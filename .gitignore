@@ -9,3 +9,5 @@ __pycache__
 /config/config_comments.json
 /settings.db
 /log.txt
+.env
+.idea/

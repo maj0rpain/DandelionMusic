@@ -5,6 +5,9 @@ import jsonc
 import inspect
 import warnings
 from typing import Optional
+from dotenv import load_dotenv
+
+load_dotenv()
 
 sys.path.insert(0, os.path.dirname(__file__))
 from utils import (  # noqa: E402
@@ -21,7 +24,7 @@ del sys.path[0]
 
 
 class Config:
-    BOT_TOKEN = "YOUR_TOKEN_GOES_HERE"
+    BOT_TOKEN = os.getenv('DISCORD_TOKEN')
     SPOTIFY_ID = ""
     SPOTIFY_SECRET = ""
 
@@ -39,7 +42,7 @@ class Config:
     ALLOW_VC_TIMEOUT_EDIT = True
 
     # maximum of 25
-    MAX_SONG_PRELOAD = 5
+    MAX_SONG_PRELOAD = 25
     MAX_HISTORY_LENGTH = 10
     MAX_TRACKNAME_HISTORY_LENGTH = 15
 

@@ -7,3 +7,5 @@ emoji==2.2.0
 SQLAlchemy[asyncio]==2.0.16
 alembic==1.11.1
 ./config
+
+setuptools~=65.5.1
