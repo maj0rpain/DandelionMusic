@@ -6,6 +6,7 @@ from musicbot import linkutils, utils
 from musicbot.bot import MusicBot, Context
 from musicbot.audiocontroller import AudioController
 from musicbot.playlist import PlaylistError, LoopMode
+from musicbot.utils import dj_check
 
 
 class AudioContext(Context):
@@ -73,6 +74,7 @@ class Music(commands.Cog):
         aliases=["l"],
     )
     @active_only
+    @commands.check(dj_check)
     async def _loop(
         self,
         ctx: AudioContext,
@@ -88,6 +90,7 @@ class Music(commands.Cog):
         aliases=["sh"],
     )
     @active_only
+    @commands.check(dj_check)
     async def _shuffle(self, ctx: AudioContext):
         ctx.audiocontroller.shuffle()
         await ctx.send("Shuffled queue :twisted_rightwards_arrows:")
@@ -98,6 +101,7 @@ class Music(commands.Cog):
         help=config.HELP_PAUSE_SHORT,
         aliases=["resume"],
     )
+    @commands.check(dj_check)
     async def _pause(self, ctx: AudioContext):
         result = ctx.audiocontroller.pause()
         await ctx.send(result.value)
@@ -130,6 +134,7 @@ class Music(commands.Cog):
         aliases=["mv"],
     )
     @active_only
+    @commands.check(dj_check)
     async def _move(
         self,
         ctx: AudioContext,
@@ -153,6 +158,7 @@ class Music(commands.Cog):
         aliases=["rm"],
     )
     @active_only
+    @commands.check(dj_check)
     async def _remove(
         self, ctx: AudioContext, queue_number: Option(int, min_value=2) = None
     ):
@@ -173,6 +179,7 @@ class Music(commands.Cog):
         aliases=["s", "next"],
     )
     @active_only
+    @commands.check(dj_check)
     async def _skip(self, ctx: AudioContext):
         ctx.audiocontroller.next_song(forced=True)
         await ctx.send("Skipped current song :fast_forward:")
@@ -183,6 +190,7 @@ class Music(commands.Cog):
         help=config.HELP_CLEAR_SHORT,
         aliases=["cl"],
     )
+    @commands.check(dj_check)
     async def _clear(self, ctx: AudioContext):
         ctx.audiocontroller.playlist.clear()
         await ctx.send("Cleared queue :no_entry_sign:")
@@ -193,6 +201,7 @@ class Music(commands.Cog):
         help=config.HELP_PREV_SHORT,
         aliases=["back"],
     )
+    @commands.check(dj_check)
     async def _prev(self, ctx: AudioContext):
         if ctx.audiocontroller.prev_song():
             await ctx.send("Playing previous song :track_previous:")
@@ -224,6 +233,7 @@ class Music(commands.Cog):
         description=config.HELP_VOL_LONG,
         help=config.HELP_VOL_SHORT,
     )
+    @commands.check(dj_check)
     async def _volume(
         self,
         ctx: AudioContext,

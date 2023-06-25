@@ -10,7 +10,7 @@ from config import config
 from musicbot import linkutils, utils, loader
 from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
 from musicbot.songinfo import Song
-from musicbot.utils import CheckError, play_check
+from musicbot.utils import CheckError, play_check, dj_check
 
 # avoiding circular import
 if TYPE_CHECKING:
@@ -32,6 +32,14 @@ class MusicButton(discord.ui.Button):
         except CheckError as e:
             await ctx.send(e, ephemeral=True)
             return
+        if ctx.interaction.custom_id in ['prev', 'pause', 'next',
+                                         'loop', 'shuffle', 'stop',
+                                         'volume_down', 'volume_up']:
+            try:
+                await dj_check(ctx)
+            except CheckError as e:
+                await ctx.send(e, ephemeral=True)
+                return
         await inter.response.defer()
         res = self._callback(ctx)
         if isawaitable(res):
