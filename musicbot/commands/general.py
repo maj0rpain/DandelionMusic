@@ -98,7 +98,7 @@ class General(commands.Cog):
     async def _update(self, ctx: Context):
         await ctx.send("Updating...")
         import subprocess
-        process = subprocess.Popen("git pull", stdout=subprocess.PIPE)
+        process = subprocess.Popen(["git", "pull"], stdout=subprocess.PIPE)
         output = process.communicate()[0]
         await ctx.send(output.decode('utf-8'))
 
