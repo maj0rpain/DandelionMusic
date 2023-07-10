@@ -90,6 +90,18 @@ class General(commands.Cog):
         sys.excepthook = lambda *_: None
         sys.exit()
 
+    @commands.command(
+        name="update",
+        hidden=True,
+    )
+    @commands.is_owner()
+    async def _update(self, ctx: Context):
+        await ctx.send("Updating...")
+        import subprocess
+        process = subprocess.Popen("git pull", stdout=subprocess.PIPE)
+        output = process.communicate()[0]
+        await ctx.send(output.decode('utf-8'))
+
     @bridge.bridge_group(
         name="setting",
         description=config.HELP_SETTINGS_LONG,
