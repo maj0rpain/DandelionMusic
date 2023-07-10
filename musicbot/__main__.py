@@ -50,9 +50,9 @@ if __name__ == "__main__":
 
     bot.load_extensions(*initial_extensions)
 
-    if "--run" in sys.argv:
-        loader.init()
-        ShutdownReader().start()
+    # if "--run" in sys.argv:
+    #     loader.init()
+    #     ShutdownReader().start()
 
     try:
         bot.run(config.BOT_TOKEN, reconnect=True)
