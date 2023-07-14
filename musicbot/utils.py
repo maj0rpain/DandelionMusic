@@ -91,6 +91,9 @@ async def dj_check(ctx: Context):
     if ctx.channel.permissions_for(ctx.author).administrator:
         return True
 
+    if ctx.bot.is_owner(ctx.author):
+        return True
+
     sett = ctx.bot.settings[ctx.guild]
     if sett.dj_role:
         if int(sett.dj_role) not in [r.id for r in ctx.author.roles]:
