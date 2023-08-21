@@ -83,7 +83,7 @@ class General(commands.Cog):
         name="shutdown",
         hidden=True,
     )
-    @commands.is_owner()
+    @commands.check(dj_check)
     async def _shutdown(self, ctx: Context):
         await ctx.send("Shutting down...")
         # hide SystemExit error message
@@ -94,7 +94,7 @@ class General(commands.Cog):
         name="update",
         hidden=True,
     )
-    @commands.is_owner()
+    @commands.check(dj_check)
     async def _update(self, ctx: Context):
         await ctx.send("Updating...")
         import subprocess
