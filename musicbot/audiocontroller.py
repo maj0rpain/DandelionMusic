@@ -326,18 +326,14 @@ class AudioController(object):
 
         self.current_song = song
 
-        try:
-            self.guild.voice_client.play(
-                discord.FFmpegPCMAudio(
-                    song.base_url,
-                    before_options="-reconnect 1 -reconnect_streamed 1"
-                    " -reconnect_delay_max 5",
-                ),
-                after=self.next_song,
-            )
-        except:
-            self.next_song(forced=True)
-            return
+        self.guild.voice_client.play(
+            discord.FFmpegPCMAudio(
+                song.base_url,
+                before_options="-reconnect 1 -reconnect_streamed 1"
+                " -reconnect_delay_max 5",
+            ),
+            after=self.next_song,
+        )
 
         self.guild.voice_client.source = discord.PCMVolumeTransformer(
             self.guild.voice_client.source
