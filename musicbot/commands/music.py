@@ -68,6 +68,46 @@ class Music(commands.Cog):
                 )
 
     @bridge.bridge_command(
+        name="playnext",
+        description=config.HELP_YT_LONG,
+        help=config.HELP_YT_SHORT,
+        aliases=["pn"],
+    )
+    @active_only
+    @commands.check(dj_check)
+    async def _play_song_next(self, ctx: AudioContext, *, track: str):
+        await ctx.defer()
+
+        # reset timer
+        await ctx.audiocontroller.timer.start(True)
+
+        song = await ctx.audiocontroller.process_song(track)
+        if song is None:
+            await ctx.send(config.SONGINFO_ERROR)
+            return
+
+        if song.origin == linkutils.Origins.Playlist:
+            await ctx.send(config.SONGINFO_PLAYLIST_QUEUED)
+        else:
+            if len(ctx.audiocontroller.playlist) != 1:
+                await ctx.send(
+                    embed=song.info.format_output(config.SONGINFO_QUEUE_ADDED)
+                )
+            elif not ctx.bot.settings[ctx.guild].announce_songs:
+                # auto-announce is disabled, announce here
+                await ctx.send(
+                    embed=song.info.format_output(config.SONGINFO_NOW_PLAYING)
+                )
+        if len(ctx.audiocontroller.playlist) > 2:
+            src_pos = len(ctx.audiocontroller.playlist)
+            dest_pos = 2
+            try:
+                ctx.audiocontroller.playlist.move(src_pos - 1, dest_pos - 1)
+                ctx.audiocontroller.preload_queue()
+            except PlaylistError as e:
+                await ctx.send(e)
+
+    @bridge.bridge_command(
         name="loop",
         description=config.HELP_LOOP_LONG,
         help=config.HELP_LOOP_SHORT,
