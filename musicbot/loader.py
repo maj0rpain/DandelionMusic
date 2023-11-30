@@ -1,7 +1,10 @@
 import sys
 import asyncio
 import threading
+from urllib.request import urlparse
+from datetime import datetime, timezone
 from concurrent.futures import ProcessPoolExecutor
+from multiprocessing import get_context as mp_context
 from typing import List, Tuple, Optional, Union
 
 import yt_dlp
@@ -15,11 +18,29 @@ from musicbot.utils import OutputWrapper
 sys.stdout = OutputWrapper(sys.stdout)
 sys.stderr = OutputWrapper(sys.stderr)
 
+_context = mp_context("spawn")
+
+
+class LoaderProcess(_context.Process):
+    def run(self):
+        try:
+            super().run()
+        # suppress noisy errors that happen on Ctrl+C
+        except (KeyboardInterrupt, InterruptedError):
+            pass
+
+
+_context.Process = LoaderProcess
+
 _loop = asyncio.new_event_loop()
-_executor = ProcessPoolExecutor(1)
+_executor = ProcessPoolExecutor(1, _context)
 _cached_downloaders: List[Tuple[dict, yt_dlp.YoutubeDL]] = []
 _preloading = {}
 _search_lock = threading.Lock()
+
+
+class SongError(Exception):
+    pass
 
 
 def _noop():
@@ -27,6 +48,7 @@ def _noop():
 
 
 def init():
+    # wake it up to spawn the process immediately
     _executor.submit(_noop).result()
 
 
@@ -109,6 +131,7 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
             return None
 
         data = search_youtube(track)
+        host = linkutils.Sites.YouTube
 
     elif host == linkutils.Sites.Spotify:
         title = _loop.run_until_complete(linkutils.convert_spotify(track))
@@ -117,12 +140,20 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
     elif host == linkutils.Sites.YouTube:
         track = track.split("&list=")[0]
 
+    elif host == linkutils.Sites.Custom:
+        data = {
+            "url": track,
+            "webpage_url": track,
+            "title": track.rpartition("/")[2],
+            "uploader": config.SONGINFO_UNKNOWN,
+        }
+
     song = Song(linkutils.Origins.Default, host, webpage_url=track)
     if data:
         song.update(data)
     else:
         if not fetch_song_info(song):
-            return None
+            raise SongError(config.SONGINFO_ERROR)
 
     return song
 
@@ -195,8 +226,27 @@ def _preload(song: Song) -> Optional[Song]:
 
 
 async def preload(song: Song) -> bool:
-    if song.info.title is not None or song.info.webpage_url is None:
+    if song.base_url is not None:
+        if song.host not in (linkutils.Sites.YouTube, linkutils.Sites.Spotify):
+            return True
+
+        expire = (
+            ("&" + urlparse(song.base_url).query)
+            .partition("&expire=")[2]
+            .partition("&")[0]
+        )
+        try:
+            expire = int(expire)
+        except ValueError:
+            return True
+        if datetime.now(timezone.utc) < datetime.fromtimestamp(
+            expire, timezone.utc
+        ):
+            return True
+
+    if song.info.webpage_url is None:
         return True
+
     future = _preloading.get(song)
     if future:
         return await future
