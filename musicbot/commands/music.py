@@ -88,17 +88,30 @@ class Music(commands.Cog):
         help=config.HELP_YT_SHORT,
         aliases=["pn"],
     )
-    @active_only
     @commands.check(dj_check)
-    async def _play_song_next(self, ctx: AudioContext, *, track: str):
+    async def _play_song_next(
+            self, ctx: AudioContext, *, track: str = None, file: Attachment = None
+    ):
+        if ctx.message and ctx.message.attachments:
+            file = ctx.message.attachments[0]
+        if file is not None:
+            track = file.url
+        elif track is None:
+            await ctx.send(config.PLAY_ARGS_MISSING)
+            return
+
         await ctx.defer()
 
         # reset timer
         await ctx.audiocontroller.timer.start(True)
 
-        song = await ctx.audiocontroller.process_song(track)
+        try:
+            song = await ctx.audiocontroller.process_song(track)
+        except SongError as e:
+            await ctx.send(e)
+            return
         if song is None:
-            await ctx.send(config.SONGINFO_ERROR)
+            await ctx.send(config.SONGINFO_UNSUPPORTED)
             return
 
         if song.origin == linkutils.Origins.Playlist:
@@ -113,14 +126,15 @@ class Music(commands.Cog):
                 await ctx.send(
                     embed=song.info.format_output(config.SONGINFO_NOW_PLAYING)
                 )
-        if len(ctx.audiocontroller.playlist) > 2:
-            src_pos = len(ctx.audiocontroller.playlist)
-            dest_pos = 2
-            try:
-                ctx.audiocontroller.playlist.move(src_pos - 1, dest_pos - 1)
-                ctx.audiocontroller.preload_queue()
-            except PlaylistError as e:
-                await ctx.send(e)
+            if len(ctx.audiocontroller.playlist) > 2:
+                src_pos = len(ctx.audiocontroller.playlist)
+                dest_pos = 2
+                try:
+                    ctx.audiocontroller.playlist.move(src_pos - 1, dest_pos - 1)
+                    ctx.audiocontroller.preload_queue()
+                    await ctx.send("Moved ↔️")
+                except PlaylistError as e:
+                    await ctx.send(e)
 
     @bridge.bridge_command(
         name="loop",

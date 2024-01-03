@@ -134,8 +134,8 @@ async def dj_check(ctx: Context):
     "Check if the user has DJ permissions"
     if ctx.channel.permissions_for(ctx.author).administrator:
         return True
-
-    if ctx.bot.is_owner(ctx.author):
+    owner = await ctx.bot.is_owner(ctx.author)
+    if owner:
         return True
 
     sett = ctx.bot.settings[ctx.guild]
