@@ -132,7 +132,6 @@ class Music(commands.Cog):
                 try:
                     ctx.audiocontroller.playlist.move(src_pos - 1, dest_pos - 1)
                     ctx.audiocontroller.preload_queue()
-                    await ctx.send("Moved ↔️")
                 except PlaylistError as e:
                     await ctx.send(e)
 
