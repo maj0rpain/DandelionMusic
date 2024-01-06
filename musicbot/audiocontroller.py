@@ -45,6 +45,8 @@ class MusicButton(discord.ui.Button):
         res = self._callback(ctx)
         if isawaitable(res):
             await res
+        if ctx.interaction.custom_id in ['next', 'prev']:
+            await ctx.send(f'{ctx.interaction.user} Skipped a Song')
 
 
 class AudioController(object):
