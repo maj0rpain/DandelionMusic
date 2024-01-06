@@ -88,7 +88,6 @@ class Music(commands.Cog):
         help=config.HELP_YT_SHORT,
         aliases=["pn"],
     )
-    @commands.check(dj_check)
     async def _play_song_next(
             self, ctx: AudioContext, *, track: str = None, file: Attachment = None
     ):
