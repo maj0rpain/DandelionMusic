@@ -155,7 +155,7 @@ class CheckError(CommandError):
 
 
 async def dj_check(ctx: Context):
-    "Check if the user has DJ permissions"
+    """Check if the user has DJ permissions"""
     if ctx.channel.permissions_for(ctx.author).administrator:
         return True
     owner = await ctx.bot.is_owner(ctx.author)
@@ -172,7 +172,7 @@ async def dj_check(ctx: Context):
 
 
 async def voice_check(ctx: Context):
-    "Check if the user can use the bot now"
+    """Check if the user can use the bot now"""
     bot_vc = ctx.guild.voice_client
     if not bot_vc:
         # the bot is free
@@ -200,7 +200,7 @@ async def voice_check(ctx: Context):
 
 
 async def play_check(ctx: Context):
-    "Prepare for music commands"
+    """Prepare for music commands"""
 
     sett = ctx.bot.settings[ctx.guild]
 

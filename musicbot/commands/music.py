@@ -82,7 +82,7 @@ class Music(commands.Cog):
         await self._play_song(ctx, track)
 
     async def _play_song(
-        self, ctx: AudioContext, track: Union[str, Iterable[str]]
+        self, ctx: AudioContext, track: Union[str, Iterable[str]], playnext=False
     ):
         # reset timer
         await ctx.audiocontroller.timer.start(True)
@@ -108,6 +108,40 @@ class Music(commands.Cog):
                 await ctx.send(
                     embed=song.format_output(config.SONGINFO_NOW_PLAYING)
                 )
+            if playnext:
+                if len(ctx.audiocontroller.playlist) > 2:
+                    src_pos = len(ctx.audiocontroller.playlist)
+                    dest_pos = 2
+                    try:
+                        ctx.audiocontroller.playlist.move(src_pos - 1, dest_pos - 1)
+                        ctx.audiocontroller.preload_queue()
+                    except PlaylistError as e:
+                        await ctx.send(e)
+
+    @bridge.bridge_command(
+        name="playnext",
+        description=config.HELP_YT_LONG,
+        help=config.HELP_YT_SHORT,
+        aliases=["pn"],
+    )
+    async def _play_next(
+            self, ctx: AudioContext, *, track: str = None, file: Attachment = None
+    ):
+        if track is None and ctx.message:
+            if ctx.message.attachments:
+                track = ctx.message.jump_url
+            elif (
+                ctx.message.reference
+                and ctx.message.reference.resolved
+                and ctx.message.reference.resolved.attachments
+            ):
+                track = ctx.message.reference.resolved.jump_url
+        if track is None:
+            await ctx.send(config.PLAY_ARGS_MISSING)
+            return
+
+        await ctx.defer()
+        await self._play_song(ctx, track, playnext=True)
 
     @bridge.bridge_command(
         name="search",
@@ -138,58 +172,6 @@ class Music(commands.Cog):
                 disable_on_timeout=True,
             ),
         )
-
-    @bridge.bridge_command(
-        name="playnext",
-        description=config.HELP_YT_LONG,
-        help=config.HELP_YT_SHORT,
-        aliases=["pn"],
-    )
-    async def _play_song_next(
-            self, ctx: AudioContext, *, track: str = None, file: Attachment = None
-    ):
-        if ctx.message and ctx.message.attachments:
-            file = ctx.message.attachments[0]
-        if file is not None:
-            track = file.url
-        elif track is None:
-            await ctx.send(config.PLAY_ARGS_MISSING)
-            return
-
-        await ctx.defer()
-
-        # reset timer
-        await ctx.audiocontroller.timer.start(True)
-
-        try:
-            song = await ctx.audiocontroller.process_song(track)
-        except SongError as e:
-            await ctx.send(e)
-            return
-        if song is None:
-            await ctx.send(config.SONGINFO_UNSUPPORTED)
-            return
-
-        if song.origin == linkutils.Origins.Playlist:
-            await ctx.send(config.SONGINFO_PLAYLIST_QUEUED)
-        else:
-            if len(ctx.audiocontroller.playlist) != 1:
-                await ctx.send(
-                    embed=song.info.format_output(config.SONGINFO_QUEUE_ADDED)
-                )
-            elif not ctx.bot.settings[ctx.guild].announce_songs:
-                # auto-announce is disabled, announce here
-                await ctx.send(
-                    embed=song.info.format_output(config.SONGINFO_NOW_PLAYING)
-                )
-            if len(ctx.audiocontroller.playlist) > 2:
-                src_pos = len(ctx.audiocontroller.playlist)
-                dest_pos = 2
-                try:
-                    ctx.audiocontroller.playlist.move(src_pos - 1, dest_pos - 1)
-                    ctx.audiocontroller.preload_queue()
-                except PlaylistError as e:
-                    await ctx.send(e)
 
     @bridge.bridge_command(
         name="loop",

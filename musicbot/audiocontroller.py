@@ -410,7 +410,7 @@ class AudioController(object):
             self.add_task(self._preload_queue())
 
     def preload_queue(self):
-        "Preloads the first MAX_SONG_PRELOAD songs asynchronously"
+        """Preloads the first MAX_SONG_PRELOAD songs asynchronously"""
         self.add_task(self._preload_queue())
 
     def stop_player(self):

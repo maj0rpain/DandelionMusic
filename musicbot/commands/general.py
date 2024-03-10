@@ -81,29 +81,6 @@ class General(commands.Cog):
     async def _ping(self, ctx):
         await ctx.send(f"Pong ({int(ctx.bot.latency * 1000)} ms)")
 
-    @commands.command(
-        name="shutdown",
-        hidden=True,
-    )
-    @commands.check(dj_check)
-    async def _shutdown(self, ctx: Context):
-        await ctx.send("Shutting down...")
-        # hide SystemExit error message
-        sys.excepthook = lambda *_: None
-        sys.exit()
-
-    @commands.command(
-        name="update",
-        hidden=True,
-    )
-    @commands.check(dj_check)
-    async def _update(self, ctx: Context):
-        await ctx.send("Updating...")
-        import subprocess
-        process = subprocess.Popen(["git", "pull"], stdout=subprocess.PIPE)
-        output = process.communicate()[0]
-        await ctx.send(output.decode('utf-8'))
-
     @bridge.bridge_group(
         name="setting",
         description=config.HELP_SETTINGS_LONG,
