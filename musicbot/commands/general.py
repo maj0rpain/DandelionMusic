@@ -1,4 +1,3 @@
-import sys
 import asyncio
 
 import discord
@@ -30,8 +29,10 @@ class General(commands.Cog):
     )
     @commands.check(voice_check)
     async def _connect(self, ctx: Context):
-        audiocontroller = ctx.bot.audio_controllers[ctx.guild]
-        await audiocontroller.uconnect(ctx, move=True)
+        # connect only if not connected yet
+        if not ctx.guild.voice_client:
+            audiocontroller = ctx.bot.audio_controllers[ctx.guild]
+            await audiocontroller.uconnect(ctx, move=True)
         await ctx.send("Connected.")
 
     @bridge.bridge_command(
@@ -42,6 +43,7 @@ class General(commands.Cog):
     )
     @commands.check(voice_check)
     async def _disconnect(self, ctx: Context):
+        await ctx.defer()  # ANNOUNCE_DISCONNECT will take a while
         audiocontroller = ctx.bot.audio_controllers[ctx.guild]
         if await audiocontroller.udisconnect():
             await ctx.send("Disconnected.")
@@ -61,9 +63,9 @@ class General(commands.Cog):
             # bot was connected and need some rest
             await asyncio.sleep(1)
 
-        audiocontroller = ctx.bot.audio_controllers[
-            ctx.guild
-        ] = AudioController(self.bot, ctx.guild)
+        audiocontroller = ctx.bot.audio_controllers[ctx.guild] = (
+            AudioController(self.bot, ctx.guild)
+        )
         await audiocontroller.uconnect(ctx)
         await ctx.send(
             "{} Connected to {}".format(

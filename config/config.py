@@ -6,6 +6,8 @@ import inspect
 import warnings
 from typing import Optional
 
+from packaging.requirements import Requirement
+
 sys.path.insert(0, os.path.dirname(__file__))
 from utils import (  # noqa: E402
     CONFIG_DIRS,
@@ -21,7 +23,7 @@ del sys.path[0]
 
 
 class Config:
-    BOT_TOKEN = "YOUR TOKEN HERE"
+    BOT_TOKEN = "YOUR_TOKEN_GOES_HERE"
     SPOTIFY_ID = ""
     SPOTIFY_SECRET = ""
 
@@ -40,6 +42,9 @@ class Config:
 
     # maximum of 25
     MAX_SONG_PRELOAD = 25
+    # how many results to display in d!search
+    SEARCH_RESULTS = 5
+
     MAX_HISTORY_LENGTH = 10
     MAX_TRACKNAME_HISTORY_LENGTH = 15
 
@@ -69,6 +74,9 @@ class Config:
 
     GLOBAL_DISABLE_AUTOJOIN_VC = False
 
+    # whether to tell users the bot is disconnecting
+    ANNOUNCE_DISCONNECT = True
+
     def __init__(self):
         current_cfg = self.load()
 
@@ -83,6 +91,19 @@ class Config:
         self.DATABASE_LIBRARY = self.DATABASE.partition("+")[2].partition(":")[
             0
         ]
+        db_req = Requirement(self.DATABASE_LIBRARY)
+        self.DATABASE = self.DATABASE.replace(
+            self.DATABASE_LIBRARY, db_req.name, 1
+        )
+        if not db_req.specifier:
+            with open(
+                os.path.join(os.path.dirname(__file__), "db-requirements.txt")
+            ) as f:
+                for line in f:
+                    req = Requirement(line)
+                    if req.name == db_req.name:
+                        self.DATABASE_LIBRARY = str(req)
+                        break
 
         self.EMBED_COLOR = int(self.EMBED_COLOR, 16)
         for dir_ in CONFIG_DIRS[::-1]:
@@ -95,9 +116,11 @@ class Config:
             load_configs(
                 "en.json",
                 lambda d: {
-                    k: Formatter(v).format(current_cfg)
-                    if isinstance(v, str)
-                    else v
+                    k: (
+                        Formatter(v).format(current_cfg)
+                        if isinstance(v, str)
+                        else v
+                    )
                     for k, v in d.items()
                 },
             )
@@ -146,6 +169,13 @@ class Config:
 
         for key, default in current_cfg.items():
             current_cfg[key] = get_env_var(key, default)
+
+        for key, alias in (
+            ("SPOTIFY_ID", "SPOTIPY_CLIENT_ID"),
+            ("SPOTIFY_SECRET", "SPOTIPY_CLIENT_SECRET"),
+        ):
+            if not current_cfg[key]:
+                current_cfg[key] = get_env_var(alias, current_cfg[key])
 
         # Embeds are limited to 25 fields
         current_cfg["MAX_SONG_PRELOAD"] = min(

@@ -2,34 +2,38 @@ import sys
 import asyncio
 from itertools import islice
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Coroutine, Optional
+from traceback import print_exc
+from typing import TYPE_CHECKING, Coroutine, Literal, Optional, Union
 
 import discord
 from config import config
 
-from musicbot import linkutils, utils, loader
+from musicbot import loader, utils
+from musicbot.song import Song
 from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
-from musicbot.songinfo import Song
-from musicbot.utils import CheckError, play_check, dj_check
+from musicbot.utils import CheckError, asset, play_check, dj_check
 
 # avoiding circular import
 if TYPE_CHECKING:
     from musicbot.bot import MusicBot
 
 
-VC_TIMEOUT = 10
+VC_CONNECT_TIMEOUT = 10
+
+PLAYLIST = object()
 _not_provided = object()
 
 
 class MusicButton(discord.ui.Button):
-    def __init__(self, callback, **kwargs):
+    def __init__(self, callback, check=play_check, **kwargs):
         super().__init__(**kwargs)
         self._callback = callback
+        self._check = check
 
     async def callback(self, inter):
         ctx = await inter.client.get_application_context(inter)
         try:
-            await play_check(ctx)
+            await self._check(ctx)
         except CheckError as e:
             await ctx.send(e, ephemeral=True)
             return
@@ -91,8 +95,11 @@ class AudioController(object):
         self._volume = value
         try:
             self.guild.voice_client.source.volume = float(value) / 100.0
-        except Exception:
+        except AttributeError:
             pass
+        except Exception:
+            print("Unknown error when setting volume:", file=sys.stderr)
+            print_exc(file=sys.stderr)
 
     def volume_up(self):
         self.volume = min(self.volume + 10, 100)
@@ -111,7 +118,7 @@ class AudioController(object):
             # to avoid ClientException: Not connected to voice
             await asyncio.sleep(1)
         else:
-            await channel.connect(reconnect=True, timeout=VC_TIMEOUT)
+            await channel.connect(reconnect=True, timeout=VC_CONNECT_TIMEOUT)
 
     def make_view(self):
         if not self.is_active():
@@ -194,9 +201,7 @@ class AudioController(object):
 
     async def current_song_callback(self, ctx):
         await ctx.send(
-            embed=self.current_song.info.format_output(
-                config.SONGINFO_SONGINFO
-            ),
+            embed=self.current_song.format_output(config.SONGINFO_SONGINFO),
         )
 
     async def queue_callback(self, ctx):
@@ -231,7 +236,8 @@ class AudioController(object):
                 except discord.NotFound:
                     self.last_message = None
             else:
-                print("Failed to update view:", e, file=sys.stderr)
+                print("Failed to update view:", file=sys.stderr)
+                print_exc(file=sys.stderr)
 
     def is_active(self) -> bool:
         client = self.guild.voice_client
@@ -289,7 +295,7 @@ class AudioController(object):
             return
 
         if self.current_song:
-            self.playlist.add_name(self.current_song.info.title)
+            self.playlist.add_name(self.current_song.title)
             self.current_song = None
 
         if self._next_song:
@@ -320,10 +326,10 @@ class AudioController(object):
             self.next_song(forced=True)
             return
 
-        if song.base_url is None:
+        if song.url is None:
             print(
                 "Something is wrong."
-                " Refusing to play a song without base_url.",
+                " Refusing to play a song without direct url.",
                 file=sys.stderr,
             )
             self.next_song(forced=True)
@@ -332,32 +338,32 @@ class AudioController(object):
         self.current_song = song
 
         self.guild.voice_client.play(
-            discord.FFmpegPCMAudio(
-                song.base_url,
-                before_options="-reconnect 1 -reconnect_streamed 1"
-                " -reconnect_delay_max 5",
-                options="-loglevel error",
-                stderr=sys.stderr,
+            discord.PCMVolumeTransformer(
+                discord.FFmpegPCMAudio(
+                    song.url,
+                    before_options="-reconnect 1 -reconnect_streamed 1"
+                    " -reconnect_delay_max 5",
+                    options="-loglevel error",
+                    stderr=sys.stderr,
+                ),
+                float(self.volume) / 100.0,
             ),
             after=self.next_song,
         )
-
-        self.guild.voice_client.source = discord.PCMVolumeTransformer(
-            self.guild.voice_client.source
-        )
-        self.guild.voice_client.source.volume = float(self.volume) / 100.0
 
         if (
             self.bot.settings[self.guild].announce_songs
             and self.command_channel
         ):
             await self.command_channel.send(
-                embed=song.info.format_output(config.SONGINFO_NOW_PLAYING)
+                embed=song.format_output(config.SONGINFO_NOW_PLAYING)
             )
 
         self.preload_queue()
 
-    async def process_song(self, track: str) -> Optional[Song]:
+    async def process_song(
+        self, track: str
+    ) -> Union[Optional[Song], Literal[PLAYLIST]]:
         """Adds the track to the playlist instance
         Starts playing if it is the first song"""
 
@@ -369,20 +375,24 @@ class AudioController(object):
         else:
             for song in loaded_song:
                 self.playlist.add(song)
-            loaded_song = Song(
-                linkutils.Origins.Playlist, linkutils.Sites.Unknown
-            )
+            if len(loaded_song) == 1:
+                # special-case one-item playlists
+                loaded_song = loaded_song[0]
+            else:
+                loaded_song = PLAYLIST
 
         if self.current_song is None:
             print("Playing {}".format(track))
             await self.play_song(self.playlist.playque[0])
+        else:
+            self.preload_queue()
 
         return loaded_song
 
     def add_task(self, coro: Coroutine):
         task = self.bot.loop.create_task(coro)
         self._tasks.add(task)
-        task.add_done_callback(lambda t: self._tasks.remove(t))
+        task.add_done_callback(self._tasks.remove)
 
     async def _preload_queue(self):
         rerun_needed = False
@@ -458,6 +468,17 @@ class AudioController(object):
         await self.update_view(None)
         if self.guild.voice_client is None:
             return False
+        if config.ANNOUNCE_DISCONNECT:
+            try:
+                await self.guild.voice_client.play(
+                    discord.FFmpegPCMAudio(asset("disconnect.mp3")),
+                    wait_finish=True,
+                )
+            except Exception:
+                print_exc(file=sys.stderr)
+            else:
+                # let it finish
+                await asyncio.sleep(1)
         await self.guild.voice_client.disconnect(force=True)
         self.timer.cancel()
         return True

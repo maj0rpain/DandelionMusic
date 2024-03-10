@@ -24,7 +24,8 @@ def get_env_var(key: str, default: T) -> T:
             value = ast.literal_eval(value)
         except (SyntaxError, ValueError):
             pass
-    assert type(value) == type(default), f"invalid value for {key}: {value!r}"
+    if type(value) is not type(default):
+        raise TypeError(f"invalid value for {key}: {value!r}")
     return value
 
 
@@ -36,7 +37,7 @@ def alchemize_url(url: str) -> str:
     )
 
     for name, scheme in SCHEMES:
-        if url.startswith(name):
+        if url.startswith(name + ":"):
             return url.replace(name, scheme, 1)
     return url
 

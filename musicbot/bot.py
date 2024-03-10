@@ -1,17 +1,18 @@
+import re
 import sys
 import asyncio
 from traceback import print_exception
 from typing import Dict, Union, List
 
 import discord
-from discord import Option
 from discord.ext import bridge, tasks
-from discord.ext.commands import DefaultHelpCommand
+from discord.ext.bridge import BridgeOption
+from discord.ext.commands import DefaultHelpCommand, NotOwner
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from config import config
-from musicbot.audiocontroller import VC_TIMEOUT, AudioController
+from musicbot.audiocontroller import VC_CONNECT_TIMEOUT, AudioController
 from musicbot.settings import (
     GuildSettings,
     run_migrations,
@@ -51,8 +52,15 @@ class MusicBot(bridge.Bot):
         return await super().start(*args, **kwargs)
 
     async def close(self):
-        for audiocontroller in self.audio_controllers.values():
-            await audiocontroller.udisconnect()
+        if "--run" not in sys.argv:
+            print(config.SHUTDOWN_MESSAGE, flush=True)
+
+        await asyncio.gather(
+            *(
+                audiocontroller.udisconnect()
+                for audiocontroller in self.audio_controllers.values()
+            )
+        )
         return await super().close()
 
     async def on_ready(self):
@@ -76,7 +84,7 @@ class MusicBot(bridge.Bot):
 
     async def on_command_error(self, ctx, error):
         await ctx.send(error)
-        if not isinstance(error, CheckError):
+        if not isinstance(error, (CheckError, NotOwner)):
             print_exception(error)
 
     async def on_application_command_error(self, ctx, error):
@@ -87,7 +95,7 @@ class MusicBot(bridge.Bot):
         if member == self.user:
             audiocontroller = self.audio_controllers[guild]
             if not guild.voice_client:
-                await asyncio.sleep(VC_TIMEOUT)
+                await asyncio.sleep(VC_CONNECT_TIMEOUT)
             if guild.voice_client:
                 is_playing = guild.voice_client.is_playing()
                 await audiocontroller.timer.start(is_playing)
@@ -109,8 +117,12 @@ class MusicBot(bridge.Bot):
 
     @tasks.loop(seconds=1)
     async def update_views(self):
-        for audiocontroller in self.audio_controllers.values():
-            await audiocontroller.update_view()
+        await asyncio.gather(
+            *(
+                audiocontroller.update_view()
+                for audiocontroller in self.audio_controllers.values()
+            )
+        )
 
     def add_application_command(self, command):
         if not config.ENABLE_SLASH_COMMANDS:
@@ -123,7 +135,19 @@ class MusicBot(bridge.Bot):
         if isinstance(message, bridge.BridgeApplicationContext):
             # display this as prefix for slash commands
             return "/"
-        return await super().get_prefix(message)
+        prefixes = await super().get_prefix(message)
+        if not self.case_insensitive:
+            return prefixes
+        if isinstance(prefixes, str):
+            prefixes = [prefixes]
+        # perform case-insensitive search
+        for prefix in prefixes:
+            if match := re.match(
+                re.escape(prefix), message.content, re.IGNORECASE
+            ):
+                return match.group()
+        # did not match
+        return " "
 
     async def get_application_context(self, interaction):
         return await super().get_application_context(
@@ -191,7 +215,9 @@ class MusicBot(bridge.Bot):
 
     @bridge.bridge_command(name="help", description=config.HELP_HELP_SHORT)
     async def _help(
-        ctx, *, command: Option(str, autocomplete=_help_autocomplete) = None
+        ctx,
+        *,
+        command: BridgeOption(str, autocomplete=_help_autocomplete) = None,
     ):
         help_command = ctx.bot._default_help
         if ctx.is_app:
@@ -207,12 +233,17 @@ class Context(bridge.BridgeContext):
     guild: discord.Guild
 
     async def send(self, *args, **kwargs):
+        kwargs.pop("reference", None)  # not supported
         audiocontroller = self.bot.audio_controllers[self.guild]
         channel = audiocontroller.command_channel
-        if kwargs.get("ephemeral", False) or (
-            channel
-            # unwrap channel from context
-            and getattr(channel, "channel", channel) != self.channel
+        if (
+            "view" in kwargs
+            or kwargs.get("ephemeral", False)
+            or (
+                channel
+                # unwrap channel from context
+                and getattr(channel, "channel", channel) != self.channel
+            )
         ):
             # sending ephemeral message or using different channel
             # don't bother with views

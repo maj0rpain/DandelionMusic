@@ -1,10 +1,11 @@
 {
   "STARTUP_MESSAGE": "Starting Bot...",
+  "SHUTDOWN_MESSAGE": "\nShutting down...",
   "STARTUP_COMPLETE_MESSAGE": "Startup Complete",
   "STATUS_TEXT": "Music, type {prefix}help",
 
   "NO_GUILD_MESSAGE": "Error: Please use guild channels to interact with the bot",
-  "USER_NOT_IN_VC_MESSAGE": "Error: Please join the active voice channel to use commands and buttons",
+  "USER_NOT_IN_VC_MESSAGE": "Error: Please join the (active) voice channel to use commands and buttons",
   "WRONG_CHANNEL_MESSAGE": "Error: Please use configured command channel",
   "NOT_CONNECTED_MESSAGE": "Error: Bot not connected to any voice channel",
   "ALREADY_CONNECTED_MESSAGE": "Error: Already connected to a voice channel",
@@ -12,7 +13,7 @@
   "USER_MISSING_PERMISSIONS": "You don't have permissions for this",
   "CHANNEL_NOT_FOUND_MESSAGE": "Error: Could not find channel",
   "VOICE_PERMISSIONS_MISSING": "The bot needs VC permissions connect and speak",
-  "PLAY_ARGS_MISSING": "You need to specify the track or attach a file.",
+  "PLAY_ARGS_MISSING": "You need to specify the track, attach a file or reply to a message with the file.",
 
   "ADD_MESSAGE": "To add this bot to your own Server, click [here]({link})",
 
@@ -59,6 +60,8 @@
   "HELP_MOVE_LONG": "Moves song from src_pos to dest_pos. If dest_pos is omitted, moves it to the end.",
   "HELP_YT_SHORT": "Play a supported link or search on youtube",
   "HELP_YT_LONG": "{prefix}p [link/video title/keywords/playlist/soundcloud link/spotify link/bandcamp link/twitter link]",
+  "HELP_SEARCH_SHORT": "Search song on YouTube",
+  "HELP_SEARCH_LONG": "Allows to choose one of {SEARCH_RESULTS} search results for a song",
   "HELP_PING_SHORT": "Pong",
   "HELP_PING_LONG": "Test bot response status",
   "HELP_CLEAR_SHORT": "Clear the queue.",
@@ -69,10 +72,13 @@
   "HELP_QUEUE_LONG": "Shows the list of songs in queue, up to {MAX_SONG_PRELOAD}.",
   "HELP_SHUFFLE_SHORT": "Shuffle the queue",
   "HELP_SHUFFLE_LONG": "Randomly sort the songs in the current queue",
-  "HELP_RESET_SHORT": "Disconnect and reconnect",
-  "HELP_RESET_LONG": "Stop player, disconnect and reconnect to the channel you are in",
+  "HELP_RESET_SHORT": "Resets player",
+  "HELP_RESET_LONG": "Fully resets player (use when bot gets stuck)",
   "HELP_REMOVE_SHORT": "Remove a song",
   "HELP_REMOVE_LONG": "Allows to remove a song from the queue by typing it's position (defaults to the last song).",
+
+  "SETTINGS_EMOJI_CHECK_MSG": "Checking the emoji...",
+  "SEARCH_EMBED_TITLE": "Results:",
 
   "PauseState": {
     "NOTHING_TO_PAUSE": "Nothing to pause or resume.",
@@ -97,6 +103,7 @@
   "ConversionError": {
     "BUTTON_DISABLED": "Button plugin is disabled",
     "INVALID_EMOJI": "Invalid emote",
+    "NO_REACTION_PERMS": "Missing permission to add reactions",
     "INVALID_VOLUME": "Value must be a number in range 0-100",
   },
   "SettingsEmbed": {
@@ -106,5 +113,6 @@
     "INVALID_CHANNEL": "Invalid Channel",
     "INVALID_VOICE_CHANNEL": "Invalid VChannel",
     "INVALID_ROLE": "Invalid Role",
+    "INVALID_EMOJI": "Invalid Emoji",
   },
 }

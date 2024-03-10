@@ -1,17 +1,35 @@
-from discord import Option, Attachment
+from typing import Iterable, Union
+
+from discord import Attachment
+from discord.ui import View
 from discord.ext import commands, bridge
+from discord.ext.bridge import BridgeOption
 
 from config import config
 from musicbot import linkutils, utils
-from musicbot.loader import SongError
+from musicbot.song import Song
 from musicbot.bot import MusicBot, Context
-from musicbot.audiocontroller import AudioController
+from musicbot.audiocontroller import PLAYLIST, AudioController, MusicButton
+from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError, LoopMode
 from musicbot.utils import dj_check
 
 
 class AudioContext(Context):
     audiocontroller: AudioController
+
+
+class SongButton(MusicButton):
+    def __init__(self, cog: "Music", num: int, song: str):
+        async def play(ctx):
+            view = self.view
+            view.stop()
+            view.disable_all_items()
+            async with ctx.channel.typing():
+                await view.message.edit(view=view)
+                await cog._play_song(ctx, song)
+
+        super().__init__(play, cog.cog_check, emoji=f"{num}⃣")
 
 
 @commands.check
@@ -44,19 +62,28 @@ class Music(commands.Cog):
         help=config.HELP_YT_SHORT,
         aliases=["p", "yt", "pl"],
     )
-    async def _play_song(
+    async def _play(
         self, ctx: AudioContext, *, track: str = None, file: Attachment = None
     ):
-        if ctx.message and ctx.message.attachments:
-            file = ctx.message.attachments[0]
-        if file is not None:
-            track = file.url
-        elif track is None:
+        if track is None and ctx.message:
+            if ctx.message.attachments:
+                track = ctx.message.jump_url
+            elif (
+                ctx.message.reference
+                and ctx.message.reference.resolved
+                and ctx.message.reference.resolved.attachments
+            ):
+                track = ctx.message.reference.resolved.jump_url
+        if track is None:
             await ctx.send(config.PLAY_ARGS_MISSING)
             return
 
         await ctx.defer()
+        await self._play_song(ctx, track)
 
+    async def _play_song(
+        self, ctx: AudioContext, track: Union[str, Iterable[str]]
+    ):
         # reset timer
         await ctx.audiocontroller.timer.start(True)
 
@@ -69,18 +96,48 @@ class Music(commands.Cog):
             await ctx.send(config.SONGINFO_UNSUPPORTED)
             return
 
-        if song.origin == linkutils.Origins.Playlist:
+        if song is PLAYLIST:
             await ctx.send(config.SONGINFO_PLAYLIST_QUEUED)
         else:
             if len(ctx.audiocontroller.playlist) != 1:
                 await ctx.send(
-                    embed=song.info.format_output(config.SONGINFO_QUEUE_ADDED)
+                    embed=song.format_output(config.SONGINFO_QUEUE_ADDED)
                 )
             elif not ctx.bot.settings[ctx.guild].announce_songs:
                 # auto-announce is disabled, announce here
                 await ctx.send(
-                    embed=song.info.format_output(config.SONGINFO_NOW_PLAYING)
+                    embed=song.format_output(config.SONGINFO_NOW_PLAYING)
                 )
+
+    @bridge.bridge_command(
+        name="search",
+        description=config.HELP_SEARCH_LONG,
+        help=config.HELP_SEARCH_SHORT,
+        aliases=["sc"],
+    )
+    async def _search(self, ctx: AudioContext, *, query: str):
+        await ctx.defer()
+        results = await search_youtube(query, config.SEARCH_RESULTS)
+        songs = []
+        for data in results:
+            song = Song(
+                linkutils.Origins.Default,
+                linkutils.SiteTypes.YT_DLP,
+                webpage_url=data["url"],
+            )
+            song.update(data)
+            songs.append(song)
+
+        await ctx.send(
+            embed=utils.songs_embed(config.SEARCH_EMBED_TITLE, songs),
+            view=View(
+                *(
+                    SongButton(self, i, data["url"])
+                    for i, data in enumerate(results, start=1)
+                ),
+                disable_on_timeout=True,
+            ),
+        )
 
     @bridge.bridge_command(
         name="playnext",
@@ -145,7 +202,9 @@ class Music(commands.Cog):
     async def _loop(
         self,
         ctx: AudioContext,
-        mode: Option(str, choices=tuple(m.value for m in LoopMode)) = None,
+        mode: BridgeOption(
+            str, choices=tuple(m.value for m in LoopMode)
+        ) = None,
     ):
         result = ctx.audiocontroller.loop(mode)
         await ctx.send(result.value)
@@ -205,8 +264,8 @@ class Music(commands.Cog):
     async def _move(
         self,
         ctx: AudioContext,
-        src_pos: Option(int, min_value=2),
-        dest_pos: Option(int, min_value=2) = None,
+        src_pos: BridgeOption(int, min_value=2),
+        dest_pos: BridgeOption(int, min_value=2) = None,
     ):
         if dest_pos is None:
             dest_pos = len(ctx.audiocontroller.playlist)
@@ -227,14 +286,16 @@ class Music(commands.Cog):
     @active_only
     @commands.check(dj_check)
     async def _remove(
-        self, ctx: AudioContext, queue_number: Option(int, min_value=2) = None
+        self,
+        ctx: AudioContext,
+        queue_number: BridgeOption(int, min_value=2) = None,
     ):
         if queue_number is None:
             queue_number = len(ctx.audiocontroller.playlist)
         try:
             song = ctx.audiocontroller.playlist.remove(queue_number - 1)
             ctx.audiocontroller.preload_queue()
-            title = song.info.title or song.info.webpage_url
+            title = song.title or song.webpage_url
             await ctx.send(f"Removed #{queue_number}: {title}")
         except PlaylistError as e:
             await ctx.send(e)
@@ -284,7 +345,7 @@ class Music(commands.Cog):
     @active_only
     async def _songinfo(self, ctx: AudioContext):
         song = ctx.audiocontroller.current_song
-        await ctx.send(embed=song.info.format_output(config.SONGINFO_SONGINFO))
+        await ctx.send(embed=song.format_output(config.SONGINFO_SONGINFO))
 
     @bridge.bridge_command(
         name="history",
@@ -304,7 +365,7 @@ class Music(commands.Cog):
     async def _volume(
         self,
         ctx: AudioContext,
-        value: Option(int, min_value=0, max_value=100) = None,
+        value: BridgeOption(int, min_value=0, max_value=100) = None,
     ):
         if value is None:
             await ctx.send(

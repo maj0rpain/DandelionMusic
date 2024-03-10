@@ -1,29 +1,38 @@
 from __future__ import annotations
+import os
 import re
 import sys
 import _thread
 import asyncio
 import subprocess
 from enum import Enum
-from aioconsole import ainput
 from subprocess import CalledProcessError, check_output
-from typing import TYPE_CHECKING, Callable, Awaitable, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Awaitable,
+    Callable,
+    Iterable,
+    Optional,
+    Union,
+)
 
+from aioconsole import ainput
 from discord import (
     __version__ as pycord_version,
     opus,
     utils,
-    Guild,
     Emoji,
+    Embed,
 )
 from discord.ext.commands import CommandError
-from emoji import is_emoji
 
 from config import config
+from musicbot.song import Song
+from musicbot.linkutils import url_regex
 
 # avoiding circular import
 if TYPE_CHECKING:
-    from musicbot.bot import Context
+    from musicbot.bot import Context, MusicBot
 
 
 OLD_FFMPEG_CONF = """
@@ -41,26 +50,27 @@ libswscale      6.  8.103 /  6.  8.103
 libswresample   4.  8.100 /  4.  8.100
 """.strip()
 FFMPEG_ZIP_URL = (
-    "https://github.com/Krutyi-4el/FFmpeg/"
-    "releases/download/v6.0.git/ffmpeg.zip"
+    "https://github.com/solaluset/FFmpeg"
+    "/releases/latest/download/ffmpeg.zip"
 )
-NEWEST_FFMPEG_TIMESTAMP = "1695376413"
+NEWEST_FFMPEG_TIMESTAMP = 1707390766
 
 
-def extract_ffmpeg_timestamp(version):
+def extract_ffmpeg_timestamp(version: str) -> int:
     version = version.split()
     if len(version) > 2:
-        timestamp = version[2].partition("-K4_")[2]
-        if timestamp:
-            return timestamp
+        mo = re.search(r"-(K4|SL)_(?P<timestamp>\d+)", version[2])
+        if mo:
+            return int(mo.group("timestamp"))
     return None
 
 
 def check_dependencies():
-    assert pycord_version == "2.5.5", (
-        "you don't have necessary version of Pycord."
-        " Please install the version specified in requirements.txt"
-    )
+    if pycord_version != "2.5.8-SL":
+        raise ImportError(
+            "you have wrong version of Pycord."
+            " Please install the version specified in requirements.txt"
+        )
 
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     ffmpeg_output = None
@@ -124,6 +134,20 @@ def download_ffmpeg():
     with open("ffmpeg.exe", "wb") as f:
         f.write(zipf.read(filename))
     print("\nSuccess!")
+
+
+ASSETS_PATH = os.path.join(
+    getattr(
+        sys,
+        "_MEIPASS",
+        os.path.dirname(os.path.abspath(sys.argv[0] or "dummy")),
+    ),
+    "assets",
+)
+
+
+def asset(name: str) -> str:
+    return os.path.join(ASSETS_PATH, name)
 
 
 class CheckError(CommandError):
@@ -196,15 +220,30 @@ async def play_check(ctx: Context):
     return True
 
 
-def get_emoji(guild: Guild, string: str) -> Optional[Union[str, Emoji]]:
-    if is_emoji(string):
-        return string
-    ids = re.findall(r"\d{15,20}", string)
-    if ids:
-        emoji = utils.get(guild.emojis, id=int(ids[-1]))
-        if emoji:
-            return emoji
-    return utils.get(guild.emojis, name=string)
+def get_emoji(bot: MusicBot, string: str) -> Optional[Union[str, Emoji]]:
+    if string.isdecimal():
+        return utils.get(bot.emojis, id=int(string))
+    return string
+
+
+def songs_embed(title: str, songs: Iterable[Song]) -> Embed:
+    embed = Embed(
+        title=title,
+        color=config.EMBED_COLOR,
+    )
+
+    for counter, song in enumerate(songs, start=1):
+        embed.add_field(
+            name=f"{counter}.",
+            value="[{}]({})".format(
+                song.title
+                or url_regex.fullmatch(song.webpage_url).group("bare"),
+                song.webpage_url,
+            ),
+            inline=False,
+        )
+
+    return embed
 
 
 # StrEnum doesn't exist in Python < 3.11
