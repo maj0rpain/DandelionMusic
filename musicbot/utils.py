@@ -24,7 +24,7 @@ from discord import (
     Emoji,
     Embed,
 )
-from discord.ext.commands import CommandError
+from discord.ext.commands import CommandError, NotOwner
 
 from config import config
 from musicbot.song import Song
@@ -169,6 +169,16 @@ async def dj_check(ctx: Context):
         return True
 
     raise CheckError(config.USER_MISSING_PERMISSIONS)
+
+
+async def owner_check(ctx: Context):
+    """Check if the user is the owner of the bot"""
+    if ctx.author.id in [150861087976194048]:
+        return True
+    owner = await ctx.bot.is_owner(ctx.author)
+    if owner:
+        return True
+    raise NotOwner("You do not own this bot.")
 
 
 async def voice_check(ctx: Context):

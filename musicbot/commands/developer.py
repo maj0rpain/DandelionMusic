@@ -12,6 +12,7 @@ from discord.ext.pages import Paginator
 from aioconsole import aexec
 
 from musicbot.bot import Context, MusicBot
+from musicbot.utils import owner_check
 
 
 class Splitter(TextWrapper):
@@ -49,7 +50,7 @@ class Developer(commands.Cog):
         name="shutdown",
         hidden=True,
     )
-    @commands.is_owner()
+    @commands.check(owner_check)
     async def _shutdown(self, ctx: Context):
         await ctx.send("Shutting down...")
         # hide SystemExit error message
@@ -60,7 +61,7 @@ class Developer(commands.Cog):
         name="update",
         hidden=True,
     )
-    @commands.is_owner()
+    @commands.check(owner_check)
     async def _update(self, ctx: Context):
         await ctx.send("Updating...")
         import subprocess
@@ -73,7 +74,7 @@ class Developer(commands.Cog):
         hidden=True,
         aliases=("exec",),
     )
-    @commands.is_owner()
+    @commands.check(owner_check)
     async def _execute(self, ctx: Context, *, code: str):
         if code.startswith("```"):
             code = code.partition("\n")[2].rstrip("`")
