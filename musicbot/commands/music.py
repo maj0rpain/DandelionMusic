@@ -246,11 +246,13 @@ class Music(commands.Cog):
     async def _move(
         self,
         ctx: AudioContext,
-        src_pos: BridgeOption(int, min_value=2),
+        src_pos: BridgeOption(int, min_value=2) = None,
         dest_pos: BridgeOption(int, min_value=2) = None,
     ):
+        if src_pos is None:
+            src_pos = len(ctx.audiocontroller.playlist)
         if dest_pos is None:
-            dest_pos = len(ctx.audiocontroller.playlist)
+            dest_pos = 2
 
         try:
             ctx.audiocontroller.playlist.move(src_pos - 1, dest_pos - 1)
