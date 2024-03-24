@@ -166,9 +166,7 @@ async def dj_check(ctx: Context):
     if sett.dj_role:
         if int(sett.dj_role) not in [r.id for r in ctx.author.roles]:
             raise CheckError(config.NOT_A_DJ)
-        return True
-
-    raise CheckError(config.USER_MISSING_PERMISSIONS)
+    return True
 
 
 async def owner_check(ctx: Context):
