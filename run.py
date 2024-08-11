@@ -100,7 +100,11 @@ def main():
 
 
 if __name__ == "__main__":
-    from multiprocessing import freeze_support
+    # from multiprocessing import freeze_support
+    #
+    # freeze_support()
+    # main()
 
-    freeze_support()
-    main()
+    import runpy
+
+    runpy.run_module("musicbot", run_name="__main__")

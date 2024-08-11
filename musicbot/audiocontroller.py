@@ -11,7 +11,7 @@ from config import config
 from musicbot import loader, utils
 from musicbot.song import Song
 from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
-from musicbot.utils import CheckError, asset, play_check
+from musicbot.utils import CheckError, asset, play_check, dj_check
 
 # avoiding circular import
 if TYPE_CHECKING:
@@ -37,10 +37,20 @@ class MusicButton(discord.ui.Button):
         except CheckError as e:
             await ctx.send(e, ephemeral=True)
             return
+        if ctx.interaction.custom_id in ['prev', 'pause', 'next',
+                                         'loop', 'shuffle', 'stop',
+                                         'volume_down', 'volume_up']:
+            try:
+                await dj_check(ctx)
+            except CheckError as e:
+                await ctx.send(e, ephemeral=True)
+                return
         await inter.response.defer()
         res = self._callback(ctx)
         if isawaitable(res):
             await res
+        if ctx.interaction.custom_id in ['next', 'prev']:
+            await ctx.send(f'{ctx.interaction.user} Skipped a Song')
 
 
 class AudioController(object):
@@ -400,7 +410,7 @@ class AudioController(object):
             self.add_task(self._preload_queue())
 
     def preload_queue(self):
-        "Preloads the first MAX_SONG_PRELOAD songs asynchronously"
+        """Preloads the first MAX_SONG_PRELOAD songs asynchronously"""
         self.add_task(self._preload_queue())
 
     def stop_player(self):

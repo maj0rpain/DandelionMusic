@@ -12,6 +12,7 @@ from musicbot.bot import MusicBot, Context
 from musicbot.audiocontroller import PLAYLIST, AudioController, MusicButton
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError, LoopMode
+from musicbot.utils import dj_check
 
 
 class AudioContext(Context):
@@ -81,7 +82,7 @@ class Music(commands.Cog):
         await self._play_song(ctx, track)
 
     async def _play_song(
-        self, ctx: AudioContext, track: Union[str, Iterable[str]]
+        self, ctx: AudioContext, track: Union[str, Iterable[str]], playnext=False
     ):
         # reset timer
         await ctx.audiocontroller.timer.start(True)
@@ -107,6 +108,40 @@ class Music(commands.Cog):
                 await ctx.send(
                     embed=song.format_output(config.SONGINFO_NOW_PLAYING)
                 )
+            if playnext:
+                if len(ctx.audiocontroller.playlist) > 2:
+                    src_pos = len(ctx.audiocontroller.playlist)
+                    dest_pos = 2
+                    try:
+                        ctx.audiocontroller.playlist.move(src_pos - 1, dest_pos - 1)
+                        ctx.audiocontroller.preload_queue()
+                    except PlaylistError as e:
+                        await ctx.send(e)
+
+    @bridge.bridge_command(
+        name="playnext",
+        description=config.HELP_YT_LONG,
+        help=config.HELP_YT_SHORT,
+        aliases=["pn"],
+    )
+    async def _play_next(
+            self, ctx: AudioContext, *, track: str = None, file: Attachment = None
+    ):
+        if track is None and ctx.message:
+            if ctx.message.attachments:
+                track = ctx.message.jump_url
+            elif (
+                ctx.message.reference
+                and ctx.message.reference.resolved
+                and ctx.message.reference.resolved.attachments
+            ):
+                track = ctx.message.reference.resolved.jump_url
+        if track is None:
+            await ctx.send(config.PLAY_ARGS_MISSING)
+            return
+
+        await ctx.defer()
+        await self._play_song(ctx, track, playnext=True)
 
     @bridge.bridge_command(
         name="search",
@@ -145,6 +180,7 @@ class Music(commands.Cog):
         aliases=["l"],
     )
     @active_only
+    @commands.check(dj_check)
     async def _loop(
         self,
         ctx: AudioContext,
@@ -162,6 +198,7 @@ class Music(commands.Cog):
         aliases=["sh"],
     )
     @active_only
+    @commands.check(dj_check)
     async def _shuffle(self, ctx: AudioContext):
         ctx.audiocontroller.shuffle()
         await ctx.send("Shuffled queue :twisted_rightwards_arrows:")
@@ -172,6 +209,7 @@ class Music(commands.Cog):
         help=config.HELP_PAUSE_SHORT,
         aliases=["resume"],
     )
+    @commands.check(dj_check)
     async def _pause(self, ctx: AudioContext):
         result = ctx.audiocontroller.pause()
         await ctx.send(result.value)
@@ -204,14 +242,17 @@ class Music(commands.Cog):
         aliases=["mv"],
     )
     @active_only
+    @commands.check(dj_check)
     async def _move(
         self,
         ctx: AudioContext,
-        src_pos: BridgeOption(int, min_value=2),
+        src_pos: BridgeOption(int, min_value=2) = None,
         dest_pos: BridgeOption(int, min_value=2) = None,
     ):
+        if src_pos is None:
+            src_pos = len(ctx.audiocontroller.playlist)
         if dest_pos is None:
-            dest_pos = len(ctx.audiocontroller.playlist)
+            dest_pos = 2
 
         try:
             ctx.audiocontroller.playlist.move(src_pos - 1, dest_pos - 1)
@@ -227,6 +268,7 @@ class Music(commands.Cog):
         aliases=["rm"],
     )
     @active_only
+    @commands.check(dj_check)
     async def _remove(
         self,
         ctx: AudioContext,
@@ -249,6 +291,7 @@ class Music(commands.Cog):
         aliases=["s", "next"],
     )
     @active_only
+    @commands.check(dj_check)
     async def _skip(self, ctx: AudioContext):
         ctx.audiocontroller.next_song(forced=True)
         await ctx.send("Skipped current song :fast_forward:")
@@ -259,6 +302,7 @@ class Music(commands.Cog):
         help=config.HELP_CLEAR_SHORT,
         aliases=["cl"],
     )
+    @commands.check(dj_check)
     async def _clear(self, ctx: AudioContext):
         ctx.audiocontroller.playlist.clear()
         await ctx.send("Cleared queue :no_entry_sign:")
@@ -269,6 +313,7 @@ class Music(commands.Cog):
         help=config.HELP_PREV_SHORT,
         aliases=["back"],
     )
+    @commands.check(dj_check)
     async def _prev(self, ctx: AudioContext):
         if ctx.audiocontroller.prev_song():
             await ctx.send("Playing previous song :track_previous:")
@@ -300,6 +345,7 @@ class Music(commands.Cog):
         description=config.HELP_VOL_LONG,
         help=config.HELP_VOL_SHORT,
     )
+    @commands.check(dj_check)
     async def _volume(
         self,
         ctx: AudioContext,

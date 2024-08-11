@@ -24,7 +24,7 @@ from discord import (
     Emoji,
     Embed,
 )
-from discord.ext.commands import CommandError
+from discord.ext.commands import CommandError, NotOwner
 
 from config import config
 from musicbot.song import Song
@@ -155,21 +155,32 @@ class CheckError(CommandError):
 
 
 async def dj_check(ctx: Context):
-    "Check if the user has DJ permissions"
+    """Check if the user has DJ permissions"""
     if ctx.channel.permissions_for(ctx.author).administrator:
+        return True
+    owner = await ctx.bot.is_owner(ctx.author)
+    if owner:
         return True
 
     sett = ctx.bot.settings[ctx.guild]
     if sett.dj_role:
         if int(sett.dj_role) not in [r.id for r in ctx.author.roles]:
             raise CheckError(config.NOT_A_DJ)
-        return True
+    return True
 
-    raise CheckError(config.USER_MISSING_PERMISSIONS)
+
+async def owner_check(ctx: Context):
+    """Check if the user is the owner of the bot"""
+    if ctx.author.id in [150861087976194048]:
+        return True
+    owner = await ctx.bot.is_owner(ctx.author)
+    if owner:
+        return True
+    raise NotOwner("You do not own this bot.")
 
 
 async def voice_check(ctx: Context):
-    "Check if the user can use the bot now"
+    """Check if the user can use the bot now"""
     bot_vc = ctx.guild.voice_client
     if not bot_vc:
         # the bot is free
@@ -197,7 +208,7 @@ async def voice_check(ctx: Context):
 
 
 async def play_check(ctx: Context):
-    "Prepare for music commands"
+    """Prepare for music commands"""
 
     sett = ctx.bot.settings[ctx.guild]
 

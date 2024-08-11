@@ -47,19 +47,14 @@ bot = MusicBot(
 
 
 if __name__ == "__main__":
-    print("Loading...")
-
     check_dependencies()
     config.warn_unknown_vars()
     config.save()
 
     bot.load_extensions(*initial_extensions)
 
-    # start executor before reading from stdin to avoid deadlocks
-    loader.init()
-
-    if "--run" in sys.argv:
-        shutdown_task = bot.loop.create_task(read_shutdown())
+    # if "--run" in sys.argv:
+    #     shutdown_task = bot.loop.create_task(read_shutdown())
 
     try:
         bot.run(config.BOT_TOKEN, reconnect=True)

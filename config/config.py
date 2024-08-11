@@ -41,7 +41,7 @@ class Config:
     ALLOW_VC_TIMEOUT_EDIT = True
 
     # maximum of 25
-    MAX_SONG_PRELOAD = 5
+    MAX_SONG_PRELOAD = 25
     # how many results to display in d!search
     SEARCH_RESULTS = 5
 
