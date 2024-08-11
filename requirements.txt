@@ -7,3 +7,4 @@ SQLAlchemy[asyncio]==2.0.32
 alembic==1.13.2
 aioconsole==0.7.1
 ./config
+yt-dlp-youtube-oauth2 @ https://github.com/coletdjnz/yt-dlp-youtube-oauth2/archive/refs/heads/master.zip
