@@ -69,9 +69,7 @@ _downloader = YoutubeDL(
         "default_search": "auto",
         "cookiefile": config.COOKIE_PATH,
         "quiet": True,
-        "username": "oauth2",
-        "password": "",
-        # "config-location": config.YTDLP_CONFIG_PATH
+        "netrc": True
     }
 )
 _preloading = {}
