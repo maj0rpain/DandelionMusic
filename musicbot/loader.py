@@ -70,6 +70,7 @@ _downloader = YoutubeDL(
         "cookiefile": config.COOKIE_PATH,
         "quiet": True,
         # "usenetrc": True
+        "ignoreerrors": "only_download"
     }
 )
 _preloading = {}
