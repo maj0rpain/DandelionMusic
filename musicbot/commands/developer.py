@@ -70,6 +70,18 @@ class Developer(commands.Cog):
         await ctx.send(output.decode('utf-8'))
 
     @commands.command(
+        name="ytdlp",
+        hidden=True,
+    )
+    @commands.check(owner_check)
+    async def _ytdlp(self, ctx: Context):
+        await ctx.send("Updating yt-dlp...")
+        import subprocess
+        process = subprocess.Popen(["pip", "install", "--upgrade", "yt-dlp"], stdout=subprocess.PIPE)
+        output = process.communicate()[0]
+        await ctx.send(output.decode('utf-8'))
+
+    @commands.command(
         name="execute",
         hidden=True,
         aliases=("exec",),
