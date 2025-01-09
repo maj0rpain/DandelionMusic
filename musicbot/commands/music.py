@@ -302,6 +302,16 @@ class Music(commands.Cog):
         await ctx.send("Skipped current song :fast_forward:")
 
     @bridge.bridge_command(
+        name="restore",
+        description=config.HELP_RESTORE,
+        help=config.HELP_RESTORE,
+    )
+    @commands.check(dj_check)
+    async def _restore(self, ctx: AudioContext):
+        ctx.audiocontroller.load_pickle_playlist()
+        await ctx.send("Restored playlist")
+
+    @bridge.bridge_command(
         name="clear",
         description=config.HELP_CLEAR_LONG,
         help=config.HELP_CLEAR_SHORT,

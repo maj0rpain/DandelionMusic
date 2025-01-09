@@ -1,3 +1,4 @@
+import os
 import sys
 import asyncio
 from itertools import islice
@@ -12,6 +13,8 @@ from musicbot import loader, utils
 from musicbot.song import Song
 from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
 from musicbot.utils import CheckError, asset, play_check, dj_check
+from pathlib import Path
+import pickle
 
 # avoiding circular import
 if TYPE_CHECKING:
@@ -66,6 +69,8 @@ class AudioController(object):
     def __init__(self, bot: "MusicBot", guild: discord.Guild):
         self.bot = bot
         self.playlist = Playlist()
+        self.pickle_file = Path('backup') / f'playlist_{guild.id}.pickle'
+        self.pickle_file.parent.mkdir(parents=True, exist_ok=True)
         self._next_song = None
         self.guild = guild
 
@@ -105,6 +110,16 @@ class AudioController(object):
         except Exception:
             print("Unknown error when setting volume:", file=sys.stderr)
             print_exc(file=sys.stderr)
+
+    def pickle_playlist(self):
+        with open(self.pickle_file, 'wb') as f:
+            pickle.dump(self.playlist, f)
+
+    def load_pickle_playlist(self):
+        if self.pickle_file.exists():
+            with open(self.pickle_file, 'rb') as f:
+                self.playlist = pickle.load(f)
+            self.next_song()
 
     def volume_up(self):
         self.volume = min(self.volume + 10, 100)
@@ -257,6 +272,7 @@ class AudioController(object):
         return history_string
 
     def pause(self):
+        self.pickle_playlist()
         client = self.guild.voice_client
         if client:
             if client.is_playing():
@@ -288,6 +304,7 @@ class AudioController(object):
 
     def shuffle(self):
         self.playlist.shuffle()
+        self.pickle_playlist()
         self.preload_queue()
 
     def next_song(self, error=None, *, forced=False):
@@ -308,7 +325,11 @@ class AudioController(object):
         else:
             next_song = self.playlist.next(forced)
 
+        self.pickle_playlist()
+
         if next_song is None:
+            # if self.pickle_file.exists():
+            #     self.pickle_file.unlink()
             if not self.timer.triggered and self.guild.voice_client:
                 self.add_task(
                     self.timer.start(
@@ -387,6 +408,7 @@ class AudioController(object):
             else:
                 loaded_song = PLAYLIST
 
+        self.pickle_playlist()
         if self.current_song is None:
             print("Playing {}".format(track))
             await self.play_song(self.playlist[0])
@@ -442,6 +464,7 @@ class AudioController(object):
         else:
             self._next_song = prev_song
             self.guild.voice_client.stop()
+        self.pickle_playlist()
         return True
 
     async def timeout_handler(self):
@@ -467,6 +490,7 @@ class AudioController(object):
             await self.register_voice_channel(author_vc.channel)
         else:
             raise CheckError(config.ALREADY_CONNECTED_MESSAGE)
+        # self.load_pickle_playlist()
         return True
 
     async def udisconnect(self):
