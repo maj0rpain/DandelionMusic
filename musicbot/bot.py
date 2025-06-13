@@ -17,6 +17,7 @@ from musicbot.settings import (
     GuildSettings,
     run_migrations,
     extract_legacy_settings,
+    migrate_old_playlists,
 )
 from musicbot.utils import CheckError
 
@@ -49,6 +50,8 @@ class MusicBot(bridge.Bot):
         async with self.db_engine.connect() as connection:
             await connection.run_sync(run_migrations)
         await extract_legacy_settings(self)
+        await migrate_old_playlists(self)
+
         return await super().start(*args, **kwargs)
 
     async def close(self):
@@ -67,6 +70,13 @@ class MusicBot(bridge.Bot):
         self.settings.update(await GuildSettings.load_many(self, self.guilds))
 
         for guild in self.guilds:
+            if (
+                config.GUILD_WHITELIST
+                and guild.id not in config.GUILD_WHITELIST
+            ):
+                print(f"{guild.name} is not whitelisted, leaving.")
+                await guild.leave()
+                continue
             await self.register(guild)
             print("Joined {}".format(guild.name))
 
@@ -80,6 +90,10 @@ class MusicBot(bridge.Bot):
 
     async def on_guild_join(self, guild):
         print(guild.name)
+        if config.GUILD_WHITELIST and guild.id not in config.GUILD_WHITELIST:
+            print("Not whitelisted, leaving.")
+            await guild.leave()
+            return
         await self.register(guild)
 
     async def on_command_error(self, ctx, error):

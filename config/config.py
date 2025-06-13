@@ -9,6 +9,10 @@ import jsonc
 from packaging.requirements import Requirement
 
 sys.path.insert(0, os.path.dirname(__file__))
+# to load yt-dlp plugin
+sys.path.append(
+    os.path.join(os.path.dirname(os.path.dirname(__file__)), "musicbot")
+)
 from utils import (  # noqa: E402
     CONFIG_DIRS,
     Formatter,
@@ -79,6 +83,9 @@ class Config:
 
     ENABLE_PLAYLISTS = True
 
+    # if not empty, the bot will leave non-whitelisted guilds
+    GUILD_WHITELIST = []
+
     def __init__(self):
         current_cfg = self.load()
 
@@ -140,9 +147,7 @@ class Config:
     def load(self) -> dict:
         loaded_cfgs = load_configs(
             "config.json",
-            lambda d: {
-                k: tuple(v) if isinstance(v, list) else v for k, v in d.items()
-            },
+            None,
         )
 
         current_cfg = self.as_dict()
@@ -162,13 +167,14 @@ class Config:
         missing = subtract_dicts(current_cfg, loaded_joined)
         self.unknown_vars = subtract_dicts(loaded_joined, current_cfg)
 
-        if missing:
-            missing.update(loaded_cfgs[-1])
-            self.to_save = missing
-        else:
-            self.to_save = None
+        self.has_missing = bool(missing)
+        missing.update(loaded_cfgs[-1])
+        self.to_save = missing
 
         current_cfg.update(loaded_joined)
+        current_cfg["SUPPORTED_EXTENSIONS"] = tuple(
+            current_cfg["SUPPORTED_EXTENSIONS"]
+        )
 
         for key, default in current_cfg.items():
             current_cfg[key] = get_env_var(key, default)
@@ -198,8 +204,6 @@ class Config:
         return self.dicts[name]
 
     def save(self):
-        if not self.to_save:
-            return
         comments = self.get_comments()
         if comments:
             # sort according to definition order
@@ -215,7 +219,6 @@ class Config:
                 comments=comments,
             )
             f.write("\n")
-        self.to_save = None
 
     def warn_unknown_vars(self):
         for name in self.unknown_vars:
