@@ -1,4 +1,4 @@
-py-cord[voice] @ git+https://github.com/maj0rpain/pycord@master
+py-cord[voice] @ https://github.com/maj0rpain/pycord/releases/download/v1.0.0/py_cord-0.1.dev6237+g1d7b5db-py3-none-any.whl
 py-cord[speed]
 yt-dlp[default]==2025.6.30
 aiohttp==3.12.13
