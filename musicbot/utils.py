@@ -67,11 +67,11 @@ def extract_ffmpeg_timestamp(version: str) -> int:
 
 
 def check_dependencies():
-    if pycord_version != "2.6.1-SL":
-        raise ImportError(
-            "you have wrong version of Pycord."
-            " Please install the version specified in requirements.txt"
-        )
+    # if pycord_version != "2.6.1-SL":
+    #     raise ImportError(
+    #         "you have wrong version of Pycord."
+    #         " Please install the version specified in requirements.txt"
+    #     )
 
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     ffmpeg_output = None
