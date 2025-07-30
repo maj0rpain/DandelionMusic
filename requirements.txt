@@ -1,6 +1,6 @@
 py-cord[voice] @ https://github.com/maj0rpain/pycord/releases/download/v1.0.0/py_cord-0.1.dev6237+g1d7b5db-py3-none-any.whl
 py-cord[speed]
-yt-dlp[default]==2025.6.30
+yt-dlp[default]==2025.7.21
 aiohttp==3.12.13
 beautifulsoup4==4.13.4
 spotipy==2.25.1
