@@ -1,8 +1,9 @@
-version: '1.0'
 services:
   doybot:
     container_name: doybot
     build: .
+    volumes:
+      - app_data:/app
     image: doybot:latest
     restart: unless-stopped
     environment:
@@ -28,3 +29,5 @@ services:
       - ANNOUNCE_DISCONNECT=${ANNOUNCE_DISCONNECT}
       - ENABLE_PLAYLISTS=${ENABLE_PLAYLISTS}
       - GUILD_WHITELIST=${GUILD_WHITELIST}
+volumes:
+  app_data:
