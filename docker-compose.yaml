@@ -3,9 +3,8 @@ services:
   doybot:
     container_name: doybot
     build: .
-    volumes:
-      - .:/app
     image: doybot:latest
+    restart: unless-stopped
     environment:
       - BOT_TOKEN=${BOT_TOKEN}
       - SPOTIFY_ID=${SPOTIFY_ID}
