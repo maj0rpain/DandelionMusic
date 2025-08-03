@@ -22,7 +22,7 @@ A Discord music bot written in Python with support for Youtube, SoundCloud, Spot
   - Client Secret
   - Note: Limited to 50 playlist items without API
 
-Obtained keys must be entered into ```config.json``` (or set as environment variables)
+Obtained keys must be entered into the ```.env``` file as environment variables
 
 #### Requirements (skip this if you've decided to use pre-built exe)
 
@@ -45,7 +45,7 @@ Install `ffmpeg` and `libopus` packages.
 1. Download release if available, alternatively download repository zip
 2. Complete Prerequisites
 3. Start ```run.py``` in project root (or the exe)
-4. See configuration options in config.json (more info at https://github.com/solaluset/DandelionMusic/wiki/Configuration)
+4. See configuration options in the .env file (more info at https://github.com/solaluset/DandelionMusic/wiki/Configuration)
 
 Button play plugin:
 * Set emoji with the setting command to enable this feature
@@ -183,7 +183,7 @@ d!dc
 ```
 d!history
 ```
-* Shows you the titles of the X last played songs. Configurable in config.json
+* Shows you the titles of the X last played songs. Configurable in the .env file (MAX_HISTORY_LENGTH)
 
 
 ### Utility

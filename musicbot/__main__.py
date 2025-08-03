@@ -44,8 +44,6 @@ bot = MusicBot(
 if __name__ == "__main__":
     check_dependencies()
     config.warn_unknown_vars()
-    if config.has_missing:
-        config.save()
 
     bot.load_extensions(*initial_extensions)
 
@@ -56,7 +54,7 @@ if __name__ == "__main__":
         bot.run(config.BOT_TOKEN, reconnect=True)
     except discord.LoginFailure:
         print_exc(file=sys.stderr)
-        print("Set the correct token in config.json", file=sys.stderr)
+        print("Set the correct token in the .env file (BOT_TOKEN=your_token)", file=sys.stderr)
         sys.exit(1)
     except RuntimeError as e:
         if e.args != ("Event loop is closed",):
