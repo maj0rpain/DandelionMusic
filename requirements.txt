@@ -1,10 +1,14 @@
 py-cord[voice] @ https://github.com/maj0rpain/pycord/releases/download/v1.0.0/py_cord-0.1.dev6237+g1d7b5db-py3-none-any.whl
 py-cord[speed]
-yt-dlp[default]==2025.7.21
-aiohttp==3.12.13
+yt-dlp[default]~=2025.8.22
+aiohttp~=3.12.15
 beautifulsoup4==4.13.4
 spotipy==2.25.1
-SQLAlchemy[asyncio]==2.0.41
-alembic==1.16.2
+SQLAlchemy[asyncio]~=2.0.43
+alembic~=1.16.4
 aioconsole==0.8.1
 ./config
+
+packaging~=25.0
+python-dotenv~=1.1.1
+asyncio~=4.0.0

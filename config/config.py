@@ -7,7 +7,7 @@ from typing import Optional
 
 import jsonc
 from packaging.requirements import Requirement
-
+from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(__file__))
 from utils import (  # noqa: E402
     CONFIG_DIRS,
@@ -147,6 +147,7 @@ class Config:
     def load(self) -> dict:
         # Start with default configuration from class attributes
         current_cfg = self.as_dict()
+        load_dotenv()
         
         # Check for deprecated environment variable with typo
         if "VC_TIMOUT_DEFAULT" in os.environ:
