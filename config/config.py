@@ -5,6 +5,7 @@ import sys
 import warnings
 from typing import Optional
 
+import jsonc
 from packaging.requirements import Requirement
 from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(__file__))
@@ -452,7 +453,16 @@ class Config:
 
     @classmethod
     def get_comments(cls) -> Optional[dict]:
-        src = inspect.getsource(cls)
+        try:
+            src = inspect.getsource(cls)
+        except OSError:
+            fallback = os.path.join(
+                getattr(sys, "_MEIPASS", ""), "config_comments.json"
+            )
+            if os.path.isfile(fallback):
+                with open(fallback) as f:
+                    return jsonc.load(f)
+            return None
         result = {}
         body = ast.parse(src).body[0].body
         src = src.splitlines()
