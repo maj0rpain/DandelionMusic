@@ -12,3 +12,7 @@ packaging~=25.0
 python-dotenv~=1.1.1
 asyncio~=4.0.0
 json-with-comments==1.2.10
+tomli==2.2.1
+aiosqlite~=0.21.0
+setuptools==80.9.0
+wheel==0.45.1
