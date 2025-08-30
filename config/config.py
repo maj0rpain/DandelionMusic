@@ -5,7 +5,7 @@ import sys
 import warnings
 from typing import Optional
 
-import jsonc
+# import jsonc
 from packaging.requirements import Requirement
 from dotenv import load_dotenv
 sys.path.insert(0, os.path.dirname(__file__))
@@ -459,9 +459,9 @@ class Config:
             fallback = os.path.join(
                 getattr(sys, "_MEIPASS", ""), "config_comments.json"
             )
-            if os.path.isfile(fallback):
-                with open(fallback) as f:
-                    return jsonc.load(f)
+            # if os.path.isfile(fallback):
+            #     with open(fallback) as f:
+            #         return jsonc.load(f)
             return None
         result = {}
         body = ast.parse(src).body[0].body
