@@ -104,12 +104,17 @@ async def fetch_spotify(url: str) -> Optional[Union[dict, List[str]]]:
     if url_type != "track":
         return await fetch_spotify_playlist(url, url_type, match.group("code"))
 
-    soup = await get_soup(url)
+    track_data = spotify_api.track(url)
+    title = track_data["name"]
+    artist = track_data["artists"][0]["name"]
+    title = f"{title} - {artist}"
 
-    title = soup.find("title").string
-    title = re.sub(
-        r"(.*) - song( and lyrics)? by (.*) \| Spotify", r"\1 \3", title
-    )
+    # soup = await get_soup(url)
+
+    # title = soup.find("title").string
+    # title = re.sub(
+    #     r"(.*) - song( and lyrics)? by (.*) \| Spotify", r"\1 \3", title
+    # )
     # use sync function because we're already in executor
     results = loader._search_youtube(title)
     return results[0] if results else None
