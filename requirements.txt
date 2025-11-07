@@ -16,3 +16,4 @@ tomli==2.2.1
 aiosqlite~=0.21.0
 setuptools==80.9.0
 wheel==0.45.1
+bgutil-ytdlp-pot-provider==1.2.2
