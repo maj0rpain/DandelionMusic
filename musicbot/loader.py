@@ -71,7 +71,7 @@ _downloader = YoutubeDL(
         "cookiefile": config.COOKIE_PATH,
         "quiet": True,
         "extractor_args": {"youtube": {"player-client": "default,tv,-web_safari"},
-                           "youtubepot-bgutilhttp:base_url": "http://bgutil-provider:4416"},
+                           "youtubepot-bgutilhttp" : {"base_url": "http://bgutil-provider:4416"}},
         "ignoreerrors": "only_download"
     }
 )
