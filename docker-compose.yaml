@@ -31,8 +31,16 @@ services:
       - GUILD_WHITELIST=${GUILD_WHITELIST}
     networks:
       - bridge
+  bgutil-provider:
+    container_name: bgutil-provider
+    image: brainicism/bgutil-ytdlp-pot-provider:latest
+    restart: unless-stopped
+    ports:
+      - "4416:4416"
+    networks:
+      - bridge
 volumes:
   app_data:
 networks:
   bridge:
-    external: true
+    driver: bridge
