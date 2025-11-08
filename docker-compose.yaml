@@ -29,5 +29,10 @@ services:
       - ANNOUNCE_DISCONNECT=${ANNOUNCE_DISCONNECT}
       - ENABLE_PLAYLISTS=${ENABLE_PLAYLISTS}
       - GUILD_WHITELIST=${GUILD_WHITELIST}
+    networks:
+      - bridge
 volumes:
   app_data:
+networks:
+  bridge:
+    driver: bridge
