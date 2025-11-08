@@ -10,6 +10,8 @@ ENV HEROKU_DB=$HEROKU_DB
 RUN pip --no-cache-dir install -r requirements.txt \
     && apt-get update \
     && apt-get install --no-install-recommends ffmpeg -y \
-    && curl -fsSL https://deno.land/install.sh | sh
+    && apt-get install -y curl
+
+RUN  curl -fsSL https://deno.land/install.sh | sh
 
 CMD ["python", "run.py"]
