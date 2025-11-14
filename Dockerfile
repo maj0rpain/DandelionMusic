@@ -13,9 +13,9 @@ RUN pip --no-cache-dir install -r requirements.txt \
     && apt-get install -y curl \
     && apt-get install -y unzip
 
+ENV DENO_INSTALL="/usr/local"
 RUN  curl -fsSL https://deno.land/install.sh | sh
 
-ENV DENO_INSTALL="$HOME/.deno"
-ENV PATH="$DENO_INSTALL/bin:${PATH}"
+ENV PATH="${DENO_INSTALL}/bin:${PATH}"
 
 CMD ["python", "run.py"]
