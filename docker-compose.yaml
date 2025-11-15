@@ -41,9 +41,13 @@ services:
     ports:
       - "4416:4416"
     networks:
-      - bridge
+      bridge:
+        ipv4_address: 172.20.0.100
 volumes:
   app_data:
 networks:
   bridge:
     driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/24
