@@ -43,7 +43,7 @@ services:
     networks:
       - bridge
     healthcheck:
-      test: [ "CMD", "curl", "-f", "http://127.0.0.1:4416/ping" ]
+      test: ["CMD-SHELL", "sh -c 'exec 3<> /dev/tcp/localhost/4416' || exit 1"]
       interval: 10s
       timeout: 5s
       retries: 5
