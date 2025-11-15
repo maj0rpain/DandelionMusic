@@ -31,6 +31,9 @@ services:
       - GUILD_WHITELIST=${GUILD_WHITELIST}
     networks:
       - bridge
+    depends_on:
+      bgutil-provider:
+        condition: service_healthy
   bgutil-provider:
     container_name: bgutil-provider
     image: brainicism/bgutil-ytdlp-pot-provider:latest
@@ -39,6 +42,11 @@ services:
       - "4416:4416"
     networks:
       - bridge
+    healthcheck:
+      test: [ "CMD", "curl", "-f", "http://localhost:4416/ping" ]
+      interval: 10s
+      timeout: 5s
+      retries: 5
 volumes:
   app_data:
 networks:

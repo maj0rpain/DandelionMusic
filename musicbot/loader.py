@@ -78,7 +78,8 @@ _downloader = YoutubeDL(
                 "base_url": "http://bgutil-provider:4416"
             }
         },
-        "ignoreerrors": "only_download"
+        "ignoreerrors": "only_download",
+        "verbose": True
     }
 )
 _preloading = {}
