@@ -33,7 +33,7 @@ services:
       - bridge
     depends_on:
       bgutil-provider:
-        condition: service_healthy
+        condition: service_started
   bgutil-provider:
     container_name: bgutil-provider
     image: brainicism/bgutil-ytdlp-pot-provider:latest
@@ -42,11 +42,6 @@ services:
       - "4416:4416"
     networks:
       - bridge
-    healthcheck:
-      test: ["CMD-SHELL", "sh -c 'exec 3<> /dev/tcp/localhost/4416' || exit 1"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
 volumes:
   app_data:
 networks:
