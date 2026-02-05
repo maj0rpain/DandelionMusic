@@ -1,19 +1,19 @@
 py-cord[voice] @ https://github.com/solaluset/pycord/releases/download/v2.7.0/py_cord-2.7.0-py3-none-any.whl
 py-cord[speed]
-yt-dlp[default]~=2025.11.12
-aiohttp~=3.13.2
-beautifulsoup4==4.14.2
-spotipy==2.25.1
+yt-dlp[default]~=2026.2.4
+aiohttp~=3.13.3
+beautifulsoup4==4.14.3
+spotipy==2.25.2
 SQLAlchemy[asyncio]~=2.0.43
-alembic~=1.17.2
+alembic~=1.18.3
 aioconsole==0.8.2
 
-packaging~=25.0
+packaging~=26.0
 python-dotenv~=1.2.1
 asyncio~=4.0.0
 json-with-comments==1.2.10
-tomli==2.3.0
-aiosqlite~=0.21.0
-setuptools==80.9.0
-wheel==0.45.1
+tomli==2.4.0
+aiosqlite~=0.22.1
+setuptools==80.10.2
+wheel==0.46.2
 bgutil-ytdlp-pot-provider==1.2.2

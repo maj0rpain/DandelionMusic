@@ -79,7 +79,8 @@ _downloader = YoutubeDL(
             }
         },
         "ignoreerrors": "only_download",
-        "verbose": True
+        "verbose": True,
+        "remote_components": "ejs:npm"
     }
 )
 _preloading = {}
