@@ -1,4 +1,4 @@
-py-cord[voice] @ https://github.com/solaluset/pycord/releases/download/v2.7.0/py_cord-2.7.0-py3-none-any.whl
+py-cord[voice] @ https://github.com/solaluset/pycord/releases/download/v2.7.2/py_cord-2.7.2-py3-none-any.whl
 py-cord[speed]
 yt-dlp[default]~=2026.2.4
 aiohttp~=3.13.3
