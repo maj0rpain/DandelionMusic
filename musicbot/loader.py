@@ -77,8 +77,8 @@ _downloader = YoutubeDL(
                 "youtubepot-bgutilhttp=base_url=http://bgutil-provider:4416"
             ]
         },
-        "ignoreerrors": "only_download",
-        "verbose": True
+        "ignoreerrors": "only_download"
+        # "verbose": True
         # "remote_components": "ejs:npm"
     }
 )
