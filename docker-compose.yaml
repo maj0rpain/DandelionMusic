@@ -3,7 +3,8 @@ services:
     container_name: doybot
     build: .
     volumes:
-      - app_data:/app
+      - backup:/app/backup
+      - ./settings.db:/app/settings.db
     image: doybot:latest
     restart: unless-stopped
     environment:
@@ -43,7 +44,7 @@ services:
     networks:
       - bridge
 volumes:
-  app_data:
+  backup:
 networks:
   bridge:
     driver: bridge
