@@ -4,7 +4,7 @@ services:
     build: .
     volumes:
       - backup:/app/backup
-      - ./settings.db:/app/settings.db
+      - settings:/app/settings.db
     image: doybot:latest
     restart: unless-stopped
     environment:
@@ -45,6 +45,7 @@ services:
       - bridge
 volumes:
   backup:
+  settings:
 networks:
   bridge:
     driver: bridge
