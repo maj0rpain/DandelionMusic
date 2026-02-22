@@ -4,14 +4,15 @@ import atexit
 import asyncio
 import threading
 from inspect import getmodule
-from urllib.request import urlparse
+from urllib.parse import urlparse
 from datetime import datetime, timezone
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context as mp_context
 from typing import List, Optional, Union
 
 from aiohttp import ClientResponseError
-from yt_dlp import YoutubeDL, DownloadError
+from yt_dlp import YoutubeDL
+from yt_dlp.utils import DownloadError
 
 from config import config
 from musicbot.bot import MusicBot
@@ -72,10 +73,8 @@ _downloader = YoutubeDL(
         "quiet": True,
         "extractor_args": {
             "youtube": {
-                "player-client": "default,tv"
-            },
-            "youtubepot-bgutilhttp": {
-                "base_url": "http://bgutil-provider:4416"
+                "player-client": ["default", "tv"],
+                "youtubepot-bgutilhttp": ["base_url=http://bgutil-provider:4416"]
             }
         },
         "ignoreerrors": "only_download",
