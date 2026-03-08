@@ -1,3 +1,5 @@
+from __future__ import annotations
+from typing import Union
 import asyncio
 
 import discord
@@ -28,7 +30,7 @@ class General(commands.Cog):
         aliases=["c", "cc"],  # this command replaces removed changechannel
     )
     @commands.check(voice_check)
-    async def _connect(self, ctx: Context):
+    async def _connect(self, ctx):
         # connect only if not connected yet
         if not ctx.guild.voice_client:
             audiocontroller = ctx.bot.audio_controllers[ctx.guild]
@@ -42,7 +44,7 @@ class General(commands.Cog):
         aliases=["dc"],
     )
     @commands.check(voice_check)
-    async def _disconnect(self, ctx: Context):
+    async def _disconnect(self, ctx):
         await ctx.defer()  # ANNOUNCE_DISCONNECT will take a while
         audiocontroller = ctx.bot.audio_controllers[ctx.guild]
         if await audiocontroller.udisconnect():
@@ -57,7 +59,7 @@ class General(commands.Cog):
         aliases=["rs", "restart"],
     )
     @commands.check(voice_check)
-    async def _reset(self, ctx: Context):
+    async def _reset(self, ctx):
         await ctx.defer()
         if await ctx.bot.audio_controllers[ctx.guild].udisconnect():
             # bot was connected and need some rest
@@ -86,33 +88,78 @@ class General(commands.Cog):
         description=config.HELP_SETTINGS_LONG,
         help=config.HELP_SETTINGS_SHORT,
         aliases=["settings", "set"],
-        usage="[setting_name setting_value]",
-        invoke_without_command=True,
+        fallback="show",
     )
-    async def _settings(self, ctx: Context, *, inexistent_setting=None):
-        if inexistent_setting is not None:
-            await ctx.send("`Error: Setting not found`")
-        else:
-            await self._show_settings_callback(ctx)
-
-    async def _show_settings_callback(self, ctx: Context):
-        sett = ctx.bot.settings[ctx.guild]
+    async def _settings(self, ctx: commands.Context):
+        sett = self.bot.settings[ctx.guild]
         await ctx.send(embed=sett.format(ctx))
 
-    _show_settings = _settings.command(name="show")(_show_settings_callback)
+    @_settings.command(name="command_channel")
+    @commands.check(dj_check)
+    async def _set_command_channel(self, ctx: commands.Context, channel: Union[discord.TextChannel, discord.VoiceChannel]):
+        sett = self.bot.settings[ctx.guild]
+        await sett.update_setting("command_channel", str(channel.id), ctx)
+        await ctx.send(f"Setting `command_channel` updated to {channel.mention}!")
 
-    for name, type_ in CONFIG_OPTIONS.items():
+    @_settings.command(name="start_voice_channel")
+    @commands.check(dj_check)
+    async def _set_start_voice_channel(self, ctx: commands.Context, channel: discord.VoiceChannel):
+        sett = self.bot.settings[ctx.guild]
+        await sett.update_setting("start_voice_channel", str(channel.id), ctx)
+        await ctx.send(f"Setting `start_voice_channel` updated to {channel.mention}!")
 
-        @_settings.command(name=name)
-        @commands.check(dj_check)
-        async def _set_setting(self, ctx: Context, *, value: type_):
-            sett = ctx.bot.settings[ctx.guild]
-            try:
-                await sett.update_setting(ctx.command.name, value, ctx)
-            except ConversionError as e:
-                await ctx.send(f"`Error: {e}`")
-                return
-            await ctx.send("Setting updated!")
+    @_settings.command(name="dj_role")
+    @commands.check(dj_check)
+    async def _set_dj_role(self, ctx: commands.Context, role: discord.Role):
+        sett = self.bot.settings[ctx.guild]
+        await sett.update_setting("dj_role", str(role.id), ctx)
+        await ctx.send(f"Setting `dj_role` updated to {role.name}!")
+
+    @_settings.command(name="user_must_be_in_vc")
+    @commands.check(dj_check)
+    async def _set_user_must_be_in_vc(self, ctx: commands.Context, value: bool):
+        sett = self.bot.settings[ctx.guild]
+        await sett.update_setting("user_must_be_in_vc", value, ctx)
+        await ctx.send(f"Setting `user_must_be_in_vc` updated to {value}!")
+
+    @_settings.command(name="button_emote")
+    @commands.check(dj_check)
+    async def _set_button_emote(self, ctx: commands.Context, emoji: str):
+        sett = self.bot.settings[ctx.guild]
+        try:
+            await sett.update_setting("button_emote", emoji, ctx)
+        except ConversionError as e:
+            await ctx.send(f"`Error: {e}`")
+            return
+        await ctx.send(f"Setting `button_emote` updated to {emoji}!")
+
+    @_settings.command(name="default_volume")
+    @commands.check(dj_check)
+    async def _set_default_volume(self, ctx: commands.Context, value: int):
+        sett = self.bot.settings[ctx.guild]
+        if value < 0 or value > 100:
+            await ctx.send("`Error: Volume must be between 0 and 100.`")
+            return
+        await sett.update_setting("default_volume", value, ctx)
+        await ctx.send(f"Setting `default_volume` updated to {value}!")
+
+    @_settings.command(name="vc_timeout")
+    @commands.check(dj_check)
+    async def _set_vc_timeout(self, ctx: commands.Context, value: bool):
+        sett = self.bot.settings[ctx.guild]
+        await sett.update_setting("vc_timeout", value, ctx)
+        await ctx.send(f"Setting `vc_timeout` updated to {value}!")
+
+    @_settings.command(name="announce_songs")
+    @commands.check(dj_check)
+    async def _set_announce_songs(self, ctx: commands.Context, value: bool):
+        sett = self.bot.settings[ctx.guild]
+        await sett.update_setting("announce_songs", value, ctx)
+        await ctx.send(f"Setting `announce_songs` updated to {value}!")
+
+    @commands.Cog.listener()
+    async def on_ready(self):
+        pass
 
     @commands.hybrid_command(
         name="addbot",

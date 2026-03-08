@@ -1,3 +1,4 @@
+from __future__ import annotations
 import sys
 import asyncio
 from io import StringIO
@@ -52,7 +53,7 @@ class Developer(commands.Cog):
         hidden=True,
     )
     @commands.check(owner_check)
-    async def _shutdown(self, ctx: Context):
+    async def _shutdown(self, ctx):
         await ctx.send("Shutting down...")
         # hide SystemExit error message
         sys.excepthook = lambda *_: None
@@ -63,7 +64,7 @@ class Developer(commands.Cog):
         hidden=True,
     )
     @commands.check(owner_check)
-    async def _update(self, ctx: Context):
+    async def _update(self, ctx):
         await ctx.send("Updating...")
         import subprocess
         process = subprocess.Popen(["git", "pull"], stdout=subprocess.PIPE)
@@ -75,7 +76,7 @@ class Developer(commands.Cog):
         hidden=True,
     )
     @commands.check(owner_check)
-    async def _ytdlp(self, ctx: Context):
+    async def _ytdlp(self, ctx):
         await ctx.send("Updating yt-dlp...")
         import subprocess
         process = subprocess.Popen(["pip", "install", "--upgrade", "yt-dlp[default]"], stdout=subprocess.PIPE)
@@ -88,7 +89,7 @@ class Developer(commands.Cog):
         aliases=("exec",),
     )
     @commands.check(owner_check)
-    async def _execute(self, ctx: Context, *, code: str):
+    async def _execute(self, ctx, *, code: str):
         if code.startswith("```"):
             code = code.partition("\n")[2].rstrip("`")
         else:
@@ -133,14 +134,14 @@ class Developer(commands.Cog):
     )
     @commands.is_owner()
     async def _guild_whitelist(
-        self, ctx: Context, *, inexistent_subcommand=None
+        self, ctx, *, inexistent_subcommand=None
     ):
         if inexistent_subcommand is not None:
             await ctx.send("`Error: Unknown subcommand`")
         else:
             await self._show_guild_whitelist_callback(ctx)
 
-    async def _show_guild_whitelist_callback(self, ctx: Context):
+    async def _show_guild_whitelist_callback(self, ctx):
         if not config.GUILD_WHITELIST:
             await ctx.send("Whitelist is disabled.")
             return
@@ -159,7 +160,7 @@ class Developer(commands.Cog):
 
     @_guild_whitelist.command(name="add")
     @commands.is_owner()
-    async def _guild_whitelist_add(self, ctx: Context, *, id: str):
+    async def _guild_whitelist_add(self, ctx, *, id: str):
         config.GUILD_WHITELIST.append(int(id))
         config.save()
         await ctx.send("Whitelist updated.")
@@ -175,7 +176,7 @@ class Developer(commands.Cog):
     @app_commands.autocomplete(id=_guild_whitelist_remove_autocomplete)
     async def _guild_whitelist_remove(
         self,
-        ctx: Context,
+        ctx,
         *,
         id: str,
     ):

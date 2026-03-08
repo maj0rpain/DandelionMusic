@@ -1,3 +1,4 @@
+from __future__ import annotations
 import json
 from typing import Annotated, Iterable, List, Union, Literal
 
@@ -41,7 +42,7 @@ class SongButton(MusicButton):
 
 
 @commands.check
-def active_only(ctx: AudioContext):
+def active_only(ctx):
     if not ctx.audiocontroller.is_active():
         raise utils.CheckError(config.QUEUE_EMPTY)
     return True
@@ -57,11 +58,11 @@ class Music(commands.Cog):
     def __init__(self, bot: MusicBot):
         self.bot = bot
 
-    async def cog_check(self, ctx: AudioContext):
+    async def cog_check(self, ctx):
         ctx.audiocontroller = ctx.bot.audio_controllers[ctx.guild]
         return await utils.play_check(ctx)
 
-    async def cog_before_invoke(self, ctx: AudioContext):
+    async def cog_before_invoke(self, ctx):
         ctx.audiocontroller.command_channel = ctx
 
     @commands.hybrid_command(
@@ -71,7 +72,7 @@ class Music(commands.Cog):
         aliases=["p", "yt"],
     )
     async def _play(
-        self, ctx: AudioContext, *, track: str = None, file: Attachment = None
+        self, ctx, *, track: str = None, file: Attachment = None
     ):
         if track is None:
             if ctx.message:
@@ -93,7 +94,7 @@ class Music(commands.Cog):
         await self._play_song(ctx, track)
 
     async def _play_song(
-        self, ctx: AudioContext, track: Union[str, Iterable[str]], playnext=False
+        self, ctx, track: Union[str, Iterable[str]], playnext=False
     ):
         # reset timer
         await ctx.audiocontroller.timer.start(True)
@@ -136,7 +137,7 @@ class Music(commands.Cog):
         aliases=["pn"],
     )
     async def _play_next(
-            self, ctx: AudioContext, *, track: str = None, file: Attachment = None
+        self, ctx, *, track: str = None, file: Attachment = None
     ):
         if track is None and ctx.message:
             if ctx.message.attachments:
@@ -160,7 +161,7 @@ class Music(commands.Cog):
         help=config.HELP_SEARCH_SHORT,
         aliases=["sc"],
     )
-    async def _search(self, ctx: AudioContext, *, query: str):
+    async def _search(self, ctx, *, query: str):
         await ctx.defer()
         results = await search_youtube(query, config.SEARCH_RESULTS)
         songs = []
@@ -191,7 +192,7 @@ class Music(commands.Cog):
     @commands.check(dj_check)
     async def _loop(
         self,
-        ctx: AudioContext,
+        ctx,
         mode: Literal["off", "single", "all"] = None,
     ):
         result = ctx.audiocontroller.loop(mode)
@@ -205,7 +206,7 @@ class Music(commands.Cog):
     )
     @active_only
     @commands.check(dj_check)
-    async def _shuffle(self, ctx: AudioContext):
+    async def _shuffle(self, ctx):
         ctx.audiocontroller.shuffle()
         await ctx.send("Shuffled queue :twisted_rightwards_arrows:")
 
@@ -216,7 +217,7 @@ class Music(commands.Cog):
         aliases=["resume"],
     )
     @commands.check(dj_check)
-    async def _pause(self, ctx: AudioContext):
+    async def _pause(self, ctx):
         result = ctx.audiocontroller.pause()
         await ctx.send(result.value)
 
@@ -227,7 +228,7 @@ class Music(commands.Cog):
         aliases=["q"],
     )
     @active_only
-    async def _queue(self, ctx: AudioContext):
+    async def _queue(self, ctx):
         playlist = ctx.audiocontroller.playlist
         await ctx.send(embed=playlist.queue_embed())
 
@@ -237,7 +238,7 @@ class Music(commands.Cog):
         help=config.HELP_STOP_SHORT,
         aliases=["st"],
     )
-    async def _stop(self, ctx: AudioContext):
+    async def _stop(self, ctx):
         ctx.audiocontroller.stop_player()
         await ctx.send("Stopped all sessions :octagonal_sign:")
 
@@ -251,9 +252,9 @@ class Music(commands.Cog):
     @commands.check(dj_check)
     async def _move(
         self,
-        ctx: AudioContext,
-        src_pos: app_commands.Range[int, 2] = None,
-        dest_pos: app_commands.Range[int, 2] = None,
+        ctx,
+        src_pos: int = None,
+        dest_pos: int = None,
     ):
         if src_pos is None:
             src_pos = len(ctx.audiocontroller.playlist)
@@ -277,8 +278,8 @@ class Music(commands.Cog):
     @commands.check(dj_check)
     async def _remove(
         self,
-        ctx: AudioContext,
-        queue_number: app_commands.Range[int, 2] = None,
+        ctx,
+        queue_number: int = None,
     ):
         if queue_number is None:
             queue_number = len(ctx.audiocontroller.playlist)
@@ -298,7 +299,7 @@ class Music(commands.Cog):
     )
     @active_only
     @commands.check(dj_check)
-    async def _skip(self, ctx: AudioContext):
+    async def _skip(self, ctx):
         ctx.audiocontroller.next_song(forced=True)
         await ctx.send("Skipped current song :fast_forward:")
 
@@ -308,7 +309,7 @@ class Music(commands.Cog):
         help=config.HELP_RESTORE,
     )
     @commands.check(dj_check)
-    async def _restore(self, ctx: AudioContext):
+    async def _restore(self, ctx):
         ctx.audiocontroller.load_pickle_playlist()
         await ctx.send("Restored playlist")
 
@@ -319,7 +320,7 @@ class Music(commands.Cog):
         aliases=["cl"],
     )
     @commands.check(dj_check)
-    async def _clear(self, ctx: AudioContext):
+    async def _clear(self, ctx):
         ctx.audiocontroller.playlist.clear()
         await ctx.send("Cleared queue :no_entry_sign:")
 
@@ -330,7 +331,7 @@ class Music(commands.Cog):
         aliases=["back"],
     )
     @commands.check(dj_check)
-    async def _prev(self, ctx: AudioContext):
+    async def _prev(self, ctx):
         if ctx.audiocontroller.prev_song():
             await ctx.send("Playing previous song :track_previous:")
         else:
@@ -343,7 +344,7 @@ class Music(commands.Cog):
         aliases=["np"],
     )
     @active_only
-    async def _songinfo(self, ctx: AudioContext):
+    async def _songinfo(self, ctx):
         song = ctx.audiocontroller.current_song
         await ctx.send(embed=song.format_output(config.SONGINFO_SONGINFO))
 
@@ -352,7 +353,7 @@ class Music(commands.Cog):
         description=config.HELP_HISTORY_LONG,
         help=config.HELP_HISTORY_SHORT,
     )
-    async def _history(self, ctx: AudioContext):
+    async def _history(self, ctx):
         await ctx.send(ctx.audiocontroller.track_history())
 
     @commands.hybrid_command(
@@ -364,8 +365,8 @@ class Music(commands.Cog):
     @commands.check(dj_check)
     async def _volume(
         self,
-        ctx: AudioContext,
-        value: app_commands.Range[int, 0, 100] = None,
+        ctx,
+        value: int = None,
     ):
         if value is None:
             await ctx.send(
@@ -405,7 +406,7 @@ class Music(commands.Cog):
         aliases=["pl"],
         invoke_without_command=True,
     )
-    async def _playlist(self, ctx: AudioContext):
+    async def _playlist(self, ctx):
         await ctx.send("Use subcommands to manage playlists.")
 
     @_playlist.command(
@@ -415,7 +416,7 @@ class Music(commands.Cog):
         help=config.HELP_SAVE_PLAYLIST_SHORT,
     )
     @commands.check(dj_check)
-    async def _playlist_save(self, ctx: AudioContext, name: str):
+    async def _playlist_save(self, ctx, name: str):
         if not config.ENABLE_PLAYLISTS:
             await ctx.send(config.PLAYLISTS_ARE_DISABLED)
             return
@@ -452,7 +453,7 @@ class Music(commands.Cog):
     @app_commands.autocomplete(name=_playlist_autocomplete)
     async def _playlist_load(
         self,
-        ctx: AudioContext,
+        ctx,
         name: str,
     ):
         await ctx.defer()
@@ -494,7 +495,7 @@ class Music(commands.Cog):
     @app_commands.autocomplete(name=_playlist_autocomplete)
     async def _playlist_remove(
         self,
-        ctx: AudioContext,
+        ctx,
         name: str,
     ):
         await ctx.defer()
@@ -516,7 +517,7 @@ class Music(commands.Cog):
         description=config.HELP_LIST_PLAYLISTS_LONG,
         help=config.HELP_LIST_PLAYLISTS_SHORT,
     )
-    async def _playlist_list(self, ctx: AudioContext):
+    async def _playlist_list(self, ctx):
         async with ctx.bot.DbSession() as session:
             playlists = (
                 (
@@ -546,7 +547,7 @@ class Music(commands.Cog):
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_show(
         self,
-        ctx: AudioContext,
+        ctx,
         playlist: str,
     ):
         await ctx.defer()
@@ -586,7 +587,7 @@ class Music(commands.Cog):
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_add_song(
         self,
-        ctx: AudioContext,
+        ctx,
         playlist: str,
         track: str,
     ):
@@ -627,7 +628,7 @@ class Music(commands.Cog):
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_remove_song(
         self,
-        ctx: AudioContext,
+        ctx,
         playlist: str,
         position: int,
     ):
@@ -668,7 +669,7 @@ class Music(commands.Cog):
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_move_song(
         self,
-        ctx: AudioContext,
+        ctx,
         playlist: str,
         source_position: int,
         destination_position: int,
