@@ -33,14 +33,14 @@ class MusicButton(discord.ui.Button):
         self._callback = callback
         self._check = check
 
-    async def callback(self, inter):
-        ctx = await inter.client.get_application_context(inter)
+    async def callback(self, inter: discord.Interaction):
+        ctx = await inter.client.get_context(inter)
         try:
             await self._check(ctx)
         except CheckError as e:
             await ctx.send(e, ephemeral=True)
             return
-        if ctx.interaction.custom_id in ['prev', 'pause', 'next',
+        if inter.data.get('custom_id') in ['prev', 'pause', 'next',
                                          'loop', 'shuffle', 'stop',
                                          'volume_down', 'volume_up']:
             try:
@@ -52,8 +52,13 @@ class MusicButton(discord.ui.Button):
         res = self._callback(ctx)
         if isawaitable(res):
             await res
-        if ctx.interaction.custom_id in ['next', 'prev']:
-            await ctx.send(f'{ctx.interaction.user} Skipped a Song')
+
+        controller = inter.client.audio_controllers.get(inter.guild)
+        if controller:
+            if inter.data.get('custom_id') in ['next', 'prev']:
+                await ctx.send(f'{inter.user} Skipped a Song')
+            else:
+                await controller.update_view()
 
 
 class AudioController(object):
@@ -147,75 +152,73 @@ class AudioController(object):
 
         is_empty = len(self.playlist) == 0
 
-        self.last_view = discord.ui.View(
-            MusicButton(
-                lambda _: self.prev_song(),
-                custom_id="prev",
-                disabled=not self.playlist.has_prev(),
-                emoji="⏮️",
-            ),
-            MusicButton(
-                lambda _: self.pause(),
-                custom_id="pause",
-                emoji="⏸️" if self.guild.voice_client.is_playing() else "▶️",
-            ),
-            MusicButton(
-                lambda _: self.next_song(forced=True),
-                custom_id="next",
-                disabled=not self.playlist.has_next(),
-                emoji="⏭️",
-            ),
-            MusicButton(
-                lambda _: self.loop(),
-                custom_id="loop",
-                disabled=is_empty,
-                emoji="🔁",
-                label="Loop: " + self.playlist.loop,
-            ),
-            MusicButton(
-                self.current_song_callback,
-                custom_id="current_song",
-                row=1,
-                disabled=self.current_song is None,
-                emoji="💿",
-            ),
-            MusicButton(
-                lambda _: self.shuffle(),
-                custom_id="shuffle",
-                row=1,
-                disabled=is_empty,
-                emoji="🔀",
-            ),
-            MusicButton(
-                self.queue_callback,
-                custom_id="queue",
-                row=1,
-                disabled=is_empty,
-                emoji="📜",
-            ),
-            MusicButton(
-                lambda _: self.stop_player(),
-                custom_id="stop",
-                row=1,
-                emoji="⏹️",
-                style=discord.ButtonStyle.red,
-            ),
-            MusicButton(
-                lambda _: self.volume_down(),
-                custom_id="volume_down",
-                row=2,
-                disabled=self.volume == 10,
-                emoji="🔉",
-            ),
-            MusicButton(
-                lambda _: self.volume_up(),
-                custom_id="volume_up",
-                row=2,
-                disabled=self.volume == 100,
-                emoji="🔊",
-            ),
-            timeout=None,
-        )
+        view = self.last_view = discord.ui.View(timeout=None)
+        view.add_item(MusicButton(
+            lambda _: self.prev_song(),
+            custom_id="prev",
+            disabled=not self.playlist.has_prev(),
+            emoji="⏮️",
+        ))
+        view.add_item(MusicButton(
+            lambda _: self.pause(),
+            custom_id="pause",
+            emoji="⏸️" if self.guild.voice_client.is_playing() else "▶️",
+        ))
+        view.add_item(MusicButton(
+            lambda _: self.next_song(forced=True),
+            custom_id="next",
+            disabled=not self.playlist.has_next(),
+            emoji="⏭️",
+        ))
+        view.add_item(MusicButton(
+            lambda _: self.loop(),
+            custom_id="loop",
+            disabled=is_empty,
+            emoji="🔁",
+            label="Loop: " + self.playlist.loop,
+        ))
+        view.add_item(MusicButton(
+            self.current_song_callback,
+            custom_id="current_song",
+            row=1,
+            disabled=self.current_song is None,
+            emoji="💿",
+        ))
+        view.add_item(MusicButton(
+            lambda _: self.shuffle(),
+            custom_id="shuffle",
+            row=1,
+            disabled=is_empty,
+            emoji="🔀",
+        ))
+        view.add_item(MusicButton(
+            self.queue_callback,
+            custom_id="queue",
+            row=1,
+            disabled=is_empty,
+            emoji="📜",
+        ))
+        view.add_item(MusicButton(
+            lambda _: self.stop_player(),
+            custom_id="stop",
+            row=1,
+            emoji="⏹️",
+            style=discord.ButtonStyle.red,
+        ))
+        view.add_item(MusicButton(
+            lambda _: self.volume_down(),
+            custom_id="volume_down",
+            row=2,
+            disabled=self.volume == 10,
+            emoji="🔉",
+        ))
+        view.add_item(MusicButton(
+            lambda _: self.volume_up(),
+            custom_id="volume_up",
+            row=2,
+            disabled=self.volume == 100,
+            emoji="🔊",
+        ))
 
         return self.last_view
 

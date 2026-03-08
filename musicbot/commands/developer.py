@@ -7,9 +7,8 @@ from traceback import print_exc
 from contextlib import redirect_stdout
 
 import discord
-from discord.ext import commands, bridge
-from discord.ext.pages import Paginator
-from discord.ext.bridge import BridgeOption
+from discord.ext import commands
+from discord import app_commands
 from aioconsole import aexec
 
 from config import config
@@ -79,7 +78,7 @@ class Developer(commands.Cog):
     async def _ytdlp(self, ctx: Context):
         await ctx.send("Updating yt-dlp...")
         import subprocess
-        process = subprocess.Popen(["pip", "install", "--upgrade", "yt-dlp[default,curl-cffi]"], stdout=subprocess.PIPE)
+        process = subprocess.Popen(["pip", "install", "--upgrade", "yt-dlp[default]"], stdout=subprocess.PIPE)
         output = process.communicate()[0]
         await ctx.send(output.decode('utf-8'))
 
@@ -116,7 +115,8 @@ class Developer(commands.Cog):
             if len(pages) == 1:
                 await ctx.send(pages[0])
             else:
-                await Paginator(pages).send(ctx)
+                for page in pages:
+                    await ctx.send(page)
         else:
             try:
                 suppress = ctx.channel.last_message.author == ctx.me
@@ -125,7 +125,7 @@ class Developer(commands.Cog):
             if not suppress:
                 await ctx.send("No output.")
 
-    @bridge.bridge_group(
+    @commands.hybrid_group(
         name="guild_whitelist",
         aliases=("gw",),
         usage="[action [guild id]]",
@@ -164,23 +164,20 @@ class Developer(commands.Cog):
         config.save()
         await ctx.send("Whitelist updated.")
 
-    @staticmethod
-    def _guild_whitelist_remove_autocomplete(
-        ctx: discord.AutocompleteContext,
-    ) -> List[str]:
-        value = ctx.value.lower()
-        all_guilds = [f"{g.name} {g.id}" for g in ctx.bot.guilds]
-        return [s for s in all_guilds if value in s.lower()]
+    async def _guild_whitelist_remove_autocomplete(
+        self, interaction: discord.Interaction, current: str
+    ) -> List[app_commands.Choice[str]]:
+        all_guilds = [app_commands.Choice(name=f"{g.name} {g.id}", value=str(g.id)) for g in self.bot.guilds if current.lower() in g.name.lower() or current in str(g.id)]
+        return all_guilds[:25]
 
     @_guild_whitelist.command(name="remove")
     @commands.is_owner()
+    @app_commands.autocomplete(id=_guild_whitelist_remove_autocomplete)
     async def _guild_whitelist_remove(
         self,
         ctx: Context,
         *,
-        id: BridgeOption(
-            str, autocomplete=_guild_whitelist_remove_autocomplete
-        ),
+        id: str,
     ):
         id = int(id.split()[-1])
         config.GUILD_WHITELIST.remove(id)
@@ -196,5 +193,5 @@ class Developer(commands.Cog):
             await guild.leave()
 
 
-def setup(bot: MusicBot):
-    bot.add_cog(Developer(bot))
+async def setup(bot: MusicBot):
+    await bot.add_cog(Developer(bot))

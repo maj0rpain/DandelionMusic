@@ -1,5 +1,6 @@
-py-cord[voice,speed] @ https://github.com/maj0rpain/pycord/releases/download/v1.0.1/py_cord-1.0.1-py3-none-any.whl
-yt-dlp[default,curl-cffi]~=2026.3.3
+discord.py[voice]==2.7.1
+davey~=0.1.4
+yt-dlp[default]~=2026.3.3
 aiohttp~=3.13.3
 beautifulsoup4==4.14.3
 spotipy==2.26.0

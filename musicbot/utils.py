@@ -4,6 +4,7 @@ import re
 import sys
 import _thread
 import asyncio
+import discord
 import subprocess
 from enum import Enum
 from subprocess import CalledProcessError, check_output
@@ -19,7 +20,7 @@ from typing import (
 
 from aioconsole import ainput
 from discord import (
-    __version__ as pycord_version,
+    __version__ as discord_version,
     opus,
     utils,
     Emoji,
@@ -67,12 +68,6 @@ def extract_ffmpeg_timestamp(version: str) -> int:
 
 
 def check_dependencies():
-    # if pycord_version != "2.6.1-SL":
-    #     raise ImportError(
-    #         "you have wrong version of Pycord."
-    #         " Please install the version specified in requirements.txt"
-    #     )
-
     flags = subprocess.CREATE_NO_WINDOW if sys.platform == "win32" else 0
     ffmpeg_output = None
     try:
@@ -329,6 +324,30 @@ class OutputWrapper:
             return cls.log_file
         cls.log_file = open("log.txt", "w", encoding="utf-8")
         return cls.log_file
+
+
+class SimplePaginator(discord.ui.View):
+    def __init__(self, pages: List[Embed], timeout: int = 60):
+        super().__init__(timeout=timeout)
+        self.pages = pages
+        self.current_page = 0
+
+    async def send(self, ctx: Context):
+        if not self.pages:
+            return
+        self.message = await ctx.send(embed=self.pages[0], view=self)
+
+    @discord.ui.button(label="Prev", style=discord.ButtonStyle.grey)
+    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page > 0:
+            self.current_page -= 1
+            await interaction.response.edit_message(embed=self.pages[self.current_page])
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.grey)
+    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+        if self.current_page < len(self.pages) - 1:
+            self.current_page += 1
+            await interaction.response.edit_message(embed=self.pages[self.current_page])
 
 
 async def read_shutdown():

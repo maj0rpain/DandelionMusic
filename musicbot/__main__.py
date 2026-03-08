@@ -32,6 +32,7 @@ if config.ENABLE_BUTTON_PLUGIN:
     initial_extensions.append("musicbot.plugins.button")
 
 bot = MusicBot(
+    initial_extensions=initial_extensions,
     command_prefix=prefix,
     case_insensitive=True,
     status=discord.Status.online,
@@ -44,8 +45,6 @@ bot = MusicBot(
 if __name__ == "__main__":
     check_dependencies()
     config.warn_unknown_vars()
-
-    bot.load_extensions(*initial_extensions)
 
     # if "--run" in sys.argv:
     #     shutdown_task = bot.loop.create_task(read_shutdown())

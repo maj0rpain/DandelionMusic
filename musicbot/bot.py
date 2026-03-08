@@ -5,8 +5,9 @@ from traceback import print_exception
 from typing import Dict, Union, List
 
 import discord
-from discord.ext import bridge, tasks
-from discord.ext.bridge import BridgeOption
+from discord.ext import commands, tasks
+from discord.ext.commands.view import StringView
+from discord import app_commands
 from discord.ext.commands import DefaultHelpCommand, NotOwner
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
@@ -22,10 +23,11 @@ from musicbot.settings import (
 from musicbot.utils import CheckError
 
 
-class MusicBot(bridge.Bot):
-    def __init__(self, *args, **kwargs):
+class MusicBot(commands.Bot):
+    def __init__(self, initial_extensions: List[str], *args, **kwargs):
         kwargs.setdefault("help_command", UniversalHelpCommand())
         super().__init__(*args, **kwargs)
+        self.initial_extensions = initial_extensions
 
         # A dictionary that remembers
         # which guild belongs to which audiocontroller
@@ -40,9 +42,15 @@ class MusicBot(bridge.Bot):
         )
         # replace default to register slash command
         self._default_help = self.remove_command("help")
-        self.add_bridge_command(self._help)
+        self.add_command(self._help)
 
         self.absolutely_ready = asyncio.Future()
+
+    async def setup_hook(self):
+        for extension in self.initial_extensions:
+            await self.load_extension(extension)
+        if config.ENABLE_SLASH_COMMANDS:
+            await self.tree.sync()
 
     async def start(self, *args, **kwargs):
         print(config.STARTUP_MESSAGE)
@@ -101,7 +109,7 @@ class MusicBot(bridge.Bot):
         if not isinstance(error, (CheckError, NotOwner)):
             print_exception(error)
 
-    async def on_application_command_error(self, ctx, error):
+    async def on_hybrid_command_error(self, ctx, error):
         await self.on_command_error(ctx, error)
 
     async def on_voice_state_update(self, member, before, after):
@@ -138,17 +146,10 @@ class MusicBot(bridge.Bot):
             )
         )
 
-    def add_application_command(self, command):
-        if not config.ENABLE_SLASH_COMMANDS:
-            return
-        return super().add_application_command(command)
 
     async def get_prefix(
-        self, message: Union[discord.Message, bridge.BridgeApplicationContext]
+        self, message: discord.Message
     ):
-        if isinstance(message, bridge.BridgeApplicationContext):
-            # display this as prefix for slash commands
-            return "/"
         prefixes = await super().get_prefix(message)
         if not self.case_insensitive:
             return prefixes
@@ -163,25 +164,14 @@ class MusicBot(bridge.Bot):
         # did not match
         return " "
 
-    async def get_application_context(self, interaction):
-        return await super().get_application_context(
-            interaction, ApplicationContext
-        )
-
-    async def process_application_commands(self, inter):
-        if not inter.guild:
-            await inter.response.send_message(config.NO_GUILD_MESSAGE)
-            return
-
-        await self.absolutely_ready
-
-        await super().process_application_commands(inter)
+    async def get_context(self, message, *, cls=None):
+        return await super().get_context(message, cls=cls or Context)
 
     async def process_commands(self, message: discord.Message):
         if message.author.bot:
             return
 
-        ctx = await self.get_context(message, cls=ExtContext)
+        ctx = await self.get_context(message, cls=Context)
 
         if ctx.valid and not message.guild:
             await message.channel.send(config.NO_GUILD_MESSAGE)
@@ -219,32 +209,57 @@ class MusicBot(bridge.Bot):
                     file=sys.stderr,
                 )
 
-    @staticmethod
-    def _help_autocomplete(ctx: discord.AutocompleteContext) -> List[str]:
-        return [
-            c.qualified_name
-            for c in ctx.bot.walk_commands()
-            if c.qualified_name.startswith(ctx.value) and not c.hidden
-        ]
-
-    @bridge.bridge_command(name="help", description=config.HELP_HELP_SHORT)
+    @commands.hybrid_command(name="help", description=config.HELP_HELP_SHORT)
+    @app_commands.describe(command="The command to get help for")
     async def _help(
+        self,
         ctx,
         *,
-        command: BridgeOption(str, autocomplete=_help_autocomplete) = None,
+        command: str = None,
     ):
-        help_command = ctx.bot._default_help
-        if ctx.is_app:
-            # trick the command to run as slash
-            ctx.content = "/help"
-            ctx = await ctx.bot.get_context(ctx, ExtContext)
+        help_command = self._default_help
         await help_command.prepare(ctx)
         await help_command.callback(ctx, command=command)
 
+    @_help.autocomplete('command')
+    async def _help_autocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+        return [
+            app_commands.Choice(name=c.qualified_name, value=c.qualified_name)
+            for c in self.walk_commands()
+            if current.lower() in c.qualified_name.lower() and not c.hidden
+        ][:25]
 
-class Context(bridge.BridgeContext):
-    bot: MusicBot
+
+class Context(commands.Context):
+    bot: "MusicBot"
     guild: discord.Guild
+
+    @classmethod
+    async def from_interaction(cls, interaction: discord.Interaction):
+        try:
+            return await super().from_interaction(interaction)
+        except ValueError:
+            # Handle component interactions without command data
+            ctx = cls(
+                message=interaction.message,
+                bot=interaction.client,
+                view=StringView(""),
+                prefix=None
+            )
+            ctx.interaction = interaction
+            ctx.command = None
+            # Update attributes from interaction for accuracy
+            ctx.author = interaction.user
+            ctx.guild = interaction.guild
+            ctx.channel = interaction.channel
+            return ctx
+
+    async def response_send_message(self, *args, **kwargs):
+        if self.interaction:
+            if self.interaction.response.is_done():
+                return await self.interaction.followup.send(*args, **kwargs)
+            return await self.interaction.response.send_message(*args, **kwargs)
+        return await self.send(*args, **kwargs)
 
     async def send(self, *args, **kwargs):
         kwargs.pop("reference", None)  # not supported
@@ -261,27 +276,31 @@ class Context(bridge.BridgeContext):
         ):
             # sending ephemeral message or using different channel
             # don't bother with views
-            return await self.respond(*args, **kwargs)
+            if self.interaction:
+                if self.interaction.response.is_done():
+                    return await self.interaction.followup.send(*args, **kwargs)
+                return await self.interaction.response.send_message(*args, **kwargs)
+            return await super().send(*args, **kwargs)
         async with audiocontroller.message_lock:
             await audiocontroller.update_view(None)
             view = audiocontroller.make_view()
             if view:
                 kwargs["view"] = view
-            # use `respond` for compatibility
-            res = await self.respond(*args, **kwargs)
+            
+            if self.interaction:
+                if self.interaction.response.is_done():
+                    res = await self.interaction.followup.send(*args, **kwargs)
+                else:
+                    await self.interaction.response.send_message(*args, **kwargs)
+                    res = await self.interaction.original_response()
+            else:
+                res = await super().send(*args, **kwargs)
+            
             if isinstance(res, discord.Interaction):
                 audiocontroller.last_message = await res.original_response()
             else:
                 audiocontroller.last_message = res
         return res
-
-
-class ExtContext(bridge.BridgeExtContext, Context):
-    pass
-
-
-class ApplicationContext(bridge.BridgeApplicationContext, Context):
-    pass
 
 
 class UniversalHelpCommand(DefaultHelpCommand):

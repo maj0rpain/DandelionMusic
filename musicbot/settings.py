@@ -13,7 +13,6 @@ from discord import (
     HTTPException,
     utils,
 )
-from discord.ext.bridge import BridgeOption
 import sqlalchemy
 from sqlalchemy import String, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
@@ -123,16 +122,14 @@ CONFIG_CONVERTERS = {
     "announce_songs": convert_bool,
 }
 CONFIG_OPTIONS = {
-    "command_channel": BridgeOption(
-        Union[TextChannel, VoiceChannel], required=False
-    ),
-    "start_voice_channel": BridgeOption(VoiceChannel, required=False),
-    "dj_role": BridgeOption(Role, required=False),
-    "user_must_be_in_vc": BridgeOption(bool),
-    "button_emote": BridgeOption(str, required=False),
-    "default_volume": BridgeOption(int, min_value=0, max_value=100),
-    "vc_timeout": BridgeOption(bool),
-    "announce_songs": BridgeOption(bool),
+    "command_channel": Union[TextChannel, VoiceChannel],
+    "start_voice_channel": VoiceChannel,
+    "dj_role": Role,
+    "user_must_be_in_vc": bool,
+    "button_emote": str,
+    "default_volume": int,
+    "vc_timeout": bool,
+    "announce_songs": bool,
 }
 
 
