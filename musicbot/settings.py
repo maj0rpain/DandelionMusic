@@ -2,7 +2,7 @@ import json
 import os
 import re
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
 
 import discord
 from discord import (
@@ -281,7 +281,7 @@ class GuildSettings(Base):
         return embed
 
     async def update_setting(
-        self, setting: str, value: str, ctx: "Context"
+        self, setting: str, value: Any, ctx: "Context"
     ) -> bool:
         if setting not in DEFAULT_CONFIG:
             return False
