@@ -251,7 +251,7 @@ class GuildSettings(Base):
                 continue
 
             elif key == "command_channel":
-                chan = ctx.guild.get_channel(int(self.command_channel))
+                chan = ctx.guild.get_channel_or_thread(int(self.command_channel))
                 embed.add_field(
                     name=key,
                     value=chan.name if chan else SettingsEmbed.INVALID_CHANNEL,
