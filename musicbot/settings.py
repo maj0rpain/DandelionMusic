@@ -8,6 +8,7 @@ import discord
 from discord import (
     TextChannel,
     VoiceChannel,
+    Thread,
     Role,
     Forbidden,
     HTTPException,
@@ -122,7 +123,7 @@ CONFIG_CONVERTERS = {
     "announce_songs": convert_bool,
 }
 CONFIG_OPTIONS = {
-    "command_channel": Union[TextChannel, VoiceChannel],
+    "command_channel": Union[TextChannel, VoiceChannel, Thread],
     "start_voice_channel": VoiceChannel,
     "dj_role": Role,
     "user_must_be_in_vc": bool,

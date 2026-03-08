@@ -96,7 +96,7 @@ class General(commands.Cog):
 
     @_settings.command(name="command_channel")
     @commands.check(dj_check)
-    async def _set_command_channel(self, ctx: commands.Context, channel: Union[discord.VoiceChannel, discord.TextChannel]):
+    async def _set_command_channel(self, ctx: commands.Context, channel: Union[discord.Thread, discord.VoiceChannel, discord.TextChannel]):
         sett = self.bot.settings[ctx.guild]
         await sett.update_setting("command_channel", channel, ctx)
         await ctx.send(f"Setting `command_channel` updated to {channel.mention}!")
