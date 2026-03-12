@@ -503,15 +503,13 @@ class AudioController(object):
             return False
         if config.ANNOUNCE_DISCONNECT:
             try:
-                await self.guild.voice_client.play(
-                    discord.FFmpegPCMAudio(asset("disconnect.mp3")),
-                    wait_finish=True,
+                self.guild.voice_client.play(
+                    discord.FFmpegPCMAudio(asset("disconnect.mp3"))
                 )
+                while self.guild.voice_client.is_playing():
+                    await asyncio.sleep(1)
             except Exception:
                 print_exc(file=sys.stderr)
-            else:
-                # let it finish
-                await asyncio.sleep(1)
         await self.guild.voice_client.disconnect(force=True)
         self.timer.cancel()
         return True
