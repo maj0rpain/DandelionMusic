@@ -72,6 +72,7 @@ class AudioController(object):
     """
 
     def __init__(self, bot: "MusicBot", guild: discord.Guild):
+        self._stopping = False
         self.bot = bot
         self.playlist = Playlist()
         self.pickle_file = Path('backup') / f'playlist_{guild.id}.pickle'
@@ -124,7 +125,7 @@ class AudioController(object):
         if self.pickle_file.exists():
             with open(self.pickle_file, 'rb') as f:
                 self.playlist = pickle.load(f)
-            self.prev_song()
+            self.play_song(self.playlist[0])
 
     def volume_up(self):
         self.volume = min(self.volume + 10, 100)
@@ -327,8 +328,9 @@ class AudioController(object):
             self._next_song = None
         else:
             next_song = self.playlist.next(forced)
-
-        self.pickle_playlist()
+        
+        if not self._stopping:
+            self.pickle_playlist()
 
         if next_song is None:
             # if self.pickle_file.exists():
@@ -446,6 +448,8 @@ class AudioController(object):
 
     def stop_player(self):
         """Stops the player and removes all songs from the queue"""
+        self._stopping = True
+        self.pickle_playlist()
         self.playlist.loop = LoopMode.OFF
         self.playlist.clear()
         self.playlist.next()
@@ -497,6 +501,7 @@ class AudioController(object):
         return True
 
     async def udisconnect(self):
+        self.pickle_playlist()
         self.stop_player()
         await self.update_view(None)
         if self.guild.voice_client is None:
