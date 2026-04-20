@@ -125,7 +125,6 @@ class AudioController(object):
         if self.pickle_file.exists():
             with open(self.pickle_file, 'rb') as f:
                 self.playlist = pickle.load(f)
-            self.play_song(self.playlist[0])
 
     def volume_up(self):
         self.volume = min(self.volume + 10, 100)
@@ -328,7 +327,7 @@ class AudioController(object):
             self._next_song = None
         else:
             next_song = self.playlist.next(forced)
-        
+
         if not self._stopping:
             self.pickle_playlist()
 

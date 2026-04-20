@@ -311,6 +311,7 @@ class Music(commands.Cog):
     @commands.check(dj_check)
     async def _restore(self, ctx):
         ctx.audiocontroller.load_pickle_playlist()
+        await ctx.audiocontroller.play_song(ctx.audiocontroller.playlist[0])
         await ctx.send("Restored playlist")
 
     @commands.hybrid_command(
