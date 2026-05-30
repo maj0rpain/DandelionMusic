@@ -62,20 +62,13 @@ class Music(commands.Cog):
     async def cog_check(self, ctx):
         ctx.audiocontroller = ctx.bot.audio_controllers[ctx.guild]
 
-        # Check if the command being checked is actually the one currently being invoked.
-        # discord.py's HelpCommand logic checks all commands to see if they should be shown.
-        if ctx.command and ctx.command.cog == self:
-            # Only perform play_check for the command actually being executed,
-            # not when HelpCommand is just checking visibility.
-            if ctx.invoked_with == "help" or (ctx.command and ctx.command.name == "help"):
-                return True
-            
-            # Additional safety: check if we are actually executing this command
-            # discord.py doesn't have an easy way to distinguish between 'check for visibility' 
-            # and 'check for execution' inside cog_check, but we can check the context.
-            if ctx.command.name not in [ctx.invoked_with] + getattr(ctx.command, "aliases", []):
-                # Probably checking visibility for help command
-                return True
+        # If this is the help command itself, skip music checks
+        if ctx.command and ctx.command.name == "help":
+            return True
+
+        # If the help command is being executed and it's checking visibility of other commands, skip
+        if ctx.invoked_with == "help":
+            return True
 
         return await utils.play_check(ctx)
 
