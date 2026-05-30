@@ -108,7 +108,7 @@ async def fetch_spotify(url: str) -> Optional[Union[dict, List[str]]]:
         track_data = spotify_api.track(url)
         title = track_data["name"]
         artist = track_data["artists"][0]["name"]
-        title = f"{title} - {artist}"
+        title = f"{title} - {artist} \"Topic\""
     else:
         soup = await get_soup(url)
 
