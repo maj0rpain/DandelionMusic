@@ -394,7 +394,7 @@ class AudioController(object):
 
     async def process_song(
         self, track: str
-    ) -> Union[Optional[Song], Literal[PLAYLIST]]:
+    ) -> Union[Optional[Song], Literal[True]]:
         """Adds the track to the playlist instance
         Starts playing if it is the first song"""
 

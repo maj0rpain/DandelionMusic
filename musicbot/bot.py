@@ -41,7 +41,8 @@ class MusicBot(commands.Bot):
             self.db_engine, expire_on_commit=False, class_=AsyncSession
         )
         # replace default to register slash command
-        self._default_help = self.remove_command("help")
+        self._default_help_command = self.remove_command("help")
+        # Ensure the help command is added as a bound method
         self.add_command(self._help)
 
         self.absolutely_ready = asyncio.Future()
@@ -213,19 +214,37 @@ class MusicBot(commands.Bot):
     @app_commands.describe(command="The command to get help for")
     async def _help(
         self,
-        ctx,
-        *,
+        ctx: commands.Context,
         command: str = None,
     ):
-        help_command = self._default_help
-        await help_command.prepare(ctx)
-        await help_command.callback(ctx, command=command)
+        # When called via hybrid_command and added directly to the bot,
+        # discord.py sometimes passes ctx as the first argument (self).
+        if isinstance(self, commands.Context):
+            # Shift arguments: self is actually ctx, ctx is actually command
+            actual_command = ctx
+            actual_ctx = self
+            bot = actual_ctx.bot
+        else:
+            actual_ctx = ctx
+            actual_command = command
+            bot = self
+
+        help_command = bot._default_help_command
+        await help_command.prepare(actual_ctx)
+        await help_command.callback(actual_ctx, command=actual_command)
 
     @_help.autocomplete('command')
     async def _help_autocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
+        if isinstance(self, discord.Interaction):
+            actual_interaction = self
+            bot = actual_interaction.client
+        else:
+            actual_interaction = interaction
+            bot = self
+
         return [
             app_commands.Choice(name=c.qualified_name, value=c.qualified_name)
-            for c in self.walk_commands()
+            for c in bot.walk_commands()
             if current.lower() in c.qualified_name.lower() and not c.hidden
         ][:25]
 
@@ -273,8 +292,9 @@ class Context(commands.Context):
                 # unwrap channel from context
                 and getattr(channel, "channel", channel) != self.channel
             )
+            or (self.command and self.command.name == "help")
         ):
-            # sending ephemeral message or using different channel
+            # sending ephemeral message, using different channel or help command
             # don't bother with views
             if self.interaction:
                 if self.interaction.response.is_done():

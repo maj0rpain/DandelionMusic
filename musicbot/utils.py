@@ -205,6 +205,12 @@ async def voice_check(ctx: Context):
 
 async def play_check(ctx: Context):
     """Prepare for music commands"""
+    if ctx.command and ctx.command.name == "help":
+        return True
+    
+    # If we are in help command, don't trigger uconnect
+    if ctx.invoked_with == "help":
+        return True
 
     sett = ctx.bot.settings[ctx.guild]
 
