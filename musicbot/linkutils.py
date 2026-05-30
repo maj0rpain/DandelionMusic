@@ -108,16 +108,27 @@ async def fetch_spotify(url: str) -> Optional[Union[dict, List[str]]]:
         track_data = spotify_api.track(url)
         title = track_data["name"]
         artist = track_data["artists"][0]["name"]
-        title = f"{title} - {artist} \"Topic\""
     else:
         soup = await get_soup(url)
 
-        title = soup.find("title").string
-        title = re.sub(
-            r"(.*) - song( and lyrics)? by (.*) \| Spotify", r"\1 \3", title
+        title_str = soup.find("title").string
+        # Match "Title - song and lyrics by Artist | Spotify"
+        match = re.match(
+            r"(.*) - song(?: and lyrics)? by (.*) \| Spotify", title_str
         )
+        if match:
+            title, artist = match.group(1), match.group(2)
+        else:
+            # Fallback if regex doesn't match
+            title, artist = title_str, ""
+
+    if artist:
+        query = f"{title} - {artist} \"Topic\""
+    else:
+        query = f"{title} \"Topic\""
+
     # use sync function because we're already in executor
-    results = loader._search_youtube(title)
+    results = loader._search_youtube(query)
     return results[0] if results else None
 
 
