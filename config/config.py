@@ -108,7 +108,8 @@ class Config:
                 os.path.join(os.path.dirname(__file__), "db-requirements.txt")
             ) as f:
                 for line in f:
-                    req = Requirement(line)
+                    cleaned_line = line.strip()
+                    req = Requirement(cleaned_line)
                     if req.name == db_req.name:
                         self.DATABASE_LIBRARY = str(req)
                         break
