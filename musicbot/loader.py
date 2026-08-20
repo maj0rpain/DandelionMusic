@@ -69,12 +69,12 @@ _downloader = YoutubeDL(
         # we don't pass plain text to the downloader.
         # still leaving it just in case
         "default_search": "auto",
-        #"cookiefile": config.COOKIE_PATH,
+        "cookiefile": config.COOKIE_PATH,
         "quiet": True,
         "extractor_args": {
-            "youtube": {
-                "player-client": ["default", "tv"]
-            },
+            #"youtube": {
+            #    "player-client": ["default", "tv"]
+            #},
             "youtubepot-bgutilhttp": {
                 "base_url": ["http://bgutil-provider:4416"]
             }
