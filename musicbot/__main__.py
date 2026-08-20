@@ -5,9 +5,8 @@ import discord
 from discord.ext import commands
 
 from config import config
-from musicbot import loader
 from musicbot.bot import MusicBot
-from musicbot.utils import check_dependencies, read_shutdown
+from musicbot.utils import check_dependencies
 
 
 initial_extensions = [
