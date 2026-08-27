@@ -41,7 +41,7 @@ def build_index() -> LibraryIndex:
                     f.name
                     for f in album_dir.iterdir()
                     if f.is_file()
-                    and f.name.lower().endswith(config.SUPPORTED_EXTENSIONS)
+                    and f.name.lower().endswith(config.LIBRARY_EXTENSIONS)
                 )
                 if songs:
                     albums[album_dir.name] = songs
@@ -57,7 +57,9 @@ def get_index() -> LibraryIndex:
 
 
 def song_path(artist: str, album: str, filename: str) -> Path:
-    return Path(config.MUSIC_LIBRARY_PATH) / artist / album / filename
+    return (
+        Path(config.MUSIC_LIBRARY_PATH).resolve() / artist / album / filename
+    )
 
 
 def song_uri(artist: str, album: str, filename: str) -> str:

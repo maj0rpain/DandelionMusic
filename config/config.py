@@ -63,6 +63,22 @@ class Config:
     # Artist/Album/song.ext (extensions from SUPPORTED_EXTENSIONS)
     MUSIC_LIBRARY_PATH = ""
 
+    # extensions the local library indexer treats as playable audio
+    # (kept separate from SUPPORTED_EXTENSIONS, which also governs what
+    # raw pasted URLs the bot accepts as custom download links)
+    LIBRARY_EXTENSIONS = (
+        ".mp3",
+        ".flac",
+        ".m4a",
+        ".ogg",
+        ".opus",
+        ".wav",
+        ".aac",
+        ".wma",
+        ".aiff",
+        ".alac",
+    )
+
     # replace after '0x' with desired hex code ex. '#ff0188' >> "0xff0188"
     EMBED_COLOR: int = "0x4DD4D0"  # converted to int in __init__
 

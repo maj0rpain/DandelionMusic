@@ -78,6 +78,7 @@ class LibraryBrowseView(discord.ui.View):
         # for the slash-command path, where ctx.interaction is used
         # instead (see on_timeout below).
         self.message: Optional[discord.Message] = None
+        self.build_items()
 
     async def interaction_check(
         self, interaction: discord.Interaction
@@ -178,10 +179,13 @@ class LibraryBrowseView(discord.ui.View):
         await self.queue_pairs(interaction, pairs)
 
     async def queue_pairs(self, interaction, pairs):
+        if not interaction.response.is_done():
+            await interaction.response.defer(ephemeral=True)
+
         try:
             await play_check(self.ctx)
         except CheckError as e:
-            await interaction.response.send_message(str(e), ephemeral=True)
+            await interaction.followup.send(str(e), ephemeral=True)
             return
 
         queued = 0
@@ -204,10 +208,7 @@ class LibraryBrowseView(discord.ui.View):
                 message += f", and {len(missing) - 5} more"
             message += ". Try `d!library refresh`."
 
-        if interaction.response.is_done():
-            await interaction.followup.send(message, ephemeral=True)
-        else:
-            await interaction.response.send_message(message, ephemeral=True)
+        await interaction.followup.send(message, ephemeral=True)
 
 
 class Library(commands.Cog):
@@ -217,6 +218,9 @@ class Library(commands.Cog):
     async def cog_check(self, ctx):
         ctx.audiocontroller = ctx.bot.audio_controllers[ctx.guild]
         return True
+
+    async def cog_before_invoke(self, ctx):
+        ctx.audiocontroller.command_channel = ctx
 
     @commands.hybrid_group(
         name="library",

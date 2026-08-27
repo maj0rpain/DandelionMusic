@@ -168,9 +168,23 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
 
     elif host == SiteTypes.LOCAL_LIBRARY:
         path = Path.from_uri(track)
-        if not path.is_file():
+        root = (
+            Path(config.MUSIC_LIBRARY_PATH).resolve()
+            if config.MUSIC_LIBRARY_PATH
+            else None
+        )
+        resolved = path.resolve()
+        if (
+            root is None
+            or not resolved.is_relative_to(root)
+            or not resolved.is_file()
+        ):
             raise SongError(config.LIBRARY_FILE_MISSING)
-        data = {"url": track, "webpage_url": track, "title": path.stem}
+        data = {
+            "url": str(resolved),
+            "webpage_url": track,
+            "title": path.stem,
+        }
 
     else:  # host is info extractor
         data = extract_info(track, host)

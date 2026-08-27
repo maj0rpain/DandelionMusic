@@ -10,6 +10,7 @@ from config import config
 
 from musicbot import loader, utils
 from musicbot.song import Song
+from musicbot.linkutils import SiteTypes
 from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
 from musicbot.utils import CheckError, asset, play_check, dj_check
 from pathlib import Path
@@ -399,13 +400,17 @@ class AudioController(object):
             self.next_song(forced=True)
             return
 
+        before_options = (
+            None
+            if song.host == SiteTypes.LOCAL_LIBRARY
+            else "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+        )
         try:
             self.guild.voice_client.play(
                 discord.PCMVolumeTransformer(
                     discord.FFmpegPCMAudio(
                         song.url,
-                        before_options="-reconnect 1 -reconnect_streamed 1"
-                        " -reconnect_delay_max 5",
+                        before_options=before_options,
                         options="-loglevel error",
                         stderr=sys.stderr,
                     ),

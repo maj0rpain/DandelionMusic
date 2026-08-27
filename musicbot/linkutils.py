@@ -206,6 +206,8 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
         return SiteTypes.SPOTIFY
 
     if url.startswith("file://"):
+        if not config.ENABLE_LOCAL_LIBRARY:
+            return SiteTypes.UNKNOWN
         return SiteTypes.LOCAL_LIBRARY
 
     if ie := get_ie(url):
