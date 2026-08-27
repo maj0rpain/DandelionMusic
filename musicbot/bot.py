@@ -23,6 +23,39 @@ from musicbot.settings import (
 from musicbot.utils import CheckError
 
 
+# Deliberately module-level, not a MusicBot method: discord.py decides
+# how many leading parameters to skip (self/cog + ctx, or just ctx)
+# based on whether the function is lexically defined inside a class,
+# regardless of whether it's actually attached to a Cog at runtime.
+# Since this command is added directly via add_command() below rather
+# than through a Cog, defining it inside the class body would make
+# discord.py's signature introspection expect a leading `self` that
+# invocation never actually supplies, raising a TypeError on every
+# call. Use ctx.bot/interaction.client instead of self to reach the
+# bot instance.
+@commands.hybrid_command(name="help", description=config.HELP_HELP_SHORT)
+@app_commands.describe(command="The command to get help for")
+async def _help(
+    ctx,
+    *,
+    command: str = None,
+):
+    help_command = ctx.bot._default_help
+    await help_command.prepare(ctx)
+    await help_command.callback(ctx, command=command)
+
+
+@_help.autocomplete("command")
+async def _help_autocomplete(
+    interaction: discord.Interaction, current: str
+) -> List[app_commands.Choice[str]]:
+    return [
+        app_commands.Choice(name=c.qualified_name, value=c.qualified_name)
+        for c in interaction.client.walk_commands()
+        if current.lower() in c.qualified_name.lower() and not c.hidden
+    ][:25]
+
+
 class MusicBot(commands.Bot):
     def __init__(self, initial_extensions: List[str], *args, **kwargs):
         kwargs.setdefault("help_command", UniversalHelpCommand())
@@ -42,7 +75,7 @@ class MusicBot(commands.Bot):
         )
         # replace default to register slash command
         self._default_help = self.remove_command("help")
-        self.add_command(self._help)
+        self.add_command(_help)
 
         self.absolutely_ready = asyncio.Future()
 
@@ -208,26 +241,6 @@ class MusicBot(commands.Bot):
                     e,
                     file=sys.stderr,
                 )
-
-    @commands.hybrid_command(name="help", description=config.HELP_HELP_SHORT)
-    @app_commands.describe(command="The command to get help for")
-    async def _help(
-        self,
-        ctx,
-        *,
-        command: str = None,
-    ):
-        help_command = self._default_help
-        await help_command.prepare(ctx)
-        await help_command.callback(ctx, command=command)
-
-    @_help.autocomplete('command')
-    async def _help_autocomplete(self, interaction: discord.Interaction, current: str) -> List[app_commands.Choice[str]]:
-        return [
-            app_commands.Choice(name=c.qualified_name, value=c.qualified_name)
-            for c in self.walk_commands()
-            if current.lower() in c.qualified_name.lower() and not c.hidden
-        ][:25]
 
 
 class Context(commands.Context):
