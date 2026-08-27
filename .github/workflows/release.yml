@@ -13,14 +13,14 @@ jobs:
 
     steps:
     - uses: actions/checkout@v4
-    - uses: actions/setup-python@v5
+    - uses: astral-sh/setup-uv@v10
       with:
-        python-version: "3.11"
+        python-version: "3.13"
 
     - name: Build
       run: >
-        pip install -r config/build-requirements.txt
-        && python -m config.build
+        uv sync --frozen --group build
+        && uv run python -m config.build
 
     - name: Upload binaries to release
       uses: svenstaro/upload-release-action@v2

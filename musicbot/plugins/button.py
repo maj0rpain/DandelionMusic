@@ -49,9 +49,12 @@ class Button(commands.Cog):
         serv = self.bot.get_guild(reaction.guild_id)
 
         member = reaction.member
-        user_vc = member.voice
+        # member is None for reactions outside a guild (e.g. DMs)
+        if not serv or member is None or member.bot:
+            return
 
-        if not serv or member.bot or not user_vc:
+        user_vc = member.voice
+        if not user_vc:
             return
 
         sett = self.bot.settings[serv]

@@ -20,7 +20,6 @@ from typing import (
 
 from aioconsole import ainput
 from discord import (
-    __version__ as discord_version,
     opus,
     utils,
     Emoji,
@@ -269,11 +268,18 @@ class Timer:
         self.triggered = False
 
     async def _job(self):
+        task = asyncio.current_task()
         await asyncio.sleep(config.VC_TIMEOUT)
         self.triggered = True
-        await self._callback()
-        self.triggered = False
-        self._task = None
+        try:
+            await self._callback()
+        finally:
+            self.triggered = False
+            # start(restart=True) may have already replaced self._task
+            # with a new job while this one was being cancelled; only
+            # clear it if it's still ours to clear
+            if self._task is task:
+                self._task = None
 
     # we need event loop here
     async def start(self, restart=False):

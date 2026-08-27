@@ -19,7 +19,7 @@ from sqlalchemy import String, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from alembic.migration import MigrationContext
 from alembic.autogenerate import produce_migrations, render_python_code
-from alembic.operations import Operations
+from alembic.operations import Operations, ops as alembic_ops
 from typing_extensions import Annotated
 
 from config import config
@@ -305,14 +305,47 @@ class SavedPlaylist(Base):
     songs_json: Mapped[str]
 
 
+# Operation types that only ever add to the schema (new table,
+# new column) and can never lose existing data. Anything else
+# (dropped/renamed/altered tables or columns) is refused below -
+# allow-listed rather than deny-listed, so an unrecognized or
+# future Alembic op type is treated as unsafe by default.
+SAFE_MIGRATION_OPS = (
+    alembic_ops.CreateTableOp,
+    alembic_ops.AddColumnOp,
+)
+
+
+def _find_unsafe_ops(op):
+    """Yields any migration operation that isn't a known-additive
+    schema change."""
+    if isinstance(op, alembic_ops.OpContainer):
+        for child in op.ops:
+            yield from _find_unsafe_ops(child)
+    elif not isinstance(op, SAFE_MIGRATION_OPS):
+        yield op
+
+
 def run_migrations(connection):
-    """Automatically creates or deletes tables and columns
-    Reflects code changes"""
+    """Automatically creates tables and adds columns to reflect
+    additive code changes. Refuses to start if the generated diff
+    contains anything destructive (a dropped/renamed/altered table
+    or column) instead of silently applying it - that needs a
+    manual, reviewed migration."""
     ctx = MigrationContext.configure(connection)
-    code = render_python_code(
-        produce_migrations(ctx, Base.metadata).upgrade_ops,
-        migration_context=ctx,
-    )
+    upgrade_ops = produce_migrations(ctx, Base.metadata).upgrade_ops
+
+    unsafe_ops = [type(op).__name__ for op in _find_unsafe_ops(upgrade_ops)]
+    if unsafe_ops:
+        raise RuntimeError(
+            "Refusing to start: the database schema differs from the "
+            "code in a way that isn't a plain additive change "
+            f"({', '.join(unsafe_ops)}). This usually means a column "
+            "or table was renamed or removed. Back up the database "
+            "and apply the schema change manually, then restart."
+        )
+
+    code = render_python_code(upgrade_ops, migration_context=ctx)
     if connection.engine.echo:
         # debug mode
         print(code)

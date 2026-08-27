@@ -26,11 +26,12 @@ Obtained keys must be entered into the ```.env``` file as environment variables
 
 #### Requirements (skip this if you've decided to use pre-built exe)
 
-* Installation of Python 3.9+
+* Installation of Python 3.13+
+* Installation of [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
 Install dependencies:
 ```
-pip install -r requirements.txt
+uv sync
 ```
 
 ##### Windows

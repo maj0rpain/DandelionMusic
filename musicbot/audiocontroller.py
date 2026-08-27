@@ -1,4 +1,3 @@
-import os
 import sys
 import asyncio
 from itertools import islice
@@ -319,8 +318,12 @@ class AudioController(object):
             self.guild.voice_client.stop()
             return
 
-        if self.current_song:
-            self.playlist.add_name(self.current_song.title)
+        if self.playlist:
+            # current_song is unusable here: is_active() is always
+            # False at this point, so it would always return None.
+            # playlist[0] still holds the just-finished song, since
+            # playlist.next() hasn't advanced the queue yet.
+            self.playlist.add_name(self.playlist[0].title)
 
         if self._next_song:
             next_song = self._next_song
@@ -422,9 +425,21 @@ class AudioController(object):
         return loaded_song
 
     def add_task(self, coro: Coroutine):
+        # next_song is invoked by discord.py as the `after` callback
+        # of voice_client.play(), which runs on its own audio-player
+        # thread rather than the event loop thread. loop.create_task()
+        # is not thread-safe, so detect that case and use the
+        # thread-safe scheduling API instead.
+        try:
+            asyncio.get_running_loop()
+        except RuntimeError:
+            future = asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
+            self._tasks.add(future)
+            future.add_done_callback(self._tasks.discard)
+            return
         task = self.bot.loop.create_task(coro)
         self._tasks.add(task)
-        task.add_done_callback(self._tasks.remove)
+        task.add_done_callback(self._tasks.discard)
 
     async def _preload_queue(self):
         rerun_needed = False
