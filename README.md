@@ -157,6 +157,23 @@ d!stop / d!st
 ```
 * Stops the current song and clears the playqueue.
 
+#### Local Library Commands
+
+Requires `ENABLE_LOCAL_LIBRARY=True` and `MUSIC_LIBRARY_PATH` set to a folder laid out as `Artist/Album/song.ext` (see `.env.sample`).
+
+```
+d!library refresh
+```
+
+* Rescans `MUSIC_LIBRARY_PATH` and rebuilds the browsable library index.
+* Administrators and DJs only
+
+```
+d!library browse
+```
+
+* Opens an interactive browser to queue a song, album, or artist from the local music library.
+
 
 ### General
 

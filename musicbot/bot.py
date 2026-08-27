@@ -14,6 +14,7 @@ from sqlalchemy.orm import sessionmaker
 
 from config import config
 from musicbot.audiocontroller import VC_CONNECT_TIMEOUT, AudioController
+from musicbot import library
 from musicbot.settings import (
     GuildSettings,
     run_migrations,
@@ -80,6 +81,8 @@ class MusicBot(commands.Bot):
         self.absolutely_ready = asyncio.Future()
 
     async def setup_hook(self):
+        if config.ENABLE_LOCAL_LIBRARY:
+            await library.build_index_async()
         for extension in self.initial_extensions:
             await self.load_extension(extension)
         if config.ENABLE_SLASH_COMMANDS:

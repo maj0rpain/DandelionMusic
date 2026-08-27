@@ -10,6 +10,7 @@ from config import config
 
 from musicbot import loader, utils
 from musicbot.song import Song
+from musicbot.linkutils import SiteTypes
 from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
 from musicbot.utils import CheckError, asset, play_check, dj_check
 from pathlib import Path
@@ -399,13 +400,17 @@ class AudioController(object):
             self.next_song(forced=True)
             return
 
+        before_options = (
+            None
+            if song.host == SiteTypes.LOCAL_LIBRARY
+            else "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+        )
         try:
             self.guild.voice_client.play(
                 discord.PCMVolumeTransformer(
                     discord.FFmpegPCMAudio(
                         song.url,
-                        before_options="-reconnect 1 -reconnect_streamed 1"
-                        " -reconnect_delay_max 5",
+                        before_options=before_options,
                         options="-loglevel error",
                         stderr=sys.stderr,
                     ),
@@ -428,10 +433,20 @@ class AudioController(object):
         self.preload_queue()
 
     async def process_song(
-        self, track: str, user: Optional[discord.abc.User] = None
+        self,
+        track: str,
+        user: Optional[discord.abc.User] = None,
+        pickle: bool = True,
     ) -> Union[Optional[Song], Literal[PLAYLIST]]:
         """Adds the track to the playlist instance
-        Starts playing if it is the first song"""
+        Starts playing if it is the first song.
+
+        pickle=False lets a caller queueing many tracks in a row (e.g.
+        LibraryBrowseView.queue_pairs) skip the per-call
+        pickle_playlist() disk write and do a single batched write after
+        its loop instead - pickling on every call would otherwise mean
+        serializing the whole, progressively larger playlist once per
+        track, an O(n^2) blocking write for a bulk queue action."""
 
         print(f"{user} queued {track!r} in guild {self.guild.name!r}")
 
@@ -449,7 +464,8 @@ class AudioController(object):
             else:
                 loaded_song = PLAYLIST
 
-        self.pickle_playlist()
+        if pickle:
+            self.pickle_playlist()
         if self.current_song is None:
             print("Playing {}".format(track))
             await self.play_song(self.playlist[0])
