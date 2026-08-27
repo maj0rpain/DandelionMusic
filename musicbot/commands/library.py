@@ -246,6 +246,33 @@ class Library(commands.Cog):
             )
         )
 
+    @_library.command(
+        name="browse",
+        description=config.HELP_LIBRARY_BROWSE_SHORT,
+        help=config.HELP_LIBRARY_BROWSE_LONG,
+    )
+    async def _library_browse(self, ctx):
+        if not config.MUSIC_LIBRARY_PATH:
+            await ctx.send(config.LIBRARY_NOT_CONFIGURED)
+            return
+        if not library.get_index():
+            await ctx.send(config.LIBRARY_EMPTY)
+            return
+
+        view = LibraryBrowseView(ctx)
+        kwargs = {"embed": view.embed(), "view": view}
+        # ephemeral only makes sense for an interaction (slash) response -
+        # a plain text message from a prefix command can't be ephemeral
+        if ctx.interaction is not None:
+            kwargs["ephemeral"] = True
+        # For the text-command path this is a real discord.Message,
+        # used by on_timeout() to disable the view later. For the
+        # slash path Context.send() routes through
+        # interaction.response.send_message(), which returns None -
+        # on_timeout() uses ctx.interaction.edit_original_response()
+        # instead in that case, so this being None there is expected.
+        view.message = await ctx.send(**kwargs)
+
 
 async def setup(bot: MusicBot):
     await bot.add_cog(Library(bot))

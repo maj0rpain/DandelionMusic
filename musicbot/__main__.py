@@ -30,6 +30,9 @@ if config.ENABLE_BUTTON_PLUGIN:
     intents.message_content = True
     initial_extensions.append("musicbot.plugins.button")
 
+if config.ENABLE_LOCAL_LIBRARY:
+    initial_extensions.append("musicbot.commands.library")
+
 bot = MusicBot(
     initial_extensions=initial_extensions,
     command_prefix=prefix,
