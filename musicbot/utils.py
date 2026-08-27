@@ -20,7 +20,6 @@ from typing import (
 
 from aioconsole import ainput
 from discord import (
-    __version__ as discord_version,
     opus,
     utils,
     Emoji,

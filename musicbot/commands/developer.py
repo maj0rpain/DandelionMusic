@@ -13,7 +13,7 @@ from discord import app_commands
 from aioconsole import aexec
 
 from config import config
-from musicbot.bot import Context, MusicBot
+from musicbot.bot import MusicBot
 from musicbot.utils import owner_check
 
 

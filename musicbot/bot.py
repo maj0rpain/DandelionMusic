@@ -2,7 +2,7 @@ import re
 import sys
 import asyncio
 from traceback import print_exception
-from typing import Dict, Union, List
+from typing import Dict, List
 
 import discord
 from discord.ext import commands, tasks

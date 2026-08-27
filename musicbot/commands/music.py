@@ -1,6 +1,6 @@
 from __future__ import annotations
 import json
-from typing import Annotated, Iterable, List, Union, Literal
+from typing import Iterable, List, Union, Literal
 
 import discord
 from discord import Attachment, Embed, app_commands
@@ -16,7 +16,7 @@ from musicbot.bot import MusicBot, Context
 from musicbot.utils import dj_check, chunks, SimplePaginator
 from musicbot.audiocontroller import PLAYLIST, AudioController, MusicButton
 from musicbot.loader import SongError, search_youtube
-from musicbot.playlist import PlaylistError, LoopMode
+from musicbot.playlist import PlaylistError
 from musicbot.settings import SavedPlaylist
 from musicbot.linkutils import get_site_type, url_regex
 

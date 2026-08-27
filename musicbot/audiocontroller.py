@@ -1,4 +1,3 @@
-import os
 import sys
 import asyncio
 from itertools import islice

@@ -6,8 +6,8 @@ import discord
 from discord.ext import commands
 
 from config import config
-from musicbot.bot import Context, MusicBot
-from musicbot.settings import CONFIG_OPTIONS, ConversionError
+from musicbot.bot import MusicBot
+from musicbot.settings import ConversionError
 from musicbot.audiocontroller import AudioController
 from musicbot.utils import dj_check, voice_check
 
