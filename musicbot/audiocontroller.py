@@ -319,8 +319,12 @@ class AudioController(object):
             self.guild.voice_client.stop()
             return
 
-        if self.current_song:
-            self.playlist.add_name(self.current_song.title)
+        if self.playlist:
+            # current_song is unusable here: is_active() is always
+            # False at this point, so it would always return None.
+            # playlist[0] still holds the just-finished song, since
+            # playlist.next() hasn't advanced the queue yet.
+            self.playlist.add_name(self.playlist[0].title)
 
         if self._next_song:
             next_song = self._next_song

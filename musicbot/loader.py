@@ -4,6 +4,7 @@ import atexit
 import asyncio
 import threading
 from inspect import getmodule
+from traceback import print_exc
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from concurrent.futures import ProcessPoolExecutor
@@ -229,27 +230,35 @@ async def preload(song: Song, bot: MusicBot) -> bool:
         return await future
     _preloading[song] = asyncio.Future()
 
+    # any exception here (not just SongError) must still resolve the
+    # future below, or a future preload() call on the same song hangs
+    # forever awaiting it
+    success = False
     try:
-        preloaded = await load_song(song.webpage_url)
-    except SongError:
-        success = False
-    else:
-        success = preloaded is not None
+        try:
+            preloaded = await load_song(song.webpage_url)
+        except SongError:
+            pass
+        except Exception:
+            print_exc(file=sys.stderr)
+        else:
+            success = preloaded is not None
 
-    if success:
-        song.update(preloaded)
+        if success:
+            song.update(preloaded)
 
-        if song.playlist is not None:
-            saved_songs_data = json.loads(song.playlist.songs_json)
-            for song_data in saved_songs_data:
-                if song_data["url"] == song.webpage_url:
-                    song_data["title"] = song.title
-            song.playlist.songs_json = json.dumps(saved_songs_data)
-            async with bot.DbSession() as session:
-                session.add(song.playlist)
-                await session.commit()
+            if song.playlist is not None:
+                saved_songs_data = json.loads(song.playlist.songs_json)
+                for song_data in saved_songs_data:
+                    if song_data["url"] == song.webpage_url:
+                        song_data["title"] = song.title
+                song.playlist.songs_json = json.dumps(saved_songs_data)
+                async with bot.DbSession() as session:
+                    session.add(song.playlist)
+                    await session.commit()
+    finally:
+        _preloading.pop(song).set_result(success)
 
-    _preloading.pop(song).set_result(success)
     return success
 
 
