@@ -4,6 +4,7 @@ import atexit
 import asyncio
 import threading
 from inspect import getmodule
+from pathlib import Path
 from traceback import print_exc
 from urllib.parse import urlparse
 from datetime import datetime, timezone
@@ -164,6 +165,12 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
             "webpage_url": track,
             "title": urlparse(track).path.rpartition("/")[2],
         }
+
+    elif host == SiteTypes.LOCAL_LIBRARY:
+        path = Path.from_uri(track)
+        if not path.is_file():
+            raise SongError(config.LIBRARY_FILE_MISSING)
+        data = {"url": track, "webpage_url": track, "title": path.stem}
 
     else:  # host is info extractor
         data = extract_info(track, host)
