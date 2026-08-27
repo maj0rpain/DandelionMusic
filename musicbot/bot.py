@@ -179,10 +179,7 @@ class MusicBot(commands.Bot):
             )
         )
 
-
-    async def get_prefix(
-        self, message: discord.Message
-    ):
+    async def get_prefix(self, message: discord.Message):
         prefixes = await super().get_prefix(message)
         if not self.case_insensitive:
             return prefixes
@@ -257,7 +254,7 @@ class Context(commands.Context):
                 message=interaction.message,
                 bot=interaction.client,
                 view=StringView(""),
-                prefix=None
+                prefix=None,
             )
             ctx.interaction = interaction
             ctx.command = None
@@ -271,7 +268,9 @@ class Context(commands.Context):
         if self.interaction:
             if self.interaction.response.is_done():
                 return await self.interaction.followup.send(*args, **kwargs)
-            return await self.interaction.response.send_message(*args, **kwargs)
+            return await self.interaction.response.send_message(
+                *args, **kwargs
+            )
         return await self.send(*args, **kwargs)
 
     async def send(self, *args, **kwargs):
@@ -291,24 +290,30 @@ class Context(commands.Context):
             # don't bother with views
             if self.interaction:
                 if self.interaction.response.is_done():
-                    return await self.interaction.followup.send(*args, **kwargs)
-                return await self.interaction.response.send_message(*args, **kwargs)
+                    return await self.interaction.followup.send(
+                        *args, **kwargs
+                    )
+                return await self.interaction.response.send_message(
+                    *args, **kwargs
+                )
             return await super().send(*args, **kwargs)
         async with audiocontroller.message_lock:
             await audiocontroller.update_view(None)
             view = audiocontroller.make_view()
             if view:
                 kwargs["view"] = view
-            
+
             if self.interaction:
                 if self.interaction.response.is_done():
                     res = await self.interaction.followup.send(*args, **kwargs)
                 else:
-                    await self.interaction.response.send_message(*args, **kwargs)
+                    await self.interaction.response.send_message(
+                        *args, **kwargs
+                    )
                     res = await self.interaction.original_response()
             else:
                 res = await super().send(*args, **kwargs)
-            
+
             if isinstance(res, discord.Interaction):
                 audiocontroller.last_message = await res.original_response()
             else:

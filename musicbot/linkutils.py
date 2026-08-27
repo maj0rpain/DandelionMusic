@@ -123,9 +123,9 @@ async def fetch_spotify(url: str) -> Optional[Union[dict, List[str]]]:
             title, artist = title_str, ""
 
     if artist:
-        query = f"{title} - {artist} \"Topic\""
+        query = f'{title} - {artist} "Topic"'
     else:
-        query = f"{title} \"Topic\""
+        query = f'{title} "Topic"'
 
     # use sync function because we're already in executor
     results = loader._search_youtube(query)

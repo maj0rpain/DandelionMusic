@@ -96,17 +96,29 @@ class General(commands.Cog):
 
     @_settings.command(name="command_channel")
     @commands.check(dj_check)
-    async def _set_command_channel(self, ctx: commands.Context, channel: Union[discord.Thread, discord.VoiceChannel, discord.TextChannel]):
+    async def _set_command_channel(
+        self,
+        ctx: commands.Context,
+        channel: Union[
+            discord.Thread, discord.VoiceChannel, discord.TextChannel
+        ],
+    ):
         sett = self.bot.settings[ctx.guild]
         await sett.update_setting("command_channel", channel, ctx)
-        await ctx.send(f"Setting `command_channel` updated to {channel.mention}!")
+        await ctx.send(
+            f"Setting `command_channel` updated to {channel.mention}!"
+        )
 
     @_settings.command(name="start_voice_channel")
     @commands.check(dj_check)
-    async def _set_start_voice_channel(self, ctx: commands.Context, channel: discord.VoiceChannel):
+    async def _set_start_voice_channel(
+        self, ctx: commands.Context, channel: discord.VoiceChannel
+    ):
         sett = self.bot.settings[ctx.guild]
         await sett.update_setting("start_voice_channel", channel, ctx)
-        await ctx.send(f"Setting `start_voice_channel` updated to {channel.mention}!")
+        await ctx.send(
+            f"Setting `start_voice_channel` updated to {channel.mention}!"
+        )
 
     @_settings.command(name="dj_role")
     @commands.check(dj_check)
@@ -117,7 +129,9 @@ class General(commands.Cog):
 
     @_settings.command(name="user_must_be_in_vc")
     @commands.check(dj_check)
-    async def _set_user_must_be_in_vc(self, ctx: commands.Context, value: bool):
+    async def _set_user_must_be_in_vc(
+        self, ctx: commands.Context, value: bool
+    ):
         sett = self.bot.settings[ctx.guild]
         await sett.update_setting("user_must_be_in_vc", value, ctx)
         await ctx.send(f"Setting `user_must_be_in_vc` updated to {value}!")

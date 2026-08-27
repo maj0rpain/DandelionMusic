@@ -71,9 +71,7 @@ class Music(commands.Cog):
         help=config.HELP_YT_SHORT,
         aliases=["p", "yt"],
     )
-    async def _play(
-        self, ctx, *, track: str = None, file: Attachment = None
-    ):
+    async def _play(self, ctx, *, track: str = None, file: Attachment = None):
         if track is None:
             if ctx.message:
                 if ctx.message.attachments:
@@ -125,7 +123,9 @@ class Music(commands.Cog):
                     src_pos = len(ctx.audiocontroller.playlist)
                     dest_pos = 2
                     try:
-                        ctx.audiocontroller.playlist.move(src_pos - 1, dest_pos - 1)
+                        ctx.audiocontroller.playlist.move(
+                            src_pos - 1, dest_pos - 1
+                        )
                         ctx.audiocontroller.preload_queue()
                     except PlaylistError as e:
                         await ctx.send(e)
@@ -395,15 +395,21 @@ class Music(commands.Cog):
     ) -> List[app_commands.Choice[str]]:
         async with self.bot.DbSession() as session:
             choices = (
-                await session.execute(
-                    select(SavedPlaylist.name)
-                    .where(
-                        SavedPlaylist.guild_id == str(interaction.guild.id)
+                (
+                    await session.execute(
+                        select(SavedPlaylist.name)
+                        .where(
+                            SavedPlaylist.guild_id == str(interaction.guild.id)
+                        )
+                        .where(SavedPlaylist.name.startswith(current))
                     )
-                    .where(SavedPlaylist.name.startswith(current))
                 )
-            ).scalars().all()
-            return [app_commands.Choice(name=name, value=name) for name in choices][:25]
+                .scalars()
+                .all()
+            )
+            return [
+                app_commands.Choice(name=name, value=name) for name in choices
+            ][:25]
 
     @commands.hybrid_group(
         name="playlist",

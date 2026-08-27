@@ -344,16 +344,24 @@ class SimplePaginator(discord.ui.View):
         self.message = await ctx.send(embed=self.pages[0], view=self)
 
     @discord.ui.button(label="Prev", style=discord.ButtonStyle.grey)
-    async def prev_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def prev_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if self.current_page > 0:
             self.current_page -= 1
-            await interaction.response.edit_message(embed=self.pages[self.current_page])
+            await interaction.response.edit_message(
+                embed=self.pages[self.current_page]
+            )
 
     @discord.ui.button(label="Next", style=discord.ButtonStyle.grey)
-    async def next_page(self, interaction: discord.Interaction, button: discord.ui.Button):
+    async def next_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
         if self.current_page < len(self.pages) - 1:
             self.current_page += 1
-            await interaction.response.edit_message(embed=self.pages[self.current_page])
+            await interaction.response.edit_message(
+                embed=self.pages[self.current_page]
+            )
 
 
 async def read_shutdown():
