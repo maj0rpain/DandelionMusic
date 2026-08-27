@@ -29,15 +29,3 @@ repos:
         additional_dependencies: ["json-with-comments==1.2.10"]
         types: [json]
         require_serial: true
-
-    -   id: update-dockerfile
-        name: update-dockerfile
-        description: 'Update env vars in Dockerfile'
-        entry: python -c 'import runpy; runpy.run_path("config/update-dockerfile.py")'
-        files: ^config/config\.py$
-        language: python
-        additional_dependencies:
-        -   "json-with-comments==1.2.10"
-        -   "packaging~=26.3"
-        -   "python-dotenv~=1.2.3"
-        require_serial: true

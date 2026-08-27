@@ -68,7 +68,7 @@ Produces `dist/DandelionMusic.exe` via PyInstaller (see `config/build.py` for th
 2. Warns about `.env` variables that don't match any known `Config` attribute (`warn_unknown_vars`, called from `__main__`).
 3. Resolves `DATABASE_URL` into a SQLAlchemy async URL (`alchemize_url`) and normalizes the driver name (`DATABASE_LIBRARY_NAME`) for the PyInstaller build's hidden-import list. `aiosqlite` (sqlite, the default) is a normal dependency; postgres/mysql users need the matching driver via the `postgres`/`mysql` extras (`uv sync --extra postgres` / `--extra mysql`).
 4. Loads localized message strings from `config/en.json` (or other language files found under `CONFIG_DIRS`) via `load_configs`/`join_dicts`, exposed through `config.__getattr__` (e.g. `config.SONGINFO_ERROR`) and `config.get_dict(name)`.
-5. `Config.save()`/`_update_env_files()` can write changed settings back into `.env`/`.env.sample` (used by the `update-dockerfile` pre-commit hook and `config/build.py`, which dumps per-setting doc comments to `config_comments.json` for the frozen exe).
+5. `Config.save()`/`_update_env_files()` can write changed settings back into `.env`/`.env.sample` (called from `musicbot/commands/developer.py`'s owner-only settings commands). `config/build.py` separately dumps per-setting doc comments to `config_comments.json` for the frozen exe.
 
 Adding a new setting means adding a class attribute to `Config` (with a comment directly above it — comments are parsed by `get_comments()` for docs/exe use) — that alone makes it configurable via `.env`.
 
