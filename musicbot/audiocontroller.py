@@ -39,9 +39,16 @@ class MusicButton(discord.ui.Button):
         except CheckError as e:
             await ctx.send(e, ephemeral=True)
             return
-        if inter.data.get('custom_id') in ['prev', 'pause', 'next',
-                                         'loop', 'shuffle', 'stop',
-                                         'volume_down', 'volume_up']:
+        if inter.data.get("custom_id") in [
+            "prev",
+            "pause",
+            "next",
+            "loop",
+            "shuffle",
+            "stop",
+            "volume_down",
+            "volume_up",
+        ]:
             try:
                 await dj_check(ctx)
             except CheckError as e:
@@ -54,8 +61,8 @@ class MusicButton(discord.ui.Button):
 
         controller = inter.client.audio_controllers.get(inter.guild)
         if controller:
-            if inter.data.get('custom_id') in ['next', 'prev']:
-                await ctx.send(f'{inter.user} Skipped a Song')
+            if inter.data.get("custom_id") in ["next", "prev"]:
+                await ctx.send(f"{inter.user} Skipped a Song")
             else:
                 await controller.update_view()
 
@@ -74,7 +81,7 @@ class AudioController(object):
         self._stopping = False
         self.bot = bot
         self.playlist = Playlist()
-        self.pickle_file = Path('backup') / f'playlist_{guild.id}.pickle'
+        self.pickle_file = Path("backup") / f"playlist_{guild.id}.pickle"
         self.pickle_file.parent.mkdir(parents=True, exist_ok=True)
         self._next_song = None
         self.guild = guild
@@ -117,12 +124,12 @@ class AudioController(object):
             print_exc(file=sys.stderr)
 
     def pickle_playlist(self):
-        with open(self.pickle_file, 'wb') as f:
+        with open(self.pickle_file, "wb") as f:
             pickle.dump(self.playlist, f)
 
     def load_pickle_playlist(self):
         if self.pickle_file.exists():
-            with open(self.pickle_file, 'rb') as f:
+            with open(self.pickle_file, "rb") as f:
                 self.playlist = pickle.load(f)
 
     def volume_up(self):
@@ -152,72 +159,92 @@ class AudioController(object):
         is_empty = len(self.playlist) == 0
 
         view = self.last_view = discord.ui.View(timeout=None)
-        view.add_item(MusicButton(
-            lambda _: self.prev_song(),
-            custom_id="prev",
-            disabled=not self.playlist.has_prev(),
-            emoji="⏮️",
-        ))
-        view.add_item(MusicButton(
-            lambda _: self.pause(),
-            custom_id="pause",
-            emoji="⏸️" if self.guild.voice_client.is_playing() else "▶️",
-        ))
-        view.add_item(MusicButton(
-            lambda _: self.next_song(forced=True),
-            custom_id="next",
-            disabled=not self.playlist.has_next(),
-            emoji="⏭️",
-        ))
-        view.add_item(MusicButton(
-            lambda _: self.loop(),
-            custom_id="loop",
-            disabled=is_empty,
-            emoji="🔁",
-            label="Loop: " + self.playlist.loop,
-        ))
-        view.add_item(MusicButton(
-            self.current_song_callback,
-            custom_id="current_song",
-            row=1,
-            disabled=self.current_song is None,
-            emoji="💿",
-        ))
-        view.add_item(MusicButton(
-            lambda _: self.shuffle(),
-            custom_id="shuffle",
-            row=1,
-            disabled=is_empty,
-            emoji="🔀",
-        ))
-        view.add_item(MusicButton(
-            self.queue_callback,
-            custom_id="queue",
-            row=1,
-            disabled=is_empty,
-            emoji="📜",
-        ))
-        view.add_item(MusicButton(
-            lambda _: self.stop_player(),
-            custom_id="stop",
-            row=1,
-            emoji="⏹️",
-            style=discord.ButtonStyle.red,
-        ))
-        view.add_item(MusicButton(
-            lambda _: self.volume_down(),
-            custom_id="volume_down",
-            row=2,
-            disabled=self.volume == 10,
-            emoji="🔉",
-        ))
-        view.add_item(MusicButton(
-            lambda _: self.volume_up(),
-            custom_id="volume_up",
-            row=2,
-            disabled=self.volume == 100,
-            emoji="🔊",
-        ))
+        view.add_item(
+            MusicButton(
+                lambda _: self.prev_song(),
+                custom_id="prev",
+                disabled=not self.playlist.has_prev(),
+                emoji="⏮️",
+            )
+        )
+        view.add_item(
+            MusicButton(
+                lambda _: self.pause(),
+                custom_id="pause",
+                emoji="⏸️" if self.guild.voice_client.is_playing() else "▶️",
+            )
+        )
+        view.add_item(
+            MusicButton(
+                lambda _: self.next_song(forced=True),
+                custom_id="next",
+                disabled=not self.playlist.has_next(),
+                emoji="⏭️",
+            )
+        )
+        view.add_item(
+            MusicButton(
+                lambda _: self.loop(),
+                custom_id="loop",
+                disabled=is_empty,
+                emoji="🔁",
+                label="Loop: " + self.playlist.loop,
+            )
+        )
+        view.add_item(
+            MusicButton(
+                self.current_song_callback,
+                custom_id="current_song",
+                row=1,
+                disabled=self.current_song is None,
+                emoji="💿",
+            )
+        )
+        view.add_item(
+            MusicButton(
+                lambda _: self.shuffle(),
+                custom_id="shuffle",
+                row=1,
+                disabled=is_empty,
+                emoji="🔀",
+            )
+        )
+        view.add_item(
+            MusicButton(
+                self.queue_callback,
+                custom_id="queue",
+                row=1,
+                disabled=is_empty,
+                emoji="📜",
+            )
+        )
+        view.add_item(
+            MusicButton(
+                lambda _: self.stop_player(),
+                custom_id="stop",
+                row=1,
+                emoji="⏹️",
+                style=discord.ButtonStyle.red,
+            )
+        )
+        view.add_item(
+            MusicButton(
+                lambda _: self.volume_down(),
+                custom_id="volume_down",
+                row=2,
+                disabled=self.volume == 10,
+                emoji="🔉",
+            )
+        )
+        view.add_item(
+            MusicButton(
+                lambda _: self.volume_up(),
+                custom_id="volume_up",
+                row=2,
+                disabled=self.volume == 100,
+                emoji="🔊",
+            )
+        )
 
         return self.last_view
 

@@ -67,9 +67,10 @@ class Developer(commands.Cog):
     async def _update(self, ctx):
         await ctx.send("Updating...")
         import subprocess
+
         process = subprocess.Popen(["git", "pull"], stdout=subprocess.PIPE)
         output = process.communicate()[0]
-        await ctx.send(output.decode('utf-8'))
+        await ctx.send(output.decode("utf-8"))
 
     @commands.command(
         name="ytdlp",
@@ -79,12 +80,13 @@ class Developer(commands.Cog):
     async def _ytdlp(self, ctx):
         await ctx.send("Updating yt-dlp...")
         import subprocess
+
         process = subprocess.Popen(
             ["uv", "pip", "install", "--upgrade", "yt-dlp[default]"],
             stdout=subprocess.PIPE,
         )
         output = process.communicate()[0]
-        await ctx.send(output.decode('utf-8'))
+        await ctx.send(output.decode("utf-8"))
 
     @commands.command(
         name="execute",
@@ -136,9 +138,7 @@ class Developer(commands.Cog):
         invoke_without_command=True,
     )
     @commands.is_owner()
-    async def _guild_whitelist(
-        self, ctx, *, inexistent_subcommand=None
-    ):
+    async def _guild_whitelist(self, ctx, *, inexistent_subcommand=None):
         if inexistent_subcommand is not None:
             await ctx.send("`Error: Unknown subcommand`")
         else:
@@ -171,7 +171,11 @@ class Developer(commands.Cog):
     async def _guild_whitelist_remove_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
-        all_guilds = [app_commands.Choice(name=f"{g.name} {g.id}", value=str(g.id)) for g in self.bot.guilds if current.lower() in g.name.lower() or current in str(g.id)]
+        all_guilds = [
+            app_commands.Choice(name=f"{g.name} {g.id}", value=str(g.id))
+            for g in self.bot.guilds
+            if current.lower() in g.name.lower() or current in str(g.id)
+        ]
         return all_guilds[:25]
 
     @_guild_whitelist.command(name="remove")
