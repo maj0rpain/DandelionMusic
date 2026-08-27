@@ -14,7 +14,8 @@
 
 - No test suite exists in this repo (confirmed in `CLAUDE.md`) — every task's "test" step is a standalone verification script run via `uv run python -c "..."`, not pytest. Follow this project's own conventions, not the generic pytest examples in the writing-plans skill.
 - Lint: `black -l 79` and `flake8 --ignore E203,W503`, pinned in `.pre-commit-config.yaml` to `black==25.1.0`/`flake8==7.3.0` specifically — **always check against those exact pinned versions** (`uv tool run --from black==25.1.0 black ...`), not whatever `uv tool run --from black black` resolves to latest, which can produce false-positive diffs against a newer/different formatting version.
-- Every new user-facing string goes in `config/en.json` as a `config.SOME_KEY` constant, never a hardcoded string in command code — matches every existing command in this codebase.
+- Every new user-facing *error/status* string goes in `config/en.json` as a `config.SOME_KEY` constant. The one established exception, followed here too: a bare group's fallback reply (e.g. `_playlist`'s "Use subcommands to manage playlists.") is a plain hardcoded string in every existing command group (`music.py`'s `_playlist`, `_shuffle`, `_stop`, `_move`, `_remove`, `_skip`, `_clear`) — `library`'s bare-group handler follows that exact precedent, not an inconsistency.
+- `library.build_index()` walks the filesystem synchronously; anywhere it's called from a coroutine (startup, `d!library refresh`) it must go through `asyncio.get_running_loop().run_in_executor(None, library.build_index)`, matching this codebase's established rule (see `musicbot/loader.py`'s `_run_sync`) that blocking I/O never runs directly on the event loop — a plain `run_in_executor(None, ...)` (default thread pool) is enough here since this is I/O-bound directory listing, not the CPU-bound extraction work `loader.py`'s dedicated `ProcessPoolExecutor` exists for.
 - `ENABLE_LOCAL_LIBRARY` defaults to `False`; nothing in this plan should change behavior for a deployment that doesn't set it.
 - Local library queue actions must call `utils.play_check(ctx)` before queueing (mirrors what `Music.cog_check` already does for `d!play`, including the voice-channel auto-join) — but merely *opening* the browse menu must not require being in a voice channel.
 - `ephemeral=True` only works for interaction-based (slash) invocations. Since `d!library browse` is a hybrid command also usable as plain `d!library browse` text, and a plain text message can never be ephemeral, the browse response is ephemeral only when `ctx.interaction is not None`; either way, the view must reject interactions from anyone but the original invoker (`interaction_check`), since a non-ephemeral text-command response is visible/clickable by the whole channel.
@@ -29,7 +30,7 @@
 - Modify: `.env.sample`
 
 **Interfaces:**
-- Produces: `config.ENABLE_LOCAL_LIBRARY: bool`, `config.MUSIC_LIBRARY_PATH: str`, `config.LIBRARY_FILE_MISSING`, `config.LIBRARY_NOT_CONFIGURED`, `config.LIBRARY_EMPTY`, `config.LIBRARY_REFRESHED` (a `.format(artists=, albums=, songs=)` template — confirmed safe: `config/utils.py`'s `Formatter`/`string.Template.safe_substitute` step that runs on every `en.json` string at load time does not touch `{}`-style braces, only its own `$`-style delimiter, so plain `str.format()` at the call site is safe), `config.HELP_LIBRARY_SHORT`, `config.HELP_LIBRARY_LONG`, `config.HELP_LIBRARY_REFRESH_SHORT`, `config.HELP_LIBRARY_REFRESH_LONG`, `config.HELP_LIBRARY_BROWSE_SHORT`, `config.HELP_LIBRARY_BROWSE_LONG`.
+- Produces: `config.ENABLE_LOCAL_LIBRARY: bool`, `config.MUSIC_LIBRARY_PATH: str`, `config.LIBRARY_FILE_MISSING`, `config.LIBRARY_NOT_CONFIGURED`, `config.LIBRARY_EMPTY`, `config.LIBRARY_REFRESHED` (a `.format(artists=, albums=, songs=)` template — confirmed safe, but for a narrower reason than "braces are ignored": `config/utils.py`'s `Formatter` (a `string.Template` with `delimiter=""`) *does* substitute bare `{identifier}` placeholders — that's exactly how `STATUS_TEXT`'s `{prefix}` gets filled in at config load time. It's safe here only because `Formatter.format(current_cfg)` looks up lowercase keys like `artists`/`albums`/`songs` in `current_cfg`, which only contains uppercase `Config` attribute names — no match, so `safe_substitute` leaves `{artists}` etc. untouched by definition. Task 1 Step 4's verification script confirms this empirically; don't rely on the reasoning alone if this string's placeholder names ever collide with a real Config attribute name.), `config.HELP_LIBRARY_SHORT`, `config.HELP_LIBRARY_LONG`, `config.HELP_LIBRARY_REFRESH_SHORT`, `config.HELP_LIBRARY_REFRESH_LONG`, `config.HELP_LIBRARY_BROWSE_SHORT`, `config.HELP_LIBRARY_BROWSE_LONG`.
 
 - [ ] **Step 1: Add the two config attributes**
 
@@ -115,7 +116,7 @@ git commit -m "Add config and messages for local music library browsing"
 
 **Interfaces:**
 - Consumes: `config.MUSIC_LIBRARY_PATH: str`, `config.SUPPORTED_EXTENSIONS: tuple`.
-- Produces: `library.LibraryIndex = Dict[str, Dict[str, List[str]]]`, `library.build_index() -> LibraryIndex`, `library.get_index() -> LibraryIndex`, `library.song_path(artist: str, album: str, filename: str) -> pathlib.Path`, `library.song_uri(artist: str, album: str, filename: str) -> str`, `library.counts(index: LibraryIndex) -> Tuple[int, int, int]` (artists, albums, songs). These four functions/the `LibraryIndex` alias are what every later task imports from `musicbot.library`.
+- Produces: `library.LibraryIndex = Dict[str, Dict[str, List[str]]]`, `library.build_index() -> LibraryIndex` (sync, filesystem-walking), `library.build_index_async() -> LibraryIndex` (the coroutine wrapper every real call site inside the bot must use instead), `library.get_index() -> LibraryIndex`, `library.song_path(artist: str, album: str, filename: str) -> pathlib.Path`, `library.song_uri(artist: str, album: str, filename: str) -> str`, `library.counts(index: LibraryIndex) -> Tuple[int, int, int]` (artists, albums, songs). These four functions/the `LibraryIndex` alias are what every later task imports from `musicbot.library`.
 
 - [ ] **Step 1: Write a verification script demonstrating the module doesn't exist yet**
 
@@ -128,6 +129,7 @@ Expected: `ModuleNotFoundError: No module named 'musicbot.library'`
 - [ ] **Step 2: Create `musicbot/library.py`**
 
 ```python
+import asyncio
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -138,8 +140,20 @@ LibraryIndex = Dict[str, Dict[str, List[str]]]
 _index: LibraryIndex = {}
 
 
+async def build_index_async() -> LibraryIndex:
+    """Coroutine callers (startup, commands) must use this, not
+    build_index() directly - it's a blocking filesystem walk, and this
+    codebase's rule (see loader.py's _run_sync) is that blocking I/O
+    never runs directly on the event loop."""
+    return await asyncio.get_running_loop().run_in_executor(
+        None, build_index
+    )
+
+
 def build_index() -> LibraryIndex:
-    """Walks config.MUSIC_LIBRARY_PATH (expected layout:
+    """Synchronous - only call directly from a thread/process executor
+    (via build_index_async) or from non-async test scripts. Walks
+    config.MUSIC_LIBRARY_PATH (expected layout:
     Artist/Album/song.ext) and rebuilds the in-memory index.
     Returns the new index."""
     global _index
@@ -253,7 +267,7 @@ from musicbot import library
 ```python
     async def setup_hook(self):
         if config.ENABLE_LOCAL_LIBRARY:
-            library.build_index()
+            await library.build_index_async()
         for extension in self.initial_extensions:
             await self.load_extension(extension)
         if config.ENABLE_SLASH_COMMANDS:
@@ -497,7 +511,8 @@ class Library(commands.Cog):
         if not config.MUSIC_LIBRARY_PATH:
             await ctx.send(config.LIBRARY_NOT_CONFIGURED)
             return
-        index = library.build_index()
+        await ctx.defer()
+        index = await library.build_index_async()
         artists, albums, songs = library.counts(index)
         await ctx.send(
             config.LIBRARY_REFRESHED.format(
@@ -555,6 +570,7 @@ async def main():
         ctx.bot = bot
         ctx.guild = guild
         ctx.send = AsyncMock()
+        ctx.defer = AsyncMock()
 
         cmd = bot.get_command('library refresh')
         await cmd.callback(bot.get_cog('Library'), ctx)
@@ -651,6 +667,11 @@ class LibraryBrowseView(discord.ui.View):
         self.artist: Optional[str] = None
         self.album: Optional[str] = None
         self.page = 0
+        # set by the caller after sending (Task 8); needed so
+        # on_timeout() can disable the stale buttons/select. Left None
+        # for the slash-command path, where ctx.interaction is used
+        # instead (see on_timeout below).
+        self.message: Optional[discord.Message] = None
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
         if interaction.user.id != self.ctx.author.id:
@@ -659,6 +680,21 @@ class LibraryBrowseView(discord.ui.View):
             )
             return False
         return True
+
+    async def on_timeout(self):
+        # Without this, a click after the 5-minute timeout just fails
+        # silently client-side (discord.py stops dispatching to a
+        # timed-out view's items) and the message's Select/Buttons
+        # stay visibly enabled forever.
+        for item in self.children:
+            item.disabled = True
+        try:
+            if self.ctx.interaction is not None:
+                await self.ctx.interaction.edit_original_response(view=self)
+            elif self.message is not None:
+                await self.message.edit(view=self)
+        except discord.HTTPException:
+            pass
 
     def entries(self) -> List[str]:
         if self.artist is None:
@@ -996,7 +1032,13 @@ git commit -m "Add queueing (song/album/artist) to the browse view"
         # a plain text message from a prefix command can't be ephemeral
         if ctx.interaction is not None:
             kwargs["ephemeral"] = True
-        await ctx.send(**kwargs)
+        # For the text-command path this is a real discord.Message,
+        # used by on_timeout() to disable the view later. For the
+        # slash path Context.send() routes through
+        # interaction.response.send_message(), which returns None -
+        # on_timeout() uses ctx.interaction.edit_original_response()
+        # instead in that case, so this being None there is expected.
+        view.message = await ctx.send(**kwargs)
 ```
 
 - [ ] **Step 2: Load the extension conditionally in `musicbot/__main__.py`**
