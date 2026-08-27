@@ -78,6 +78,7 @@ class SiteTypes(Enum):
     SPOTIFY = auto()
     YT_DLP = auto()
     CUSTOM = auto()
+    LOCAL_LIBRARY = auto()
     UNKNOWN = auto()
     NOT_URL = auto()
 
@@ -203,6 +204,9 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
 
     if spotify_regex.match(url):
         return SiteTypes.SPOTIFY
+
+    if url.startswith("file://"):
+        return SiteTypes.LOCAL_LIBRARY
 
     if ie := get_ie(url):
         return ie
