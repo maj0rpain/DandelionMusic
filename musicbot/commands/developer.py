@@ -79,7 +79,10 @@ class Developer(commands.Cog):
     async def _ytdlp(self, ctx):
         await ctx.send("Updating yt-dlp...")
         import subprocess
-        process = subprocess.Popen(["pip", "install", "--upgrade", "yt-dlp[default]"], stdout=subprocess.PIPE)
+        process = subprocess.Popen(
+            ["uv", "pip", "install", "--upgrade", "yt-dlp[default]"],
+            stdout=subprocess.PIPE,
+        )
         output = process.communicate()[0]
         await ctx.send(output.decode('utf-8'))
 
