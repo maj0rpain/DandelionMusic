@@ -1,4 +1,5 @@
 import asyncio
+import sys
 from pathlib import Path
 from typing import Dict, List, Tuple
 
@@ -7,6 +8,22 @@ from config import config
 LibraryIndex = Dict[str, Dict[str, List[str]]]
 
 _index: LibraryIndex = {}
+
+
+def _safe_iterdir(path: Path) -> List[Path]:
+    """sorted(path.iterdir()), but a single unreadable directory
+    (permission-restricted folder, NAS metadata dirs, a stale network
+    mount, etc.) is skipped with a warning instead of crashing the
+    whole index build - which would otherwise crash bot startup
+    (build_index_async() is awaited directly from setup_hook())."""
+    try:
+        return sorted(path.iterdir())
+    except OSError as e:
+        print(
+            f"library: skipping unreadable directory {path}: {e}",
+            file=sys.stderr,
+        )
+        return []
 
 
 async def build_index_async() -> LibraryIndex:
@@ -30,16 +47,16 @@ def build_index() -> LibraryIndex:
     )
 
     if root is not None and root.is_dir():
-        for artist_dir in sorted(root.iterdir()):
+        for artist_dir in _safe_iterdir(root):
             if not artist_dir.is_dir():
                 continue
             albums: Dict[str, List[str]] = {}
-            for album_dir in sorted(artist_dir.iterdir()):
+            for album_dir in _safe_iterdir(artist_dir):
                 if not album_dir.is_dir():
                     continue
                 songs = sorted(
                     f.name
-                    for f in album_dir.iterdir()
+                    for f in _safe_iterdir(album_dir)
                     if f.is_file()
                     and f.name.lower().endswith(config.LIBRARY_EXTENSIONS)
                 )

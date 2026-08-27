@@ -194,11 +194,14 @@ class LibraryBrowseView(discord.ui.View):
             uri = library.song_uri(self.artist, album, filename)
             try:
                 await self.ctx.audiocontroller.process_song(
-                    uri, user=self.ctx.author
+                    uri, user=self.ctx.author, pickle=False
                 )
                 queued += 1
             except SongError:
                 missing.append(filename)
+
+        if queued:
+            self.ctx.audiocontroller.pickle_playlist()
 
         message = f"Queued {queued} song(s)."
         if missing:
