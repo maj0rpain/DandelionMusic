@@ -423,10 +423,12 @@ class AudioController(object):
         self.preload_queue()
 
     async def process_song(
-        self, track: str
+        self, track: str, user: Optional[discord.abc.User] = None
     ) -> Union[Optional[Song], Literal[PLAYLIST]]:
         """Adds the track to the playlist instance
         Starts playing if it is the first song"""
+
+        print(f"{user} queued {track!r} in guild {self.guild.name!r}")
 
         loaded_song = await loader.load_song(track)
         if not loaded_song:

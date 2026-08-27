@@ -98,7 +98,9 @@ class Music(commands.Cog):
         await ctx.audiocontroller.timer.start(True)
 
         try:
-            song = await ctx.audiocontroller.process_song(track)
+            song = await ctx.audiocontroller.process_song(
+                track, user=ctx.author
+            )
         except SongError as e:
             await ctx.send(e)
             return

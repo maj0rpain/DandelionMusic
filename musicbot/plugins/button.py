@@ -95,7 +95,7 @@ class Button(commands.Cog):
                     int(sett.command_channel)
                 )
             for url in links:
-                await audiocontroller.process_song(url)
+                await audiocontroller.process_song(url, user=member)
 
 
 async def setup(bot: MusicBot):
