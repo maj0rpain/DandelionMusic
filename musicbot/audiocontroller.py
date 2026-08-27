@@ -382,6 +382,11 @@ class AudioController(object):
         """Plays a song object"""
 
         if not await loader.preload(song, self.bot):
+            if self.command_channel:
+                await self.command_channel.send(
+                    f"{config.SONGINFO_ERROR}\n"
+                    f"(Skipped: {song.title or song.webpage_url})"
+                )
             self.next_song(forced=True)
             return
 
