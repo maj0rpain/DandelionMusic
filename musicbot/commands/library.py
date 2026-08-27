@@ -6,7 +6,8 @@ from discord.ext import commands
 from config import config
 from musicbot import library
 from musicbot.bot import MusicBot
-from musicbot.utils import dj_check
+from musicbot.loader import SongError
+from musicbot.utils import CheckError, dj_check, play_check
 
 PAGE_SIZE = 25
 
@@ -48,6 +49,20 @@ class PageButton(discord.ui.Button):
     async def callback(self, interaction: discord.Interaction):
         self.browse_view.page += self.delta
         await self.browse_view.render(interaction)
+
+
+class QueueLevelButton(discord.ui.Button):
+    def __init__(self, browse_view: "LibraryBrowseView"):
+        label = (
+            "Queue this Album"
+            if browse_view.album is not None
+            else "Queue this Artist"
+        )
+        super().__init__(label=label, style=discord.ButtonStyle.green, row=1)
+        self.browse_view = browse_view
+
+    async def callback(self, interaction: discord.Interaction):
+        await self.browse_view.queue_current_level(interaction)
 
 
 class LibraryBrowseView(discord.ui.View):
@@ -118,6 +133,7 @@ class LibraryBrowseView(discord.ui.View):
         if page_entries:
             self.add_item(LibrarySelect(page_entries, self))
         if self.artist is not None:
+            self.add_item(QueueLevelButton(self))
             self.add_item(BackButton(self))
         if self.page > 0:
             self.add_item(PageButton(self, -1, "◀ Prev"))
@@ -137,11 +153,7 @@ class LibraryBrowseView(discord.ui.View):
             self.album = chosen
             await self.render(interaction)
         else:
-            # Task 7 replaces this with queueing the chosen song.
-            await interaction.response.send_message(
-                f"(queueing {chosen!r} - implemented in Task 7)",
-                ephemeral=True,
-            )
+            await self.queue_pairs(interaction, [(self.album, chosen)])
 
     async def go_back(self, interaction: discord.Interaction):
         self.page = 0
@@ -150,6 +162,52 @@ class LibraryBrowseView(discord.ui.View):
         else:
             self.artist = None
         await self.render(interaction)
+
+    async def queue_current_level(self, interaction: discord.Interaction):
+        if self.album is not None:
+            pairs = [
+                (self.album, song)
+                for song in self.index.get(self.artist, {}).get(self.album, [])
+            ]
+        else:
+            pairs = [
+                (album, song)
+                for album, songs in self.index.get(self.artist, {}).items()
+                for song in songs
+            ]
+        await self.queue_pairs(interaction, pairs)
+
+    async def queue_pairs(self, interaction, pairs):
+        try:
+            await play_check(self.ctx)
+        except CheckError as e:
+            await interaction.response.send_message(str(e), ephemeral=True)
+            return
+
+        queued = 0
+        missing = []
+        for album, filename in pairs:
+            uri = library.song_uri(self.artist, album, filename)
+            try:
+                await self.ctx.audiocontroller.process_song(
+                    uri, user=self.ctx.author
+                )
+                queued += 1
+            except SongError:
+                missing.append(filename)
+
+        message = f"Queued {queued} song(s)."
+        if missing:
+            shown = ", ".join(missing[:5])
+            message += f" {len(missing)} skipped (file not found): {shown}"
+            if len(missing) > 5:
+                message += f", and {len(missing) - 5} more"
+            message += ". Try `d!library refresh`."
+
+        if interaction.response.is_done():
+            await interaction.followup.send(message, ephemeral=True)
+        else:
+            await interaction.response.send_message(message, ephemeral=True)
 
 
 class Library(commands.Cog):
