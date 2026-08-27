@@ -95,24 +95,10 @@ class Config:
         )
 
         self.DATABASE = alchemize_url(self.DATABASE_URL)
-        self.DATABASE_LIBRARY = self.DATABASE.partition("+")[2].partition(":")[
-            0
-        ]
-        db_req = Requirement(self.DATABASE_LIBRARY)
-        self.DATABASE = self.DATABASE.replace(
-            self.DATABASE_LIBRARY, db_req.name, 1
-        )
+        driver_name = self.DATABASE.partition("+")[2].partition(":")[0]
+        db_req = Requirement(driver_name)
+        self.DATABASE = self.DATABASE.replace(driver_name, db_req.name, 1)
         self.DATABASE_LIBRARY_NAME = db_req.name
-        if not db_req.specifier:
-            with open(
-                os.path.join(os.path.dirname(__file__), "db-requirements.txt")
-            ) as f:
-                for line in f:
-                    cleaned_line = line.strip()
-                    req = Requirement(cleaned_line)
-                    if req.name == db_req.name:
-                        self.DATABASE_LIBRARY = str(req)
-                        break
 
         # Convert EMBED_COLOR to integer if it's a string
         if isinstance(self.EMBED_COLOR, str):
@@ -247,7 +233,6 @@ class Config:
         internal_vars = [
             'COOKIE_PATH',  # Don't track COOKIE_PATH as it can change based on runtime path
             'DATABASE',     # Internal database connection string
-            'DATABASE_LIBRARY',  # Internal database library
             'DATABASE_LIBRARY_NAME',  # Internal database library name
             'messages',     # Internal messages dictionary
             'dicts',        # Internal dictionaries

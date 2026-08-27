@@ -22,3 +22,12 @@ dependencies = [
     "wheel==0.48.0",
     "yt-dlp[default]~=2026.8.19",
 ]
+
+[project.optional-dependencies]
+# extra async DB drivers for DATABASE_URL — sqlite (aiosqlite) is a
+# default dependency above; install one of these to use a different DB
+postgres = ["asyncpg==0.30.0"]
+mysql = ["aiomysql==0.2.0"]
+
+[dependency-groups]
+build = ["pyinstaller==6.14.2"]
