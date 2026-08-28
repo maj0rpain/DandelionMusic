@@ -13,6 +13,7 @@ dependencies = [
     "davey~=0.1.6",
     "discord-py[voice]==2.7.1",
     "json-with-comments==1.2.10",
+    "mutagen==1.47.0",
     "packaging~=26.3",
     "python-dotenv~=1.2.3",
     "setuptools==84.0.0",

@@ -1,11 +1,18 @@
 import asyncio
 import sys
 from pathlib import Path
-from typing import Dict, List, Tuple
+from typing import Dict, List, NamedTuple, Tuple
 
 from config import config
+from musicbot.audiotags import nice_title, read_tags
 
-LibraryIndex = Dict[str, Dict[str, List[str]]]
+
+class LibrarySong(NamedTuple):
+    filename: str
+    title: str
+
+
+LibraryIndex = Dict[str, Dict[str, List[LibrarySong]]]
 
 _index: LibraryIndex = {}
 
@@ -50,16 +57,26 @@ def build_index() -> LibraryIndex:
         for artist_dir in _safe_iterdir(root):
             if not artist_dir.is_dir():
                 continue
-            albums: Dict[str, List[str]] = {}
+            albums: Dict[str, List[LibrarySong]] = {}
             for album_dir in _safe_iterdir(artist_dir):
                 if not album_dir.is_dir():
                     continue
-                songs = sorted(
-                    f.name
+                files = sorted(
+                    f
                     for f in _safe_iterdir(album_dir)
                     if f.is_file()
                     and f.name.lower().endswith(config.LIBRARY_EXTENSIONS)
                 )
+                # sorted by filename (not the tag-derived title) so
+                # track-number-prefixed filenames ("01 - ...", "02 -
+                # ...") keep their natural album order
+                songs = [
+                    LibrarySong(
+                        filename=f.name,
+                        title=nice_title(read_tags(f), fallback=f.stem),
+                    )
+                    for f in files
+                ]
                 if songs:
                     albums[album_dir.name] = songs
             if albums:
