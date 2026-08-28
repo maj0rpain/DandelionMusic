@@ -32,6 +32,18 @@ Investigated during brainstorming:
 
 **Summary text:** Last.fm only. No summary shown if `LASTFM_API_KEY` is unset or the lookup fails/has no match.
 
+## Query name resolution (tags over folder names)
+
+The browse tree's grouping stays folder-based (unchanged — see Non-goals), but the *query strings* sent to Spotify/Last.fm prefer tag data over the folder name. A folder name is organizational and can drift from the canonical name (abbreviations, typos, "Various Artists" compilation folders, alternate spellings) — searching Spotify/Last.fm with a bad query string doesn't just risk finding nothing, a fuzzy match can return a wrong-but-similarly-named artist or album, which is worse than an empty field.
+
+Resolution order, both for the artist-level and album-level lookups: **`albumartist` tag → `artist` tag → folder name.** `albumartist` (ID3 `TPE2`, also present in FLAC/MP4 tags) is preferred over the plain `artist` tag because it's what well-tagged files use specifically to normalize a consistent artist name across a whole album (e.g. compilations, or various featured-artist tracks that would otherwise each report a different `artist`).
+
+This reuses the same "first song in the album" file already read for embedded art — one `read_tags()` call resolves the query name and checks for embedded art together. For the artist-level screen (no single album in scope yet), the sample file is the first song of the first album under that artist folder — deterministic, since both `library.py`'s directory walk and each album's song list are already sorted.
+
+`musicbot/audiotags.py`'s `AudioTags` gains two fields to support this — `album: Optional[str]` and `album_artist: Optional[str]` (mutagen easy-mode keys `"album"`/`"albumartist"`) — read the same way `title`/`artist` already are.
+
+Because resolution happens inside `library_metadata.py` (not the caller), the module-level caches are keyed by the *resolved* name, not the folder name — a side benefit: two differently-named folders that share the same tagged artist end up sharing one cache entry instead of two redundant lookups.
+
 ## Configuration
 
 One new `Config` class attribute in `config/config.py`, following the `SPOTIFY_ID`/`SPOTIFY_SECRET` pattern (optional, feature silently degrades when unset):
@@ -54,17 +66,22 @@ class ArtInfo(NamedTuple):
     url: Optional[str]     # a real URL (Spotify/Last.fm) - use with embed.set_thumbnail(url=...)
     data: Optional[bytes]  # raw embedded bytes - needs a discord.File + attachment:// URI
 
-async def get_artist_photo(artist: str) -> Optional[ArtInfo]: ...
-async def get_artist_summary(artist: str) -> Optional[str]: ...
-async def get_album_art(artist: str, album: str, sample_file: Path) -> Optional[ArtInfo]: ...
-async def get_album_summary(artist: str, album: str) -> Optional[str]: ...
+# artist_folder/album_folder are the folder names, used only as the
+# final fallback if tags can't resolve a name (see "Query name
+# resolution" above) and, for the artist functions, to key the cache
+# when even the fallback comes up empty. sample_file is read once for
+# both tag-based name resolution and (album-level) embedded art.
+async def get_artist_photo(artist_folder: str, sample_file: Path) -> Optional[ArtInfo]: ...
+async def get_artist_summary(artist_folder: str, sample_file: Path) -> Optional[str]: ...
+async def get_album_art(artist_folder: str, album_folder: str, sample_file: Path) -> Optional[ArtInfo]: ...
+async def get_album_summary(artist_folder: str, album_folder: str, sample_file: Path) -> Optional[str]: ...
 ```
 
-- **Embedded art**: `musicbot/audiotags.py` gains `read_artwork(path: Path) -> Optional[bytes]`, mirroring `read_tags()`'s never-raises shape (try/except around the mutagen call, `None` on any failure or absence). Called against the *first* filename in the album's song list — one disk read represents the whole album, not one per track.
+- **Embedded art**: `musicbot/audiotags.py` gains `read_artwork(path: Path) -> Optional[bytes]`, mirroring `read_tags()`'s never-raises shape (try/except around the mutagen call, `None` on any failure or absence). Called (album-level only) against the same sample file used for name resolution — one disk read represents the whole album, not one per track.
 - **Spotify fallback**: reuses the existing `spotify_api` client (`musicbot/linkutils.py`). Since `spotipy` is a synchronous/blocking client, the call is wrapped in `loop.run_in_executor(None, ...)` — a thread, not the `loader.py` `ProcessPoolExecutor`. This is a quick I/O-bound lookup, not CPU-bound extraction work, so it doesn't need that heavier machinery.
 - **Last.fm**: a genuine async `aiohttp` call, reusing the session `linkutils.py` already opens via `init_session()`/`get_soup()`. `bio.summary`/`wiki.summary` commonly has a trailing `<a href="...">Read more on Last.fm</a>` — stripped before use — then truncated to ~400 characters (well under Discord's 4096-char embed description limit, and matching the "short summary" ask this feature started from rather than dumping Last.fm's full multi-paragraph bio into a list-browsing screen).
 - **Timeout**: each external call (Spotify executor call, Last.fm HTTP call) has a short timeout (~3s) so one slow API can't stall browsing noticeably even behind the interaction defer described below.
-- **Caching**: module-level dicts, `_artist_cache: Dict[str, ...]` and `_album_cache: Dict[Tuple[str, str], ...]`, populated on first lookup and kept for the process lifetime. Not tied to `d!library refresh` (which only rebuilds the local file index) — external bios/art don't change often enough to justify invalidation logic now.
+- **Caching**: module-level dicts, `_artist_cache: Dict[str, ...]` and `_album_cache: Dict[Tuple[str, str], ...]`, keyed by the *resolved* name from the query-resolution step above (not the raw folder name) and populated on first lookup, kept for the process lifetime. Not tied to `d!library refresh` (which only rebuilds the local file index) — external bios/art don't change often enough to justify invalidation logic now.
 - **Failure handling**: any lookup failure (network error, timeout, rate limit, no match, missing config) returns `None` for that specific piece. Nothing here ever raises past its own function — the caller always gets a clean "no data" signal instead of an exception.
 
 ## Browse embed changes (`musicbot/commands/library.py`)
