@@ -29,7 +29,7 @@ from discord.ext.commands import CommandError, NotOwner
 
 from config import config
 from musicbot.song import Song
-from musicbot.linkutils import url_regex
+from musicbot.linkutils import SiteTypes, url_regex
 
 # avoiding circular import
 if TYPE_CHECKING:
@@ -236,13 +236,20 @@ def songs_embed(title: str, songs: Iterable[Song]) -> Embed:
     )
 
     for counter, song in enumerate(songs, start=1):
+        song_title = song.title or url_regex.fullmatch(song.webpage_url).group(
+            "bare"
+        )
+        # file:// isn't a scheme Discord renders as a clickable link -
+        # show plain title text instead of a dead-looking markdown
+        # link (matches Song.format_output()'s handling of this).
+        value = (
+            song_title
+            if song.host == SiteTypes.LOCAL_LIBRARY
+            else "[{}]({})".format(song_title, song.webpage_url)
+        )
         embed.add_field(
             name=f"{counter}.",
-            value="[{}]({})".format(
-                song.title
-                or url_regex.fullmatch(song.webpage_url).group("bare"),
-                song.webpage_url,
-            ),
+            value=value,
             inline=False,
         )
 

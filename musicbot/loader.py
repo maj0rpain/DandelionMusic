@@ -17,6 +17,7 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 from config import config
+from musicbot.audiotags import nice_title, read_tags
 from musicbot.bot import MusicBot
 from musicbot.song import Song
 from musicbot.utils import OutputWrapper
@@ -30,7 +31,6 @@ from musicbot.linkutils import (
     init as init_session,
     stop as stop_session,
 )
-
 
 sys.stdout = OutputWrapper(sys.stdout)
 sys.stderr = OutputWrapper(sys.stderr)
@@ -180,10 +180,13 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
             or not resolved.is_file()
         ):
             raise SongError(config.LIBRARY_FILE_MISSING)
+        tags = read_tags(resolved)
         data = {
             "url": str(resolved),
             "webpage_url": track,
-            "title": path.stem,
+            "title": nice_title(tags, fallback=path.stem),
+            "uploader": tags.artist,
+            "duration": tags.duration,
         }
 
     else:  # host is info extractor

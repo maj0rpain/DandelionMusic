@@ -13,14 +13,19 @@ PAGE_SIZE = 25
 
 
 class LibrarySelect(discord.ui.Select):
-    def __init__(self, entries: List[str], browse_view: "LibraryBrowseView"):
+    def __init__(
+        self,
+        entries: List[str],
+        labels: List[str],
+        browse_view: "LibraryBrowseView",
+    ):
         self._entries = entries
         self.browse_view = browse_view
         super().__init__(
             placeholder="Choose...",
             options=[
-                discord.SelectOption(label=entry[:100], value=str(i))
-                for i, entry in enumerate(entries)
+                discord.SelectOption(label=label[:100], value=str(i))
+                for i, label in enumerate(labels)
             ],
         )
 
@@ -105,12 +110,27 @@ class LibraryBrowseView(discord.ui.View):
         except discord.HTTPException:
             pass
 
+    def _songs(self) -> List[library.LibrarySong]:
+        return self.index.get(self.artist, {}).get(self.album, [])
+
     def entries(self) -> List[str]:
+        """Selection values - filenames at the song level, folder
+        names above it. Always use these (not labels()) for anything
+        that needs to look the entry back up in the index."""
         if self.artist is None:
             return sorted(self.index.keys())
         if self.album is None:
             return sorted(self.index.get(self.artist, {}).keys())
-        return sorted(self.index.get(self.artist, {}).get(self.album, []))
+        # already sorted by filename in build_index(), preserving
+        # track-number order - don't re-sort
+        return [song.filename for song in self._songs()]
+
+    def labels(self) -> List[str]:
+        """Display text, parallel to entries() - tag-derived titles
+        at the song level, folder names above it."""
+        if self.artist is not None and self.album is not None:
+            return [song.title for song in self._songs()]
+        return self.entries()
 
     def title(self) -> str:
         if self.artist is None:
@@ -128,11 +148,12 @@ class LibraryBrowseView(discord.ui.View):
     def build_items(self):
         self.clear_items()
         entries = self.entries()
-        page_entries = entries[
-            self.page * PAGE_SIZE : (self.page + 1) * PAGE_SIZE
-        ]
+        labels = self.labels()
+        page = slice(self.page * PAGE_SIZE, (self.page + 1) * PAGE_SIZE)
+        page_entries = entries[page]
+        page_labels = labels[page]
         if page_entries:
-            self.add_item(LibrarySelect(page_entries, self))
+            self.add_item(LibrarySelect(page_entries, page_labels, self))
         if self.artist is not None:
             self.add_item(QueueLevelButton(self))
             self.add_item(BackButton(self))
@@ -166,13 +187,10 @@ class LibraryBrowseView(discord.ui.View):
 
     async def queue_current_level(self, interaction: discord.Interaction):
         if self.album is not None:
-            pairs = [
-                (self.album, song)
-                for song in self.index.get(self.artist, {}).get(self.album, [])
-            ]
+            pairs = [(self.album, song.filename) for song in self._songs()]
         else:
             pairs = [
-                (album, song)
+                (album, song.filename)
                 for album, songs in self.index.get(self.artist, {}).items()
                 for song in songs
             ]
