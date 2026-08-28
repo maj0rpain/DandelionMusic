@@ -21,6 +21,9 @@ A Discord music bot written in Python with support for Youtube, SoundCloud, Spot
   - Client ID
   - Client Secret
   - Note: Limited to 50 playlist items without API
+* Last.fm (optional) - https://www.last.fm/api/account/create
+  - API Key
+  - Only used for artist/album bio summaries in `d!library browse`
 
 Obtained keys must be entered into the ```.env``` file as environment variables
 
@@ -160,6 +163,8 @@ d!stop / d!st
 #### Local Library Commands
 
 Requires `ENABLE_LOCAL_LIBRARY=True` and `MUSIC_LIBRARY_PATH` set to a folder laid out as `Artist/Album/song.ext` (see `.env.sample`).
+
+`d!library browse`'s artist and album screens show cover art and a short bio, sourced from artwork embedded in the audio files themselves, falling back to Spotify and Last.fm when configured (both optional - the browser works without either).
 
 ```
 d!library refresh
