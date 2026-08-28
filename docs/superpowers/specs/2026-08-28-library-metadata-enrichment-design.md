@@ -83,6 +83,7 @@ async def get_album_summary(artist_folder: str, album_folder: str, sample_file: 
 - **Timeout**: each external call (Spotify executor call, Last.fm HTTP call) has a short timeout (~3s) so one slow API can't stall browsing noticeably even behind the interaction defer described below.
 - **Caching**: module-level dicts, `_artist_cache: Dict[str, ...]` and `_album_cache: Dict[Tuple[str, str], ...]`, keyed by the *resolved* name from the query-resolution step above (not the raw folder name) and populated on first lookup, kept for the process lifetime. Not tied to `d!library refresh` (which only rebuilds the local file index) — external bios/art don't change often enough to justify invalidation logic now.
 - **Failure handling**: any lookup failure (network error, timeout, rate limit, no match, missing config) returns `None` for that specific piece. Nothing here ever raises past its own function — the caller always gets a clean "no data" signal instead of an exception.
+- **Logging**: each source-specific helper (`_spotify_album_art()`, `_lastfm_album_info()`, etc.) logs a one-line message to stderr — matching the existing `print(..., file=sys.stderr)` convention (`library.py`'s `_safe_iterdir`, `audiotags.read_tags`) — when a source it actually *attempted* (i.e. configured) returns no match or errors, e.g. `library_metadata: Spotify found no album art for 'Artist - Album'` or `library_metadata: Last.fm lookup failed for 'Artist': <error>`. An unconfigured source (no `LASTFM_API_KEY`/`SPOTIFY_ID`) is never attempted, so it never logs — this is purely for "I set this up and it isn't working" visibility, not spam on setups that only use a subset of sources.
 
 ## Browse embed changes (`musicbot/commands/library.py`)
 
@@ -100,7 +101,7 @@ async def get_album_summary(artist_folder: str, album_folder: str, sample_file: 
 
 - No `LASTFM_API_KEY` configured: summaries are simply omitted; art still works via embedded/Spotify.
 - No `SPOTIFY_ID`/`SPOTIFY_SECRET` configured: Spotify art/photo fallback is skipped; embedded art and Last.fm's last-resort image still apply.
-- A lookup times out, errors, or has no match: that specific field (art or summary) is omitted from the embed; browsing continues normally.
+- A lookup times out, errors, or has no match: that specific field (art or summary) is omitted from the embed, browsing continues normally, and a one-line message is logged to stderr (see Logging above) naming the source and the artist/album, so this is diagnosable without needing to reproduce it live.
 - No embedded art in any file, no Spotify config, no Last.fm match: the embed just has no thumbnail, same as today.
 
 ## Testing / verification approach
