@@ -74,6 +74,14 @@ async def stop():
     await asyncio.sleep(0.5)
 
 
+def get_session() -> ClientSession:
+    """Dynamic accessor for the module-private _session - a plain
+    `from linkutils import _session` at another module's top level
+    would bind None forever, since _session is only set later by the
+    async init() call at bot startup, not at import time."""
+    return _session
+
+
 class SiteTypes(Enum):
     SPOTIFY = auto()
     YT_DLP = auto()
