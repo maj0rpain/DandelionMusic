@@ -24,6 +24,10 @@ Configuration is via a `.env` file (see `.env.sample`) — at minimum `BOT_TOKEN
 
 There is no test suite in this repo (no `tests/` directory, no test runner configured).
 
+### Git remotes / PRs
+
+This repo has two remotes: `origin` (`maj0rpain/DandelionMusic`, the user's fork — branches get pushed here) and `upstream` (`solaluset/DandelionMusic`, the original project, which `gh`'s default repo resolution points at). Always create pull requests against `maj0rpain/DandelionMusic` — pass `--repo maj0rpain/DandelionMusic` explicitly to `gh pr create` rather than relying on `gh`'s default, which resolves to `upstream` and would open the PR against the wrong repo.
+
 ### Linting / formatting
 
 Enforced via pre-commit (`.pre-commit-config.yaml`), also run in CI (`.github/workflows/checks.yml`):
