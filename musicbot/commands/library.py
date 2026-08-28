@@ -1,15 +1,22 @@
-from typing import List, Optional
+import io
+from pathlib import Path
+from typing import List, NamedTuple, Optional
 
 import discord
 from discord.ext import commands
 
 from config import config
-from musicbot import library
+from musicbot import library, library_metadata
 from musicbot.bot import MusicBot
 from musicbot.loader import SongError
 from musicbot.utils import CheckError, dj_check, play_check
 
 PAGE_SIZE = 25
+
+
+class _Enrichment(NamedTuple):
+    summary: Optional[str]
+    art: Optional[library_metadata.ArtInfo]
 
 
 class LibrarySelect(discord.ui.Select):
@@ -78,6 +85,14 @@ class LibraryBrowseView(discord.ui.View):
         self.artist: Optional[str] = None
         self.album: Optional[str] = None
         self.page = 0
+        self._enrichment: Optional[_Enrichment] = None
+        # guards against a second click landing while a deferred
+        # descend()/go_back() is still resolving enrichment - deferring
+        # a component interaction clears its click spinner and
+        # re-enables the view immediately, it does not show a
+        # "thinking" placeholder, so without this two overlapping
+        # resolves could land out of order
+        self._busy: bool = False
         # set by the caller after sending (Task 8); needed so
         # on_timeout() can disable the stale buttons/select. Left None
         # for the slash-command path, where ctx.interaction is used
@@ -91,6 +106,11 @@ class LibraryBrowseView(discord.ui.View):
         if interaction.user.id != self.ctx.author.id:
             await interaction.response.send_message(
                 "This browser belongs to someone else.", ephemeral=True
+            )
+            return False
+        if self._busy:
+            await interaction.response.send_message(
+                "Still loading, please wait…", ephemeral=True
             )
             return False
         return True
@@ -112,6 +132,42 @@ class LibraryBrowseView(discord.ui.View):
 
     def _songs(self) -> List[library.LibrarySong]:
         return self.index.get(self.artist, {}).get(self.album, [])
+
+    def _first_sample_file(self) -> Optional[Path]:
+        albums = self.index.get(self.artist, {})
+        if not albums:
+            return None
+        first_album = sorted(albums.keys())[0]
+        songs = albums[first_album]
+        if not songs:
+            return None
+        return library.song_path(self.artist, first_album, songs[0].filename)
+
+    async def _resolve_enrichment(self) -> Optional[_Enrichment]:
+        if self.artist is None:
+            return None
+        if self.album is None:
+            sample = self._first_sample_file()
+            if sample is None:
+                return None
+            summary = await library_metadata.get_artist_summary(
+                self.artist, sample
+            )
+            art = await library_metadata.get_artist_photo(self.artist, sample)
+        else:
+            songs = self._songs()
+            if not songs:
+                return None
+            sample = library.song_path(
+                self.artist, self.album, songs[0].filename
+            )
+            summary = await library_metadata.get_album_summary(
+                self.artist, self.album, sample
+            )
+            art = await library_metadata.get_album_art(
+                self.artist, self.album, sample
+            )
+        return _Enrichment(summary=summary, art=art)
 
     def entries(self) -> List[str]:
         """Selection values - filenames at the song level, folder
@@ -143,7 +199,25 @@ class LibraryBrowseView(discord.ui.View):
         embed = discord.Embed(title=self.title(), color=config.EMBED_COLOR)
         if not self.entries():
             embed.description = config.LIBRARY_EMPTY
+        if self._enrichment:
+            if self._enrichment.summary:
+                embed.description = self._enrichment.summary
+            art = self._enrichment.art
+            if art and art.url:
+                embed.set_thumbnail(url=art.url)
+            elif art and art.data:
+                embed.set_thumbnail(url=f"attachment://cover.{art.extension}")
         return embed
+
+    def _attachments(self) -> List[discord.File]:
+        art = self._enrichment.art if self._enrichment else None
+        if art and art.data:
+            return [
+                discord.File(
+                    io.BytesIO(art.data), filename=f"cover.{art.extension}"
+                )
+            ]
+        return []
 
     def build_items(self):
         self.clear_items()
@@ -162,18 +236,28 @@ class LibraryBrowseView(discord.ui.View):
         if (self.page + 1) * PAGE_SIZE < len(entries):
             self.add_item(PageButton(self, 1, "Next ▶"))
 
-    async def render(self, interaction: discord.Interaction):
+    async def render(
+        self, interaction: discord.Interaction, use_followup: bool = False
+    ):
         self.build_items()
-        await interaction.response.edit_message(embed=self.embed(), view=self)
+        kwargs = {
+            "embed": self.embed(),
+            "view": self,
+            "attachments": self._attachments(),
+        }
+        if use_followup:
+            await interaction.edit_original_response(**kwargs)
+        else:
+            await interaction.response.edit_message(**kwargs)
 
     async def descend(self, interaction: discord.Interaction, chosen: str):
         self.page = 0
         if self.artist is None:
             self.artist = chosen
-            await self.render(interaction)
+            await self._enter_level(interaction)
         elif self.album is None:
             self.album = chosen
-            await self.render(interaction)
+            await self._enter_level(interaction)
         else:
             await self.queue_pairs(interaction, [(self.album, chosen)])
 
@@ -183,7 +267,16 @@ class LibraryBrowseView(discord.ui.View):
             self.album = None
         else:
             self.artist = None
-        await self.render(interaction)
+        await self._enter_level(interaction)
+
+    async def _enter_level(self, interaction: discord.Interaction):
+        self._busy = True
+        try:
+            await interaction.response.defer()
+            self._enrichment = await self._resolve_enrichment()
+            await self.render(interaction, use_followup=True)
+        finally:
+            self._busy = False
 
     async def queue_current_level(self, interaction: discord.Interaction):
         if self.album is not None:
