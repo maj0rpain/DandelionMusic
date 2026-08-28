@@ -9,7 +9,7 @@ from bs4 import BeautifulSoup
 from config import config
 from musicbot import linkutils
 from musicbot.linkutils import spotify_api
-from musicbot.audiotags import read_tags
+from musicbot.audiotags import read_artwork, read_tags
 
 # Dedicated pool (not the loop's shared default executor) for the
 # blocking calls this module makes - mutagen reads and spotipy's
@@ -235,3 +235,91 @@ async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
         _spotify_futures.pop(key).set_result(result)
 
     return result
+
+
+async def get_artist_photo(
+    artist_folder: str, sample_file: Path
+) -> Optional[ArtInfo]:
+    artist_name, _ = await _resolve_names(artist_folder, None, sample_file)
+
+    url = await _spotify_image(
+        lambda: _spotify_artist_image_sync(artist_name),
+        artist_name,
+        "artist photo",
+    )
+    if url:
+        return ArtInfo(url=url, data=None, extension=None)
+
+    info = await _lastfm_info(
+        "artist.getInfo", {"artist": artist_name}, artist_name
+    )
+    if info and info.image_url:
+        return ArtInfo(url=info.image_url, data=None, extension=None)
+
+    return None
+
+
+async def get_artist_summary(
+    artist_folder: str, sample_file: Path
+) -> Optional[str]:
+    artist_name, _ = await _resolve_names(artist_folder, None, sample_file)
+    info = await _lastfm_info(
+        "artist.getInfo", {"artist": artist_name}, artist_name
+    )
+    return info.summary if info else None
+
+
+async def get_album_art(
+    artist_folder: str, album_folder: str, sample_file: Path
+) -> Optional[ArtInfo]:
+    artist_name, album_name = await _resolve_names(
+        artist_folder, album_folder, sample_file
+    )
+
+    loop = asyncio.get_running_loop()
+    try:
+        embedded = await asyncio.wait_for(
+            loop.run_in_executor(_executor, read_artwork, sample_file),
+            timeout=3,
+        )
+    except asyncio.TimeoutError:
+        print(
+            f"library_metadata: reading artwork from {sample_file}"
+            " timed out",
+            file=sys.stderr,
+        )
+        embedded = None
+    if embedded is not None:
+        data, extension = embedded
+        return ArtInfo(url=None, data=data, extension=extension)
+
+    key = (artist_name, album_name)
+    url = await _spotify_image(
+        lambda: _spotify_album_image_sync(artist_name, album_name),
+        key,
+        "album art",
+    )
+    if url:
+        return ArtInfo(url=url, data=None, extension=None)
+
+    info = await _lastfm_info(
+        "album.getInfo", {"artist": artist_name, "album": album_name}, key
+    )
+    if info and info.image_url:
+        return ArtInfo(url=info.image_url, data=None, extension=None)
+
+    return None
+
+
+async def get_album_summary(
+    artist_folder: str, album_folder: str, sample_file: Path
+) -> Optional[str]:
+    artist_name, album_name = await _resolve_names(
+        artist_folder, album_folder, sample_file
+    )
+    info = await _lastfm_info(
+        "album.getInfo",
+        {"artist": artist_name, "album": album_name},
+        (artist_name, album_name),
+    )
+    return info.summary if info else None
