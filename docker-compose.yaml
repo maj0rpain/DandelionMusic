@@ -5,7 +5,7 @@ services:
     volumes:
       - backup:/app/backup
       - ./settings.db:/app/settings.db
-      # - /path/to/music:/music:ro
+      - F:/Music:/music:ro
     image: doybot:latest
     restart: unless-stopped
     environment:
