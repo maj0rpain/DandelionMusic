@@ -13,7 +13,7 @@
 ## Global Constraints
 
 - No test suite in this repo (no `tests/` dir, no pytest dependency). Every task's verification step is a runnable `uv run python -c "..."` script or shell command against real generated fixtures or stubbed network calls — not a pytest invocation.
-- `black -l 79` (79-char lines) and `flake8 --ignore E203,W503` must pass on every touched file before it's considered done. Neither is a project dependency (they only exist inside pre-commit's isolated hook environments per `CLAUDE.md`), so every lint step invokes them via `uv tool run black -l 79 --target-version py313 --check ...` / `uv tool run flake8 --ignore E203,W503 ...` — a bare `uv run black`/`uv run flake8` fails with "No such file or directory".
+- `black -l 79` (79-char lines) and `flake8 --ignore E203,W503` must pass on every touched file before it's considered done. Neither is a project dependency (they only exist inside pre-commit's isolated hook environments per `CLAUDE.md`), so every lint step invokes them via `uv tool run black@25.1.0 -l 79 --target-version py313 --check ...` / `uv tool run flake8@7.3.0 --ignore E203,W503 ...` — a bare `uv run black`/`uv run flake8` fails with "No such file or directory".
 - Run everything through `uv run ...` (project code/dependencies) or `uv tool run ...` (black/flake8, which live outside the project's own dependency set) — never a bare `python`/`pip`/`black`/`flake8` (per `CLAUDE.md`, deps are managed exclusively with `uv`).
 - No new dependencies: `mutagen==1.47.0`, `beautifulsoup4==4.15.0`, `aiohttp~=3.14.3`, `spotipy==2.26.0` are already in `pyproject.toml`.
 - Every new `Config` class attribute needs a comment directly above it — `Config.get_comments()` parses that comment for docs/exe use (per `CLAUDE.md`).
@@ -124,8 +124,8 @@ Expected: prints `OK` with no assertion errors.
 - [ ] **Step 3: Lint**
 
 ```bash
-uv tool run black -l 79 --target-version py313 --check musicbot/audiotags.py
-uv tool run flake8 --ignore E203,W503 musicbot/audiotags.py
+uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/audiotags.py
+uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/audiotags.py
 ```
 
 - [ ] **Step 4: Commit**
@@ -267,8 +267,8 @@ Expected: prints `OK` with no assertion errors.
 - [ ] **Step 4: Lint**
 
 ```bash
-uv tool run black -l 79 --target-version py313 --check musicbot/audiotags.py
-uv tool run flake8 --ignore E203,W503 musicbot/audiotags.py
+uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/audiotags.py
+uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/audiotags.py
 ```
 
 - [ ] **Step 5: Commit**
@@ -354,8 +354,8 @@ Expected: both scripts print their `OK` line.
 - [ ] **Step 4: Lint**
 
 ```bash
-uv tool run black -l 79 --target-version py313 --check config/config.py musicbot/linkutils.py
-uv tool run flake8 --ignore E203,W503 config/config.py musicbot/linkutils.py
+uv tool run black@25.1.0 -l 79 --target-version py313 --check config/config.py musicbot/linkutils.py
+uv tool run flake8@7.3.0 --ignore E203,W503 config/config.py musicbot/linkutils.py
 ```
 
 - [ ] **Step 5: Commit**
@@ -376,7 +376,7 @@ git commit -m "Add LASTFM_API_KEY config and linkutils.get_session()"
 - Consumes: `musicbot.audiotags.read_tags(path) -> AudioTags` (Task 1).
 - Produces: `ArtInfo` NamedTuple (`url`, `data`, `extension`); module-level `_executor: ThreadPoolExecutor`; `async def _resolve_names(artist_folder: str, album_folder: Optional[str], sample_file: Path) -> Tuple[str, Optional[str]]`. Tasks 5, 6, 7 depend on `_executor`; Task 7 depends on `_resolve_names` and `ArtInfo`.
 
-Note on imports across Tasks 4-7: this file is built incrementally, and each of these tasks' lint step must pass on its own — so each task's Step 1 only imports names it actually uses *at that point*, and later tasks extend the import block rather than everything being front-loaded here. Don't import `sys`, `Dict`, `BeautifulSoup`, `config`, `linkutils`, `spotify_api`, or `read_artwork` yet; Tasks 5-7 add those as they're needed.
+Note on imports across Tasks 4-7: this file is built incrementally, and each of these tasks' lint step must pass on its own — so each task's Step 1 only imports names it actually uses *at that point*, and later tasks extend the import block rather than everything being front-loaded here. This task does need `sys` (for the timeout-fallback log line below), but not yet `Dict`, `BeautifulSoup`, `config`, `linkutils`, `spotify_api`, or `read_artwork`; Tasks 5-7 add those as they're needed.
 
 - [ ] **Step 1: Write the module**
 
@@ -384,6 +384,7 @@ Create `musicbot/library_metadata.py`:
 
 ```python
 import asyncio
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
@@ -411,17 +412,32 @@ async def _resolve_names(
     """Resolves the query name(s) to use for external lookups,
     preferring tag data over the (possibly organizational-only,
     non-canonical) folder name: albumartist tag > artist tag > folder
-    name for the artist, album tag > folder name for the album."""
+    name for the artist, album tag > folder name for the album. A
+    hung/slow read (e.g. MUSIC_LIBRARY_PATH on a NAS mount) times out
+    and falls back to the folder names rather than blocking forever."""
     loop = asyncio.get_running_loop()
-    tags = await loop.run_in_executor(_executor, read_tags, sample_file)
-    artist_name = tags.album_artist or tags.artist or artist_folder
-    album_name = None
-    if album_folder is not None:
-        album_name = tags.album or album_folder
+    artist_name = artist_folder
+    album_name = album_folder
+    try:
+        tags = await asyncio.wait_for(
+            loop.run_in_executor(_executor, read_tags, sample_file),
+            timeout=3,
+        )
+    except asyncio.TimeoutError:
+        print(
+            f"library_metadata: reading tags from {sample_file} timed out",
+            file=sys.stderr,
+        )
+    else:
+        artist_name = tags.album_artist or tags.artist or artist_folder
+        if album_folder is not None:
+            album_name = tags.album or album_folder
     return artist_name, album_name
 ```
 
-- [ ] **Step 2: Verify import and name resolution ordering**
+- [ ] **Step 2: Verify import, name resolution ordering, and the timeout fallback**
+
+Note: these scripts use a literal dummy path (`/tmp/dummy.mp3`), not `Path(__file__)` — `python -c "..."` never defines `__file__` in `__main__`, so `Path(__file__)` would raise `NameError`. The file doesn't need to exist since `read_tags` is mocked in every case.
 
 ```bash
 uv run python -c "import musicbot.library_metadata; print('import OK')"
@@ -429,9 +445,11 @@ uv run python -c "import musicbot.library_metadata; print('import OK')"
 uv run python -c "
 import asyncio
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 from musicbot import library_metadata
 from musicbot.audiotags import AudioTags
+
+DUMMY = Path('/tmp/dummy.mp3')
 
 async def main():
     with patch.object(
@@ -443,7 +461,7 @@ async def main():
         ),
     ):
         artist, album = await library_metadata._resolve_names(
-            'Folder Artist', 'Folder Album', Path(__file__)
+            'Folder Artist', 'Folder Album', DUMMY
         )
     assert artist == 'AlbumArtist Tag', artist
     assert album == 'Album Tag', album
@@ -457,7 +475,7 @@ async def main():
         ),
     ):
         artist, album = await library_metadata._resolve_names(
-            'Folder Artist', 'Folder Album', Path(__file__)
+            'Folder Artist', 'Folder Album', DUMMY
         )
     assert artist == 'Folder Artist', artist
     assert album == 'Folder Album', album
@@ -471,10 +489,24 @@ async def main():
         ),
     ):
         artist, album = await library_metadata._resolve_names(
-            'Folder Artist', None, Path(__file__)
+            'Folder Artist', None, DUMMY
         )
     assert artist == 'Artist Tag', artist
     assert album is None, album
+
+    # a hung/timed-out read falls back to folder names instead of
+    # blocking forever (simulated by forcing wait_for to time out,
+    # rather than actually waiting out a real 3s timeout)
+    with patch.object(
+        library_metadata.asyncio,
+        'wait_for',
+        AsyncMock(side_effect=asyncio.TimeoutError),
+    ):
+        artist, album = await library_metadata._resolve_names(
+            'Folder Artist', 'Folder Album', DUMMY
+        )
+    assert artist == 'Folder Artist', artist
+    assert album == 'Folder Album', album
 
     print('OK')
 
@@ -487,8 +519,8 @@ Expected: both scripts print `import OK` and `OK` respectively.
 - [ ] **Step 3: Lint**
 
 ```bash
-uv tool run black -l 79 --target-version py313 --check musicbot/library_metadata.py
-uv tool run flake8 --ignore E203,W503 musicbot/library_metadata.py
+uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/library_metadata.py
+uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/library_metadata.py
 ```
 
 - [ ] **Step 4: Commit**
@@ -515,6 +547,7 @@ At the top of `musicbot/library_metadata.py`, change:
 
 ```python
 import asyncio
+import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
@@ -537,6 +570,8 @@ from config import config
 from musicbot import linkutils
 from musicbot.audiotags import read_tags
 ```
+
+(`sys` was already added in Task 4; this step adds `Dict`, `BeautifulSoup`, `config`, and `linkutils`.)
 
 - [ ] **Step 2: Append Last.fm integration**
 
@@ -561,9 +596,7 @@ def _clean_summary(raw: str, max_length: int = 400) -> Optional[str]:
     return text[:max_length].rsplit(" ", 1)[0] + "…"
 
 
-async def _fetch_lastfm(
-    method: str, params: Dict[str, str]
-) -> Optional[dict]:
+async def _fetch_lastfm(method: str, params: Dict[str, str]) -> Optional[dict]:
     session = linkutils.get_session()
     query = {
         "method": method,
@@ -576,7 +609,13 @@ async def _fetch_lastfm(
     ) as response:
         if response.status != 200:
             return None
-        return await response.json(content_type=None)
+        data = await response.json(content_type=None)
+    # Last.fm returns HTTP 200 even for a bad/expired API key or
+    # rate limiting - the failure only shows up as an "error" field
+    # in the body, which would otherwise silently look like "no match"
+    if "error" in data:
+        raise RuntimeError(f"{data.get('message')} (code {data.get('error')})")
+    return data
 
 
 async def _lastfm_info(
@@ -592,7 +631,11 @@ async def _lastfm_info(
     _lastfm_futures[key] = asyncio.get_running_loop().create_future()
 
     result: Optional[_LastfmInfo] = None
-    logged = False
+    # a timeout/exception is transient and must not be cached as a
+    # permanent "no match" - only a real fetched-successfully outcome
+    # (match or genuine no-match) is worth remembering for the rest
+    # of the process's lifetime
+    transient_failure = False
     try:
         try:
             data = await asyncio.wait_for(
@@ -604,7 +647,7 @@ async def _lastfm_info(
                 f" for {params}",
                 file=sys.stderr,
             )
-            logged = True
+            transient_failure = True
             data = None
         except Exception as e:
             print(
@@ -612,7 +655,7 @@ async def _lastfm_info(
                 f" for {params}: {e}",
                 file=sys.stderr,
             )
-            logged = True
+            transient_failure = True
             data = None
 
         node = (data.get("artist") or data.get("album")) if data else None
@@ -624,31 +667,28 @@ async def _lastfm_info(
 
             images = node.get("image") or []
             image_url = next(
-                (
-                    img["#text"]
-                    for img in reversed(images)
-                    if img.get("#text")
-                ),
+                (img["#text"] for img in reversed(images) if img.get("#text")),
                 None,
             )
             if summary or image_url:
                 result = _LastfmInfo(summary=summary, image_url=image_url)
 
-        if result is None and not logged:
+        if result is None and not transient_failure:
             print(
                 f"library_metadata: Last.fm {method} found no match"
                 f" for {params}",
                 file=sys.stderr,
             )
 
-        _lastfm_cache[key] = result
+        if not transient_failure:
+            _lastfm_cache[key] = result
     finally:
         _lastfm_futures.pop(key).set_result(result)
 
     return result
 ```
 
-- [ ] **Step 3: Verify caching, dedup, unconfigured behavior, and HTML stripping**
+- [ ] **Step 3: Verify caching, dedup, unconfigured behavior, HTML stripping, transient-failure handling, and the error-body case**
 
 ```bash
 uv run python -c "
@@ -712,19 +752,58 @@ async def main():
         assert call_count == 1, call_count
         assert r3 == r1
 
+    # a transient failure is NOT cached - a later retry re-fetches
+    # rather than being permanently stuck as 'no match'
+    library_metadata._lastfm_cache.clear()
+    library_metadata._lastfm_futures.clear()
+    attempt = 0
+
+    async def flaky_fetch(method, params):
+        nonlocal attempt
+        attempt += 1
+        if attempt == 1:
+            raise RuntimeError('boom')
+        return {'artist': {'bio': {'summary': 'ok'}, 'image': []}}
+
+    with patch.object(library_metadata, '_fetch_lastfm', flaky_fetch):
+        first = await library_metadata._lastfm_info(
+            'artist.getInfo', {'artist': 'Y'}, 'Y'
+        )
+        assert first is None, first
+        assert 'Y' not in library_metadata._lastfm_cache
+        second = await library_metadata._lastfm_info(
+            'artist.getInfo', {'artist': 'Y'}, 'Y'
+        )
+        assert second is not None and second.summary == 'ok', second
+        assert 'Y' in library_metadata._lastfm_cache
+
+    # HTTP 200 with an error body is a real failure, not silent
+    # 'no match' - _fetch_lastfm must raise so _lastfm_info logs it
+    async def error_body_fetch(method, params):
+        raise RuntimeError('Invalid API key (code 10)')
+
+    library_metadata._lastfm_cache.clear()
+    library_metadata._lastfm_futures.clear()
+    with patch.object(library_metadata, '_fetch_lastfm', error_body_fetch):
+        result = await library_metadata._lastfm_info(
+            'artist.getInfo', {'artist': 'Z'}, 'Z'
+        )
+        assert result is None
+        assert 'Z' not in library_metadata._lastfm_cache
+
     print('OK')
 
 asyncio.run(main())
 "
 ```
 
-Expected: prints `OK` with no assertion errors. (`call_count == 1` after two concurrent calls proves dedup; staying at `1` after the third call proves caching.)
+Expected: prints `OK` with no assertion errors. (`call_count == 1` after two concurrent calls proves dedup; staying at `1` after the third call proves caching. The `flaky_fetch`/`error_body_fetch` blocks confirm transient failures and Last.fm error responses are logged and retried rather than being permanently cached as a false "no match" — see `_fetch_lastfm`'s own `"error" in data` check, which is what actually raises for a real Last.fm error response; this script stubs `_fetch_lastfm` directly to isolate `_lastfm_info`'s caching behavior from that check.)
 
 - [ ] **Step 4: Lint**
 
 ```bash
-uv tool run black -l 79 --target-version py313 --check musicbot/library_metadata.py
-uv tool run flake8 --ignore E203,W503 musicbot/library_metadata.py
+uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/library_metadata.py
+uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/library_metadata.py
 ```
 
 - [ ] **Step 5: Commit**
@@ -805,6 +884,9 @@ async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
     _spotify_futures[key] = asyncio.get_running_loop().create_future()
 
     result: Optional[str] = None
+    # see _lastfm_info's identical reasoning - a timeout/exception is
+    # transient and must not be cached as a permanent "no match"
+    transient_failure = False
     try:
         loop = asyncio.get_running_loop()
         try:
@@ -816,12 +898,13 @@ async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
                 f"library_metadata: Spotify {label} timed out for {key}",
                 file=sys.stderr,
             )
+            transient_failure = True
         except Exception as e:
             print(
-                f"library_metadata: Spotify {label} failed"
-                f" for {key}: {e}",
+                f"library_metadata: Spotify {label} failed for {key}: {e}",
                 file=sys.stderr,
             )
+            transient_failure = True
         else:
             if result is None:
                 print(
@@ -829,14 +912,15 @@ async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
                     f" for {key}",
                     file=sys.stderr,
                 )
-        _spotify_cache[key] = result
+        if not transient_failure:
+            _spotify_cache[key] = result
     finally:
         _spotify_futures.pop(key).set_result(result)
 
     return result
 ```
 
-- [ ] **Step 3: Verify caching, dedup, and unconfigured behavior**
+- [ ] **Step 3: Verify caching, dedup, unconfigured behavior, and transient-failure handling**
 
 ```bash
 uv run python -c "
@@ -881,6 +965,30 @@ async def main():
         )
         assert call_count == 1, call_count
 
+    # a transient failure is NOT cached - a later retry re-fetches
+    library_metadata._spotify_cache.clear()
+    library_metadata._spotify_futures.clear()
+    attempt = 0
+
+    def flaky_lookup():
+        nonlocal attempt
+        attempt += 1
+        if attempt == 1:
+            raise RuntimeError('boom')
+        return 'http://example.com/ok.jpg'
+
+    with patch.object(library_metadata, 'spotify_api', object()):
+        first = await library_metadata._spotify_image(
+            flaky_lookup, 'W', 'artist photo'
+        )
+        assert first is None, first
+        assert 'W' not in library_metadata._spotify_cache
+        second = await library_metadata._spotify_image(
+            flaky_lookup, 'W', 'artist photo'
+        )
+        assert second == 'http://example.com/ok.jpg', second
+        assert 'W' in library_metadata._spotify_cache
+
     print('OK')
 
 asyncio.run(main())
@@ -892,8 +1000,8 @@ Expected: prints `OK` with no assertion errors.
 - [ ] **Step 4: Lint**
 
 ```bash
-uv tool run black -l 79 --target-version py313 --check musicbot/library_metadata.py
-uv tool run flake8 --ignore E203,W503 musicbot/library_metadata.py
+uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/library_metadata.py
+uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/library_metadata.py
 ```
 
 - [ ] **Step 5: Commit**
@@ -973,7 +1081,18 @@ async def get_album_art(
     )
 
     loop = asyncio.get_running_loop()
-    embedded = await loop.run_in_executor(_executor, read_artwork, sample_file)
+    try:
+        embedded = await asyncio.wait_for(
+            loop.run_in_executor(_executor, read_artwork, sample_file),
+            timeout=3,
+        )
+    except asyncio.TimeoutError:
+        print(
+            f"library_metadata: reading artwork from {sample_file}"
+            " timed out",
+            file=sys.stderr,
+        )
+        embedded = None
     if embedded is not None:
         data, extension = embedded
         return ArtInfo(url=None, data=data, extension=extension)
@@ -1020,6 +1139,8 @@ from unittest.mock import AsyncMock, patch
 from musicbot import library_metadata
 from musicbot.audiotags import AudioTags
 
+DUMMY = Path('/tmp/dummy.mp3')
+
 async def main():
     tags = AudioTags(
         title=None, artist='A', duration=1, album='Alb', album_artist=None
@@ -1032,7 +1153,7 @@ async def main():
         library_metadata, 'read_artwork', return_value=(b'bytes', 'jpeg')
     ):
         art = await library_metadata.get_album_art(
-            'FolderArtist', 'FolderAlbum', Path(__file__)
+            'FolderArtist', 'FolderAlbum', DUMMY
         )
     assert art.data == b'bytes' and art.extension == 'jpeg', art
     assert art.url is None, art
@@ -1052,7 +1173,7 @@ async def main():
         AsyncMock(side_effect=AssertionError('should not be called')),
     ):
         art = await library_metadata.get_album_art(
-            'FolderArtist', 'FolderAlbum', Path(__file__)
+            'FolderArtist', 'FolderAlbum', DUMMY
         )
     assert art.url == 'http://s.example/x.jpg' and art.data is None, art
 
@@ -1072,10 +1193,10 @@ async def main():
         AsyncMock(return_value=lastfm_result),
     ):
         art = await library_metadata.get_album_art(
-            'FolderArtist', 'FolderAlbum', Path(__file__)
+            'FolderArtist', 'FolderAlbum', DUMMY
         )
         summary = await library_metadata.get_album_summary(
-            'FolderArtist', 'FolderAlbum', Path(__file__)
+            'FolderArtist', 'FolderAlbum', DUMMY
         )
     assert art.url == 'http://l.example/y.jpg', art
     assert summary == 'bio', summary
@@ -1091,7 +1212,7 @@ async def main():
         library_metadata, '_lastfm_info', AsyncMock(return_value=None)
     ):
         art = await library_metadata.get_album_art(
-            'FolderArtist', 'FolderAlbum', Path(__file__)
+            'FolderArtist', 'FolderAlbum', DUMMY
         )
     assert art is None, art
 
@@ -1113,10 +1234,10 @@ async def main():
         ),
     ):
         photo = await library_metadata.get_artist_photo(
-            'FolderArtist', Path(__file__)
+            'FolderArtist', DUMMY
         )
         summary = await library_metadata.get_artist_summary(
-            'FolderArtist', Path(__file__)
+            'FolderArtist', DUMMY
         )
     assert photo.url == 'http://l.example/artist.jpg', photo
     assert summary == 'artist bio', summary
@@ -1132,8 +1253,8 @@ Expected: prints `OK` with no assertion errors.
 - [ ] **Step 4: Lint**
 
 ```bash
-uv tool run black -l 79 --target-version py313 --check musicbot/library_metadata.py
-uv tool run flake8 --ignore E203,W503 musicbot/library_metadata.py
+uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/library_metadata.py
+uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/library_metadata.py
 ```
 
 - [ ] **Step 5: Commit**
@@ -1254,9 +1375,7 @@ After the existing `_songs()` method, add:
         songs = albums[first_album]
         if not songs:
             return None
-        return library.song_path(
-            self.artist, first_album, songs[0].filename
-        )
+        return library.song_path(self.artist, first_album, songs[0].filename)
 
     async def _resolve_enrichment(self) -> Optional[_Enrichment]:
         if self.artist is None:
@@ -1268,9 +1387,7 @@ After the existing `_songs()` method, add:
             summary = await library_metadata.get_artist_summary(
                 self.artist, sample
             )
-            art = await library_metadata.get_artist_photo(
-                self.artist, sample
-            )
+            art = await library_metadata.get_artist_photo(self.artist, sample)
         else:
             songs = self._songs()
             if not songs:
@@ -1470,8 +1587,8 @@ This codebase has no automated way to simulate real Discord interactions (`defer
 - [ ] **Step 9: Lint**
 
 ```bash
-uv tool run black -l 79 --target-version py313 --check musicbot/commands/library.py
-uv tool run flake8 --ignore E203,W503 musicbot/commands/library.py
+uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/commands/library.py
+uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/commands/library.py
 ```
 
 - [ ] **Step 10: Commit**
