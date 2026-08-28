@@ -8,6 +8,7 @@ from bs4 import BeautifulSoup
 
 from config import config
 from musicbot import linkutils
+from musicbot.linkutils import spotify_api
 from musicbot.audiotags import read_tags
 
 # Dedicated pool (not the loop's shared default executor) for the
@@ -160,5 +161,77 @@ async def _lastfm_info(
             _lastfm_cache[key] = result
     finally:
         _lastfm_futures.pop(key).set_result(result)
+
+    return result
+
+
+_spotify_cache: Dict[object, Optional[str]] = {}
+_spotify_futures: Dict[object, asyncio.Future] = {}
+
+
+def _spotify_artist_image_sync(name: str) -> Optional[str]:
+    results = spotify_api.search(q=name, type="artist", limit=1)
+    items = results.get("artists", {}).get("items", [])
+    if not items:
+        return None
+    images = items[0].get("images", [])
+    return images[0]["url"] if images else None
+
+
+def _spotify_album_image_sync(
+    artist_name: str, album_name: str
+) -> Optional[str]:
+    query = f"artist:{artist_name} album:{album_name}"
+    results = spotify_api.search(q=query, type="album", limit=1)
+    items = results.get("albums", {}).get("items", [])
+    if not items:
+        return None
+    images = items[0].get("images", [])
+    return images[0]["url"] if images else None
+
+
+async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
+    if spotify_api is None:
+        return None
+    if key in _spotify_cache:
+        return _spotify_cache[key]
+    future = _spotify_futures.get(key)
+    if future:
+        return await future
+    _spotify_futures[key] = asyncio.get_running_loop().create_future()
+
+    result: Optional[str] = None
+    # see _lastfm_info's identical reasoning - a timeout/exception is
+    # transient and must not be cached as a permanent "no match"
+    transient_failure = False
+    try:
+        loop = asyncio.get_running_loop()
+        try:
+            result = await asyncio.wait_for(
+                loop.run_in_executor(_executor, fn), timeout=3
+            )
+        except asyncio.TimeoutError:
+            print(
+                f"library_metadata: Spotify {label} timed out for {key}",
+                file=sys.stderr,
+            )
+            transient_failure = True
+        except Exception as e:
+            print(
+                f"library_metadata: Spotify {label} failed for {key}: {e}",
+                file=sys.stderr,
+            )
+            transient_failure = True
+        else:
+            if result is None:
+                print(
+                    f"library_metadata: Spotify found no {label}"
+                    f" for {key}",
+                    file=sys.stderr,
+                )
+        if not transient_failure:
+            _spotify_cache[key] = result
+    finally:
+        _spotify_futures.pop(key).set_result(result)
 
     return result
