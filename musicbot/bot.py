@@ -108,6 +108,12 @@ class MusicBot(commands.Bot):
                 for audiocontroller in self.audio_controllers.values()
             )
         )
+        # this loop's aiohttp session (see linkutils.get_session).
+        # Imported here, not at module level: linkutils pulls in
+        # loader, which imports this module.
+        from musicbot import linkutils
+
+        await linkutils.stop()
         return await super().close()
 
     async def on_ready(self):

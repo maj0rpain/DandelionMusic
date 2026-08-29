@@ -5,7 +5,7 @@ from enum import Enum, auto
 from traceback import print_exc
 from urllib.parse import urlparse
 from multiprocessing import current_process
-from typing import Optional, Union, List
+from typing import Dict, Optional, Union, List
 
 from spotipy import Spotify
 from bs4 import BeautifulSoup
@@ -60,26 +60,38 @@ spotify_regex = re.compile(
 
 headers = {}
 
-_session = None
+# aiohttp binds a ClientSession to whatever loop is running when it is
+# constructed and refuses to be driven from any other one, raising
+# "Timeout context manager should be used inside a task". This process
+# runs two loops - the bot's own, and loader.py's private _loop that
+# drives the Spotify page lookups - so a single global session would be
+# usable from only one of them. Keep one session per loop instead.
+_sessions: Dict[asyncio.AbstractEventLoop, ClientSession] = {}
 
 
 async def init():
-    global _session
-    _session = ClientSession(headers=headers)
+    get_session()
 
 
 async def stop():
-    await _session.close()
+    session = _sessions.pop(asyncio.get_running_loop(), None)
+    if session is None:
+        return
+    await session.close()
     # according to aiohttp docs, we need to wait a little after closing session
     await asyncio.sleep(0.5)
 
 
 def get_session() -> ClientSession:
-    """Dynamic accessor for the module-private _session - a plain
-    `from linkutils import _session` at another module's top level
-    would bind None forever, since _session is only set later by the
-    async init() call at bot startup, not at import time."""
-    return _session
+    """The ClientSession belonging to the calling loop, opened on
+    first use. Never cache what this returns across loops (and never
+    `from linkutils import _sessions` at another module's top level) -
+    always call it from inside the coroutine that does the request."""
+    loop = asyncio.get_running_loop()
+    session = _sessions.get(loop)
+    if session is None:
+        session = _sessions[loop] = ClientSession(headers=headers)
+    return session
 
 
 class SiteTypes(Enum):
@@ -97,7 +109,7 @@ class SpotifyPlaylistTypes(Enum):
 
 
 async def get_soup(url: str) -> BeautifulSoup:
-    async with _session.get(url) as response:
+    async with get_session().get(url) as response:
         response.raise_for_status()
         page = await response.text()
 
