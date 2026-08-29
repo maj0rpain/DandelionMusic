@@ -1,7 +1,7 @@
 import io
 import sys
 from pathlib import Path
-from typing import List, NamedTuple, Optional
+from typing import List, Optional
 
 import discord
 from discord.ext import commands
@@ -13,11 +13,6 @@ from musicbot.loader import SongError
 from musicbot.utils import CheckError, dj_check, play_check
 
 PAGE_SIZE = 25
-
-
-class _Enrichment(NamedTuple):
-    summary: Optional[str]
-    art: Optional[library_metadata.ArtInfo]
 
 
 class LibrarySelect(discord.ui.Select):
@@ -86,7 +81,7 @@ class LibraryBrowseView(discord.ui.View):
         self.artist: Optional[str] = None
         self.album: Optional[str] = None
         self.page = 0
-        self._enrichment: Optional[_Enrichment] = None
+        self._enrichment: Optional[library_metadata.Enrichment] = None
         # guards against a second click landing while a deferred
         # descend()/go_back() is still resolving enrichment - deferring
         # a component interaction clears its click spinner and
@@ -144,31 +139,25 @@ class LibraryBrowseView(discord.ui.View):
             return None
         return library.song_path(self.artist, first_album, songs[0].filename)
 
-    async def _resolve_enrichment(self) -> Optional[_Enrichment]:
+    async def _resolve_enrichment(
+        self,
+    ) -> Optional[library_metadata.Enrichment]:
         if self.artist is None:
             return None
         if self.album is None:
             sample = self._first_sample_file()
             if sample is None:
                 return None
-            summary = await library_metadata.get_artist_summary(
+            return await library_metadata.get_artist_enrichment(
                 self.artist, sample
             )
-            art = await library_metadata.get_artist_photo(self.artist, sample)
-        else:
-            songs = self._songs()
-            if not songs:
-                return None
-            sample = library.song_path(
-                self.artist, self.album, songs[0].filename
-            )
-            summary = await library_metadata.get_album_summary(
-                self.artist, self.album, sample
-            )
-            art = await library_metadata.get_album_art(
-                self.artist, self.album, sample
-            )
-        return _Enrichment(summary=summary, art=art)
+        songs = self._songs()
+        if not songs:
+            return None
+        sample = library.song_path(self.artist, self.album, songs[0].filename)
+        return await library_metadata.get_album_enrichment(
+            self.artist, self.album, sample
+        )
 
     def entries(self) -> List[str]:
         """Selection values - filenames at the song level, folder

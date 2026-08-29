@@ -1,6 +1,7 @@
 import asyncio
 import re
 import sys
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, NamedTuple, Optional, Tuple
@@ -19,6 +20,27 @@ from musicbot.audiotags import read_artwork, read_tags
 # external calls could otherwise pile up threads in whatever pool the
 # rest of the bot shares.
 _executor = ThreadPoolExecutor(max_workers=4)
+
+
+# A transient failure is deliberately not cached as a result, but
+# retrying it on every navigation makes a persistently broken backend
+# (bad credentials, an outage, an unreachable host) pay its full
+# timeout again for each new key. Suppress its retries for a while.
+_TRANSIENT_COOLDOWN = 60
+
+
+def _in_cooldown(deadlines: Dict[object, float], key: object) -> bool:
+    deadline = deadlines.get(key)
+    if deadline is None:
+        return False
+    if time.monotonic() < deadline:
+        return True
+    del deadlines[key]
+    return False
+
+
+def _start_cooldown(deadlines: Dict[object, float], key: object) -> None:
+    deadlines[key] = time.monotonic() + _TRANSIENT_COOLDOWN
 
 
 class ArtInfo(NamedTuple):
@@ -68,6 +90,7 @@ class _LastfmInfo(NamedTuple):
 
 _lastfm_cache: Dict[object, Optional[_LastfmInfo]] = {}
 _lastfm_futures: Dict[object, asyncio.Future] = {}
+_lastfm_cooldown: Dict[object, float] = {}
 
 
 # Last.fm serves this boilerplate link as the *entire* bio/wiki summary
@@ -122,6 +145,8 @@ async def _lastfm_info(
         return None
     if key in _lastfm_cache:
         return _lastfm_cache[key]
+    if _in_cooldown(_lastfm_cooldown, key):
+        return None
     future = _lastfm_futures.get(key)
     if future:
         # shielded: this waiter being cancelled (view teardown, bot
@@ -185,7 +210,9 @@ async def _lastfm_info(
                 file=sys.stderr,
             )
 
-        if not transient_failure:
+        if transient_failure:
+            _start_cooldown(_lastfm_cooldown, key)
+        else:
             _lastfm_cache[key] = result
     finally:
         pending = _lastfm_futures.pop(key)
@@ -197,6 +224,7 @@ async def _lastfm_info(
 
 _spotify_cache: Dict[object, Optional[str]] = {}
 _spotify_futures: Dict[object, asyncio.Future] = {}
+_spotify_cooldown: Dict[object, float] = {}
 
 
 def _spotify_artist_image_sync(name: str) -> Optional[str]:
@@ -225,6 +253,8 @@ async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
         return None
     if key in _spotify_cache:
         return _spotify_cache[key]
+    if _in_cooldown(_spotify_cooldown, key):
+        return None
     future = _spotify_futures.get(key)
     if future:
         # see _lastfm_info - shielded against waiter cancellation
@@ -260,7 +290,9 @@ async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
                     f" for {key}",
                     file=sys.stderr,
                 )
-        if not transient_failure:
+        if transient_failure:
+            _start_cooldown(_spotify_cooldown, key)
+        else:
             _spotify_cache[key] = result
     finally:
         pending = _spotify_futures.pop(key)
@@ -270,11 +302,12 @@ async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
     return result
 
 
-async def get_artist_photo(
-    artist_folder: str, sample_file: Path
-) -> Optional[ArtInfo]:
-    artist_name, _ = await _resolve_names(artist_folder, None, sample_file)
+class Enrichment(NamedTuple):
+    summary: Optional[str]
+    art: Optional[ArtInfo]
 
+
+async def _artist_photo(artist_name: str) -> Optional[ArtInfo]:
     url = await _spotify_image(
         lambda: _spotify_artist_image_sync(artist_name),
         artist_name,
@@ -292,23 +325,16 @@ async def get_artist_photo(
     return None
 
 
-async def get_artist_summary(
-    artist_folder: str, sample_file: Path
-) -> Optional[str]:
-    artist_name, _ = await _resolve_names(artist_folder, None, sample_file)
+async def _artist_summary(artist_name: str) -> Optional[str]:
     info = await _lastfm_info(
         "artist.getInfo", {"artist": artist_name}, artist_name
     )
     return info.summary if info else None
 
 
-async def get_album_art(
-    artist_folder: str, album_folder: str, sample_file: Path
+async def _album_art(
+    artist_name: str, album_name: str, sample_file: Path
 ) -> Optional[ArtInfo]:
-    artist_name, album_name = await _resolve_names(
-        artist_folder, album_folder, sample_file
-    )
-
     loop = asyncio.get_running_loop()
     try:
         embedded = await asyncio.wait_for(
@@ -351,15 +377,43 @@ async def get_album_art(
     return None
 
 
-async def get_album_summary(
-    artist_folder: str, album_folder: str, sample_file: Path
-) -> Optional[str]:
-    artist_name, album_name = await _resolve_names(
-        artist_folder, album_folder, sample_file
-    )
+async def _album_summary(artist_name: str, album_name: str) -> Optional[str]:
     info = await _lastfm_info(
         "album.getInfo",
         {"artist": artist_name, "album": album_name},
         (artist_name, album_name),
     )
     return info.summary if info else None
+
+
+async def get_artist_enrichment(
+    artist_folder: str, sample_file: Path
+) -> Enrichment:
+    """Blurb and photo for one artist browse level. The two lookups
+    are one call because they share a resolved name: exposing them
+    separately made every navigation resolve names twice, doing the
+    same blocking tag read of the same file twice. Running them
+    concurrently also overlaps their waits instead of summing them -
+    the Last.fm lookup they have in common dedupes through
+    _lastfm_futures rather than firing twice."""
+    artist_name, _ = await _resolve_names(artist_folder, None, sample_file)
+    summary, art = await asyncio.gather(
+        _artist_summary(artist_name),
+        _artist_photo(artist_name),
+    )
+    return Enrichment(summary=summary, art=art)
+
+
+async def get_album_enrichment(
+    artist_folder: str, album_folder: str, sample_file: Path
+) -> Enrichment:
+    """Blurb and cover art for one album browse level. See
+    get_artist_enrichment for why this is a single call."""
+    artist_name, album_name = await _resolve_names(
+        artist_folder, album_folder, sample_file
+    )
+    summary, art = await asyncio.gather(
+        _album_summary(artist_name, album_name),
+        _album_art(artist_name, album_name, sample_file),
+    )
+    return Enrichment(summary=summary, art=art)
