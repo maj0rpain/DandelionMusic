@@ -1,12 +1,9 @@
 import asyncio
-import re
 import sys
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, NamedTuple, Optional, Tuple
-
-from bs4 import BeautifulSoup
 
 from config import config
 from musicbot import linkutils
@@ -84,8 +81,10 @@ async def _resolve_names(
 
 
 class _LastfmInfo(NamedTuple):
-    summary: Optional[str]
     image_url: Optional[str]
+    listeners: Optional[int]
+    playcount: Optional[int]
+    tags: Tuple[str, ...]
 
 
 _lastfm_cache: Dict[object, Optional[_LastfmInfo]] = {}
@@ -93,24 +92,38 @@ _lastfm_futures: Dict[object, asyncio.Future] = {}
 _lastfm_cooldown: Dict[object, float] = {}
 
 
-# Last.fm serves this boilerplate link as the *entire* bio/wiki summary
-# for an entity that has no write-up, and tacks it onto genuine ones
-_READ_MORE = re.compile(r"\s*Read more on Last\.fm\s*\.?\s*$")
-
 # since Last.fm's 2019 image-licensing change, artist.getInfo returns
 # this one grey-star placeholder as the image for every artist - a real
 # URL, so it has to be rejected by hash rather than by being absent
 _PLACEHOLDER_IMAGE = "2a96cbd8b46e442fc41c2b86b821562f"
 
 
-def _clean_summary(raw: str, max_length: int = 400) -> Optional[str]:
-    text = BeautifulSoup(raw, "html.parser").get_text().strip()
-    text = _READ_MORE.sub("", text).strip()
-    if not text:
+def _as_int(value) -> Optional[int]:
+    """Last.fm returns its counters as strings, and as "0" for an
+    entity nobody has ever played - neither is worth showing."""
+    try:
+        number = int(value)
+    except (TypeError, ValueError):
         return None
-    if len(text) <= max_length:
-        return text
-    return text[:max_length].rsplit(" ", 1)[0] + "…"
+    return number or None
+
+
+def _lastfm_tags(node: dict) -> Tuple[str, ...]:
+    """Community tags for an entity. Last.fm serves these as
+    {"tag": [...]}, but collapses the container to an empty string
+    when there are none and unwraps a lone tag into a bare object."""
+    container = node.get("tags") or node.get("toptags") or {}
+    if not isinstance(container, dict):
+        return ()
+    tags = container.get("tag") or []
+    if isinstance(tags, dict):
+        tags = [tags]
+    names = [
+        tag["name"]
+        for tag in tags
+        if isinstance(tag, dict) and tag.get("name")
+    ]
+    return tuple(names[:3])
 
 
 async def _fetch_lastfm(method: str, params: Dict[str, str]) -> dict:
@@ -185,10 +198,12 @@ async def _lastfm_info(
 
         node = (data.get("artist") or data.get("album")) if data else None
         if node:
-            bio = (node.get("bio") or {}).get("summary") or (
-                node.get("wiki") or {}
-            ).get("summary")
-            summary = _clean_summary(bio) if bio else None
+            # artist.getInfo nests its counters under "stats";
+            # album.getInfo puts the same keys at the top level
+            counters = node.get("stats") or node
+            listeners = _as_int(counters.get("listeners"))
+            playcount = _as_int(counters.get("playcount"))
+            tags = _lastfm_tags(node)
 
             images = node.get("image") or []
             image_url = next(
@@ -200,8 +215,13 @@ async def _lastfm_info(
                 ),
                 None,
             )
-            if summary or image_url:
-                result = _LastfmInfo(summary=summary, image_url=image_url)
+            if image_url or listeners or playcount or tags:
+                result = _LastfmInfo(
+                    image_url=image_url,
+                    listeners=listeners,
+                    playcount=playcount,
+                    tags=tags,
+                )
 
         if result is None and not transient_failure:
             print(
@@ -222,33 +242,69 @@ async def _lastfm_info(
     return result
 
 
-_spotify_cache: Dict[object, Optional[str]] = {}
+class _SpotifyInfo(NamedTuple):
+    image_url: Optional[str]
+    popularity: Optional[int]  # 0-100
+    followers: Optional[int]  # artist level only
+    release_date: Optional[str]  # album level only
+
+
+_spotify_cache: Dict[object, Optional[_SpotifyInfo]] = {}
 _spotify_futures: Dict[object, asyncio.Future] = {}
 _spotify_cooldown: Dict[object, float] = {}
 
 
-def _spotify_artist_image_sync(name: str) -> Optional[str]:
+def _spotify_artist_sync(name: str) -> Optional[_SpotifyInfo]:
     results = spotify_api.search(q=name, type="artist", limit=1)
     items = results.get("artists", {}).get("items", [])
     if not items:
         return None
-    images = items[0].get("images", [])
-    return images[0]["url"] if images else None
+    item = items[0]
+    images = item.get("images", [])
+    return _SpotifyInfo(
+        image_url=images[0]["url"] if images else None,
+        popularity=item.get("popularity"),
+        followers=(item.get("followers") or {}).get("total"),
+        release_date=None,
+    )
 
 
-def _spotify_album_image_sync(
+def _spotify_album_sync(
     artist_name: str, album_name: str
-) -> Optional[str]:
+) -> Optional[_SpotifyInfo]:
     query = f"artist:{artist_name} album:{album_name}"
     results = spotify_api.search(q=query, type="album", limit=1)
     items = results.get("albums", {}).get("items", [])
     if not items:
         return None
-    images = items[0].get("images", [])
-    return images[0]["url"] if images else None
+    item = items[0]
+    images = item.get("images", [])
+    # a search only yields simplified album objects, which carry no
+    # popularity - that lives on the full object and needs its own
+    # fetch. Losing that extra call must not cost us the rest of the
+    # match, so it degrades to no popularity rather than failing.
+    popularity = None
+    album_id = item.get("id")
+    if album_id:
+        try:
+            popularity = spotify_api.album(album_id).get("popularity")
+        except Exception as e:
+            print(
+                f"library_metadata: Spotify album detail failed"
+                f" for {album_name}: {e}",
+                file=sys.stderr,
+            )
+    return _SpotifyInfo(
+        image_url=images[0]["url"] if images else None,
+        popularity=popularity,
+        followers=None,
+        release_date=item.get("release_date"),
+    )
 
 
-async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
+async def _spotify_lookup(
+    fn, key: object, label: str
+) -> Optional[_SpotifyInfo]:
     if spotify_api is None:
         return None
     if key in _spotify_cache:
@@ -261,7 +317,7 @@ async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
         return await asyncio.shield(future)
     _spotify_futures[key] = asyncio.get_running_loop().create_future()
 
-    result: Optional[str] = None
+    result: Optional[_SpotifyInfo] = None
     # see _lastfm_info's identical reasoning - a timeout/exception is
     # transient and must not be cached as a permanent "no match"
     transient_failure = False
@@ -302,39 +358,53 @@ async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
     return result
 
 
+class ExternalStats(NamedTuple):
+    """The facts worth showing from the online backends. Every field
+    is independently optional - a library with no API keys configured
+    gets None for the whole struct, and a partial match fills in only
+    what the responding backend knew."""
+
+    listeners: Optional[int]  # Last.fm
+    playcount: Optional[int]  # Last.fm scrobbles
+    tags: Tuple[str, ...]  # Last.fm community tags
+    popularity: Optional[int]  # Spotify, 0-100
+    followers: Optional[int]  # Spotify, artist level
+    release_date: Optional[str]  # Spotify, album level
+
+
 class Enrichment(NamedTuple):
-    summary: Optional[str]
+    stats: Optional[ExternalStats]
     art: Optional[ArtInfo]
 
 
-async def _artist_photo(artist_name: str) -> Optional[ArtInfo]:
-    url = await _spotify_image(
-        lambda: _spotify_artist_image_sync(artist_name),
-        artist_name,
-        "artist photo",
+def _external_stats(
+    spotify: Optional[_SpotifyInfo], lastfm: Optional[_LastfmInfo]
+) -> Optional[ExternalStats]:
+    if spotify is None and lastfm is None:
+        return None
+    return ExternalStats(
+        listeners=lastfm.listeners if lastfm else None,
+        playcount=lastfm.playcount if lastfm else None,
+        tags=lastfm.tags if lastfm else (),
+        popularity=spotify.popularity if spotify else None,
+        followers=spotify.followers if spotify else None,
+        release_date=spotify.release_date if spotify else None,
     )
-    if url:
-        return ArtInfo(url=url, data=None, extension=None)
 
-    info = await _lastfm_info(
-        "artist.getInfo", {"artist": artist_name}, artist_name
-    )
-    if info and info.image_url:
-        return ArtInfo(url=info.image_url, data=None, extension=None)
 
+def _remote_art(
+    spotify: Optional[_SpotifyInfo], lastfm: Optional[_LastfmInfo]
+) -> Optional[ArtInfo]:
+    """Spotify's image wins over Last.fm's - the same preference the
+    two separate per-backend lookups encoded before."""
+    if spotify and spotify.image_url:
+        return ArtInfo(url=spotify.image_url, data=None, extension=None)
+    if lastfm and lastfm.image_url:
+        return ArtInfo(url=lastfm.image_url, data=None, extension=None)
     return None
 
 
-async def _artist_summary(artist_name: str) -> Optional[str]:
-    info = await _lastfm_info(
-        "artist.getInfo", {"artist": artist_name}, artist_name
-    )
-    return info.summary if info else None
-
-
-async def _album_art(
-    artist_name: str, album_name: str, sample_file: Path
-) -> Optional[ArtInfo]:
+async def _embedded_art(sample_file: Path) -> Optional[ArtInfo]:
     loop = asyncio.get_running_loop()
     try:
         embedded = await asyncio.wait_for(
@@ -347,73 +417,64 @@ async def _album_art(
             " timed out",
             file=sys.stderr,
         )
-        embedded = None
+        return None
     except Exception as e:
         print(
             f"library_metadata: reading artwork from {sample_file}"
             f" failed: {e}",
             file=sys.stderr,
         )
-        embedded = None
-    if embedded is not None:
-        data, extension = embedded
-        return ArtInfo(url=None, data=data, extension=extension)
-
-    key = (artist_name, album_name)
-    url = await _spotify_image(
-        lambda: _spotify_album_image_sync(artist_name, album_name),
-        key,
-        "album art",
-    )
-    if url:
-        return ArtInfo(url=url, data=None, extension=None)
-
-    info = await _lastfm_info(
-        "album.getInfo", {"artist": artist_name, "album": album_name}, key
-    )
-    if info and info.image_url:
-        return ArtInfo(url=info.image_url, data=None, extension=None)
-
-    return None
-
-
-async def _album_summary(artist_name: str, album_name: str) -> Optional[str]:
-    info = await _lastfm_info(
-        "album.getInfo",
-        {"artist": artist_name, "album": album_name},
-        (artist_name, album_name),
-    )
-    return info.summary if info else None
+        return None
+    if embedded is None:
+        return None
+    data, extension = embedded
+    return ArtInfo(url=None, data=data, extension=extension)
 
 
 async def get_artist_enrichment(
     artist_folder: str, sample_file: Path
 ) -> Enrichment:
-    """Blurb and photo for one artist browse level. The two lookups
-    are one call because they share a resolved name: exposing them
-    separately made every navigation resolve names twice, doing the
-    same blocking tag read of the same file twice. Running them
-    concurrently also overlaps their waits instead of summing them -
-    the Last.fm lookup they have in common dedupes through
-    _lastfm_futures rather than firing twice."""
+    """Stats and photo for one artist browse level. Each backend is
+    queried once and feeds both halves of the result - the same
+    response carries the image and the listener/popularity figures, so
+    there is nothing left to gain from splitting them. Running the two
+    concurrently overlaps their waits instead of summing them."""
     artist_name, _ = await _resolve_names(artist_folder, None, sample_file)
-    summary, art = await asyncio.gather(
-        _artist_summary(artist_name),
-        _artist_photo(artist_name),
+    spotify, lastfm = await asyncio.gather(
+        _spotify_lookup(
+            lambda: _spotify_artist_sync(artist_name), artist_name, "artist"
+        ),
+        _lastfm_info("artist.getInfo", {"artist": artist_name}, artist_name),
     )
-    return Enrichment(summary=summary, art=art)
+    return Enrichment(
+        stats=_external_stats(spotify, lastfm),
+        art=_remote_art(spotify, lastfm),
+    )
 
 
 async def get_album_enrichment(
     artist_folder: str, album_folder: str, sample_file: Path
 ) -> Enrichment:
-    """Blurb and cover art for one album browse level. See
-    get_artist_enrichment for why this is a single call."""
+    """Stats and cover art for one album browse level. Embedded
+    artwork still beats the remote images, but unlike before it no
+    longer short-circuits the remote lookups - the stats come from
+    them, so they run regardless, concurrently with the tag read."""
     artist_name, album_name = await _resolve_names(
         artist_folder, album_folder, sample_file
     )
-    summary, art = await asyncio.gather(
-        _album_summary(artist_name, album_name),
-        _album_art(artist_name, album_name, sample_file),
+    key = (artist_name, album_name)
+    embedded, spotify, lastfm = await asyncio.gather(
+        _embedded_art(sample_file),
+        _spotify_lookup(
+            lambda: _spotify_album_sync(artist_name, album_name), key, "album"
+        ),
+        _lastfm_info(
+            "album.getInfo",
+            {"artist": artist_name, "album": album_name},
+            key,
+        ),
     )
-    return Enrichment(summary=summary, art=art)
+    return Enrichment(
+        stats=_external_stats(spotify, lastfm),
+        art=embedded or _remote_art(spotify, lastfm),
+    )
