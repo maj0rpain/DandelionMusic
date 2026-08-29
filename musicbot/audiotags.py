@@ -4,6 +4,7 @@ from typing import NamedTuple, Optional, Tuple
 
 from mutagen import File as MutagenFile
 from mutagen.flac import FLAC
+from mutagen.id3 import PictureType
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
 
@@ -87,6 +88,17 @@ _IMAGE_EXTENSIONS = {
 }
 
 
+def _front_cover(pictures):
+    """Picks the front cover out of a file's embedded pictures. Taking
+    the first one blindly shows a 32x32 "file icon" (picture type 1) or
+    a back cover as the album art in files that store one of those
+    first; falls back to the first picture when none is marked."""
+    for picture in pictures:
+        if picture.type == PictureType.COVER_FRONT:
+            return picture
+    return pictures[0] if pictures else None
+
+
 def read_artwork(
     path: Path, max_bytes: int = 5 * 1024 * 1024
 ) -> Optional[Tuple[bytes, str]]:
@@ -110,11 +122,13 @@ def read_artwork(
     try:
         if isinstance(audio, MP3):
             apics = audio.tags.getall("APIC") if audio.tags else []
-            if apics:
-                data, mime = apics[0].data, apics[0].mime
+            picture = _front_cover(apics)
+            if picture is not None:
+                data, mime = picture.data, picture.mime
         elif isinstance(audio, FLAC):
-            if audio.pictures:
-                data, mime = audio.pictures[0].data, audio.pictures[0].mime
+            picture = _front_cover(audio.pictures)
+            if picture is not None:
+                data, mime = picture.data, picture.mime
         elif isinstance(audio, MP4):
             covr = audio.tags.get("covr") if audio.tags else None
             if covr:

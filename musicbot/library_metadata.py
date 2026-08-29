@@ -1,4 +1,5 @@
 import asyncio
+import re
 import sys
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -69,8 +70,19 @@ _lastfm_cache: Dict[object, Optional[_LastfmInfo]] = {}
 _lastfm_futures: Dict[object, asyncio.Future] = {}
 
 
+# Last.fm serves this boilerplate link as the *entire* bio/wiki summary
+# for an entity that has no write-up, and tacks it onto genuine ones
+_READ_MORE = re.compile(r"\s*Read more on Last\.fm\s*\.?\s*$")
+
+# since Last.fm's 2019 image-licensing change, artist.getInfo returns
+# this one grey-star placeholder as the image for every artist - a real
+# URL, so it has to be rejected by hash rather than by being absent
+_PLACEHOLDER_IMAGE = "2a96cbd8b46e442fc41c2b86b821562f"
+
+
 def _clean_summary(raw: str, max_length: int = 400) -> Optional[str]:
     text = BeautifulSoup(raw, "html.parser").get_text().strip()
+    text = _READ_MORE.sub("", text).strip()
     if not text:
         return None
     if len(text) <= max_length:
@@ -155,7 +167,12 @@ async def _lastfm_info(
 
             images = node.get("image") or []
             image_url = next(
-                (img["#text"] for img in reversed(images) if img.get("#text")),
+                (
+                    img["#text"]
+                    for img in reversed(images)
+                    if img.get("#text")
+                    and _PLACEHOLDER_IMAGE not in img["#text"]
+                ),
                 None,
             )
             if summary or image_url:
