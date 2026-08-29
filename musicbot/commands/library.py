@@ -1,4 +1,5 @@
 import io
+import sys
 from pathlib import Path
 from typing import List, NamedTuple, Optional
 
@@ -237,14 +238,15 @@ class LibraryBrowseView(discord.ui.View):
             self.add_item(PageButton(self, 1, "Next ▶"))
 
     async def render(
-        self, interaction: discord.Interaction, use_followup: bool = False
+        self,
+        interaction: discord.Interaction,
+        use_followup: bool = False,
+        set_attachments: bool = False,
     ):
         self.build_items()
-        kwargs = {
-            "embed": self.embed(),
-            "view": self,
-            "attachments": self._attachments(),
-        }
+        kwargs = {"embed": self.embed(), "view": self}
+        if set_attachments:
+            kwargs["attachments"] = self._attachments()
         if use_followup:
             await interaction.edit_original_response(**kwargs)
         else:
@@ -273,8 +275,14 @@ class LibraryBrowseView(discord.ui.View):
         self._busy = True
         try:
             await interaction.response.defer()
-            self._enrichment = await self._resolve_enrichment()
-            await self.render(interaction, use_followup=True)
+            try:
+                self._enrichment = await self._resolve_enrichment()
+            except Exception as e:
+                print(f"library: enrichment failed: {e}", file=sys.stderr)
+                self._enrichment = None
+            await self.render(
+                interaction, use_followup=True, set_attachments=True
+            )
         finally:
             self._busy = False
 
