@@ -1,3 +1,4 @@
+import re
 import sys
 from pathlib import Path
 from typing import NamedTuple, Optional, Tuple
@@ -15,6 +16,11 @@ class AudioTags(NamedTuple):
     duration: Optional[int]
     album: Optional[str]
     album_artist: Optional[str]
+    genre: Optional[str]
+    year: Optional[int]
+    bitrate: Optional[int]  # bits per second, lossy formats
+    sample_rate: Optional[int]  # Hz
+    bit_depth: Optional[int]  # bits per sample, lossless formats
 
 
 _EMPTY_TAGS = AudioTags(
@@ -23,7 +29,25 @@ _EMPTY_TAGS = AudioTags(
     duration=None,
     album=None,
     album_artist=None,
+    genre=None,
+    year=None,
+    bitrate=None,
+    sample_rate=None,
+    bit_depth=None,
 )
+
+
+_YEAR = re.compile(r"(\d{4})")
+
+
+def _parse_year(value: Optional[str]) -> Optional[int]:
+    """Date tags come in every shape in the wild - "2007",
+    "2007-10-10", "10/10/2007". Take the first four-digit run and
+    ignore whatever else is in there."""
+    if not value:
+        return None
+    match = _YEAR.search(str(value))
+    return int(match.group(1)) if match else None
 
 
 def read_tags(path: Path) -> AudioTags:
@@ -44,11 +68,18 @@ def read_tags(path: Path) -> AudioTags:
         artist = (audio.get("artist") or [None])[0]
         album = (audio.get("album") or [None])[0]
         album_artist = (audio.get("albumartist") or [None])[0]
+        genre = (audio.get("genre") or [None])[0]
+        year = _parse_year((audio.get("date") or [None])[0])
+        info = audio.info
         duration = (
-            round(audio.info.length)
-            if audio.info is not None and audio.info.length
-            else None
+            round(info.length) if info is not None and info.length else None
         )
+        # stream details are format-specific attributes on mutagen's
+        # StreamInfo - lossy formats carry a bitrate, lossless ones
+        # carry bit depth, and none of them carry every field
+        bitrate = getattr(info, "bitrate", None) or None
+        sample_rate = getattr(info, "sample_rate", None) or None
+        bit_depth = getattr(info, "bits_per_sample", None) or None
     except Exception as e:
         print(
             f"audiotags: failed to parse tags of {path}: {e}", file=sys.stderr
@@ -61,6 +92,11 @@ def read_tags(path: Path) -> AudioTags:
         duration=duration,
         album=album,
         album_artist=album_artist,
+        genre=genre,
+        year=year,
+        bitrate=bitrate,
+        sample_rate=sample_rate,
+        bit_depth=bit_depth,
     )
 
 

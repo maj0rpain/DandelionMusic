@@ -14,6 +14,47 @@ from musicbot.utils import CheckError, dj_check, play_check
 
 PAGE_SIZE = 25
 
+# small grey line above the title, so the current scope gets the
+# title to itself at every level
+AUTHOR_LINE = "Music Library"
+
+
+def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
+    """Renders as "42:39" under an hour and "11h 23m" above it - an
+    album runtime and a whole discography's runtime want different
+    units."""
+    if not seconds:
+        return None
+    hours, remainder = divmod(seconds, 3600)
+    minutes, secs = divmod(remainder, 60)
+    if hours:
+        return f"{hours}h {minutes:02d}m"
+    return f"{minutes}:{secs:02d}"
+
+
+def _fmt_count(value: Optional[int]) -> Optional[str]:
+    """Compact form for the six- and ten-digit counters Last.fm and
+    Spotify report - "1.2B" reads at a glance where "1204338291"
+    doesn't."""
+    if not value:
+        return None
+    for limit, suffix in (
+        (1_000_000_000, "B"),
+        (1_000_000, "M"),
+        (1_000, "K"),
+    ):
+        if value >= limit:
+            return f"{value / limit:.1f}".rstrip("0").rstrip(".") + suffix
+    return str(value)
+
+
+def _fmt_years(stats: library.LevelStats) -> Optional[str]:
+    if not stats.year_min:
+        return None
+    if stats.year_max and stats.year_max != stats.year_min:
+        return f"{stats.year_min}\u2013{stats.year_max}"
+    return str(stats.year_min)
+
 
 class LibrarySelect(discord.ui.Select):
     def __init__(
@@ -179,24 +220,106 @@ class LibraryBrowseView(discord.ui.View):
         return self.entries()
 
     def title(self) -> str:
+        """Only the current scope - the path to it lives in the
+        footer, and "Music Library" in the author line."""
         if self.artist is None:
-            return "Music Library — Artists"
+            return "Artists"
         if self.album is None:
-            return f"Music Library — {self.artist} — Albums"
-        return f"Music Library — {self.artist} / {self.album} — Songs"
+            return self.artist
+        return self.album
+
+    def footer(self) -> Optional[str]:
+        if self.artist is None:
+            return None
+        if self.album is None:
+            return f"Artists \u203a {self.artist}"
+        return f"{self.artist} \u203a {self.album}"
+
+    @staticmethod
+    def _field(embed: discord.Embed, name: str, value) -> None:
+        """A field with nothing behind it is left out entirely rather
+        than rendered as a placeholder dash - which backends answer
+        varies per entity, and a grid of dashes reads worse than a
+        short grid."""
+        if value:
+            embed.add_field(name=name, value=str(value), inline=True)
+
+    def _add_stat_fields(self, embed: discord.Embed) -> None:
+        stats = self._enrichment.stats if self._enrichment else None
+        if self.artist is None:
+            artists, albums, songs = library.counts(self.index)
+            self._field(embed, "Artists", f"{artists:,}")
+            self._field(embed, "Albums", f"{albums:,}")
+            self._field(embed, "Songs", f"{songs:,}")
+            return
+
+        if self.album is None:
+            local = library.artist_stats(self.index, self.artist)
+            self._field(embed, "Albums", local.albums)
+            self._field(embed, "Tracks", local.tracks)
+            self._field(embed, "Runtime", _fmt_duration(local.runtime))
+            self._field(embed, "Years", _fmt_years(local))
+            self._field(embed, "Formats", ", ".join(local.formats))
+            if stats:
+                self._field(embed, "Listeners", _fmt_count(stats.listeners))
+        else:
+            local = library.album_stats(self.index, self.artist, self.album)
+            self._field(embed, "Tracks", local.tracks)
+            self._field(embed, "Runtime", _fmt_duration(local.runtime))
+            # the tag-derived year is the one that matches these
+            # files; Spotify's release date is only a fallback, and
+            # only its year is worth the width
+            year = _fmt_years(local) or (
+                stats.release_date[:4]
+                if stats and stats.release_date
+                else None
+            )
+            self._field(embed, "Year", year)
+            self._field(
+                embed,
+                "Format",
+                " \u00b7 ".join(
+                    part
+                    for part in (
+                        local.formats[0] if local.formats else None,
+                        local.quality,
+                    )
+                    if part
+                ),
+            )
+            if stats:
+                self._field(embed, "Listeners", _fmt_count(stats.listeners))
+                self._field(
+                    embed,
+                    "Popularity",
+                    (
+                        f"{stats.popularity}/100"
+                        if stats.popularity is not None
+                        else None
+                    ),
+                )
+
+        # community tags where the online backends know any, the
+        # library's own genre tags otherwise
+        labels = (stats.tags if stats else ()) or local.genres
+        if labels:
+            embed.description = "*" + " \u00b7 ".join(labels) + "*"
 
     def embed(self) -> discord.Embed:
         embed = discord.Embed(title=self.title(), color=config.EMBED_COLOR)
+        embed.set_author(name=AUTHOR_LINE)
+        footer = self.footer()
+        if footer:
+            embed.set_footer(text=footer)
         if not self.entries():
             embed.description = config.LIBRARY_EMPTY
-        if self._enrichment:
-            if self._enrichment.summary:
-                embed.description = self._enrichment.summary
-            art = self._enrichment.art
-            if art and art.url:
-                embed.set_thumbnail(url=art.url)
-            elif art and art.data:
-                embed.set_thumbnail(url=f"attachment://cover.{art.extension}")
+        else:
+            self._add_stat_fields(embed)
+        art = self._enrichment.art if self._enrichment else None
+        if art and art.url:
+            embed.set_thumbnail(url=art.url)
+        elif art and art.data:
+            embed.set_thumbnail(url=f"attachment://cover.{art.extension}")
         return embed
 
     def _attachments(self) -> List[discord.File]:
