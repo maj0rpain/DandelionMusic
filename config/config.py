@@ -79,6 +79,11 @@ class Config:
         ".alac",
     )
 
+    # enables album/artist bio summaries in d!library browse
+    # (last.fm's artist.getInfo/album.getInfo); get a free key at
+    # https://www.last.fm/api/account/create
+    LASTFM_API_KEY = ""
+
     # replace after '0x' with desired hex code ex. '#ff0188' >> "0xff0188"
     EMBED_COLOR: int = "0x4DD4D0"  # converted to int in __init__
 
