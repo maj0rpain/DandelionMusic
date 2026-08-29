@@ -48,6 +48,11 @@ async def _resolve_names(
             f"library_metadata: reading tags from {sample_file} timed out",
             file=sys.stderr,
         )
+    except Exception as e:
+        print(
+            f"library_metadata: reading tags from {sample_file} failed: {e}",
+            file=sys.stderr,
+        )
     else:
         artist_name = tags.album_artist or tags.artist or artist_folder
         if album_folder is not None:
@@ -73,7 +78,7 @@ def _clean_summary(raw: str, max_length: int = 400) -> Optional[str]:
     return text[:max_length].rsplit(" ", 1)[0] + "…"
 
 
-async def _fetch_lastfm(method: str, params: Dict[str, str]) -> Optional[dict]:
+async def _fetch_lastfm(method: str, params: Dict[str, str]) -> dict:
     session = linkutils.get_session()
     query = {
         "method": method,
@@ -84,8 +89,11 @@ async def _fetch_lastfm(method: str, params: Dict[str, str]) -> Optional[dict]:
     async with session.get(
         "https://ws.audioscrobbler.com/2.0/", params=query
     ) as response:
+        # a non-200 (503 outage, 429 rate limit, ...) is transient -
+        # raise rather than returning "nothing found", so the caller
+        # marks it transient instead of caching a permanent no-match
         if response.status != 200:
-            return None
+            raise RuntimeError(f"HTTP {response.status}")
         data = await response.json(content_type=None)
     # Last.fm returns HTTP 200 even for a bad/expired API key or
     # rate limiting - the failure only shows up as an "error" field
@@ -104,7 +112,10 @@ async def _lastfm_info(
         return _lastfm_cache[key]
     future = _lastfm_futures.get(key)
     if future:
-        return await future
+        # shielded: this waiter being cancelled (view teardown, bot
+        # shutdown) must not cancel the shared future out from under
+        # the call that owns it, nor the other waiters on it
+        return await asyncio.shield(future)
     _lastfm_futures[key] = asyncio.get_running_loop().create_future()
 
     result: Optional[_LastfmInfo] = None
@@ -160,7 +171,9 @@ async def _lastfm_info(
         if not transient_failure:
             _lastfm_cache[key] = result
     finally:
-        _lastfm_futures.pop(key).set_result(result)
+        pending = _lastfm_futures.pop(key)
+        if not pending.done():
+            pending.set_result(result)
 
     return result
 
@@ -197,7 +210,8 @@ async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
         return _spotify_cache[key]
     future = _spotify_futures.get(key)
     if future:
-        return await future
+        # see _lastfm_info - shielded against waiter cancellation
+        return await asyncio.shield(future)
     _spotify_futures[key] = asyncio.get_running_loop().create_future()
 
     result: Optional[str] = None
@@ -232,7 +246,9 @@ async def _spotify_image(fn, key: object, label: str) -> Optional[str]:
         if not transient_failure:
             _spotify_cache[key] = result
     finally:
-        _spotify_futures.pop(key).set_result(result)
+        pending = _spotify_futures.pop(key)
+        if not pending.done():
+            pending.set_result(result)
 
     return result
 
@@ -286,6 +302,13 @@ async def get_album_art(
         print(
             f"library_metadata: reading artwork from {sample_file}"
             " timed out",
+            file=sys.stderr,
+        )
+        embedded = None
+    except Exception as e:
+        print(
+            f"library_metadata: reading artwork from {sample_file}"
+            f" failed: {e}",
             file=sys.stderr,
         )
         embedded = None

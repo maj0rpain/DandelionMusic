@@ -16,6 +16,15 @@ class AudioTags(NamedTuple):
     album_artist: Optional[str]
 
 
+_EMPTY_TAGS = AudioTags(
+    title=None,
+    artist=None,
+    duration=None,
+    album=None,
+    album_artist=None,
+)
+
+
 def read_tags(path: Path) -> AudioTags:
     """Best-effort tag read for a local library file. Never raises -
     an unreadable/corrupt file or a format mutagen can't parse just
@@ -24,32 +33,26 @@ def read_tags(path: Path) -> AudioTags:
         audio = MutagenFile(path, easy=True)
     except Exception as e:
         print(f"audiotags: failed to read {path}: {e}", file=sys.stderr)
-        return AudioTags(
-            title=None,
-            artist=None,
-            duration=None,
-            album=None,
-            album_artist=None,
-        )
+        return _EMPTY_TAGS
 
     if audio is None:
-        return AudioTags(
-            title=None,
-            artist=None,
-            duration=None,
-            album=None,
-            album_artist=None,
-        )
+        return _EMPTY_TAGS
 
-    title = (audio.get("title") or [None])[0]
-    artist = (audio.get("artist") or [None])[0]
-    album = (audio.get("album") or [None])[0]
-    album_artist = (audio.get("albumartist") or [None])[0]
-    duration = (
-        round(audio.info.length)
-        if audio.info is not None and audio.info.length
-        else None
-    )
+    try:
+        title = (audio.get("title") or [None])[0]
+        artist = (audio.get("artist") or [None])[0]
+        album = (audio.get("album") or [None])[0]
+        album_artist = (audio.get("albumartist") or [None])[0]
+        duration = (
+            round(audio.info.length)
+            if audio.info is not None and audio.info.length
+            else None
+        )
+    except Exception as e:
+        print(
+            f"audiotags: failed to parse tags of {path}: {e}", file=sys.stderr
+        )
+        return _EMPTY_TAGS
 
     return AudioTags(
         title=title,
@@ -66,6 +69,22 @@ def nice_title(tags: AudioTags, fallback: str) -> str:
     if tags.title:
         return tags.title
     return fallback
+
+
+# maps the picture-frame mime values seen in real files onto the
+# file extension the artwork gets uploaded to Discord under
+_IMAGE_EXTENSIONS = {
+    "image/jpeg": "jpg",
+    "image/jpg": "jpg",
+    "jpeg": "jpg",
+    "jpg": "jpg",
+    "image/png": "png",
+    "png": "png",
+    "image/webp": "webp",
+    "webp": "webp",
+    "image/gif": "gif",
+    "gif": "gif",
+}
 
 
 def read_artwork(
@@ -88,25 +107,44 @@ def read_artwork(
     data: Optional[bytes] = None
     mime: Optional[str] = None
 
-    if isinstance(audio, MP3):
-        apics = audio.tags.getall("APIC") if audio.tags else []
-        if apics:
-            data, mime = apics[0].data, apics[0].mime
-    elif isinstance(audio, FLAC):
-        if audio.pictures:
-            data, mime = audio.pictures[0].data, audio.pictures[0].mime
-    elif isinstance(audio, MP4):
-        covr = audio.tags.get("covr") if audio.tags else None
-        if covr:
-            cover = covr[0]
-            mime = (
-                "image/png"
-                if cover.imageformat == cover.FORMAT_PNG
-                else "image/jpeg"
-            )
-            data = bytes(cover)
+    try:
+        if isinstance(audio, MP3):
+            apics = audio.tags.getall("APIC") if audio.tags else []
+            if apics:
+                data, mime = apics[0].data, apics[0].mime
+        elif isinstance(audio, FLAC):
+            if audio.pictures:
+                data, mime = audio.pictures[0].data, audio.pictures[0].mime
+        elif isinstance(audio, MP4):
+            covr = audio.tags.get("covr") if audio.tags else None
+            if covr:
+                cover = covr[0]
+                mime = (
+                    "image/png"
+                    if cover.imageformat == cover.FORMAT_PNG
+                    else "image/jpeg"
+                )
+                data = bytes(cover)
+    except Exception as e:
+        print(
+            f"audiotags: failed to extract artwork from {path}: {e}",
+            file=sys.stderr,
+        )
+        return None
 
     if not data or not mime or len(data) > max_bytes:
         return None
 
-    return data, mime.rpartition("/")[2]
+    # the mime a picture frame carries is not reliably a real mime type
+    # in the wild - ID3 APIC values like "PNG"/"JPG" are common, and
+    # "-->" means the frame body is a URL rather than image bytes - so
+    # only recognized image types yield an extension
+    extension = _IMAGE_EXTENSIONS.get(mime.strip().lower())
+    if extension is None:
+        print(
+            f"audiotags: unsupported artwork type {mime!r} in {path}",
+            file=sys.stderr,
+        )
+        return None
+
+    return data, extension
