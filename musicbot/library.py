@@ -1,4 +1,6 @@
 import asyncio
+import difflib
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -108,6 +110,173 @@ def build_index() -> LibraryIndex:
 
 def get_index() -> LibraryIndex:
     return _index
+
+
+class SearchResult(NamedTuple):
+    """One ranked match. `album` is None for an artist hit and
+    `filename` is set only for a song hit, so a result always carries
+    exactly the path components needed to look it back up in the
+    index."""
+
+    kind: str  # "artist", "album" or "song"
+    artist: str
+    album: Optional[str]
+    filename: Optional[str]
+    label: str  # display text, without the kind emoji
+    score: float
+
+
+# Below this a match is noise rather than a near miss - without a
+# floor, a query like "zzzzz" would still return whatever five entries
+# happened to share a couple of letters with it.
+_SCORE_FLOOR = 0.45
+
+# Tie-break order at equal score: a query matching an album and one of
+# its own tracks equally well almost always meant the album, and an
+# artist hit (the broadest thing to queue) comes last.
+_KIND_ORDER = {"album": 0, "song": 1, "artist": 2}
+
+
+# `query` reaches search() from a consume-rest command parameter, so a
+# prefix invocation can hand it most of a 2000-character message.
+# SequenceMatcher is O(len(query) * len(candidate)) and runs once per
+# index entry, so an unbounded query is a CPU amplifier any guild
+# member could fire repeatedly at the executor the bot also builds its
+# index and resolves metadata on: measured against a 53k-entry
+# library, 10 characters costs 0.5s and 1900 costs 20s. Nothing anyone
+# means to search for is this long.
+_MAX_QUERY_LEN = 100
+
+
+def _word_pattern(query: str) -> Optional[re.Pattern]:
+    r"""A \b-anchored matcher for the query, or None when it doesn't
+    both start and end with word characters - \b sits between a word
+    and a non-word character, so a query like "!!!" (a real band name)
+    could never match one and has to fall through to plain
+    containment."""
+    if not re.match(r"\w", query) or not re.search(r"\w\Z", query):
+        return None
+    return re.compile(rf"\b{re.escape(query)}\b")
+
+
+def _score(
+    matcher: difflib.SequenceMatcher,
+    word: Optional[re.Pattern],
+    query: str,
+    candidate: str,
+) -> float:
+    """`query` must already be casefolded, and `matcher` must already
+    have it set as its *second* sequence - SequenceMatcher caches its
+    index of that one, so keeping the query there and varying the
+    candidate builds the cache once per search instead of once per
+    entry (1.4x on a realistic query, 3.6x at the cap).
+
+    Do not "simplify" this back to SequenceMatcher(None, query,
+    candidate) for readability: ratio() is NOT symmetric - measured
+    over random pairs it differs about half the time, and it differs
+    on ordinary library text too - so swapping the operands silently
+    moves borderline entries across _SCORE_FLOOR. The orientation is
+    load-bearing, not incidental.
+
+    difflib's ratio alone under-rates a short query against a long
+    name - "computer" against "OK Computer" is only 0.63, and falls
+    further the longer the album title gets - so a hit inside the
+    candidate gets a floor of its own. An exact match scores 1.0.
+
+    Matching a whole word outranks matching a fragment, because
+    coverage alone reads a short query as a better hit the shorter the
+    candidate is: "the" covers most of "Theo" and little of "The
+    Beatles", so without this tier a search for "the" buries every
+    real band under whatever short unrelated names happen to contain
+    those letters."""
+    candidate = candidate.casefold()
+    if not candidate:
+        return 0.0
+    matcher.set_seq1(candidate)
+    ratio = matcher.ratio()
+    if word is not None and word.search(candidate):
+        return max(ratio, 0.9 + 0.1 * len(query) / len(candidate))
+    if query in candidate:
+        # weighted towards coverage rather than a flat containment
+        # bonus: one letter appearing inside a six-letter title is a
+        # far weaker signal than eight of eleven characters, and a
+        # generous flat base would rank the former above a genuine
+        # near-miss elsewhere in the library
+        return max(ratio, 0.6 + 0.4 * len(query) / len(candidate))
+    return ratio
+
+
+def search(
+    index: LibraryIndex, query: str, limit: int = 5
+) -> List[SearchResult]:
+    """Ranks artists, albums and songs against one query string and
+    returns the closest `limit` matches, best first. Synchronous -
+    coroutine callers must use search_async()."""
+    query = query.casefold().strip()[:_MAX_QUERY_LEN]
+    if not query:
+        return []
+
+    matcher = difflib.SequenceMatcher()
+    matcher.set_seq2(query)
+    # compiled once per search, not once per candidate
+    word = _word_pattern(query)
+
+    # scored and filtered as we go: a large library holds tens of
+    # thousands of entries and only a handful ever clear the floor, so
+    # nothing but a survivor is worth building a SearchResult (and its
+    # label) for
+    matches: List[SearchResult] = []
+
+    for artist, albums in index.items():
+        score = _score(matcher, word, query, artist)
+        if score >= _SCORE_FLOOR:
+            matches.append(
+                SearchResult("artist", artist, None, None, artist, score)
+            )
+        for album, songs in albums.items():
+            score = _score(matcher, word, query, album)
+            if score >= _SCORE_FLOOR:
+                matches.append(
+                    SearchResult(
+                        "album",
+                        artist,
+                        album,
+                        None,
+                        f"{album} \u2014 {artist}",
+                        score,
+                    )
+                )
+            for song in songs:
+                score = _score(matcher, word, query, song.title)
+                if score >= _SCORE_FLOOR:
+                    matches.append(
+                        SearchResult(
+                            "song",
+                            artist,
+                            album,
+                            song.filename,
+                            f"{song.title} \u2014 {artist}",
+                            score,
+                        )
+                    )
+
+    matches.sort(
+        key=lambda r: (-r.score, _KIND_ORDER[r.kind], r.label.casefold())
+    )
+    return matches[:limit]
+
+
+async def search_async(
+    index: LibraryIndex, query: str, limit: int = 5
+) -> List[SearchResult]:
+    """Coroutine callers must use this, not search() directly - it
+    scores every entry in the index, which is tens of thousands of
+    SequenceMatcher ratios on a large library, and this codebase's
+    rule (see loader.py's _run_sync) is that blocking work never runs
+    directly on the event loop."""
+    return await asyncio.get_running_loop().run_in_executor(
+        None, search, index, query, limit
+    )
 
 
 def song_path(artist: str, album: str, filename: str) -> Path:

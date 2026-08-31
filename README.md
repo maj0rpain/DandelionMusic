@@ -164,20 +164,33 @@ d!stop / d!st
 
 Requires `ENABLE_LOCAL_LIBRARY=True` and `MUSIC_LIBRARY_PATH` set to a folder laid out as `Artist/Album/song.ext` (see `.env.sample`).
 
+`d!lib` is a shorthand for `d!library`, so `d!lib search`, `d!lib browse` and `d!lib refresh` all work. It applies to the prefix commands only - the slash commands stay under `/library`.
+
+Artists, albums and songs are marked with 👤, 💿 and 🎵 respectively, both in the search results and throughout the browser.
+
 `d!library browse`'s artist and album screens show cover art alongside statistics about the selection. Track/album counts, total runtime, years, formats and stream quality come from your own files and are always shown; listener counts, play counts, tags and Spotify popularity are added when Last.fm/Spotify are configured (both optional - the browser works without either). Cover art comes from artwork embedded in the audio files themselves, falling back to Spotify and Last.fm.
 
 ```
-d!library refresh
+d!library search (query) / d!lib search (query)
 ```
 
-* Rescans `MUSIC_LIBRARY_PATH` and rebuilds the browsable library index.
-* Administrators and DJs only
+* Searches artists, albums and songs for the five closest matches to the query and lists them to pick from.
+* Matching is fuzzy, so partial names and typos still find the right entry.
+* Picking a result queues it straight away: a song queues that track, an album queues all of its tracks, an artist queues their whole discography.
+* Searches run one at a time - scoring a large library costs real CPU on the host - so if someone else is searching, yours waits its turn rather than being refused.
 
 ```
-d!library browse
+d!library browse / d!lib browse
 ```
 
 * Opens an interactive browser to queue a song, album, or artist from the local music library.
+
+```
+d!library refresh / d!lib refresh
+```
+
+* Rescans `MUSIC_LIBRARY_PATH` and rebuilds the browsable library index.
+* Bot owner only - adding music files to the library means access to the host itself, so a DJ has no reason to rescan it.
 
 
 ### General

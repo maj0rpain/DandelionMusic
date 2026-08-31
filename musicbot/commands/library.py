@@ -1,22 +1,65 @@
+import asyncio
 import io
 import sys
 from pathlib import Path
 from typing import List, Optional
 
 import discord
+from discord import app_commands
 from discord.ext import commands
 
 from config import config
 from musicbot import library, library_metadata
 from musicbot.bot import MusicBot
 from musicbot.loader import SongError
-from musicbot.utils import CheckError, dj_check, play_check
+from musicbot.utils import CheckError, owner_check, play_check
 
 PAGE_SIZE = 25
+
+# Search is the only command here that burns real CPU: scoring is
+# pure-Python difflib, so run_in_executor keeps it off the event loop's
+# stack but not off the GIL, and several at once would take turns
+# starving the loop - and with it the audio sender thread. This runs
+# them one at a time instead. _MAX_QUERY_LEN caps what a single search
+# can cost, so one at a time is a bounded cost.
+#
+# Deliberately a lock taken *inside* the command rather than
+# commands.max_concurrency: that acquires during Command.prepare,
+# before the callback gets a chance to defer, so a slash caller queued
+# behind others could blow the three-second acknowledgement window and
+# fail outright. Taken after the deferral below, a caller has already
+# answered its interaction and can wait as long as it needs to.
+# Waiting, not refusing: a cooldown would just make someone retype
+# their query.
+_search_lock = asyncio.Lock()
 
 # small grey line above the title, so the current scope gets the
 # title to itself at every level
 AUTHOR_LINE = "Music Library"
+
+# One icon per kind of thing the library holds, shared by the browser
+# and the search results so the two can't drift apart. In a Select
+# these go in SelectOption's own `emoji` field, which renders them as
+# an icon column and leaves the whole 100-character label budget for
+# the name; embed titles and footers have no such field, so there they
+# are prefixed as literal text.
+KIND_EMOJI = {
+    "artist": "\U0001f464",
+    "album": "\U0001f4bf",
+    "song": "\U0001f3b5",
+}
+
+
+# `query` is a consume-rest parameter, so a prefix invocation can fill
+# it with most of a 2000-character message. Anything echoed back has
+# to be trimmed first, or the reply itself blows the message limit.
+QUERY_ECHO_LIMIT = 100
+
+
+def _trim(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\u2026"
 
 
 def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
@@ -61,6 +104,7 @@ class LibrarySelect(discord.ui.Select):
         self,
         entries: List[str],
         labels: List[str],
+        kind: str,
         browse_view: "LibraryBrowseView",
     ):
         self._entries = entries
@@ -68,7 +112,11 @@ class LibrarySelect(discord.ui.Select):
         super().__init__(
             placeholder="Choose...",
             options=[
-                discord.SelectOption(label=label[:100], value=str(i))
+                discord.SelectOption(
+                    label=label[:100],
+                    value=str(i),
+                    emoji=KIND_EMOJI[kind],
+                )
                 for i, label in enumerate(labels)
             ],
         )
@@ -114,35 +162,82 @@ class QueueLevelButton(discord.ui.Button):
         await self.browse_view.queue_current_level(interaction)
 
 
-class LibraryBrowseView(discord.ui.View):
-    def __init__(self, ctx):
+async def queue_songs(ctx, interaction, triples) -> None:
+    """Queues (artist, album, filename) triples and reports the
+    result ephemerally. Shared by the browser and the search results -
+    the browser always works within one artist, but a search hit list
+    spans several, so the artist travels with each song rather than
+    being read off the view."""
+    if not interaction.response.is_done():
+        await interaction.response.defer(ephemeral=True)
+
+    try:
+        await play_check(ctx)
+    except CheckError as e:
+        await interaction.followup.send(str(e), ephemeral=True)
+        return
+
+    queued = 0
+    missing = []
+    for artist, album, filename in triples:
+        uri = library.song_uri(artist, album, filename)
+        try:
+            await ctx.audiocontroller.process_song(
+                uri, user=ctx.author, pickle=False
+            )
+            queued += 1
+        except SongError:
+            missing.append(filename)
+
+    if queued:
+        ctx.audiocontroller.pickle_playlist()
+
+    message = f"Queued {queued} song(s)."
+    if missing:
+        shown = ", ".join(missing[:5])
+        message += f" {len(missing)} skipped (file not found): {shown}"
+        if len(missing) > 5:
+            message += f", and {len(missing) - 5} more"
+        # refresh is owner-only, so this can't tell whoever hit it to
+        # just run it themselves
+        message += ". The index may be stale - ask the bot owner to run"
+        message += " `d!lib refresh`."
+
+    await interaction.followup.send(message, ephemeral=True)
+
+
+class LibraryView(discord.ui.View):
+    """Ownership and lifetime handling shared by the browser and the
+    search results - both are single-user views on a message that
+    outlives their 5-minute timeout."""
+
+    def __init__(self, ctx, index: library.LibraryIndex):
         super().__init__(timeout=300)
         self.ctx = ctx
-        self.index = library.get_index()
-        self.artist: Optional[str] = None
-        self.album: Optional[str] = None
-        self.page = 0
-        self._enrichment: Optional[library_metadata.Enrichment] = None
+        # the snapshot this view was built from: a `d!library refresh`
+        # landing mid-session must not change what the already-shown
+        # entries point at
+        self.index = index
         # guards against a second click landing while a deferred
-        # descend()/go_back() is still resolving enrichment - deferring
-        # a component interaction clears its click spinner and
-        # re-enables the view immediately, it does not show a
-        # "thinking" placeholder, so without this two overlapping
-        # resolves could land out of order
+        # handler is still resolving - deferring a component
+        # interaction clears its click spinner and re-enables the view
+        # immediately, it does not show a "thinking" placeholder, so
+        # without this two overlapping resolves could land out of order
         self._busy: bool = False
-        # set by the caller after sending (Task 8); needed so
-        # on_timeout() can disable the stale buttons/select. Left None
-        # for the slash-command path, where ctx.interaction is used
-        # instead (see on_timeout below).
-        self.message: Optional[discord.Message] = None
-        self.build_items()
+        # whatever Context.send handed back, which is not always a
+        # Message: the prefix paths and the deferred search path give
+        # a Message/WebhookMessage, but answering an interaction
+        # directly returns an InteractionCallbackResponse (discord.py
+        # >= 2.5) that has no edit(). on_timeout() below discriminates
+        # on the type rather than on which path ran.
+        self.message = None
 
     async def interaction_check(
         self, interaction: discord.Interaction
     ) -> bool:
         if interaction.user.id != self.ctx.author.id:
             await interaction.response.send_message(
-                "This browser belongs to someone else.", ephemeral=True
+                "This belongs to someone else.", ephemeral=True
             )
             return False
         if self._busy:
@@ -152,6 +247,19 @@ class LibraryBrowseView(discord.ui.View):
             return False
         return True
 
+    async def queue(self, interaction: discord.Interaction, triples) -> None:
+        """Queues through the _busy guard. queue_songs() defers, and a
+        deferred *component* interaction re-enables the select at
+        once, so without this a second click during a long
+        process_song() loop would queue the same album or discography
+        twice over - a whole-artist result makes that loop long enough
+        to hit easily."""
+        self._busy = True
+        try:
+            await queue_songs(self.ctx, interaction, triples)
+        finally:
+            self._busy = False
+
     async def on_timeout(self):
         # Without this, a click after the 5-minute timeout just fails
         # silently client-side (discord.py stops dispatching to a
@@ -160,12 +268,31 @@ class LibraryBrowseView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         try:
-            if self.ctx.interaction is not None:
-                await self.ctx.interaction.edit_original_response(view=self)
-            elif self.message is not None:
+            # A view sent after a defer goes out as a followup with its
+            # own id, so @original is only the deferred placeholder and
+            # editing it would leave the real components enabled
+            # forever - those have to be edited directly. Answering an
+            # interaction without deferring puts the view on the
+            # original response, and hands back an
+            # InteractionCallbackResponse rather than the message, so
+            # that case has to go through the interaction. Testing what
+            # we actually hold keeps this right whichever path ran.
+            if isinstance(self.message, discord.Message):
                 await self.message.edit(view=self)
+            elif self.ctx.interaction is not None:
+                await self.ctx.interaction.edit_original_response(view=self)
         except discord.HTTPException:
             pass
+
+
+class LibraryBrowseView(LibraryView):
+    def __init__(self, ctx):
+        super().__init__(ctx, library.get_index())
+        self.artist: Optional[str] = None
+        self.album: Optional[str] = None
+        self.page = 0
+        self._enrichment: Optional[library_metadata.Enrichment] = None
+        self.build_items()
 
     def _songs(self) -> List[library.LibrarySong]:
         return self.index.get(self.artist, {}).get(self.album, [])
@@ -219,21 +346,37 @@ class LibraryBrowseView(discord.ui.View):
             return [song.title for song in self._songs()]
         return self.entries()
 
-    def title(self) -> str:
-        """Only the current scope - the path to it lives in the
-        footer, and "Music Library" in the author line."""
+    def level_kind(self) -> str:
+        """What the entries at this level are - every option in one
+        screen's Select is the same kind of thing."""
         if self.artist is None:
-            return "Artists"
+            return "artist"
         if self.album is None:
-            return self.artist
-        return self.album
+            return "album"
+        return "song"
+
+    def title(self) -> str:
+        """Only the current scope, prefixed with the icon for what
+        that scope is - the path to it lives in the footer, and
+        "Music Library" in the author line."""
+        if self.artist is None:
+            return f"{KIND_EMOJI['artist']} Artists"
+        if self.album is None:
+            return f"{KIND_EMOJI['artist']} {self.artist}"
+        return f"{KIND_EMOJI['album']} {self.album}"
 
     def footer(self) -> Optional[str]:
+        """In the breadcrumb the icons mark entities only - the
+        leading "Artists" names the root screen rather than an artist,
+        so it stays plain. title() runs the other way round, because
+        there "Artists" *is* the screen being shown and takes the icon
+        for the kind of thing it lists."""
         if self.artist is None:
             return None
+        artist = f"{KIND_EMOJI['artist']} {self.artist}"
         if self.album is None:
-            return f"Artists \u203a {self.artist}"
-        return f"{self.artist} \u203a {self.album}"
+            return f"Artists \u203a {artist}"
+        return f"{artist} \u203a {KIND_EMOJI['album']} {self.album}"
 
     @staticmethod
     def _field(embed: discord.Embed, name: str, value) -> None:
@@ -340,7 +483,11 @@ class LibraryBrowseView(discord.ui.View):
         page_entries = entries[page]
         page_labels = labels[page]
         if page_entries:
-            self.add_item(LibrarySelect(page_entries, page_labels, self))
+            self.add_item(
+                LibrarySelect(
+                    page_entries, page_labels, self.level_kind(), self
+                )
+            )
         if self.artist is not None:
             self.add_item(QueueLevelButton(self))
             self.add_item(BackButton(self))
@@ -365,15 +512,20 @@ class LibraryBrowseView(discord.ui.View):
             await interaction.response.edit_message(**kwargs)
 
     async def descend(self, interaction: discord.Interaction, chosen: str):
-        self.page = 0
+        # only a change of level resets the page. Queueing a track
+        # doesn't re-render, so zeroing it there would leave the
+        # displayed page and self.page disagreeing, and the next
+        # "Next" click would jump back to page 1.
         if self.artist is None:
+            self.page = 0
             self.artist = chosen
             await self._enter_level(interaction)
         elif self.album is None:
+            self.page = 0
             self.album = chosen
             await self._enter_level(interaction)
         else:
-            await self.queue_pairs(interaction, [(self.album, chosen)])
+            await self.queue(interaction, [(self.artist, self.album, chosen)])
 
     async def go_back(self, interaction: discord.Interaction):
         self.page = 0
@@ -400,49 +552,98 @@ class LibraryBrowseView(discord.ui.View):
 
     async def queue_current_level(self, interaction: discord.Interaction):
         if self.album is not None:
-            pairs = [(self.album, song.filename) for song in self._songs()]
+            triples = [
+                (self.artist, self.album, song.filename)
+                for song in self._songs()
+            ]
         else:
-            pairs = [
-                (album, song.filename)
+            triples = [
+                (self.artist, album, song.filename)
                 for album, songs in self.index.get(self.artist, {}).items()
                 for song in songs
             ]
-        await self.queue_pairs(interaction, pairs)
+        await self.queue(interaction, triples)
 
-    async def queue_pairs(self, interaction, pairs):
-        if not interaction.response.is_done():
-            await interaction.response.defer(ephemeral=True)
 
-        try:
-            await play_check(self.ctx)
-        except CheckError as e:
-            await interaction.followup.send(str(e), ephemeral=True)
-            return
-
-        queued = 0
-        missing = []
-        for album, filename in pairs:
-            uri = library.song_uri(self.artist, album, filename)
-            try:
-                await self.ctx.audiocontroller.process_song(
-                    uri, user=self.ctx.author, pickle=False
+class SearchSelect(discord.ui.Select):
+    def __init__(
+        self,
+        results: List[library.SearchResult],
+        search_view: "LibrarySearchView",
+    ):
+        self._results = results
+        self.search_view = search_view
+        super().__init__(
+            placeholder="Choose...",
+            options=[
+                discord.SelectOption(
+                    label=result.label[:100],
+                    value=str(i),
+                    emoji=KIND_EMOJI[result.kind],
                 )
-                queued += 1
-            except SongError:
-                missing.append(filename)
+                for i, result in enumerate(results)
+            ],
+        )
 
-        if queued:
-            self.ctx.audiocontroller.pickle_playlist()
+    async def callback(self, interaction: discord.Interaction):
+        result = self._results[int(self.values[0])]
+        await self.search_view.queue_result(interaction, result)
 
-        message = f"Queued {queued} song(s)."
-        if missing:
-            shown = ", ".join(missing[:5])
-            message += f" {len(missing)} skipped (file not found): {shown}"
-            if len(missing) > 5:
-                message += f", and {len(missing) - 5} more"
-            message += ". Try `d!library refresh`."
 
-        await interaction.followup.send(message, ephemeral=True)
+class LibrarySearchView(LibraryView):
+    """The ranked hit list for one query. Unlike the browser this has
+    no levels to descend through - picking any entry queues it, and
+    the mixed kinds are what the per-option icons distinguish."""
+
+    def __init__(
+        self,
+        ctx,
+        index: library.LibraryIndex,
+        query: str,
+        results: List[library.SearchResult],
+    ):
+        super().__init__(ctx, index)
+        self.query = query
+        self.results = results
+        self.add_item(SearchSelect(results, self))
+
+    def embed(self) -> discord.Embed:
+        embed = discord.Embed(
+            # embed titles are rendered as plain text, so a query
+            # containing markdown or a mention is inert here and only
+            # needs trimming to stay under the 256-character cap
+            title=f'Search: "{_trim(self.query, QUERY_ECHO_LIMIT)}"',
+            color=config.EMBED_COLOR,
+        )
+        embed.set_author(name=AUTHOR_LINE)
+        count = len(self.results)
+        embed.set_footer(
+            text=f"{count} closest match{'es' if count != 1 else ''}"
+        )
+        return embed
+
+    def _expand(self, result: library.SearchResult):
+        """One hit to the (artist, album, filename) triples it stands
+        for - a song is itself, an album is its tracks, an artist is
+        their whole discography."""
+        if result.kind == "song":
+            return [(result.artist, result.album, result.filename)]
+        albums = self.index.get(result.artist, {})
+        if result.kind == "album":
+            return [
+                (result.artist, result.album, song.filename)
+                for song in albums.get(result.album, [])
+            ]
+        return [
+            (result.artist, album, song.filename)
+            for album, songs in albums.items()
+            for song in songs
+        ]
+
+    async def queue_result(
+        self, interaction: discord.Interaction, result: library.SearchResult
+    ):
+        await self.queue(interaction, self._expand(result))
 
 
 class Library(commands.Cog):
@@ -456,21 +657,29 @@ class Library(commands.Cog):
     async def cog_before_invoke(self, ctx):
         ctx.audiocontroller.command_channel = ctx
 
+    # `lib` is a prefix-only alias: discord.py registers aliases for
+    # the text form of a hybrid command, not as extra slash commands,
+    # so `d!lib browse` works while the slash form stays `/library`
+    # (same as `d!p` against `/play` elsewhere in this bot).
     @commands.hybrid_group(
         name="library",
+        aliases=["lib"],
         description=config.HELP_LIBRARY_SHORT,
         help=config.HELP_LIBRARY_LONG,
         invoke_without_command=True,
     )
     async def _library(self, ctx):
-        await ctx.send("Use subcommands: `refresh`, `browse`.")
+        await ctx.send("Use subcommands: `search`, `browse`, `refresh`.")
 
     @_library.command(
         name="refresh",
         description=config.HELP_LIBRARY_REFRESH_SHORT,
         help=config.HELP_LIBRARY_REFRESH_LONG,
     )
-    @commands.check(dj_check)
+    # owner-only rather than DJ: only whoever runs the host can add
+    # files to MUSIC_LIBRARY_PATH in the first place, so nobody else
+    # has a reason to rescan it
+    @commands.check(owner_check)
     async def _library_refresh(self, ctx):
         if not config.MUSIC_LIBRARY_PATH:
             await ctx.send(config.LIBRARY_NOT_CONFIGURED)
@@ -483,6 +692,60 @@ class Library(commands.Cog):
                 artists=artists, albums=albums, songs=songs
             )
         )
+
+    @_library.command(
+        name="search",
+        description=config.HELP_LIBRARY_SEARCH_SHORT,
+        help=config.HELP_LIBRARY_SEARCH_LONG,
+    )
+    @app_commands.describe(query="Artist, album or song to look for")
+    async def _library_search(self, ctx, *, query: str):
+        if not config.MUSIC_LIBRARY_PATH:
+            await ctx.send(config.LIBRARY_NOT_CONFIGURED)
+            return
+        index = library.get_index()
+        if not index:
+            await ctx.send(config.LIBRARY_EMPTY)
+            return
+
+        # ephemeral here as well as on the sends below: the deferred
+        # placeholder's visibility is fixed when it's created, so a
+        # public defer would leave a stray public message behind the
+        # ephemeral result. typing() rather than defer() so the prefix
+        # path, where deferring does nothing, still shows the user
+        # something while a big library is scored.
+        async with ctx.typing(ephemeral=True):
+            async with _search_lock:
+                results = await library.search_async(index, query)
+        if not results:
+            kwargs = {
+                # the query is echoed back, so deny it any ability to
+                # ping on top of escaping its markdown
+                "allowed_mentions": discord.AllowedMentions.none(),
+            }
+            # matches the deferral above, and matches the hit-list send
+            # below. Without it Context.send takes its public-message
+            # path, which moves the playback controls off the
+            # now-playing message and onto this one - which the
+            # ephemeral deferral then hides from everyone but the
+            # searcher.
+            if ctx.interaction is not None:
+                kwargs["ephemeral"] = True
+            await ctx.send(
+                config.LIBRARY_SEARCH_NO_RESULTS.format(
+                    query=discord.utils.escape_markdown(
+                        _trim(query, QUERY_ECHO_LIMIT)
+                    )
+                ),
+                **kwargs,
+            )
+            return
+
+        view = LibrarySearchView(ctx, index, query, results)
+        kwargs = {"embed": view.embed(), "view": view}
+        if ctx.interaction is not None:
+            kwargs["ephemeral"] = True
+        view.message = await ctx.send(**kwargs)
 
     @_library.command(
         name="browse",
@@ -503,12 +766,8 @@ class Library(commands.Cog):
         # a plain text message from a prefix command can't be ephemeral
         if ctx.interaction is not None:
             kwargs["ephemeral"] = True
-        # For the text-command path this is a real discord.Message,
-        # used by on_timeout() to disable the view later. For the
-        # slash path Context.send() routes through
-        # interaction.response.send_message(), which returns None -
-        # on_timeout() uses ctx.interaction.edit_original_response()
-        # instead in that case, so this being None there is expected.
+        # whatever this hands back, LibraryView.on_timeout() knows what
+        # to do with it - see the note on LibraryView.message
         view.message = await ctx.send(**kwargs)
 
 
