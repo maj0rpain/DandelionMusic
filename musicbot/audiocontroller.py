@@ -436,17 +436,14 @@ class AudioController(object):
         self,
         track: str,
         user: Optional[discord.abc.User] = None,
-        pickle: bool = True,
     ) -> Union[Optional[Song], Literal[PLAYLIST]]:
         """Adds the track to the playlist instance
         Starts playing if it is the first song.
 
-        pickle=False lets a caller queueing many tracks in a row (e.g.
-        musicbot.commands.library.queue_songs) skip the per-call
-        pickle_playlist() disk write and do a single batched write after
-        its loop instead - pickling on every call would otherwise mean
+        For many tracks at once use process_local_tracks() rather than
+        calling this in a loop - pickling here on every call would mean
         serializing the whole, progressively larger playlist once per
-        track, an O(n^2) blocking write for a bulk queue action."""
+        track, an O(n^2) blocking write."""
 
         print(f"{user} queued {track!r} in guild {self.guild.name!r}")
 
@@ -464,8 +461,7 @@ class AudioController(object):
             else:
                 loaded_song = PLAYLIST
 
-        if pickle:
-            self.pickle_playlist()
+        self.pickle_playlist()
         if self.current_song is None:
             print("Playing {}".format(track))
             await self.play_song(self.playlist[0])

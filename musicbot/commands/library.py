@@ -271,12 +271,12 @@ class LibraryView(discord.ui.View):
         return True
 
     async def queue(self, interaction: discord.Interaction, triples) -> None:
-        """Queues through the _busy guard. queue_songs() defers, and a
-        deferred *component* interaction re-enables the select at
-        once, so without this a second click during a long
-        process_song() loop would queue the same album or discography
-        twice over - a whole-artist result makes that loop long enough
-        to hit easily."""
+        """Queues through the _busy guard. queue_songs() defers, and
+        deferring re-enables the select at once - the "thinking"
+        placeholder it puts up is a separate ephemeral message, not a
+        lock on the view - so without this a second click while the
+        batch is still loading would queue the same album or
+        discography twice over."""
         self._busy = True
         try:
             await queue_songs(self.ctx, interaction, triples)
