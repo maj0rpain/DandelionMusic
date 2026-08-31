@@ -32,6 +32,18 @@ KIND_EMOJI = {
 }
 
 
+# `query` is a consume-rest parameter, so a prefix invocation can fill
+# it with most of a 2000-character message. Anything echoed back has
+# to be trimmed first, or the reply itself blows the message limit.
+QUERY_ECHO_LIMIT = 100
+
+
+def _trim(text: str, limit: int) -> str:
+    if len(text) <= limit:
+        return text
+    return text[:limit] + "\u2026"
+
+
 def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
     """Renders as "42:39" under an hour and "11h 23m" above it - an
     album runtime and a whole discography's runtime want different
@@ -168,7 +180,10 @@ async def queue_songs(ctx, interaction, triples) -> None:
         message += f" {len(missing)} skipped (file not found): {shown}"
         if len(missing) > 5:
             message += f", and {len(missing) - 5} more"
-        message += ". Try `d!library refresh`."
+        # refresh is owner-only, so this can't tell whoever hit it to
+        # just run it themselves
+        message += " The index may be stale - ask the bot owner to run"
+        message += " `d!lib refresh`."
 
     await interaction.followup.send(message, ephemeral=True)
 
@@ -309,9 +324,11 @@ class LibraryBrowseView(LibraryView):
         return f"{KIND_EMOJI['album']} {self.album}"
 
     def footer(self) -> Optional[str]:
-        """The icons mark real entities only: the leading "Artists" is
-        the name of the root screen, not an artist, so it stays
-        plain."""
+        """In the breadcrumb the icons mark entities only - the
+        leading "Artists" names the root screen rather than an artist,
+        so it stays plain. title() runs the other way round, because
+        there "Artists" *is* the screen being shown and takes the icon
+        for the kind of thing it lists."""
         if self.artist is None:
             return None
         artist = f"{KIND_EMOJI['artist']} {self.artist}"
@@ -548,8 +565,9 @@ class LibrarySearchView(LibraryView):
     def embed(self) -> discord.Embed:
         embed = discord.Embed(
             # embed titles are rendered as plain text, so a query
-            # containing markdown or a mention can't do anything here
-            title=f'Search: "{self.query}"'[:256],
+            # containing markdown or a mention is inert here and only
+            # needs trimming to stay under the 256-character cap
+            title=f'Search: "{_trim(self.query, QUERY_ECHO_LIMIT)}"',
             color=config.EMBED_COLOR,
         )
         embed.set_author(name=AUTHOR_LINE)
@@ -652,13 +670,26 @@ class Library(commands.Cog):
         await ctx.defer(ephemeral=True)
         results = await library.search_async(index, query)
         if not results:
+            kwargs = {
+                # the query is echoed back, so deny it any ability to
+                # ping on top of escaping its markdown
+                "allowed_mentions": discord.AllowedMentions.none(),
+            }
+            # matches the deferral above, and matches the hit-list send
+            # below. Without it Context.send takes its public-message
+            # path, which moves the playback controls off the
+            # now-playing message and onto this one - which the
+            # ephemeral deferral then hides from everyone but the
+            # searcher.
+            if ctx.interaction is not None:
+                kwargs["ephemeral"] = True
             await ctx.send(
                 config.LIBRARY_SEARCH_NO_RESULTS.format(
-                    query=discord.utils.escape_markdown(query)
+                    query=discord.utils.escape_markdown(
+                        _trim(query, QUERY_ECHO_LIMIT)
+                    )
                 ),
-                # the query is echoed back verbatim, so deny it any
-                # ability to ping
-                allowed_mentions=discord.AllowedMentions.none(),
+                **kwargs,
             )
             return
 

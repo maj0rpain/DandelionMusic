@@ -100,9 +100,9 @@
   "PLAYLISTS_ARE_DISABLED": "Playlists are disabled globally in this bot.",
   "HELP_RESTORE": "Restore last playlist after unexpected disconnect",
 
-  "LIBRARY_FILE_MISSING": "Error: This library file no longer exists on disk. Try running `d!library refresh`.",
+  "LIBRARY_FILE_MISSING": "Error: This library file no longer exists on disk. Ask the bot owner to run `d!lib refresh`.",
   "LIBRARY_NOT_CONFIGURED": "The local library isn't configured. Set MUSIC_LIBRARY_PATH in your .env file.",
-  "LIBRARY_EMPTY": "No music found in the library. Check MUSIC_LIBRARY_PATH and run `d!library refresh`.",
+  "LIBRARY_EMPTY": "No music found in the library. The bot owner needs to check MUSIC_LIBRARY_PATH and run `d!lib refresh`.",
   "LIBRARY_REFRESHED": "Library refreshed: {artists} artists, {albums} albums, {songs} songs.",
   "HELP_LIBRARY_SHORT": "Browse and queue local music library",
   "HELP_LIBRARY_LONG": "Browse the local music library and queue a song, album, or artist.",
