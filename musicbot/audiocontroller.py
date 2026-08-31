@@ -3,7 +3,7 @@ import asyncio
 from itertools import islice
 from inspect import isawaitable
 from traceback import print_exc
-from typing import TYPE_CHECKING, Coroutine, Literal, Optional, Union
+from typing import TYPE_CHECKING, Coroutine, List, Literal, Optional, Union
 
 import discord
 from config import config
@@ -473,6 +473,46 @@ class AudioController(object):
             self.preload_queue()
 
         return loaded_song
+
+    async def process_local_tracks(
+        self,
+        tracks: List[str],
+        user: Optional[discord.abc.User] = None,
+    ) -> List[Optional[Song]]:
+        """Queues a batch of local-library files and settles the
+        playlist once at the end. Returns a list parallel to `tracks`,
+        None wherever a file could not be loaded, so the caller can
+        name what it skipped.
+
+        The per-track equivalent is process_song() in a loop, which is
+        what queueing an album or a discography from the library
+        browser used to be: one IPC round trip through the
+        single-worker loader process per track, and a fresh preload
+        sweep per track on top - each of which walks up to
+        MAX_SONG_PRELOAD songs, so a few hundred tracks meant a few
+        thousand redundant iterations. Here the load is one call, and
+        the pickle, the preload sweep and the "start playing if
+        nothing is" check each happen once."""
+        print(
+            f"{user} queued {len(tracks)} local track(s)"
+            f" in guild {self.guild.name!r}"
+        )
+
+        songs = await loader.load_local_songs(tracks)
+        loaded = [song for song in songs if song is not None]
+        if not loaded:
+            return songs
+
+        for song in loaded:
+            self.playlist.add(song)
+        self.pickle_playlist()
+
+        if self.current_song is None:
+            await self.play_song(self.playlist[0])
+        else:
+            self.preload_queue()
+
+        return songs
 
     def add_task(self, coro: Coroutine):
         # next_song is invoked by discord.py as the `after` callback

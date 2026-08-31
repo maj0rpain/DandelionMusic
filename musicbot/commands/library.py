@@ -2,6 +2,7 @@ import asyncio
 import io
 import sys
 from pathlib import Path
+from traceback import print_exc
 from typing import List, Optional
 
 import discord
@@ -11,7 +12,6 @@ from discord.ext import commands
 from config import config
 from musicbot import library, library_metadata
 from musicbot.bot import MusicBot
-from musicbot.loader import SongError
 from musicbot.utils import CheckError, owner_check, play_check
 
 PAGE_SIZE = 25
@@ -168,7 +168,12 @@ async def queue_songs(ctx, interaction, triples) -> None:
     spans several, so the artist travels with each song rather than
     being read off the view."""
     if not interaction.response.is_done():
-        await interaction.response.defer(ephemeral=True)
+        # thinking=True, so this is a real ephemeral placeholder that
+        # the followup below fills in. A plain defer() on a component
+        # interaction is deferred_message_update - silent, and it
+        # ignores `ephemeral` outright - which left queueing a whole
+        # discography looking like a button that did nothing.
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
     try:
         await play_check(ctx)
@@ -176,20 +181,29 @@ async def queue_songs(ctx, interaction, triples) -> None:
         await interaction.followup.send(str(e), ephemeral=True)
         return
 
-    queued = 0
-    missing = []
-    for artist, album, filename in triples:
-        uri = library.song_uri(artist, album, filename)
-        try:
-            await ctx.audiocontroller.process_song(
-                uri, user=ctx.author, pickle=False
-            )
-            queued += 1
-        except SongError:
-            missing.append(filename)
+    # walked twice below (once to build the URIs, once to name what
+    # was skipped), so it must not be something that can be consumed
+    triples = list(triples)
+    tracks = [library.song_uri(*triple) for triple in triples]
+    try:
+        songs = await ctx.audiocontroller.process_local_tracks(
+            tracks, user=ctx.author
+        )
+    except Exception:
+        # the interaction is already deferred, so anything escaping
+        # here would leave the placeholder spinning with no
+        # explanation - discord.py logs the traceback and the user is
+        # told nothing at all
+        print_exc(file=sys.stderr)
+        await interaction.followup.send(config.SONGINFO_ERROR, ephemeral=True)
+        return
 
-    if queued:
-        ctx.audiocontroller.pickle_playlist()
+    missing = [
+        filename
+        for (_, _, filename), song in zip(triples, songs)
+        if song is None
+    ]
+    queued = len(songs) - len(missing)
 
     message = f"Queued {queued} song(s)."
     if missing:

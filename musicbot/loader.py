@@ -138,6 +138,45 @@ async def load_song(track: str) -> Union[Optional[Song], List[Song]]:
     return await _run_sync(_load_song, track)
 
 
+async def load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
+    """Loads a batch of local-library tracks in one executor call.
+    Returns a list parallel to `tracks`, None wherever a file could not
+    be loaded.
+
+    Deliberately not _run_sync. The single-worker ProcessPoolExecutor
+    exists to keep yt-dlp's extraction off the event loop, and every
+    call into it is an IPC round trip that queues behind whatever
+    extraction is already running - so queueing an album meant a dozen
+    round trips through the one process the rest of the bot depends on,
+    and queueing a discography meant hundreds of them. A local-library
+    track needs none of that: _load_song's LOCAL_LIBRARY branch is a
+    path check and a mutagen tag read, ordinary blocking I/O that
+    belongs on a thread. One threaded call covers the whole batch and
+    the loader process stays free for the extraction it is for.
+
+    Refuses anything that is not a local-library URI, since the other
+    branches of _load_song would put yt-dlp on the shared thread pool.
+    """
+    for track in tracks:
+        if identify_url(track) is not SiteTypes.LOCAL_LIBRARY:
+            raise ValueError(f"not a local library track: {track!r}")
+    return await asyncio.get_running_loop().run_in_executor(
+        None, _load_local_songs, tracks
+    )
+
+
+def _load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
+    songs: List[Optional[Song]] = []
+    for track in tracks:
+        # one unreadable file must not cost the caller the rest of the
+        # batch - the browser reports the missing ones by name
+        try:
+            songs.append(_load_song(track))
+        except SongError:
+            songs.append(None)
+    return songs
+
+
 def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
     host = identify_url(track)
 
