@@ -218,11 +218,14 @@ class LibraryView(discord.ui.View):
         # landing mid-session must not change what the already-shown
         # entries point at
         self.index = index
-        # guards against a second click landing while a deferred
-        # handler is still resolving - deferring a component
-        # interaction clears its click spinner and re-enables the view
-        # immediately, it does not show a "thinking" placeholder, so
-        # without this two overlapping resolves could land out of order
+        # serializes the message edits themselves. discord.py
+        # dispatches every click in its own task, and deferring a
+        # component interaction clears the click spinner and re-enables
+        # the view immediately rather than showing a "thinking"
+        # placeholder, so without this two overlapping handlers could
+        # edit the same message out of order. Held only across the
+        # edits - never across the slow work that produces them, or a
+        # rapid click would spend seconds being refused.
         self._busy: bool = False
         # whatever Context.send handed back, which is not always a
         # Message: the prefix paths and the deferred search path give
@@ -241,9 +244,16 @@ class LibraryView(discord.ui.View):
             )
             return False
         if self._busy:
-            await interaction.response.send_message(
-                "Still loading, please wait…", ephemeral=True
-            )
+            # acknowledged silently rather than answered with an
+            # ephemeral complaint: the guard's window is now a single
+            # message edit for navigation and paging, so the clicks it
+            # catches are overwhelmingly the second half of a
+            # double-click. Telling someone off for that reads as a
+            # malfunction. The one operation still slow enough to be
+            # worth explaining - a bulk queue - shows its own
+            # "thinking" placeholder while it runs, so the user can
+            # already see why nothing else is responding.
+            await interaction.response.defer()
             return False
         return True
 
@@ -292,6 +302,13 @@ class LibraryBrowseView(LibraryView):
         self.album: Optional[str] = None
         self.page = 0
         self._enrichment: Optional[library_metadata.Enrichment] = None
+        # bumped on every level change, so an enrichment that resolves
+        # after the user has navigated on can tell that it describes a
+        # level nobody is looking at any more and drop itself
+        self._nav = 0
+        # what _attachment_key() described the last time an edit
+        # actually carried an `attachments` field - see render()
+        self._attached: Optional[str] = None
         self.build_items()
 
     def _songs(self) -> List[library.LibrarySong]:
@@ -475,6 +492,18 @@ class LibraryBrowseView(LibraryView):
             ]
         return []
 
+    def _attachment_key(self) -> Optional[str]:
+        """Identity of the file the current level needs on the
+        message, or None when it needs none. Embedded artwork runs to
+        megabytes and is re-sent in full whenever an edit carries an
+        `attachments` field, which makes it the most expensive part of
+        a render by a wide margin - so an edit only carries that field
+        when this changes."""
+        art = self._enrichment.art if self._enrichment else None
+        if art is None or not art.data:
+            return None
+        return f"{self.artist}/{self.album}.{art.extension}"
+
     def build_items(self):
         self.clear_items()
         entries = self.entries()
@@ -500,16 +529,22 @@ class LibraryBrowseView(LibraryView):
         self,
         interaction: discord.Interaction,
         use_followup: bool = False,
-        set_attachments: bool = False,
+        sync_attachments: bool = False,
     ):
         self.build_items()
         kwargs = {"embed": self.embed(), "view": self}
-        if set_attachments:
-            kwargs["attachments"] = self._attachments()
+        attached = self._attached
+        if sync_attachments:
+            attached = self._attachment_key()
+            if attached != self._attached:
+                kwargs["attachments"] = self._attachments()
         if use_followup:
             await interaction.edit_original_response(**kwargs)
         else:
             await interaction.response.edit_message(**kwargs)
+        # only once the edit has landed: a failed edit leaves whatever
+        # was already on the message
+        self._attached = attached
 
     async def descend(self, interaction: discord.Interaction, chosen: str):
         # only a change of level resets the page. Queueing a track
@@ -536,16 +571,53 @@ class LibraryBrowseView(LibraryView):
         await self._enter_level(interaction)
 
     async def _enter_level(self, interaction: discord.Interaction):
+        """Shows the new level immediately, then fills the enrichment
+        in behind it.
+
+        A level's own contents - its entries, and every statistic in
+        _add_stat_fields() - come straight out of the in-memory index,
+        so the screen the user asked for can be drawn at once.
+        Enrichment cannot: it reads tags and embedded artwork off disk
+        and queries two HTTP backends, each with its own three-second
+        timeout, so resolving it first would leave the *previous*
+        level on screen for up to several seconds. There is nothing to
+        soften that with, either - deferring a component interaction
+        is a silent acknowledgement, not a spinner, so the stale
+        screen keeps its buttons and looks entirely live.
+
+        The two edits are each made under _busy so a second click
+        can't interleave its own edit between them, but the wait
+        between them is deliberately left unguarded: that is exactly
+        when someone browsing quickly clicks again, and they should be
+        able to."""
+        self._nav += 1
+        nav = self._nav
+        self._enrichment = None
         self._busy = True
         try:
             await interaction.response.defer()
-            try:
-                self._enrichment = await self._resolve_enrichment()
-            except Exception as e:
-                print(f"library: enrichment failed: {e}", file=sys.stderr)
-                self._enrichment = None
             await self.render(
-                interaction, use_followup=True, set_attachments=True
+                interaction, use_followup=True, sync_attachments=True
+            )
+        finally:
+            self._busy = False
+
+        try:
+            enrichment = await self._resolve_enrichment()
+        except Exception as e:
+            print(f"library: enrichment failed: {e}", file=sys.stderr)
+            return
+
+        # Checked *and* acted on without awaiting in between, so a
+        # click can neither slip past the check nor find _busy clear
+        # while this second edit is in flight.
+        if nav != self._nav:
+            return
+        self._busy = True
+        try:
+            self._enrichment = enrichment
+            await self.render(
+                interaction, use_followup=True, sync_attachments=True
             )
         finally:
             self._busy = False
