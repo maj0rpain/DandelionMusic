@@ -1,6 +1,7 @@
 import asyncio
 import io
 import sys
+from contextlib import contextmanager
 from pathlib import Path
 from traceback import print_exc
 from typing import List, Optional
@@ -239,7 +240,13 @@ class LibraryView(discord.ui.View):
         # edit the same message out of order. Held only across the
         # edits - never across the slow work that produces them, or a
         # rapid click would spend seconds being refused.
-        self._busy: bool = False
+        #
+        # A depth count rather than a flag, because two handlers can
+        # legitimately hold it at once: a queue runs unguarded work in
+        # the middle, and an enrichment that resolves during it would,
+        # as a flag, clear the queue's guard on the way out and let a
+        # second click queue the same album twice.
+        self._busy: int = 0
         # whatever Context.send handed back, which is not always a
         # Message: the prefix paths and the deferred search path give
         # a Message/WebhookMessage, but answering an interaction
@@ -247,6 +254,15 @@ class LibraryView(discord.ui.View):
         # >= 2.5) that has no edit(). on_timeout() below discriminates
         # on the type rather than on which path ran.
         self.message = None
+
+    @contextmanager
+    def busy(self):
+        """Refuses clicks for the duration - see _busy."""
+        self._busy += 1
+        try:
+            yield
+        finally:
+            self._busy -= 1
 
     async def interaction_check(
         self, interaction: discord.Interaction
@@ -277,11 +293,8 @@ class LibraryView(discord.ui.View):
         lock on the view - so without this a second click while the
         batch is still loading would queue the same album or
         discography twice over."""
-        self._busy = True
-        try:
+        with self.busy():
             await queue_songs(self.ctx, interaction, triples)
-        finally:
-            self._busy = False
 
     async def on_timeout(self):
         # Without this, a click after the 5-minute timeout just fails
@@ -575,11 +588,8 @@ class LibraryBrowseView(LibraryView):
         all, and no button that leads back."""
         last = max(0, (len(self.entries()) - 1) // PAGE_SIZE)
         self.page = min(max(self.page + delta, 0), last)
-        self._busy = True
-        try:
+        with self.busy():
             await self.render(interaction)
-        finally:
-            self._busy = False
 
     async def descend(self, interaction: discord.Interaction, chosen: str):
         # only a change of level resets the page. Queueing a track
@@ -628,14 +638,11 @@ class LibraryBrowseView(LibraryView):
         self._nav += 1
         nav = self._nav
         self._enrichment = None
-        self._busy = True
-        try:
+        with self.busy():
             await interaction.response.defer()
             await self.render(
                 interaction, use_followup=True, sync_attachments=True
             )
-        finally:
-            self._busy = False
 
         try:
             enrichment = await self._resolve_enrichment()
@@ -648,14 +655,11 @@ class LibraryBrowseView(LibraryView):
         # while this second edit is in flight.
         if nav != self._nav:
             return
-        self._busy = True
-        try:
+        with self.busy():
             self._enrichment = enrichment
             await self.render(
                 interaction, use_followup=True, sync_attachments=True
             )
-        finally:
-            self._busy = False
 
     async def queue_current_level(self, interaction: discord.Interaction):
         if self.album is not None:
