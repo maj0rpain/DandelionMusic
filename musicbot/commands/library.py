@@ -182,7 +182,7 @@ async def queue_songs(ctx, interaction, triples) -> None:
             message += f", and {len(missing) - 5} more"
         # refresh is owner-only, so this can't tell whoever hit it to
         # just run it themselves
-        message += " The index may be stale - ask the bot owner to run"
+        message += ". The index may be stale - ask the bot owner to run"
         message += " `d!lib refresh`."
 
     await interaction.followup.send(message, ephemeral=True)
@@ -207,9 +207,9 @@ class LibraryView(discord.ui.View):
         # without this two overlapping resolves could land out of order
         self._busy: bool = False
         # set by the caller after sending; needed so on_timeout() can
-        # disable the stale buttons/select. Left None for the
-        # slash-command path, where ctx.interaction is used instead
-        # (see on_timeout below).
+        # disable the stale buttons/select. Left None only when
+        # Context.send routed through interaction.response, which
+        # returns nothing - see on_timeout below.
         self.message: Optional[discord.Message] = None
 
     async def interaction_check(
@@ -227,6 +227,19 @@ class LibraryView(discord.ui.View):
             return False
         return True
 
+    async def queue(self, interaction: discord.Interaction, triples) -> None:
+        """Queues through the _busy guard. queue_songs() defers, and a
+        deferred *component* interaction re-enables the select at
+        once, so without this a second click during a long
+        process_song() loop would queue the same album or discography
+        twice over - a whole-artist result makes that loop long enough
+        to hit easily."""
+        self._busy = True
+        try:
+            await queue_songs(self.ctx, interaction, triples)
+        finally:
+            self._busy = False
+
     async def on_timeout(self):
         # Without this, a click after the 5-minute timeout just fails
         # silently client-side (discord.py stops dispatching to a
@@ -235,10 +248,17 @@ class LibraryView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         try:
-            if self.ctx.interaction is not None:
-                await self.ctx.interaction.edit_original_response(view=self)
-            elif self.message is not None:
+            if self.message is not None:
                 await self.message.edit(view=self)
+            elif self.ctx.interaction is not None:
+                # only reached when Context.send answered the
+                # interaction directly, which returns None - there the
+                # view really is on the original response. A view sent
+                # after a defer lands on a *followup* instead, which
+                # does come back as a Message, and editing @original
+                # for one of those would edit the deferred placeholder
+                # and leave the real components enabled forever.
+                await self.ctx.interaction.edit_original_response(view=self)
         except discord.HTTPException:
             pass
 
@@ -478,9 +498,7 @@ class LibraryBrowseView(LibraryView):
             self.album = chosen
             await self._enter_level(interaction)
         else:
-            await queue_songs(
-                self.ctx, interaction, [(self.artist, self.album, chosen)]
-            )
+            await self.queue(interaction, [(self.artist, self.album, chosen)])
 
     async def go_back(self, interaction: discord.Interaction):
         self.page = 0
@@ -517,7 +535,7 @@ class LibraryBrowseView(LibraryView):
                 for album, songs in self.index.get(self.artist, {}).items()
                 for song in songs
             ]
-        await queue_songs(self.ctx, interaction, triples)
+        await self.queue(interaction, triples)
 
 
 class SearchSelect(discord.ui.Select):
@@ -598,7 +616,7 @@ class LibrarySearchView(LibraryView):
     async def queue_result(
         self, interaction: discord.Interaction, result: library.SearchResult
     ):
-        await queue_songs(self.ctx, interaction, self._expand(result))
+        await self.queue(interaction, self._expand(result))
 
 
 class Library(commands.Cog):

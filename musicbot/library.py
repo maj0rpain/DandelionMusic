@@ -136,17 +136,37 @@ _SCORE_FLOOR = 0.45
 _KIND_ORDER = {"album": 0, "song": 1, "artist": 2}
 
 
-def _score(query: str, candidate: str) -> float:
-    """`query` must already be casefolded. difflib's ratio alone
-    under-rates a short query against a long name - "computer" against
-    "OK Computer" is only 0.63, and falls further the longer the album
-    title gets - so a containment hit gets a floor of its own, scaled
-    by how much of the candidate the query accounts for. An exact
-    match therefore scores 1.0."""
+# `query` reaches search() from a consume-rest command parameter, so a
+# prefix invocation can hand it most of a 2000-character message.
+# SequenceMatcher is O(len(query) * len(candidate)) and runs once per
+# index entry, so an unbounded query is a CPU amplifier any guild
+# member could fire repeatedly at the executor the bot also builds its
+# index and resolves metadata on: measured against a 53k-entry
+# library, 10 characters costs 0.5s and 1900 costs 20s. Nothing anyone
+# means to search for is this long.
+_MAX_QUERY_LEN = 100
+
+
+def _score(
+    matcher: difflib.SequenceMatcher, query: str, candidate: str
+) -> float:
+    """`query` must already be casefolded, and `matcher` must already
+    have it set as its *second* sequence - SequenceMatcher caches its
+    index of that one, so keeping the query there and varying the
+    candidate builds the cache once per search instead of once per
+    entry (3.6x at the query cap, and the score is unchanged either
+    way - ratio() is symmetric here).
+
+    difflib's ratio alone under-rates a short query against a long
+    name - "computer" against "OK Computer" is only 0.63, and falls
+    further the longer the album title gets - so a containment hit
+    gets a floor of its own, scaled by how much of the candidate the
+    query accounts for. An exact match therefore scores 1.0."""
     candidate = candidate.casefold()
     if not candidate:
         return 0.0
-    ratio = difflib.SequenceMatcher(None, query, candidate).ratio()
+    matcher.set_seq1(candidate)
+    ratio = matcher.ratio()
     if query in candidate:
         # weighted towards coverage rather than a flat containment
         # bonus: one letter appearing inside a six-letter title is a
@@ -163,47 +183,51 @@ def search(
     """Ranks artists, albums and songs against one query string and
     returns the closest `limit` matches, best first. Synchronous -
     coroutine callers must use search_async()."""
-    query = query.casefold().strip()
+    query = query.casefold().strip()[:_MAX_QUERY_LEN]
     if not query:
         return []
 
-    # filtered as we go rather than collected then sorted: a large
-    # library holds tens of thousands of entries and only a handful
-    # ever clear the floor
+    matcher = difflib.SequenceMatcher()
+    matcher.set_seq2(query)
+
+    # scored and filtered as we go: a large library holds tens of
+    # thousands of entries and only a handful ever clear the floor, so
+    # nothing but a survivor is worth building a SearchResult (and its
+    # label) for
     matches: List[SearchResult] = []
 
-    def keep(result: SearchResult) -> None:
-        if result.score >= _SCORE_FLOOR:
-            matches.append(result)
-
     for artist, albums in index.items():
-        keep(
-            SearchResult(
-                "artist", artist, None, None, artist, _score(query, artist)
+        score = _score(matcher, query, artist)
+        if score >= _SCORE_FLOOR:
+            matches.append(
+                SearchResult("artist", artist, None, None, artist, score)
             )
-        )
         for album, songs in albums.items():
-            keep(
-                SearchResult(
-                    "album",
-                    artist,
-                    album,
-                    None,
-                    f"{album} \u2014 {artist}",
-                    _score(query, album),
-                )
-            )
-            for song in songs:
-                keep(
+            score = _score(matcher, query, album)
+            if score >= _SCORE_FLOOR:
+                matches.append(
                     SearchResult(
-                        "song",
+                        "album",
                         artist,
                         album,
-                        song.filename,
-                        f"{song.title} \u2014 {artist}",
-                        _score(query, song.title),
+                        None,
+                        f"{album} \u2014 {artist}",
+                        score,
                     )
                 )
+            for song in songs:
+                score = _score(matcher, query, song.title)
+                if score >= _SCORE_FLOOR:
+                    matches.append(
+                        SearchResult(
+                            "song",
+                            artist,
+                            album,
+                            song.filename,
+                            f"{song.title} \u2014 {artist}",
+                            score,
+                        )
+                    )
 
     matches.sort(
         key=lambda r: (-r.score, _KIND_ORDER[r.kind], r.label.casefold())

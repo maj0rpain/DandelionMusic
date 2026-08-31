@@ -442,7 +442,7 @@ class AudioController(object):
         Starts playing if it is the first song.
 
         pickle=False lets a caller queueing many tracks in a row (e.g.
-        LibraryBrowseView.queue_pairs) skip the per-call
+        musicbot.commands.library.queue_songs) skip the per-call
         pickle_playlist() disk write and do a single batched write after
         its loop instead - pickling on every call would otherwise mean
         serializing the whole, progressively larger playlist once per
