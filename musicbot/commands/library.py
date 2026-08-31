@@ -1,3 +1,4 @@
+import asyncio
 import io
 import sys
 from pathlib import Path
@@ -14,6 +15,23 @@ from musicbot.loader import SongError
 from musicbot.utils import CheckError, owner_check, play_check
 
 PAGE_SIZE = 25
+
+# Search is the only command here that burns real CPU: scoring is
+# pure-Python difflib, so run_in_executor keeps it off the event loop's
+# stack but not off the GIL, and several at once would take turns
+# starving the loop - and with it the audio sender thread. This runs
+# them one at a time instead. _MAX_QUERY_LEN caps what a single search
+# can cost, so one at a time is a bounded cost.
+#
+# Deliberately a lock taken *inside* the command rather than
+# commands.max_concurrency: that acquires during Command.prepare,
+# before the callback gets a chance to defer, so a slash caller queued
+# behind others could blow the three-second acknowledgement window and
+# fail outright. Taken after the deferral below, a caller has already
+# answered its interaction and can wait as long as it needs to.
+# Waiting, not refusing: a cooldown would just make someone retype
+# their query.
+_search_lock = asyncio.Lock()
 
 # small grey line above the title, so the current scope gets the
 # title to itself at every level
@@ -690,12 +708,15 @@ class Library(commands.Cog):
             await ctx.send(config.LIBRARY_EMPTY)
             return
 
-        # ephemeral here as well as on the send below: the deferred
+        # ephemeral here as well as on the sends below: the deferred
         # placeholder's visibility is fixed when it's created, so a
         # public defer would leave a stray public message behind the
-        # ephemeral result
-        await ctx.defer(ephemeral=True)
-        results = await library.search_async(index, query)
+        # ephemeral result. typing() rather than defer() so the prefix
+        # path, where deferring does nothing, still shows the user
+        # something while a big library is scored.
+        async with ctx.typing(ephemeral=True):
+            async with _search_lock:
+                results = await library.search_async(index, query)
         if not results:
             kwargs = {
                 # the query is echoed back, so deny it any ability to
@@ -745,12 +766,8 @@ class Library(commands.Cog):
         # a plain text message from a prefix command can't be ephemeral
         if ctx.interaction is not None:
             kwargs["ephemeral"] = True
-        # For the text-command path this is a real discord.Message,
-        # used by on_timeout() to disable the view later. For the
-        # slash path Context.send() routes through
-        # interaction.response.send_message(), which returns None -
-        # on_timeout() uses ctx.interaction.edit_original_response()
-        # instead in that case, so this being None there is expected.
+        # whatever this hands back, LibraryView.on_timeout() knows what
+        # to do with it - see the note on LibraryView.message
         view.message = await ctx.send(**kwargs)
 
 

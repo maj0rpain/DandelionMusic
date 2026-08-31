@@ -169,8 +169,14 @@ def _score(
     have it set as its *second* sequence - SequenceMatcher caches its
     index of that one, so keeping the query there and varying the
     candidate builds the cache once per search instead of once per
-    entry (3.6x at the query cap, and the score is unchanged either
-    way - ratio() is symmetric here).
+    entry (1.4x on a realistic query, 3.6x at the cap).
+
+    Do not "simplify" this back to SequenceMatcher(None, query,
+    candidate) for readability: ratio() is NOT symmetric - measured
+    over random pairs it differs about half the time, and it differs
+    on ordinary library text too - so swapping the operands silently
+    moves borderline entries across _SCORE_FLOOR. The orientation is
+    load-bearing, not incidental.
 
     difflib's ratio alone under-rates a short query against a long
     name - "computer" against "OK Computer" is only 0.63, and falls

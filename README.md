@@ -177,6 +177,7 @@ d!library search (query) / d!lib search (query)
 * Searches artists, albums and songs for the five closest matches to the query and lists them to pick from.
 * Matching is fuzzy, so partial names and typos still find the right entry.
 * Picking a result queues it straight away: a song queues that track, an album queues all of its tracks, an artist queues their whole discography.
+* Searches run one at a time - scoring a large library costs real CPU on the host - so if someone else is searching, yours waits its turn rather than being refused.
 
 ```
 d!library browse / d!lib browse
