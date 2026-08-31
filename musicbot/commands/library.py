@@ -4,7 +4,7 @@ import sys
 from contextlib import contextmanager
 from pathlib import Path
 from traceback import print_exc
-from typing import List, Optional
+from typing import List, NamedTuple, Optional, Tuple
 
 import discord
 from discord import app_commands
@@ -98,6 +98,28 @@ def _fmt_years(stats: library.LevelStats) -> Optional[str]:
     if stats.year_max and stats.year_max != stats.year_min:
         return f"{stats.year_min}\u2013{stats.year_max}"
     return str(stats.year_min)
+
+
+class LevelData(NamedTuple):
+    """Everything one browse screen derives from the index: the
+    entries, their display labels, and the aggregate statistics for
+    the level. All of it is a pure function of (index, artist, album)
+    - the index is a snapshot taken when the view was built and never
+    replaced - so it is computed once per level rather than per
+    render.
+
+    It used to be computed several times per *render*: build_items()
+    asked for entries and for labels, which are the same list above the
+    song level, and embed() asked a third time just to decide whether
+    the level was empty. At the root each of those is a sort of every
+    artist in the library, next to a counts() walk of every album and
+    every song - and all of it ran again on each page turn, where by
+    definition nothing has changed."""
+
+    entries: List[str]
+    labels: List[str]
+    counts: Optional[Tuple[int, int, int]]  # root level only
+    stats: Optional[library.LevelStats]  # every level below the root
 
 
 class LibrarySelect(discord.ui.Select):
@@ -335,20 +357,25 @@ class LibraryBrowseView(LibraryView):
         # what _attachment_key() described the last time an edit
         # actually carried an `attachments` field - see render()
         self._attached: Optional[str] = None
+        # (level key, data) for the level currently shown - see level()
+        self._level: Optional[
+            Tuple[Tuple[Optional[str], Optional[str]], LevelData]
+        ] = None
         self.build_items()
 
     def _songs(self) -> List[library.LibrarySong]:
         return self.index.get(self.artist, {}).get(self.album, [])
 
     def _first_sample_file(self) -> Optional[Path]:
-        albums = self.index.get(self.artist, {})
+        # only ever called at the artist level, whose entries are
+        # already that artist's sorted album folder names
+        albums = self.level().entries
         if not albums:
             return None
-        first_album = sorted(albums.keys())[0]
-        songs = albums[first_album]
+        songs = self.index.get(self.artist, {}).get(albums[0], [])
         if not songs:
             return None
-        return library.song_path(self.artist, first_album, songs[0].filename)
+        return library.song_path(self.artist, albums[0], songs[0].filename)
 
     async def _resolve_enrichment(
         self,
@@ -370,24 +397,53 @@ class LibraryBrowseView(LibraryView):
             self.artist, self.album, sample
         )
 
+    def _build_level(self) -> LevelData:
+        if self.artist is None:
+            entries = sorted(self.index.keys())
+            # entries and labels are the same list above the song
+            # level; nothing mutates either, so they can share it
+            return LevelData(
+                entries, entries, library.counts(self.index), None
+            )
+        if self.album is None:
+            entries = sorted(self.index.get(self.artist, {}).keys())
+            return LevelData(
+                entries,
+                entries,
+                None,
+                library.artist_stats(self.index, self.artist),
+            )
+        songs = self._songs()
+        return LevelData(
+            # already sorted by filename in build_index(), preserving
+            # track-number order - don't re-sort
+            [song.filename for song in songs],
+            [song.title for song in songs],
+            None,
+            library.album_stats(self.index, self.artist, self.album),
+        )
+
+    def level(self) -> LevelData:
+        """The current level's data, computed on first use and held
+        until the level changes. One slot rather than a per-level
+        cache: what this is worth is not recomputing within a render or
+        across a page turn, and keeping every level a long browse
+        touched would retain the whole index a second time over."""
+        key = (self.artist, self.album)
+        if self._level is None or self._level[0] != key:
+            self._level = (key, self._build_level())
+        return self._level[1]
+
     def entries(self) -> List[str]:
         """Selection values - filenames at the song level, folder
         names above it. Always use these (not labels()) for anything
         that needs to look the entry back up in the index."""
-        if self.artist is None:
-            return sorted(self.index.keys())
-        if self.album is None:
-            return sorted(self.index.get(self.artist, {}).keys())
-        # already sorted by filename in build_index(), preserving
-        # track-number order - don't re-sort
-        return [song.filename for song in self._songs()]
+        return self.level().entries
 
     def labels(self) -> List[str]:
         """Display text, parallel to entries() - tag-derived titles
         at the song level, folder names above it."""
-        if self.artist is not None and self.album is not None:
-            return [song.title for song in self._songs()]
-        return self.entries()
+        return self.level().labels
 
     def level_kind(self) -> str:
         """What the entries at this level are - every option in one
@@ -432,15 +488,16 @@ class LibraryBrowseView(LibraryView):
 
     def _add_stat_fields(self, embed: discord.Embed) -> None:
         stats = self._enrichment.stats if self._enrichment else None
+        level = self.level()
         if self.artist is None:
-            artists, albums, songs = library.counts(self.index)
+            artists, albums, songs = level.counts
             self._field(embed, "Artists", f"{artists:,}")
             self._field(embed, "Albums", f"{albums:,}")
             self._field(embed, "Songs", f"{songs:,}")
             return
 
+        local = level.stats
         if self.album is None:
-            local = library.artist_stats(self.index, self.artist)
             self._field(embed, "Albums", local.albums)
             self._field(embed, "Tracks", local.tracks)
             self._field(embed, "Runtime", _fmt_duration(local.runtime))
@@ -449,7 +506,6 @@ class LibraryBrowseView(LibraryView):
             if stats:
                 self._field(embed, "Listeners", _fmt_count(stats.listeners))
         else:
-            local = library.album_stats(self.index, self.artist, self.album)
             self._field(embed, "Tracks", local.tracks)
             self._field(embed, "Runtime", _fmt_duration(local.runtime))
             # the tag-derived year is the one that matches these
@@ -532,8 +588,9 @@ class LibraryBrowseView(LibraryView):
 
     def build_items(self):
         self.clear_items()
-        entries = self.entries()
-        labels = self.labels()
+        level = self.level()
+        entries = level.entries
+        labels = level.labels
         page = slice(self.page * PAGE_SIZE, (self.page + 1) * PAGE_SIZE)
         page_entries = entries[page]
         page_labels = labels[page]
