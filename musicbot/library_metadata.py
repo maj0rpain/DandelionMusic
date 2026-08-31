@@ -1,6 +1,7 @@
 import asyncio
 import sys
 import time
+from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, NamedTuple, Optional, Tuple
@@ -40,10 +41,25 @@ def _start_cooldown(deadlines: Dict[object, float], key: object) -> None:
     deadlines[key] = time.monotonic() + _TRANSIENT_COOLDOWN
 
 
+# distinguishes "not looked up yet" from a looked-up-and-genuinely-
+# absent None, which the art cache below stores as a real result
+_MISSING = object()
+
+
 class ArtInfo(NamedTuple):
     url: Optional[str]  # a real URL - use with embed.set_thumbnail(url=...)
     data: Optional[bytes]  # raw embedded bytes - needs discord.File
     extension: Optional[str]  # "jpeg"/"png"/etc, set only when data is set
+
+
+# Deliberately unbounded, unlike _art_cache below. The key is one
+# browse level, so this holds at most one small entry per artist and
+# per album in the library and cannot grow past that however long the
+# session runs - where a single cached cover can be 5 MB, which is what
+# the other cache is defending against.
+_names_cache: Dict[
+    Tuple[str, Optional[str], Path], Tuple[str, Optional[str]]
+] = {}
 
 
 async def _resolve_names(
@@ -54,10 +70,27 @@ async def _resolve_names(
     non-canonical) folder name: albumartist tag > artist tag > folder
     name for the artist, album tag > folder name for the album. A
     hung/slow read (e.g. MUSIC_LIBRARY_PATH on a NAS mount) times out
-    and falls back to the folder names rather than blocking forever."""
+    and falls back to the folder names rather than blocking forever.
+
+    Memoized, because browsing revisits the same levels constantly -
+    artist, album, back, the next album - and each visit would
+    otherwise re-read the same file off disk.
+
+    A read that hangs past the timeout is deliberately not remembered:
+    caching that fallback would let one NAS stall pin an entity to its
+    folder name for the rest of the process's life, and the folder name
+    is exactly the input the tags exist to correct. A read that *fails*
+    is a different matter - read_tags() never raises, and returns empty
+    tags both for a file it could not open and for one that simply
+    carries no tags - so the two are indistinguishable here and both do
+    get remembered as the folder-name fallback. clear_caches(), on
+    `d!library refresh`, is what clears those."""
+    key = (artist_folder, album_folder, sample_file)
+    cached = _names_cache.get(key)
+    if cached is not None:
+        return cached
+
     loop = asyncio.get_running_loop()
-    artist_name = artist_folder
-    album_name = album_folder
     try:
         tags = await asyncio.wait_for(
             loop.run_in_executor(_executor, read_tags, sample_file),
@@ -68,15 +101,19 @@ async def _resolve_names(
             f"library_metadata: reading tags from {sample_file} timed out",
             file=sys.stderr,
         )
+        return artist_folder, album_folder
     except Exception as e:
         print(
             f"library_metadata: reading tags from {sample_file} failed: {e}",
             file=sys.stderr,
         )
-    else:
-        artist_name = tags.album_artist or tags.artist or artist_folder
-        if album_folder is not None:
-            album_name = tags.album or album_folder
+        return artist_folder, album_folder
+
+    artist_name = tags.album_artist or tags.artist or artist_folder
+    album_name = (
+        (tags.album or album_folder) if album_folder is not None else None
+    )
+    _names_cache[key] = (artist_name, album_name)
     return artist_name, album_name
 
 
@@ -404,7 +441,81 @@ def _remote_art(
     return None
 
 
+# Embedded covers are the one thing worth caching that is also big
+# enough to be worth bounding: read_artwork() admits up to 5 MB per
+# album, and a browsing session can walk hundreds of them. Bounded by
+# total bytes rather than by entry count, because entries differ in
+# size by three orders of magnitude, and evicted least-recently-used,
+# because going back and forth between an artist and its albums is the
+# access pattern this exists to serve.
+_ART_CACHE_BUDGET = 32 * 1024 * 1024
+# A second bound, on entry count. "This album has no embedded cover" is
+# a real result worth remembering - recreating it costs a full mutagen
+# parse - but it weighs nothing, so the byte budget alone does not
+# bound how many of them accumulate.
+_ART_CACHE_MAX_ENTRIES = 512
+_art_cache: "OrderedDict[Path, Optional[ArtInfo]]" = OrderedDict()
+_art_cache_bytes = 0
+
+
+def _art_size(art: Optional[ArtInfo]) -> int:
+    return len(art.data) if art is not None and art.data else 0
+
+
+def _remember_art(key: Path, art: Optional[ArtInfo]) -> None:
+    global _art_cache_bytes
+    if key in _art_cache:
+        # Reachable: unlike the two remote lookups, _embedded_art() has
+        # no in-flight dedup, so two reads of the same file can be
+        # resolving at once - descending into an album, going back, and
+        # descending again before the first enrichment finishes does
+        # it. The dict keeps one entry, so counting the replacement
+        # without discounting what it replaced would leave the budget
+        # permanently overstated, and eventually evict entries that fit.
+        _art_cache_bytes -= _art_size(_art_cache[key])
+    _art_cache[key] = art
+    # assigning to a key it already has leaves it in its old position
+    _art_cache.move_to_end(key)
+    _art_cache_bytes += _art_size(art)
+    # Over the byte budget, evict the least-recently-used entry that
+    # actually holds bytes. Plain least-recently-used would walk a run
+    # of weightless "no cover here" memos first, freeing nothing on
+    # each one and discarding a mutagen parse apiece, so a single large
+    # cover could clear every such memo the session had built up.
+    # Neither loop touches the entry just stored, even if it alone is
+    # over budget - the level being looked at now is the one that
+    # matters.
+    while _art_cache_bytes > _ART_CACHE_BUDGET:
+        victim = next(
+            (
+                other
+                for other, art in _art_cache.items()
+                if other != key and _art_size(art)
+            ),
+            None,
+        )
+        if victim is None:
+            break
+        _art_cache_bytes -= _art_size(_art_cache.pop(victim))
+    # Over the entry cap, plain least-recently-used: here the weightless
+    # entries are exactly what needs trimming.
+    while len(_art_cache) > _ART_CACHE_MAX_ENTRIES:
+        _, evicted = _art_cache.popitem(last=False)
+        _art_cache_bytes -= _art_size(evicted)
+
+
 async def _embedded_art(sample_file: Path) -> Optional[ArtInfo]:
+    """Memoized like _resolve_names(), and for the same reason: this
+    is a second full mutagen parse of the same file on every visit to
+    an album, and it pulls the picture data out in full. A genuine
+    "this file has no cover" is a real result and is remembered; a
+    timeout or a read error is not, so a transient failure can't
+    permanently hide artwork that is actually there."""
+    cached = _art_cache.get(sample_file, _MISSING)
+    if cached is not _MISSING:
+        _art_cache.move_to_end(sample_file)
+        return cached
+
     loop = asyncio.get_running_loop()
     try:
         embedded = await asyncio.wait_for(
@@ -425,10 +536,37 @@ async def _embedded_art(sample_file: Path) -> Optional[ArtInfo]:
             file=sys.stderr,
         )
         return None
+
     if embedded is None:
-        return None
-    data, extension = embedded
-    return ArtInfo(url=None, data=data, extension=extension)
+        art = None
+    else:
+        data, extension = embedded
+        art = ArtInfo(url=None, data=data, extension=extension)
+    _remember_art(sample_file, art)
+    return art
+
+
+def clear_caches() -> None:
+    """Drops every memoized lookup. Called after a library rescan: the
+    two local caches are keyed by file path and hold what those files
+    said last time, so without this a `d!library refresh` - whose whole
+    purpose is to pick up what changed on disk - would keep serving
+    stale tags and stale artwork. The remote caches go with them,
+    since a rescan is also the natural moment to give a backend that
+    had no match for an entity another chance.
+
+    In-flight lookups are deliberately left alone. Their futures are
+    what concurrent waiters are parked on, and dropping those would
+    hang the waiters; they simply repopulate the cleared caches when
+    they finish."""
+    global _art_cache_bytes
+    _names_cache.clear()
+    _art_cache.clear()
+    _art_cache_bytes = 0
+    _lastfm_cache.clear()
+    _lastfm_cooldown.clear()
+    _spotify_cache.clear()
+    _spotify_cooldown.clear()
 
 
 async def get_artist_enrichment(

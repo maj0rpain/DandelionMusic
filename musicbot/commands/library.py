@@ -1,8 +1,10 @@
 import asyncio
 import io
 import sys
+from contextlib import contextmanager
 from pathlib import Path
-from typing import List, Optional
+from traceback import print_exc
+from typing import List, NamedTuple, Optional, Tuple
 
 import discord
 from discord import app_commands
@@ -11,7 +13,6 @@ from discord.ext import commands
 from config import config
 from musicbot import library, library_metadata
 from musicbot.bot import MusicBot
-from musicbot.loader import SongError
 from musicbot.utils import CheckError, owner_check, play_check
 
 PAGE_SIZE = 25
@@ -99,6 +100,28 @@ def _fmt_years(stats: library.LevelStats) -> Optional[str]:
     return str(stats.year_min)
 
 
+class LevelData(NamedTuple):
+    """Everything one browse screen derives from the index: the
+    entries, their display labels, and the aggregate statistics for
+    the level. All of it is a pure function of (index, artist, album)
+    - the index is a snapshot taken when the view was built and never
+    replaced - so it is computed once per level rather than per
+    render.
+
+    It used to be computed several times per *render*: build_items()
+    asked for entries and for labels, which are the same list above the
+    song level, and embed() asked a third time just to decide whether
+    the level was empty. At the root each of those is a sort of every
+    artist in the library, next to a counts() walk of every album and
+    every song - and all of it ran again on each page turn, where by
+    definition nothing has changed."""
+
+    entries: List[str]
+    labels: List[str]
+    counts: Optional[Tuple[int, int, int]]  # root level only
+    stats: Optional[library.LevelStats]  # every level below the root
+
+
 class LibrarySelect(discord.ui.Select):
     def __init__(
         self,
@@ -144,8 +167,7 @@ class PageButton(discord.ui.Button):
         self.delta = delta
 
     async def callback(self, interaction: discord.Interaction):
-        self.browse_view.page += self.delta
-        await self.browse_view.render(interaction)
+        await self.browse_view.turn_page(interaction, self.delta)
 
 
 class QueueLevelButton(discord.ui.Button):
@@ -169,28 +191,43 @@ async def queue_songs(ctx, interaction, triples) -> None:
     spans several, so the artist travels with each song rather than
     being read off the view."""
     if not interaction.response.is_done():
-        await interaction.response.defer(ephemeral=True)
+        # thinking=True, so this is a real ephemeral placeholder that
+        # the followup below fills in. A plain defer() on a component
+        # interaction is deferred_message_update - silent, and it
+        # ignores `ephemeral` outright - which left queueing a whole
+        # discography looking like a button that did nothing.
+        await interaction.response.defer(ephemeral=True, thinking=True)
 
+    # walked twice below (once to build the URIs, once to name what
+    # was skipped), so it must not be something that can be consumed
+    triples = list(triples)
+
+    # play_check() is inside this, not ahead of it: it connects to
+    # voice, and a failed connect raises asyncio.TimeoutError or
+    # discord.ClientException rather than CheckError. The placeholder
+    # above is a visible "thinking" message now, so anything escaping
+    # here leaves it spinning forever - discord.py logs the traceback
+    # and the user is told nothing at all.
     try:
         await play_check(ctx)
+        tracks = [library.song_uri(*triple) for triple in triples]
+        songs = await ctx.audiocontroller.process_local_tracks(
+            tracks, user=ctx.author
+        )
     except CheckError as e:
         await interaction.followup.send(str(e), ephemeral=True)
         return
+    except Exception:
+        print_exc(file=sys.stderr)
+        await interaction.followup.send(config.SONGINFO_ERROR, ephemeral=True)
+        return
 
-    queued = 0
-    missing = []
-    for artist, album, filename in triples:
-        uri = library.song_uri(artist, album, filename)
-        try:
-            await ctx.audiocontroller.process_song(
-                uri, user=ctx.author, pickle=False
-            )
-            queued += 1
-        except SongError:
-            missing.append(filename)
-
-    if queued:
-        ctx.audiocontroller.pickle_playlist()
+    missing = [
+        filename
+        for (_, _, filename), song in zip(triples, songs)
+        if song is None
+    ]
+    queued = len(songs) - len(missing)
 
     message = f"Queued {queued} song(s)."
     if missing:
@@ -218,12 +255,21 @@ class LibraryView(discord.ui.View):
         # landing mid-session must not change what the already-shown
         # entries point at
         self.index = index
-        # guards against a second click landing while a deferred
-        # handler is still resolving - deferring a component
-        # interaction clears its click spinner and re-enables the view
-        # immediately, it does not show a "thinking" placeholder, so
-        # without this two overlapping resolves could land out of order
-        self._busy: bool = False
+        # serializes the message edits themselves. discord.py
+        # dispatches every click in its own task, and deferring a
+        # component interaction clears the click spinner and re-enables
+        # the view immediately rather than showing a "thinking"
+        # placeholder, so without this two overlapping handlers could
+        # edit the same message out of order. Held only across the
+        # edits - never across the slow work that produces them, or a
+        # rapid click would spend seconds being refused.
+        #
+        # A depth count rather than a flag, because two handlers can
+        # legitimately hold it at once: a queue runs unguarded work in
+        # the middle, and an enrichment that resolves during it would,
+        # as a flag, clear the queue's guard on the way out and let a
+        # second click queue the same album twice.
+        self._busy: int = 0
         # whatever Context.send handed back, which is not always a
         # Message: the prefix paths and the deferred search path give
         # a Message/WebhookMessage, but answering an interaction
@@ -231,6 +277,15 @@ class LibraryView(discord.ui.View):
         # >= 2.5) that has no edit(). on_timeout() below discriminates
         # on the type rather than on which path ran.
         self.message = None
+
+    @contextmanager
+    def busy(self):
+        """Refuses clicks for the duration - see _busy."""
+        self._busy += 1
+        try:
+            yield
+        finally:
+            self._busy -= 1
 
     async def interaction_check(
         self, interaction: discord.Interaction
@@ -241,24 +296,28 @@ class LibraryView(discord.ui.View):
             )
             return False
         if self._busy:
-            await interaction.response.send_message(
-                "Still loading, please wait…", ephemeral=True
-            )
+            # acknowledged silently rather than answered with an
+            # ephemeral complaint: the guard's window is now a single
+            # message edit for navigation and paging, so the clicks it
+            # catches are overwhelmingly the second half of a
+            # double-click. Telling someone off for that reads as a
+            # malfunction. The one operation still slow enough to be
+            # worth explaining - a bulk queue - shows its own
+            # "thinking" placeholder while it runs, so the user can
+            # already see why nothing else is responding.
+            await interaction.response.defer()
             return False
         return True
 
     async def queue(self, interaction: discord.Interaction, triples) -> None:
-        """Queues through the _busy guard. queue_songs() defers, and a
-        deferred *component* interaction re-enables the select at
-        once, so without this a second click during a long
-        process_song() loop would queue the same album or discography
-        twice over - a whole-artist result makes that loop long enough
-        to hit easily."""
-        self._busy = True
-        try:
+        """Queues through the _busy guard. queue_songs() defers, and
+        deferring re-enables the select at once - the "thinking"
+        placeholder it puts up is a separate ephemeral message, not a
+        lock on the view - so without this a second click while the
+        batch is still loading would queue the same album or
+        discography twice over."""
+        with self.busy():
             await queue_songs(self.ctx, interaction, triples)
-        finally:
-            self._busy = False
 
     async def on_timeout(self):
         # Without this, a click after the 5-minute timeout just fails
@@ -292,20 +351,34 @@ class LibraryBrowseView(LibraryView):
         self.album: Optional[str] = None
         self.page = 0
         self._enrichment: Optional[library_metadata.Enrichment] = None
+        # bumped on every level change, so an enrichment that resolves
+        # after the user has navigated on can tell that it describes a
+        # level nobody is looking at any more and drop itself
+        self._nav = 0
+        # what _attachment_key() described the last time an edit
+        # actually carried an `attachments` field - see render()
+        self._attached: Optional[str] = None
+        # (level key, data) for the level currently shown - see level()
+        self._level: Optional[
+            Tuple[Tuple[Optional[str], Optional[str]], LevelData]
+        ] = None
+        # serialises the message edits themselves - see render()
+        self._render_lock = asyncio.Lock()
         self.build_items()
 
     def _songs(self) -> List[library.LibrarySong]:
         return self.index.get(self.artist, {}).get(self.album, [])
 
     def _first_sample_file(self) -> Optional[Path]:
-        albums = self.index.get(self.artist, {})
+        # only ever called at the artist level, whose entries are
+        # already that artist's sorted album folder names
+        albums = self.level().entries
         if not albums:
             return None
-        first_album = sorted(albums.keys())[0]
-        songs = albums[first_album]
+        songs = self.index.get(self.artist, {}).get(albums[0], [])
         if not songs:
             return None
-        return library.song_path(self.artist, first_album, songs[0].filename)
+        return library.song_path(self.artist, albums[0], songs[0].filename)
 
     async def _resolve_enrichment(
         self,
@@ -327,24 +400,53 @@ class LibraryBrowseView(LibraryView):
             self.artist, self.album, sample
         )
 
+    def _build_level(self) -> LevelData:
+        if self.artist is None:
+            entries = sorted(self.index.keys())
+            # entries and labels are the same list above the song
+            # level; nothing mutates either, so they can share it
+            return LevelData(
+                entries, entries, library.counts(self.index), None
+            )
+        if self.album is None:
+            entries = sorted(self.index.get(self.artist, {}).keys())
+            return LevelData(
+                entries,
+                entries,
+                None,
+                library.artist_stats(self.index, self.artist),
+            )
+        songs = self._songs()
+        return LevelData(
+            # already sorted by filename in build_index(), preserving
+            # track-number order - don't re-sort
+            [song.filename for song in songs],
+            [song.title for song in songs],
+            None,
+            library.album_stats(self.index, self.artist, self.album),
+        )
+
+    def level(self) -> LevelData:
+        """The current level's data, computed on first use and held
+        until the level changes. One slot rather than a per-level
+        cache: what this is worth is not recomputing within a render or
+        across a page turn, and keeping every level a long browse
+        touched would retain the whole index a second time over."""
+        key = (self.artist, self.album)
+        if self._level is None or self._level[0] != key:
+            self._level = (key, self._build_level())
+        return self._level[1]
+
     def entries(self) -> List[str]:
         """Selection values - filenames at the song level, folder
         names above it. Always use these (not labels()) for anything
         that needs to look the entry back up in the index."""
-        if self.artist is None:
-            return sorted(self.index.keys())
-        if self.album is None:
-            return sorted(self.index.get(self.artist, {}).keys())
-        # already sorted by filename in build_index(), preserving
-        # track-number order - don't re-sort
-        return [song.filename for song in self._songs()]
+        return self.level().entries
 
     def labels(self) -> List[str]:
         """Display text, parallel to entries() - tag-derived titles
         at the song level, folder names above it."""
-        if self.artist is not None and self.album is not None:
-            return [song.title for song in self._songs()]
-        return self.entries()
+        return self.level().labels
 
     def level_kind(self) -> str:
         """What the entries at this level are - every option in one
@@ -389,15 +491,16 @@ class LibraryBrowseView(LibraryView):
 
     def _add_stat_fields(self, embed: discord.Embed) -> None:
         stats = self._enrichment.stats if self._enrichment else None
+        level = self.level()
         if self.artist is None:
-            artists, albums, songs = library.counts(self.index)
+            artists, albums, songs = level.counts
             self._field(embed, "Artists", f"{artists:,}")
             self._field(embed, "Albums", f"{albums:,}")
             self._field(embed, "Songs", f"{songs:,}")
             return
 
+        local = level.stats
         if self.album is None:
-            local = library.artist_stats(self.index, self.artist)
             self._field(embed, "Albums", local.albums)
             self._field(embed, "Tracks", local.tracks)
             self._field(embed, "Runtime", _fmt_duration(local.runtime))
@@ -406,7 +509,6 @@ class LibraryBrowseView(LibraryView):
             if stats:
                 self._field(embed, "Listeners", _fmt_count(stats.listeners))
         else:
-            local = library.album_stats(self.index, self.artist, self.album)
             self._field(embed, "Tracks", local.tracks)
             self._field(embed, "Runtime", _fmt_duration(local.runtime))
             # the tag-derived year is the one that matches these
@@ -475,10 +577,23 @@ class LibraryBrowseView(LibraryView):
             ]
         return []
 
+    def _attachment_key(self) -> Optional[str]:
+        """Identity of the file the current level needs on the
+        message, or None when it needs none. Embedded artwork runs to
+        megabytes and is re-sent in full whenever an edit carries an
+        `attachments` field, which makes it the most expensive part of
+        a render by a wide margin - so an edit only carries that field
+        when this changes."""
+        art = self._enrichment.art if self._enrichment else None
+        if art is None or not art.data:
+            return None
+        return f"{self.artist}/{self.album}.{art.extension}"
+
     def build_items(self):
         self.clear_items()
-        entries = self.entries()
-        labels = self.labels()
+        level = self.level()
+        entries = level.entries
+        labels = level.labels
         page = slice(self.page * PAGE_SIZE, (self.page + 1) * PAGE_SIZE)
         page_entries = entries[page]
         page_labels = labels[page]
@@ -499,17 +614,68 @@ class LibraryBrowseView(LibraryView):
     async def render(
         self,
         interaction: discord.Interaction,
-        use_followup: bool = False,
-        set_attachments: bool = False,
+        sync_attachments: bool = False,
     ):
-        self.build_items()
-        kwargs = {"embed": self.embed(), "view": self}
-        if set_attachments:
-            kwargs["attachments"] = self._attachments()
-        if use_followup:
+        """Redraws the message. `interaction` must already have been
+        deferred - every edit goes out as a followup, so that waiting
+        on the lock below can never eat the three seconds an
+        interaction has to be answered in.
+
+        Serialised, because _busy does not cover this. _busy turns away
+        new *clicks*; the enrichment edit in _enter_level() is not one.
+        It resumes on its own after a wait that is deliberately
+        unguarded, so it can arrive here while a page turn's edit is
+        still in flight. Two edits to one message would then land in
+        either order - drawing the enrichment and then replacing it
+        with the page turn's older embed - and each would write back an
+        _attached it sampled before the other ran. That last part is
+        the lasting damage: the record of what the message carries ends
+        up disagreeing with the message, so a later navigation omits an
+        `attachments` field it needed and strands a cover under an
+        embed that no longer references it."""
+        async with self._render_lock:
+            self.build_items()
+            kwargs = {"embed": self.embed(), "view": self}
+            attached = self._attached
+            if sync_attachments:
+                attached = self._attachment_key()
+                if attached != self._attached:
+                    kwargs["attachments"] = self._attachments()
             await interaction.edit_original_response(**kwargs)
-        else:
-            await interaction.response.edit_message(**kwargs)
+            # only once the edit has landed: a failed edit leaves
+            # whatever was already on the message
+            self._attached = attached
+
+    async def turn_page(self, interaction: discord.Interaction, delta: int):
+        """Applies a page delta under the same guard as everything
+        else, and clamps the result.
+
+        Both matter. The button stays clickable until the edit lands
+        and discord.py dispatches every click in its own task, so a
+        double-click used to apply the delta twice; the guard is what
+        keeps the second click from doing that, and the clamp is what
+        keeps any other route to an out-of-range page from being
+        silently destructive. Out of range in either direction the page
+        slice comes back empty - past the end because there is nothing
+        there, and below zero because slice(-25, 0) selects nothing -
+        and build_items() then draws a screen with no Select on it at
+        all, and no button that leads back."""
+        last = max(0, (len(self.entries()) - 1) // PAGE_SIZE)
+        self.page = min(max(self.page + delta, 0), last)
+        with self.busy():
+            # deferred before render() for the reason given there: a
+            # render can have to wait for one already in flight
+            await interaction.response.defer()
+            # Syncs attachments even though a page turn cannot change
+            # them, so that this heals a level whose enrichment edit
+            # failed. That edit assigns _enrichment before sending, so
+            # a failure (a 429 that outlives its retries, a 5xx) leaves
+            # the embed asking for attachment://cover.<ext> while the
+            # message carries no such file - and every later page turn
+            # would redraw that broken reference. Costs nothing when
+            # nothing has changed: render() compares the key first and
+            # omits the field.
+            await self.render(interaction, sync_attachments=True)
 
     async def descend(self, interaction: discord.Interaction, chosen: str):
         # only a change of level resets the page. Queueing a track
@@ -536,19 +702,46 @@ class LibraryBrowseView(LibraryView):
         await self._enter_level(interaction)
 
     async def _enter_level(self, interaction: discord.Interaction):
-        self._busy = True
-        try:
+        """Shows the new level immediately, then fills the enrichment
+        in behind it.
+
+        A level's own contents - its entries, and every statistic in
+        _add_stat_fields() - come straight out of the in-memory index,
+        so the screen the user asked for can be drawn at once.
+        Enrichment cannot: it reads tags and embedded artwork off disk
+        and queries two HTTP backends, each with its own three-second
+        timeout, so resolving it first would leave the *previous*
+        level on screen for up to several seconds. There is nothing to
+        soften that with, either - deferring a component interaction
+        is a silent acknowledgement, not a spinner, so the stale
+        screen keeps its buttons and looks entirely live.
+
+        The two edits are each made under _busy so a second click
+        can't interleave its own edit between them, but the wait
+        between them is deliberately left unguarded: that is exactly
+        when someone browsing quickly clicks again, and they should be
+        able to."""
+        self._nav += 1
+        nav = self._nav
+        self._enrichment = None
+        with self.busy():
             await interaction.response.defer()
-            try:
-                self._enrichment = await self._resolve_enrichment()
-            except Exception as e:
-                print(f"library: enrichment failed: {e}", file=sys.stderr)
-                self._enrichment = None
-            await self.render(
-                interaction, use_followup=True, set_attachments=True
-            )
-        finally:
-            self._busy = False
+            await self.render(interaction, sync_attachments=True)
+
+        try:
+            enrichment = await self._resolve_enrichment()
+        except Exception as e:
+            print(f"library: enrichment failed: {e}", file=sys.stderr)
+            return
+
+        # Checked *and* acted on without awaiting in between, so a
+        # click can neither slip past the check nor find _busy clear
+        # while this second edit is in flight.
+        if nav != self._nav:
+            return
+        with self.busy():
+            self._enrichment = enrichment
+            await self.render(interaction, sync_attachments=True)
 
     async def queue_current_level(self, interaction: discord.Interaction):
         if self.album is not None:
@@ -686,6 +879,10 @@ class Library(commands.Cog):
             return
         await ctx.defer()
         index = await library.build_index_async()
+        # the enrichment caches hold tag and artwork reads keyed by
+        # file path; a rescan exists to pick up what changed on disk,
+        # so they have to go with it
+        library_metadata.clear_caches()
         artists, albums, songs = library.counts(index)
         await ctx.send(
             config.LIBRARY_REFRESHED.format(

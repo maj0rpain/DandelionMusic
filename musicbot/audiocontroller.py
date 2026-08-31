@@ -3,7 +3,7 @@ import asyncio
 from itertools import islice
 from inspect import isawaitable
 from traceback import print_exc
-from typing import TYPE_CHECKING, Coroutine, Literal, Optional, Union
+from typing import TYPE_CHECKING, Coroutine, List, Literal, Optional, Union
 
 import discord
 from config import config
@@ -436,17 +436,14 @@ class AudioController(object):
         self,
         track: str,
         user: Optional[discord.abc.User] = None,
-        pickle: bool = True,
     ) -> Union[Optional[Song], Literal[PLAYLIST]]:
         """Adds the track to the playlist instance
         Starts playing if it is the first song.
 
-        pickle=False lets a caller queueing many tracks in a row (e.g.
-        musicbot.commands.library.queue_songs) skip the per-call
-        pickle_playlist() disk write and do a single batched write after
-        its loop instead - pickling on every call would otherwise mean
+        For many tracks at once use process_local_tracks() rather than
+        calling this in a loop - pickling here on every call would mean
         serializing the whole, progressively larger playlist once per
-        track, an O(n^2) blocking write for a bulk queue action."""
+        track, an O(n^2) blocking write."""
 
         print(f"{user} queued {track!r} in guild {self.guild.name!r}")
 
@@ -464,8 +461,7 @@ class AudioController(object):
             else:
                 loaded_song = PLAYLIST
 
-        if pickle:
-            self.pickle_playlist()
+        self.pickle_playlist()
         if self.current_song is None:
             print("Playing {}".format(track))
             await self.play_song(self.playlist[0])
@@ -473,6 +469,67 @@ class AudioController(object):
             self.preload_queue()
 
         return loaded_song
+
+    async def process_local_tracks(
+        self,
+        tracks: List[str],
+        user: Optional[discord.abc.User] = None,
+    ) -> List[Optional[Song]]:
+        """Queues a batch of local-library files and settles the
+        playlist once at the end. Returns a list parallel to `tracks`,
+        None wherever a file could not be loaded, so the caller can
+        name what it skipped.
+
+        The per-track equivalent is process_song() in a loop, which is
+        what queueing an album or a discography from the library
+        browser used to be: one IPC round trip through the
+        single-worker loader process per track, and a fresh preload
+        sweep per track on top - each of which walks up to
+        MAX_SONG_PRELOAD songs, so a few hundred tracks meant a few
+        thousand redundant iterations. Here the load is one call (two
+        when it has to start playback first, see below), and the
+        preload sweep happens once."""
+        print(
+            f"{user} queued {len(tracks)} local track(s)"
+            f" in guild {self.guild.name!r}"
+        )
+
+        songs: List[Optional[Song]] = []
+        tail = tracks
+
+        # With nothing playing, the first track is loaded and started
+        # on its own before the rest. Batching means the whole batch
+        # has to finish before any of it is queued, where the per-track
+        # path this replaced began on track one - a few hundred
+        # milliseconds of silence for a discography on local disk, and
+        # seconds of it on a network-mounted library. One extra round
+        # trip buys that back; loading a single track costs about
+        # 1.5ms.
+        if self.current_song is None and len(tracks) > 1:
+            songs += await loader.load_local_songs(tracks[:1])
+            tail = tracks[1:]
+            if songs[0] is not None:
+                self.playlist.add(songs[0])
+                self.pickle_playlist()
+                await self.play_song(self.playlist[0])
+
+        loaded_tail = await loader.load_local_songs(tail)
+        songs += loaded_tail
+
+        added = [song for song in loaded_tail if song is not None]
+        if not added:
+            return songs
+
+        for song in added:
+            self.playlist.add(song)
+        self.pickle_playlist()
+
+        if self.current_song is None:
+            await self.play_song(self.playlist[0])
+        else:
+            self.preload_queue()
+
+        return songs
 
     def add_task(self, coro: Coroutine):
         # next_song is invoked by discord.py as the `after` callback

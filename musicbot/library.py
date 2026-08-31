@@ -1,5 +1,6 @@
 import asyncio
 import difflib
+import heapq
 import re
 import sys
 from collections import Counter
@@ -138,13 +139,21 @@ _KIND_ORDER = {"album": 0, "song": 1, "artist": 2}
 
 
 # `query` reaches search() from a consume-rest command parameter, so a
-# prefix invocation can hand it most of a 2000-character message.
-# SequenceMatcher is O(len(query) * len(candidate)) and runs once per
-# index entry, so an unbounded query is a CPU amplifier any guild
-# member could fire repeatedly at the executor the bot also builds its
-# index and resolves metadata on: measured against a 53k-entry
-# library, 10 characters costs 0.5s and 1900 costs 20s. Nothing anyone
-# means to search for is this long.
+# prefix invocation can hand it most of a 2000-character message, and
+# nothing anyone means to search for is that long.
+#
+# This used to be the defence against a CPU amplifier: SequenceMatcher
+# is O(len(query) * len(candidate)) and ran in full against every index
+# entry, so against a 53k-entry library 10 characters cost 0.5s and
+# 1900 cost 20s - something any guild member could fire repeatedly.
+# That is no longer the shape of the cost. Now that _score() screens on
+# difflib's cheap bounds, a very long query is the *cheapest* case,
+# because real_quick_ratio() rules out an ordinary-length candidate on
+# the length difference alone in O(1): the same 1900 characters
+# measure at 45ms, against 81ms for a short query. The cap stays for
+# what it still does - bounding the work over whatever candidates do
+# survive screening, and bounding what a caller can make the bot hold
+# - but it is no longer what keeps a long query cheap.
 _MAX_QUERY_LEN = 100
 
 
@@ -159,17 +168,31 @@ def _word_pattern(query: str) -> Optional[re.Pattern]:
     return re.compile(rf"\b{re.escape(query)}\b")
 
 
+def _with_bonus(matcher: difflib.SequenceMatcher, bonus: float) -> float:
+    """max(ratio, bonus) for the two bonus tiers, without paying for
+    ratio() when it cannot win. real_quick_ratio() is an upper bound on
+    it costing O(1) against its O(len * len), so a bonus that already
+    exceeds the bound is the answer outright - which is the usual case
+    for a short query, where the bonus is high and the ratio is low."""
+    if matcher.real_quick_ratio() <= bonus:
+        return bonus
+    return max(matcher.ratio(), bonus)
+
+
 def _score(
     matcher: difflib.SequenceMatcher,
     word: Optional[re.Pattern],
     query: str,
     candidate: str,
+    cutoff: float,
 ) -> float:
     """`query` must already be casefolded, and `matcher` must already
     have it set as its *second* sequence - SequenceMatcher caches its
     index of that one, so keeping the query there and varying the
     candidate builds the cache once per search instead of once per
-    entry (1.4x on a realistic query, 3.6x at the cap).
+    entry (1.4x on a realistic query, 19x at the cap - quick_ratio()
+    below leans on the same cached index, so the screening made this
+    orientation matter more than it already did).
 
     Do not "simplify" this back to SequenceMatcher(None, query,
     candidate) for readability: ratio() is NOT symmetric - measured
@@ -188,22 +211,46 @@ def _score(
     candidate is: "the" covers most of "Theo" and little of "The
     Beatles", so without this tier a search for "the" buries every
     real band under whatever short unrelated names happen to contain
-    those letters."""
+    those letters.
+
+    Returns 0.0, rather than the true score, for any candidate that
+    cannot reach `cutoff` - see the bounds check below. Callers only
+    ever compare the result against _SCORE_FLOOR and rank what
+    survives, so a candidate ruled out here is one that could not have
+    appeared in the results anyway."""
     candidate = candidate.casefold()
     if not candidate:
         return 0.0
     matcher.set_seq1(candidate)
-    ratio = matcher.ratio()
+    # Both bonus tiers float their candidate above the floor on their
+    # own (0.9 and 0.6 against 0.45), so they are tested before
+    # anything is spent on ruling the candidate out - and they are
+    # tested first among themselves in that order, since a word match
+    # outranks a fragment. Only the exact score is still in question.
     if word is not None and word.search(candidate):
-        return max(ratio, 0.9 + 0.1 * len(query) / len(candidate))
+        return _with_bonus(matcher, 0.9 + 0.1 * len(query) / len(candidate))
     if query in candidate:
         # weighted towards coverage rather than a flat containment
         # bonus: one letter appearing inside a six-letter title is a
         # far weaker signal than eight of eleven characters, and a
         # generous flat base would rank the former above a genuine
         # near-miss elsewhere in the library
-        return max(ratio, 0.6 + 0.4 * len(query) / len(candidate))
-    return ratio
+        return _with_bonus(matcher, 0.6 + 0.4 * len(query) / len(candidate))
+    # Neither bonus applies, so the score is the ratio alone and the
+    # only thing that matters is whether it can reach the cutoff.
+    # real_quick_ratio() and quick_ratio() are upper bounds on ratio()
+    # costing O(1) and O(len) against its O(len * len), so a candidate
+    # they rule out never pays for the full comparison - and on a real
+    # library that is nearly all of them. This is difflib's own idiom;
+    # get_close_matches() screens exactly this way.
+    #
+    # It is what keeps a search off the GIL: scoring is pure Python and
+    # runs once per index entry, so time spent in here is time the
+    # event loop - and with it the audio sender thread - is contending
+    # for the interpreter, whatever executor the search was handed to.
+    if matcher.real_quick_ratio() < cutoff or matcher.quick_ratio() < cutoff:
+        return 0.0
+    return matcher.ratio()
 
 
 def search(
@@ -214,6 +261,10 @@ def search(
     coroutine callers must use search_async()."""
     query = query.casefold().strip()[:_MAX_QUERY_LEN]
     if not query:
+        return []
+    # keep() below indexes the heap of the best `limit` scores, which
+    # a non-positive limit would leave permanently empty
+    if limit <= 0:
         return []
 
     matcher = difflib.SequenceMatcher()
@@ -227,14 +278,43 @@ def search(
     # label) for
     matches: List[SearchResult] = []
 
+    # The screening cutoff _score() prunes against. It starts at the
+    # floor and rises: once `limit` results are in hand, a candidate
+    # that cannot reach the weakest of them cannot appear in the
+    # returned list either, so there is no reason to score it exactly.
+    # This is what makes the O(1) bound above worth having - against
+    # the bare floor it rules out almost nothing for a query of
+    # ordinary length, and against a cutoff that has climbed to 0.8 it
+    # rules out nearly everything.
+    #
+    # `best` is a min-heap of the top `limit` scores, so best[0] is
+    # that weakest one. The comparison in _score() is strict, so an
+    # entry that ties it still survives to be ranked - which matters,
+    # because equal scores are separated by the tie-break below rather
+    # than by arrival order.
+    cutoff = _SCORE_FLOOR
+    best: List[float] = []
+
+    def keep(score: float) -> None:
+        nonlocal cutoff
+        if len(best) < limit:
+            heapq.heappush(best, score)
+        elif score > best[0]:
+            heapq.heapreplace(best, score)
+        else:
+            return
+        if len(best) == limit:
+            cutoff = best[0]
+
     for artist, albums in index.items():
-        score = _score(matcher, word, query, artist)
+        score = _score(matcher, word, query, artist, cutoff)
         if score >= _SCORE_FLOOR:
             matches.append(
                 SearchResult("artist", artist, None, None, artist, score)
             )
+            keep(score)
         for album, songs in albums.items():
-            score = _score(matcher, word, query, album)
+            score = _score(matcher, word, query, album, cutoff)
             if score >= _SCORE_FLOOR:
                 matches.append(
                     SearchResult(
@@ -246,8 +326,9 @@ def search(
                         score,
                     )
                 )
+                keep(score)
             for song in songs:
-                score = _score(matcher, word, query, song.title)
+                score = _score(matcher, word, query, song.title, cutoff)
                 if score >= _SCORE_FLOOR:
                     matches.append(
                         SearchResult(
@@ -259,6 +340,7 @@ def search(
                             score,
                         )
                     )
+                    keep(score)
 
     matches.sort(
         key=lambda r: (-r.score, _KIND_ORDER[r.kind], r.label.casefold())
