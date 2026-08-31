@@ -758,6 +758,10 @@ class Library(commands.Cog):
             return
         await ctx.defer()
         index = await library.build_index_async()
+        # the enrichment caches hold tag and artwork reads keyed by
+        # file path; a rescan exists to pick up what changed on disk,
+        # so they have to go with it
+        library_metadata.clear_caches()
         artists, albums, songs = library.counts(index)
         await ctx.send(
             config.LIBRARY_REFRESHED.format(
