@@ -144,8 +144,7 @@ class PageButton(discord.ui.Button):
         self.delta = delta
 
     async def callback(self, interaction: discord.Interaction):
-        self.browse_view.page += self.delta
-        await self.browse_view.render(interaction)
+        await self.browse_view.turn_page(interaction, self.delta)
 
 
 class QueueLevelButton(discord.ui.Button):
@@ -545,6 +544,28 @@ class LibraryBrowseView(LibraryView):
         # only once the edit has landed: a failed edit leaves whatever
         # was already on the message
         self._attached = attached
+
+    async def turn_page(self, interaction: discord.Interaction, delta: int):
+        """Applies a page delta under the same guard as everything
+        else, and clamps the result.
+
+        Both matter. The button stays clickable until the edit lands
+        and discord.py dispatches every click in its own task, so a
+        double-click used to apply the delta twice; the guard is what
+        keeps the second click from doing that, and the clamp is what
+        keeps any other route to an out-of-range page from being
+        silently destructive. Out of range in either direction the page
+        slice comes back empty - past the end because there is nothing
+        there, and below zero because slice(-25, 0) selects nothing -
+        and build_items() then draws a screen with no Select on it at
+        all, and no button that leads back."""
+        last = max(0, (len(self.entries()) - 1) // PAGE_SIZE)
+        self.page = min(max(self.page + delta, 0), last)
+        self._busy = True
+        try:
+            await self.render(interaction)
+        finally:
+            self._busy = False
 
     async def descend(self, interaction: discord.Interaction, chosen: str):
         # only a change of level resets the page. Queueing a track
