@@ -438,6 +438,11 @@ def _remote_art(
 # because going back and forth between an artist and its albums is the
 # access pattern this exists to serve.
 _ART_CACHE_BUDGET = 32 * 1024 * 1024
+# A second bound, on entry count. "This album has no embedded cover" is
+# a real result worth remembering - recreating it costs a full mutagen
+# parse - but it weighs nothing, so the byte budget alone does not
+# bound how many of them accumulate.
+_ART_CACHE_MAX_ENTRIES = 512
 _art_cache: "OrderedDict[Path, Optional[ArtInfo]]" = OrderedDict()
 _art_cache_bytes = 0
 
@@ -461,9 +466,29 @@ def _remember_art(key: Path, art: Optional[ArtInfo]) -> None:
     # assigning to a key it already has leaves it in its old position
     _art_cache.move_to_end(key)
     _art_cache_bytes += _art_size(art)
-    # never evicts the entry just stored, even if it alone is over
-    # budget - the level being looked at now is the one that matters
-    while _art_cache_bytes > _ART_CACHE_BUDGET and len(_art_cache) > 1:
+    # Over the byte budget, evict the least-recently-used entry that
+    # actually holds bytes. Plain least-recently-used would walk a run
+    # of weightless "no cover here" memos first, freeing nothing on
+    # each one and discarding a mutagen parse apiece, so a single large
+    # cover could clear every such memo the session had built up.
+    # Neither loop touches the entry just stored, even if it alone is
+    # over budget - the level being looked at now is the one that
+    # matters.
+    while _art_cache_bytes > _ART_CACHE_BUDGET:
+        victim = next(
+            (
+                other
+                for other, art in _art_cache.items()
+                if other != key and _art_size(art)
+            ),
+            None,
+        )
+        if victim is None:
+            break
+        _art_cache_bytes -= _art_size(_art_cache.pop(victim))
+    # Over the entry cap, plain least-recently-used: here the weightless
+    # entries are exactly what needs trimming.
+    while len(_art_cache) > _ART_CACHE_MAX_ENTRIES:
         _, evicted = _art_cache.popitem(last=False)
         _art_cache_bytes -= _art_size(evicted)
 

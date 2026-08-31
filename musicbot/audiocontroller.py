@@ -486,20 +486,41 @@ class AudioController(object):
         single-worker loader process per track, and a fresh preload
         sweep per track on top - each of which walks up to
         MAX_SONG_PRELOAD songs, so a few hundred tracks meant a few
-        thousand redundant iterations. Here the load is one call, and
-        the pickle, the preload sweep and the "start playing if
-        nothing is" check each happen once."""
+        thousand redundant iterations. Here the load is one call (two
+        when it has to start playback first, see below), and the
+        preload sweep happens once."""
         print(
             f"{user} queued {len(tracks)} local track(s)"
             f" in guild {self.guild.name!r}"
         )
 
-        songs = await loader.load_local_songs(tracks)
-        loaded = [song for song in songs if song is not None]
-        if not loaded:
+        songs: List[Optional[Song]] = []
+        tail = tracks
+
+        # With nothing playing, the first track is loaded and started
+        # on its own before the rest. Batching means the whole batch
+        # has to finish before any of it is queued, where the per-track
+        # path this replaced began on track one - a few hundred
+        # milliseconds of silence for a discography on local disk, and
+        # seconds of it on a network-mounted library. One extra round
+        # trip buys that back; loading a single track costs about
+        # 1.5ms.
+        if self.current_song is None and len(tracks) > 1:
+            songs += await loader.load_local_songs(tracks[:1])
+            tail = tracks[1:]
+            if songs[0] is not None:
+                self.playlist.add(songs[0])
+                self.pickle_playlist()
+                await self.play_song(self.playlist[0])
+
+        loaded_tail = await loader.load_local_songs(tail)
+        songs += loaded_tail
+
+        added = [song for song in loaded_tail if song is not None]
+        if not added:
             return songs
 
-        for song in loaded:
+        for song in added:
             self.playlist.add(song)
         self.pickle_playlist()
 

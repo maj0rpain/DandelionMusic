@@ -143,36 +143,47 @@ async def load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
     Returns a list parallel to `tracks`, None wherever a file could not
     be loaded.
 
-    Deliberately not _run_sync. The single-worker ProcessPoolExecutor
-    exists to keep yt-dlp's extraction off the event loop, and every
-    call into it is an IPC round trip that queues behind whatever
-    extraction is already running - so queueing an album meant a dozen
-    round trips through the one process the rest of the bot depends on,
-    and queueing a discography meant hundreds of them. A local-library
-    track needs none of that: _load_song's LOCAL_LIBRARY branch is a
-    path check and a mutagen tag read, ordinary blocking I/O that
-    belongs on a thread. One threaded call covers the whole batch and
-    the loader process stays free for the extraction it is for.
+    What this saves is the round trip, not the subprocess. Every call
+    into the single-worker pool is an IPC round trip that queues behind
+    whatever extraction is already running, so queueing an album used
+    to mean a dozen of them and queueing a discography hundreds - one
+    call covers the batch instead. It still goes through the pool,
+    because a local track's work is a mutagen tag read: mostly pure
+    Python, and therefore holding the GIL. On a thread it would be
+    contending with the event loop and discord.py's audio-player
+    thread for as long as the batch takes, which is the hazard
+    _search_lock exists for in musicbot.commands.library. Measured over
+    300 tracks the pool is no slower than a thread anyway (247ms
+    against 254ms), so there is nothing to trade away.
 
-    Refuses anything that is not a local-library URI, since the other
-    branches of _load_song would put yt-dlp on the shared thread pool.
+    Refuses anything that is not a local-library URI. The other
+    branches of _load_song can return a *list* of songs for one track
+    (a playlist), which would silently break the one-entry-per-input
+    contract the caller relies on to report which files it skipped.
     """
     for track in tracks:
         if identify_url(track) is not SiteTypes.LOCAL_LIBRARY:
             raise ValueError(f"not a local library track: {track!r}")
-    return await asyncio.get_running_loop().run_in_executor(
-        None, _load_local_songs, tracks
-    )
+    return await _run_sync(_load_local_songs, tracks)
 
 
 def _load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
     songs: List[Optional[Song]] = []
     for track in tracks:
-        # one unreadable file must not cost the caller the rest of the
-        # batch - the browser reports the missing ones by name
+        # One bad file must not cost the caller the rest of the batch -
+        # the browser reports the missing ones by name. SongError is
+        # the expected way that happens (a file the index has and the
+        # disk no longer does); anything else - an unparseable URI, a
+        # stale mount refusing resolve() - is unexpected but just as
+        # local to the one track, and the per-track path this replaced
+        # kept everything queued up to the failure rather than losing
+        # the batch.
         try:
             songs.append(_load_song(track))
         except SongError:
+            songs.append(None)
+        except Exception as e:
+            print(f"loader: loading {track!r} failed: {e}", file=sys.stderr)
             songs.append(None)
     return songs
 

@@ -198,25 +198,26 @@ async def queue_songs(ctx, interaction, triples) -> None:
         # discography looking like a button that did nothing.
         await interaction.response.defer(ephemeral=True, thinking=True)
 
-    try:
-        await play_check(ctx)
-    except CheckError as e:
-        await interaction.followup.send(str(e), ephemeral=True)
-        return
-
     # walked twice below (once to build the URIs, once to name what
     # was skipped), so it must not be something that can be consumed
     triples = list(triples)
-    tracks = [library.song_uri(*triple) for triple in triples]
+
+    # play_check() is inside this, not ahead of it: it connects to
+    # voice, and a failed connect raises asyncio.TimeoutError or
+    # discord.ClientException rather than CheckError. The placeholder
+    # above is a visible "thinking" message now, so anything escaping
+    # here leaves it spinning forever - discord.py logs the traceback
+    # and the user is told nothing at all.
     try:
+        await play_check(ctx)
+        tracks = [library.song_uri(*triple) for triple in triples]
         songs = await ctx.audiocontroller.process_local_tracks(
             tracks, user=ctx.author
         )
+    except CheckError as e:
+        await interaction.followup.send(str(e), ephemeral=True)
+        return
     except Exception:
-        # the interaction is already deferred, so anything escaping
-        # here would leave the placeholder spinning with no
-        # explanation - discord.py logs the traceback and the user is
-        # told nothing at all
         print_exc(file=sys.stderr)
         await interaction.followup.send(config.SONGINFO_ERROR, ephemeral=True)
         return
