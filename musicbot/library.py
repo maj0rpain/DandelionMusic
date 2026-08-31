@@ -1,5 +1,6 @@
 import asyncio
 import difflib
+import re
 import sys
 from collections import Counter
 from pathlib import Path
@@ -147,8 +148,22 @@ _KIND_ORDER = {"album": 0, "song": 1, "artist": 2}
 _MAX_QUERY_LEN = 100
 
 
+def _word_pattern(query: str) -> Optional[re.Pattern]:
+    r"""A \b-anchored matcher for the query, or None when it doesn't
+    both start and end with word characters - \b sits between a word
+    and a non-word character, so a query like "!!!" (a real band name)
+    could never match one and has to fall through to plain
+    containment."""
+    if not re.match(r"\w", query) or not re.search(r"\w\Z", query):
+        return None
+    return re.compile(rf"\b{re.escape(query)}\b")
+
+
 def _score(
-    matcher: difflib.SequenceMatcher, query: str, candidate: str
+    matcher: difflib.SequenceMatcher,
+    word: Optional[re.Pattern],
+    query: str,
+    candidate: str,
 ) -> float:
     """`query` must already be casefolded, and `matcher` must already
     have it set as its *second* sequence - SequenceMatcher caches its
@@ -159,14 +174,22 @@ def _score(
 
     difflib's ratio alone under-rates a short query against a long
     name - "computer" against "OK Computer" is only 0.63, and falls
-    further the longer the album title gets - so a containment hit
-    gets a floor of its own, scaled by how much of the candidate the
-    query accounts for. An exact match therefore scores 1.0."""
+    further the longer the album title gets - so a hit inside the
+    candidate gets a floor of its own. An exact match scores 1.0.
+
+    Matching a whole word outranks matching a fragment, because
+    coverage alone reads a short query as a better hit the shorter the
+    candidate is: "the" covers most of "Theo" and little of "The
+    Beatles", so without this tier a search for "the" buries every
+    real band under whatever short unrelated names happen to contain
+    those letters."""
     candidate = candidate.casefold()
     if not candidate:
         return 0.0
     matcher.set_seq1(candidate)
     ratio = matcher.ratio()
+    if word is not None and word.search(candidate):
+        return max(ratio, 0.9 + 0.1 * len(query) / len(candidate))
     if query in candidate:
         # weighted towards coverage rather than a flat containment
         # bonus: one letter appearing inside a six-letter title is a
@@ -189,6 +212,8 @@ def search(
 
     matcher = difflib.SequenceMatcher()
     matcher.set_seq2(query)
+    # compiled once per search, not once per candidate
+    word = _word_pattern(query)
 
     # scored and filtered as we go: a large library holds tens of
     # thousands of entries and only a handful ever clear the floor, so
@@ -197,13 +222,13 @@ def search(
     matches: List[SearchResult] = []
 
     for artist, albums in index.items():
-        score = _score(matcher, query, artist)
+        score = _score(matcher, word, query, artist)
         if score >= _SCORE_FLOOR:
             matches.append(
                 SearchResult("artist", artist, None, None, artist, score)
             )
         for album, songs in albums.items():
-            score = _score(matcher, query, album)
+            score = _score(matcher, word, query, album)
             if score >= _SCORE_FLOOR:
                 matches.append(
                     SearchResult(
@@ -216,7 +241,7 @@ def search(
                     )
                 )
             for song in songs:
-                score = _score(matcher, query, song.title)
+                score = _score(matcher, word, query, song.title)
                 if score >= _SCORE_FLOOR:
                     matches.append(
                         SearchResult(

@@ -206,11 +206,13 @@ class LibraryView(discord.ui.View):
         # immediately, it does not show a "thinking" placeholder, so
         # without this two overlapping resolves could land out of order
         self._busy: bool = False
-        # set by the caller after sending; needed so on_timeout() can
-        # disable the stale buttons/select. Left None only when
-        # Context.send routed through interaction.response, which
-        # returns nothing - see on_timeout below.
-        self.message: Optional[discord.Message] = None
+        # whatever Context.send handed back, which is not always a
+        # Message: the prefix paths and the deferred search path give
+        # a Message/WebhookMessage, but answering an interaction
+        # directly returns an InteractionCallbackResponse (discord.py
+        # >= 2.5) that has no edit(). on_timeout() below discriminates
+        # on the type rather than on which path ran.
+        self.message = None
 
     async def interaction_check(
         self, interaction: discord.Interaction
@@ -248,16 +250,18 @@ class LibraryView(discord.ui.View):
         for item in self.children:
             item.disabled = True
         try:
-            if self.message is not None:
+            # A view sent after a defer goes out as a followup with its
+            # own id, so @original is only the deferred placeholder and
+            # editing it would leave the real components enabled
+            # forever - those have to be edited directly. Answering an
+            # interaction without deferring puts the view on the
+            # original response, and hands back an
+            # InteractionCallbackResponse rather than the message, so
+            # that case has to go through the interaction. Testing what
+            # we actually hold keeps this right whichever path ran.
+            if isinstance(self.message, discord.Message):
                 await self.message.edit(view=self)
             elif self.ctx.interaction is not None:
-                # only reached when Context.send answered the
-                # interaction directly, which returns None - there the
-                # view really is on the original response. A view sent
-                # after a defer lands on a *followup* instead, which
-                # does come back as a Message, and editing @original
-                # for one of those would edit the deferred placeholder
-                # and leave the real components enabled forever.
                 await self.ctx.interaction.edit_original_response(view=self)
         except discord.HTTPException:
             pass
@@ -490,11 +494,16 @@ class LibraryBrowseView(LibraryView):
             await interaction.response.edit_message(**kwargs)
 
     async def descend(self, interaction: discord.Interaction, chosen: str):
-        self.page = 0
+        # only a change of level resets the page. Queueing a track
+        # doesn't re-render, so zeroing it there would leave the
+        # displayed page and self.page disagreeing, and the next
+        # "Next" click would jump back to page 1.
         if self.artist is None:
+            self.page = 0
             self.artist = chosen
             await self._enter_level(interaction)
         elif self.album is None:
+            self.page = 0
             self.album = chosen
             await self._enter_level(interaction)
         else:
