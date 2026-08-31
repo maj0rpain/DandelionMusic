@@ -1,4 +1,5 @@
 import asyncio
+import difflib
 import sys
 from collections import Counter
 from pathlib import Path
@@ -108,6 +109,119 @@ def build_index() -> LibraryIndex:
 
 def get_index() -> LibraryIndex:
     return _index
+
+
+class SearchResult(NamedTuple):
+    """One ranked match. `album` is None for an artist hit and
+    `filename` is set only for a song hit, so a result always carries
+    exactly the path components needed to look it back up in the
+    index."""
+
+    kind: str  # "artist", "album" or "song"
+    artist: str
+    album: Optional[str]
+    filename: Optional[str]
+    label: str  # display text, without the kind emoji
+    score: float
+
+
+# Below this a match is noise rather than a near miss - without a
+# floor, a query like "zzzzz" would still return whatever five entries
+# happened to share a couple of letters with it.
+_SCORE_FLOOR = 0.45
+
+# Tie-break order at equal score: a query matching an album and one of
+# its own tracks equally well almost always meant the album, and an
+# artist hit (the broadest thing to queue) comes last.
+_KIND_ORDER = {"album": 0, "song": 1, "artist": 2}
+
+
+def _score(query: str, candidate: str) -> float:
+    """`query` must already be casefolded. difflib's ratio alone
+    under-rates a short query against a long name - "computer" against
+    "OK Computer" is only 0.63, and falls further the longer the album
+    title gets - so a containment hit gets a floor of its own, scaled
+    by how much of the candidate the query accounts for. An exact
+    match therefore scores 1.0."""
+    candidate = candidate.casefold()
+    if not candidate:
+        return 0.0
+    ratio = difflib.SequenceMatcher(None, query, candidate).ratio()
+    if query in candidate:
+        # weighted towards coverage rather than a flat containment
+        # bonus: one letter appearing inside a six-letter title is a
+        # far weaker signal than eight of eleven characters, and a
+        # generous flat base would rank the former above a genuine
+        # near-miss elsewhere in the library
+        return max(ratio, 0.6 + 0.4 * len(query) / len(candidate))
+    return ratio
+
+
+def search(
+    index: LibraryIndex, query: str, limit: int = 5
+) -> List[SearchResult]:
+    """Ranks artists, albums and songs against one query string and
+    returns the closest `limit` matches, best first. Synchronous -
+    coroutine callers must use search_async()."""
+    query = query.casefold().strip()
+    if not query:
+        return []
+
+    # filtered as we go rather than collected then sorted: a large
+    # library holds tens of thousands of entries and only a handful
+    # ever clear the floor
+    matches: List[SearchResult] = []
+
+    def keep(result: SearchResult) -> None:
+        if result.score >= _SCORE_FLOOR:
+            matches.append(result)
+
+    for artist, albums in index.items():
+        keep(
+            SearchResult(
+                "artist", artist, None, None, artist, _score(query, artist)
+            )
+        )
+        for album, songs in albums.items():
+            keep(
+                SearchResult(
+                    "album",
+                    artist,
+                    album,
+                    None,
+                    f"{album} \u2014 {artist}",
+                    _score(query, album),
+                )
+            )
+            for song in songs:
+                keep(
+                    SearchResult(
+                        "song",
+                        artist,
+                        album,
+                        song.filename,
+                        f"{song.title} \u2014 {artist}",
+                        _score(query, song.title),
+                    )
+                )
+
+    matches.sort(
+        key=lambda r: (-r.score, _KIND_ORDER[r.kind], r.label.casefold())
+    )
+    return matches[:limit]
+
+
+async def search_async(
+    index: LibraryIndex, query: str, limit: int = 5
+) -> List[SearchResult]:
+    """Coroutine callers must use this, not search() directly - it
+    scores every entry in the index, which is tens of thousands of
+    SequenceMatcher ratios on a large library, and this codebase's
+    rule (see loader.py's _run_sync) is that blocking work never runs
+    directly on the event loop."""
+    return await asyncio.get_running_loop().run_in_executor(
+        None, search, index, query, limit
+    )
 
 
 def song_path(artist: str, album: str, filename: str) -> Path:

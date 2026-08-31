@@ -108,6 +108,9 @@
   "HELP_LIBRARY_LONG": "Browse the local music library and queue a song, album, or artist.",
   "HELP_LIBRARY_REFRESH_SHORT": "Rescan the local music library",
   "HELP_LIBRARY_REFRESH_LONG": "Rescans MUSIC_LIBRARY_PATH and rebuilds the browsable index.",
+  "LIBRARY_SEARCH_NO_RESULTS": "Nothing in the library looks like \"{query}\".",
+  "HELP_LIBRARY_SEARCH_SHORT": "Search the local music library",
+  "HELP_LIBRARY_SEARCH_LONG": "Searches artists, albums and songs for the closest matches and offers the top 5 to queue.",
   "HELP_LIBRARY_BROWSE_SHORT": "Browse the local music library",
   "HELP_LIBRARY_BROWSE_LONG": "Opens an interactive browser to queue a song, album, or artist from the local music library.",
 
