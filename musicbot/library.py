@@ -262,6 +262,10 @@ def search(
     query = query.casefold().strip()[:_MAX_QUERY_LEN]
     if not query:
         return []
+    # keep() below indexes the heap of the best `limit` scores, which
+    # a non-positive limit would leave permanently empty
+    if limit <= 0:
+        return []
 
     matcher = difflib.SequenceMatcher()
     matcher.set_seq2(query)

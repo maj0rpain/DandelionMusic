@@ -52,6 +52,11 @@ class ArtInfo(NamedTuple):
     extension: Optional[str]  # "jpeg"/"png"/etc, set only when data is set
 
 
+# Deliberately unbounded, unlike _art_cache below. The key is one
+# browse level, so this holds at most one small entry per artist and
+# per album in the library and cannot grow past that however long the
+# session runs - where a single cached cover can be 5 MB, which is what
+# the other cache is defending against.
 _names_cache: Dict[
     Tuple[str, Optional[str], Path], Tuple[str, Optional[str]]
 ] = {}
@@ -69,11 +74,17 @@ async def _resolve_names(
 
     Memoized, because browsing revisits the same levels constantly -
     artist, album, back, the next album - and each visit would
-    otherwise re-read the same file off disk. Only a completed read is
-    remembered: caching the fallback would let one NAS hiccup pin an
-    entity to its folder name for the rest of the process's life, and
-    the folder name is exactly the input the tags exist to correct.
-    Cleared by clear_caches() when the library is rescanned."""
+    otherwise re-read the same file off disk.
+
+    A read that hangs past the timeout is deliberately not remembered:
+    caching that fallback would let one NAS stall pin an entity to its
+    folder name for the rest of the process's life, and the folder name
+    is exactly the input the tags exist to correct. A read that *fails*
+    is a different matter - read_tags() never raises, and returns empty
+    tags both for a file it could not open and for one that simply
+    carries no tags - so the two are indistinguishable here and both do
+    get remembered as the folder-name fallback. clear_caches(), on
+    `d!library refresh`, is what clears those."""
     key = (artist_folder, album_folder, sample_file)
     cached = _names_cache.get(key)
     if cached is not None:

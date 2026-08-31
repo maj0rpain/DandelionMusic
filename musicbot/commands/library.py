@@ -666,7 +666,16 @@ class LibraryBrowseView(LibraryView):
             # deferred before render() for the reason given there: a
             # render can have to wait for one already in flight
             await interaction.response.defer()
-            await self.render(interaction)
+            # Syncs attachments even though a page turn cannot change
+            # them, so that this heals a level whose enrichment edit
+            # failed. That edit assigns _enrichment before sending, so
+            # a failure (a 429 that outlives its retries, a 5xx) leaves
+            # the embed asking for attachment://cover.<ext> while the
+            # message carries no such file - and every later page turn
+            # would redraw that broken reference. Costs nothing when
+            # nothing has changed: render() compares the key first and
+            # omits the field.
+            await self.render(interaction, sync_attachments=True)
 
     async def descend(self, interaction: discord.Interaction, chosen: str):
         # only a change of level resets the page. Queueing a track
