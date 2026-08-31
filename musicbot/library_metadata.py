@@ -448,7 +448,18 @@ def _art_size(art: Optional[ArtInfo]) -> int:
 
 def _remember_art(key: Path, art: Optional[ArtInfo]) -> None:
     global _art_cache_bytes
+    if key in _art_cache:
+        # Reachable: unlike the two remote lookups, _embedded_art() has
+        # no in-flight dedup, so two reads of the same file can be
+        # resolving at once - descending into an album, going back, and
+        # descending again before the first enrichment finishes does
+        # it. The dict keeps one entry, so counting the replacement
+        # without discounting what it replaced would leave the budget
+        # permanently overstated, and eventually evict entries that fit.
+        _art_cache_bytes -= _art_size(_art_cache[key])
     _art_cache[key] = art
+    # assigning to a key it already has leaves it in its old position
+    _art_cache.move_to_end(key)
     _art_cache_bytes += _art_size(art)
     # never evicts the entry just stored, even if it alone is over
     # budget - the level being looked at now is the one that matters

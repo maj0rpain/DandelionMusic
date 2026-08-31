@@ -361,6 +361,8 @@ class LibraryBrowseView(LibraryView):
         self._level: Optional[
             Tuple[Tuple[Optional[str], Optional[str]], LevelData]
         ] = None
+        # serialises the message edits themselves - see render()
+        self._render_lock = asyncio.Lock()
         self.build_items()
 
     def _songs(self) -> List[library.LibrarySong]:
@@ -611,23 +613,37 @@ class LibraryBrowseView(LibraryView):
     async def render(
         self,
         interaction: discord.Interaction,
-        use_followup: bool = False,
         sync_attachments: bool = False,
     ):
-        self.build_items()
-        kwargs = {"embed": self.embed(), "view": self}
-        attached = self._attached
-        if sync_attachments:
-            attached = self._attachment_key()
-            if attached != self._attached:
-                kwargs["attachments"] = self._attachments()
-        if use_followup:
+        """Redraws the message. `interaction` must already have been
+        deferred - every edit goes out as a followup, so that waiting
+        on the lock below can never eat the three seconds an
+        interaction has to be answered in.
+
+        Serialised, because _busy does not cover this. _busy turns away
+        new *clicks*; the enrichment edit in _enter_level() is not one.
+        It resumes on its own after a wait that is deliberately
+        unguarded, so it can arrive here while a page turn's edit is
+        still in flight. Two edits to one message would then land in
+        either order - drawing the enrichment and then replacing it
+        with the page turn's older embed - and each would write back an
+        _attached it sampled before the other ran. That last part is
+        the lasting damage: the record of what the message carries ends
+        up disagreeing with the message, so a later navigation omits an
+        `attachments` field it needed and strands a cover under an
+        embed that no longer references it."""
+        async with self._render_lock:
+            self.build_items()
+            kwargs = {"embed": self.embed(), "view": self}
+            attached = self._attached
+            if sync_attachments:
+                attached = self._attachment_key()
+                if attached != self._attached:
+                    kwargs["attachments"] = self._attachments()
             await interaction.edit_original_response(**kwargs)
-        else:
-            await interaction.response.edit_message(**kwargs)
-        # only once the edit has landed: a failed edit leaves whatever
-        # was already on the message
-        self._attached = attached
+            # only once the edit has landed: a failed edit leaves
+            # whatever was already on the message
+            self._attached = attached
 
     async def turn_page(self, interaction: discord.Interaction, delta: int):
         """Applies a page delta under the same guard as everything
@@ -646,6 +662,9 @@ class LibraryBrowseView(LibraryView):
         last = max(0, (len(self.entries()) - 1) // PAGE_SIZE)
         self.page = min(max(self.page + delta, 0), last)
         with self.busy():
+            # deferred before render() for the reason given there: a
+            # render can have to wait for one already in flight
+            await interaction.response.defer()
             await self.render(interaction)
 
     async def descend(self, interaction: discord.Interaction, chosen: str):
@@ -697,9 +716,7 @@ class LibraryBrowseView(LibraryView):
         self._enrichment = None
         with self.busy():
             await interaction.response.defer()
-            await self.render(
-                interaction, use_followup=True, sync_attachments=True
-            )
+            await self.render(interaction, sync_attachments=True)
 
         try:
             enrichment = await self._resolve_enrichment()
@@ -714,9 +731,7 @@ class LibraryBrowseView(LibraryView):
             return
         with self.busy():
             self._enrichment = enrichment
-            await self.render(
-                interaction, use_followup=True, sync_attachments=True
-            )
+            await self.render(interaction, sync_attachments=True)
 
     async def queue_current_level(self, interaction: discord.Interaction):
         if self.album is not None:
