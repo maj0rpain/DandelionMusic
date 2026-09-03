@@ -191,12 +191,18 @@ async def queue_songs(ctx, interaction, triples) -> None:
     spans several, so the artist travels with each song rather than
     being read off the view."""
     if not interaction.response.is_done():
-        # thinking=True, so this is a real ephemeral placeholder that
-        # the followup below fills in. A plain defer() on a component
-        # interaction is deferred_message_update - silent, and it
-        # ignores `ephemeral` outright - which left queueing a whole
-        # discography looking like a button that did nothing.
-        await interaction.response.defer(ephemeral=True, thinking=True)
+        # A real ephemeral placeholder, edited in place below - not a
+        # deferred "thinking" response. Deferring a component
+        # interaction with thinking=True sends response type 5
+        # (deferred_channel_message), which Discord's client
+        # unreliably renders as "This interaction failed" even though
+        # the deferral succeeds server-side and the real result still
+        # arrives a moment later. A plain defer() avoids that but is
+        # deferred_message_update - silent, and it ignores `ephemeral`
+        # outright - which left queueing a whole discography looking
+        # like a button that did nothing. Responding for real up front
+        # sidesteps both problems.
+        await interaction.response.send_message("Queueing...", ephemeral=True)
 
     # walked twice below (once to build the URIs, once to name what
     # was skipped), so it must not be something that can be consumed
@@ -205,8 +211,8 @@ async def queue_songs(ctx, interaction, triples) -> None:
     # play_check() is inside this, not ahead of it: it connects to
     # voice, and a failed connect raises asyncio.TimeoutError or
     # discord.ClientException rather than CheckError. The placeholder
-    # above is a visible "thinking" message now, so anything escaping
-    # here leaves it spinning forever - discord.py logs the traceback
+    # above is a visible message now, so anything escaping here leaves
+    # it saying "Queueing..." forever - discord.py logs the traceback
     # and the user is told nothing at all.
     try:
         await play_check(ctx)
@@ -215,11 +221,11 @@ async def queue_songs(ctx, interaction, triples) -> None:
             tracks, user=ctx.author
         )
     except CheckError as e:
-        await interaction.followup.send(str(e), ephemeral=True)
+        await interaction.edit_original_response(content=str(e))
         return
     except Exception:
         print_exc(file=sys.stderr)
-        await interaction.followup.send(config.SONGINFO_ERROR, ephemeral=True)
+        await interaction.edit_original_response(content=config.SONGINFO_ERROR)
         return
 
     missing = [
@@ -240,7 +246,7 @@ async def queue_songs(ctx, interaction, triples) -> None:
         message += ". The index may be stale - ask the bot owner to run"
         message += " `d!lib refresh`."
 
-    await interaction.followup.send(message, ephemeral=True)
+    await interaction.edit_original_response(content=message)
 
 
 class LibraryView(discord.ui.View):
