@@ -11,17 +11,33 @@ from musicbot.utils import check_dependencies
 
 
 class _NoTracebackFormatter(logging.Formatter):
-    """discord.py's own formatter appends a full traceback whenever a
-    record carries exc_info/stack_info (e.g. gateway reconnect
-    errors) - fine for a log file, unreadable in a console. Returning
-    "" from both hooks drops that regardless of level, leaving just
-    the one-line message."""
+    """One line per record below ERROR, traceback and all.
 
-    def formatException(self, ei) -> str:
-        return ""
+    discord.py attaches a full traceback to routine trouble - a
+    gateway reconnect, a rate limit it already handled - which is
+    noise in a console. ERROR is different: uncaught exceptions in a
+    View item, an event handler or a command reach discord.py's logger
+    and nowhere else, so stripping those would leave a bare "Ignoring
+    exception in view ..." with no file, line or exception type behind
+    it, and no other record anywhere. Those keep their traceback."""
 
-    def formatStack(self, stack_info: str) -> str:
-        return ""
+    def format(self, record: logging.LogRecord) -> str:
+        if record.levelno >= logging.ERROR:
+            return super().format(record)
+        # blanked around the call rather than dropped, since the
+        # record belongs to the logging machinery, not to us
+        exc_info, exc_text, stack_info = (
+            record.exc_info,
+            record.exc_text,
+            record.stack_info,
+        )
+        record.exc_info = record.exc_text = record.stack_info = None
+        try:
+            return super().format(record)
+        finally:
+            record.exc_info = exc_info
+            record.exc_text = exc_text
+            record.stack_info = stack_info
 
 
 initial_extensions = [

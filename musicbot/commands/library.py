@@ -317,9 +317,9 @@ class LibraryView(discord.ui.View):
             # catches are overwhelmingly the second half of a
             # double-click. Telling someone off for that reads as a
             # malfunction. The one operation still slow enough to be
-            # worth explaining - a bulk queue - shows its own
-            # "thinking" placeholder while it runs, so the user can
-            # already see why nothing else is responding.
+            # worth explaining - a bulk queue - puts up its own
+            # ephemeral "Queueing..." message while it runs, so the
+            # user can already see why nothing else is responding.
             await interaction.response.defer()
             return False
         return True
@@ -327,12 +327,12 @@ class LibraryView(discord.ui.View):
     async def queue(
         self, interaction: discord.Interaction, triples, source: str
     ) -> None:
-        """Queues through the _busy guard. queue_songs() defers, and
-        deferring re-enables the select at once - the "thinking"
-        placeholder it puts up is a separate ephemeral message, not a
-        lock on the view - so without this a second click while the
-        batch is still loading would queue the same album or
-        discography twice over."""
+        """Queues through the _busy guard. queue_songs() answers the
+        interaction straight away, which re-enables the select at once
+        - the "Queueing..." placeholder it puts up is a separate
+        ephemeral message, not a lock on the view - so without this a
+        second click while the batch is still loading would queue the
+        same album or discography twice over."""
         with self.busy():
             await queue_songs(self.ctx, interaction, triples, source)
 

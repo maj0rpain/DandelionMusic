@@ -87,6 +87,15 @@ class AudioController(object):
         self._next_song = None
         self.guild = guild
 
+        # True from the moment playback starts until the queue runs
+        # dry or the player is stopped - see play_song(). is_active()
+        # cannot stand in for this: every route into play_song() is
+        # already gated on the player being inactive (next_song() only
+        # gets there after discord.py has cleared the player state -
+        # see its own comment below), so it reads False on a plain
+        # track change too.
+        self._playing = False
+
         sett = bot.settings[guild]
         self._volume: int = sett.default_volume
 
@@ -363,6 +372,9 @@ class AudioController(object):
             self.pickle_playlist()
 
         if next_song is None:
+            # nothing left to advance to - the next song to start is a
+            # fresh one, and play_song() should say so
+            self._playing = False
             # if self.pickle_file.exists():
             #     self.pickle_file.unlink()
             if not self.timer.triggered and self.guild.voice_client:
@@ -381,15 +393,6 @@ class AudioController(object):
 
     async def play_song(self, song: Song):
         """Plays a song object"""
-
-        # captured before voice_client.play() below flips is_active()
-        # true, so this is the one place that can tell a genuine
-        # idle->playing transition apart from advancing to the next
-        # queued track - every path that starts playback (a single
-        # link, a local-library batch, skipping to a previous song)
-        # routes through here, so logging it here covers all of them
-        # instead of duplicating the check at each call site.
-        was_idle = not self.is_active()
 
         if not await loader.preload(song, self.bot):
             if self.command_channel:
@@ -431,7 +434,12 @@ class AudioController(object):
             await self.udisconnect("playback error")
             return
 
-        if was_idle:
+        if not self._playing:
+            # only the transition into playing, so advancing through a
+            # queue stays silent. A first track that fails to preload
+            # leaves this False and skips ahead, so whichever track
+            # actually starts is the one that gets announced.
+            self._playing = True
             print(
                 f"Started playing {(song.title or song.webpage_url)!r}"
                 f" in guild {self.guild.name!r}"
@@ -462,6 +470,14 @@ class AudioController(object):
 
         loaded_song = await loader.load_song(track)
         if not loaded_song:
+            # logged here rather than on the way in, so that the
+            # success cases below can name what the track resolved to -
+            # but a request that resolved to nothing still has to leave
+            # a trace, or an unplayable link looks like silence.
+            print(
+                f"{user} queued {track!r} in guild {self.guild.name!r}"
+                " - nothing could be loaded"
+            )
             return None
         elif isinstance(loaded_song, Song):
             self.playlist.add(loaded_song)
@@ -606,6 +622,9 @@ class AudioController(object):
     def stop_player(self):
         """Stops the player and removes all songs from the queue"""
         self._stopping = True
+        # whatever starts after this is a new session, not a track
+        # change - see play_song()
+        self._playing = False
         self.pickle_playlist()
         self.playlist.loop = LoopMode.OFF
         self.playlist.clear()
@@ -662,6 +681,14 @@ class AudioController(object):
         self.stop_player()
         await self.update_view(None)
         if self.guild.voice_client is None:
+            # There is no connection left to close, but the state
+            # above was still torn down, and for a bot dragged out of
+            # voice that failed to reconnect this is the only record
+            # the disconnect happened at all.
+            print(
+                f"Cleared voice state for guild {self.guild.name!r}"
+                f" ({reason})"
+            )
             return False
         print(f"Disconnecting from guild {self.guild.name!r} ({reason})")
         if config.ANNOUNCE_DISCONNECT:
