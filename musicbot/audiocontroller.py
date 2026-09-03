@@ -87,6 +87,15 @@ class AudioController(object):
         self._next_song = None
         self.guild = guild
 
+        # True from the moment playback starts until the queue runs
+        # dry or the player is stopped - see play_song(). is_active()
+        # cannot stand in for this: by the time next_song() advances
+        # the queue, discord.py has already cleared the player state
+        # (see next_song()'s own comment below), so is_active() reads
+        # False on an ordinary track change just as it does when
+        # nothing was playing at all.
+        self._playing = False
+
         sett = bot.settings[guild]
         self._volume: int = sett.default_volume
 
@@ -363,6 +372,9 @@ class AudioController(object):
             self.pickle_playlist()
 
         if next_song is None:
+            # nothing left to advance to - the next song to start is a
+            # fresh one, and play_song() should say so
+            self._playing = False
             # if self.pickle_file.exists():
             #     self.pickle_file.unlink()
             if not self.timer.triggered and self.guild.voice_client:
@@ -405,6 +417,17 @@ class AudioController(object):
             if song.host == SiteTypes.LOCAL_LIBRARY
             else "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
         )
+        # Claimed before play() rather than after it, because play()
+        # starts the audio thread there and then: a source that yields
+        # nothing (a truncated file, a stream URL that died) ends
+        # immediately and runs next_song() on that thread, which with
+        # an empty queue clears this flag. Reading it afterwards would
+        # see the value that callback left, announce a track that has
+        # already finished, and leave the flag set with nothing
+        # playing - silencing the next genuine start. A play() that
+        # raises below disconnects, and stop_player() clears it there.
+        was_idle = not self._playing
+        self._playing = True
         try:
             self.guild.voice_client.play(
                 discord.PCMVolumeTransformer(
@@ -419,8 +442,18 @@ class AudioController(object):
                 after=self.next_song,
             )
         except discord.ClientException:
-            await self.udisconnect()
+            await self.udisconnect("playback error")
             return
+
+        if was_idle:
+            # only the transition into playing, so advancing through a
+            # queue stays silent. A first track that fails to preload
+            # returns above without claiming the flag, so whichever
+            # track actually starts is the one that gets announced.
+            print(
+                f"Started playing {(song.title or song.webpage_url)!r}"
+                f" in guild {self.guild.name!r}"
+            )
 
         if (
             self.bot.settings[self.guild].announce_songs
@@ -445,25 +478,58 @@ class AudioController(object):
         serializing the whole, progressively larger playlist once per
         track, an O(n^2) blocking write."""
 
-        print(f"{user} queued {track!r} in guild {self.guild.name!r}")
-
-        loaded_song = await loader.load_song(track)
+        # Logged on the way out rather than on the way in, so the
+        # success cases below can name what the track resolved to
+        # instead of echoing the link. A request that resolves to
+        # nothing still has to leave a trace, though - both ways it
+        # can fail, since an unsupported or blocked link raises
+        # (SongError, which the caller turns into a Discord reply and
+        # nothing else) where an empty extraction returns falsy.
+        try:
+            loaded_song = await loader.load_song(track)
+        except loader.SongError:
+            print(
+                f"{user} queued {track!r} in guild {self.guild.name!r}"
+                " - could not be loaded"
+            )
+            raise
         if not loaded_song:
+            print(
+                f"{user} queued {track!r} in guild {self.guild.name!r}"
+                " - nothing could be loaded"
+            )
             return None
         elif isinstance(loaded_song, Song):
             self.playlist.add(loaded_song)
+            print(
+                f"{user} queued {loaded_song.title!r}"
+                f" by {loaded_song.uploader or 'unknown'}"
+                f" ({loaded_song.host.name}) in guild {self.guild.name!r}"
+            )
         else:
             for song in loaded_song:
                 self.playlist.add(song)
-            if len(loaded_song) == 1:
+            count = len(loaded_song)
+            if count == 1:
                 # special-case one-item playlists
                 loaded_song = loaded_song[0]
+                print(
+                    f"{user} queued {loaded_song.title!r}"
+                    f" by {loaded_song.uploader or 'unknown'}"
+                    f" ({loaded_song.host.name})"
+                    f" in guild {self.guild.name!r}"
+                )
             else:
+                # a resolved playlist has no single title to show -
+                # the input is the only useful identifier left
+                print(
+                    f"{user} queued a playlist ({count} track(s))"
+                    f" via {track!r} in guild {self.guild.name!r}"
+                )
                 loaded_song = PLAYLIST
 
         self.pickle_playlist()
         if self.current_song is None:
-            print("Playing {}".format(track))
             await self.play_song(self.playlist[0])
         else:
             self.preload_queue()
@@ -473,12 +539,18 @@ class AudioController(object):
     async def process_local_tracks(
         self,
         tracks: List[str],
+        source: str,
         user: Optional[discord.abc.User] = None,
     ) -> List[Optional[Song]]:
         """Queues a batch of local-library files and settles the
         playlist once at the end. Returns a list parallel to `tracks`,
         None wherever a file could not be loaded, so the caller can
         name what it skipped.
+
+        `source` names the browse/search action that produced `tracks`
+        (e.g. "browse: entire album Artist - Album") - unlike a single
+        process_song() call, a file path alone doesn't say what the
+        user actually picked, so the caller supplies it.
 
         The per-track equivalent is process_song() in a loop, which is
         what queueing an album or a discography from the library
@@ -490,7 +562,7 @@ class AudioController(object):
         when it has to start playback first, see below), and the
         preload sweep happens once."""
         print(
-            f"{user} queued {len(tracks)} local track(s)"
+            f"{user} queued {source} ({len(tracks)} track(s))"
             f" in guild {self.guild.name!r}"
         )
 
@@ -570,6 +642,9 @@ class AudioController(object):
     def stop_player(self):
         """Stops the player and removes all songs from the queue"""
         self._stopping = True
+        # whatever starts after this is a new session, not a track
+        # change - see play_song()
+        self._playing = False
         self.pickle_playlist()
         self.playlist.loop = LoopMode.OFF
         self.playlist.clear()
@@ -605,7 +680,7 @@ class AudioController(object):
             not self.guild.voice_client.is_playing()
             or all(m.bot for m in self.guild.voice_client.channel.members)
         ):
-            await self.udisconnect()
+            await self.udisconnect("inactivity timeout")
 
     async def uconnect(self, ctx, move=False):
         author_vc = ctx.author.voice
@@ -621,12 +696,29 @@ class AudioController(object):
         # self.load_pickle_playlist()
         return True
 
-    async def udisconnect(self):
+    async def udisconnect(self, reason: str):
+        # sampled before the teardown below wipes both - see the
+        # no-connection branch
+        had_session = self._playing or bool(self.playlist)
         self.pickle_playlist()
         self.stop_player()
         await self.update_view(None)
         if self.guild.voice_client is None:
+            # No connection left to close, but state was still torn
+            # down above - and for a bot dragged out of voice that
+            # failed to reconnect, this is the only record that the
+            # disconnect happened at all. Only worth saying when there
+            # was something to lose: there is one controller per
+            # guild the bot is in, connected or not, and close()
+            # disconnects all of them, so without this a shutdown
+            # would print a line for every idle guild.
+            if had_session:
+                print(
+                    f"Cleared voice state for guild {self.guild.name!r}"
+                    f" ({reason})"
+                )
             return False
+        print(f"Disconnecting from guild {self.guild.name!r} ({reason})")
         if config.ANNOUNCE_DISCONNECT:
             try:
                 self.guild.voice_client.play(

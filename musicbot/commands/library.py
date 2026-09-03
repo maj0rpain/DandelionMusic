@@ -145,8 +145,12 @@ class LibrarySelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
-        chosen = self._entries[int(self.values[0])]
-        await self.browse_view.descend(interaction, chosen)
+        index = int(self.values[0])
+        chosen = self._entries[index]
+        # the option's own label, not the underlying entry (a raw
+        # filename at the song level) - see queue_songs()'s `source`
+        label = self.options[index].label
+        await self.browse_view.descend(interaction, chosen, label)
 
 
 class BackButton(discord.ui.Button):
@@ -184,13 +188,19 @@ class QueueLevelButton(discord.ui.Button):
         await self.browse_view.queue_current_level(interaction)
 
 
-async def queue_songs(ctx, interaction, triples) -> None:
+async def queue_songs(ctx, interaction, triples, source: str) -> None:
     """Queues (artist, album, filename) triples and reports the
     result ephemerally. Shared by the browser and the search results -
     the browser always works within one artist, but a search hit list
     spans several, so the artist travels with each song rather than
-    being read off the view."""
-    if not interaction.response.is_done():
+    being read off the view.
+
+    `source` describes what was actually picked in the dropdown/button
+    that led here (e.g. "browse: Artist - Album - Song") - passed
+    straight through to process_local_tracks() for the console log,
+    since a bare file path doesn't say that."""
+    owns_placeholder = not interaction.response.is_done()
+    if owns_placeholder:
         # A real ephemeral placeholder, edited in place below - not a
         # deferred "thinking" response. Deferring a component
         # interaction with thinking=True sends response type 5
@@ -203,6 +213,18 @@ async def queue_songs(ctx, interaction, triples) -> None:
         # like a button that did nothing. Responding for real up front
         # sidesteps both problems.
         await interaction.response.send_message("Queueing...", ephemeral=True)
+
+    async def reply(content: str) -> None:
+        """Fills in the placeholder above, or sends an ephemeral
+        message of its own if something else already answered this
+        interaction. Editing the original response would then edit
+        whatever that answer was - and for the plain defer() used by
+        interaction_check() and _enter_level(), that is the browse
+        message itself, so the result would land on the embed."""
+        if owns_placeholder:
+            await interaction.edit_original_response(content=content)
+        else:
+            await interaction.followup.send(content, ephemeral=True)
 
     # walked twice below (once to build the URIs, once to name what
     # was skipped), so it must not be something that can be consumed
@@ -218,14 +240,14 @@ async def queue_songs(ctx, interaction, triples) -> None:
         await play_check(ctx)
         tracks = [library.song_uri(*triple) for triple in triples]
         songs = await ctx.audiocontroller.process_local_tracks(
-            tracks, user=ctx.author
+            tracks, source, user=ctx.author
         )
     except CheckError as e:
-        await interaction.edit_original_response(content=str(e))
+        await reply(str(e))
         return
     except Exception:
         print_exc(file=sys.stderr)
-        await interaction.edit_original_response(content=config.SONGINFO_ERROR)
+        await reply(config.SONGINFO_ERROR)
         return
 
     missing = [
@@ -246,7 +268,7 @@ async def queue_songs(ctx, interaction, triples) -> None:
         message += ". The index may be stale - ask the bot owner to run"
         message += " `d!lib refresh`."
 
-    await interaction.edit_original_response(content=message)
+    await reply(message)
 
 
 class LibraryView(discord.ui.View):
@@ -308,22 +330,24 @@ class LibraryView(discord.ui.View):
             # catches are overwhelmingly the second half of a
             # double-click. Telling someone off for that reads as a
             # malfunction. The one operation still slow enough to be
-            # worth explaining - a bulk queue - shows its own
-            # "thinking" placeholder while it runs, so the user can
-            # already see why nothing else is responding.
+            # worth explaining - a bulk queue - puts up its own
+            # ephemeral "Queueing..." message while it runs, so the
+            # user can already see why nothing else is responding.
             await interaction.response.defer()
             return False
         return True
 
-    async def queue(self, interaction: discord.Interaction, triples) -> None:
-        """Queues through the _busy guard. queue_songs() defers, and
-        deferring re-enables the select at once - the "thinking"
-        placeholder it puts up is a separate ephemeral message, not a
-        lock on the view - so without this a second click while the
-        batch is still loading would queue the same album or
-        discography twice over."""
+    async def queue(
+        self, interaction: discord.Interaction, triples, source: str
+    ) -> None:
+        """Queues through the _busy guard. queue_songs() answers the
+        interaction straight away, which re-enables the select at once
+        - the "Queueing..." placeholder it puts up is a separate
+        ephemeral message, not a lock on the view - so without this a
+        second click while the batch is still loading would queue the
+        same album or discography twice over."""
         with self.busy():
-            await queue_songs(self.ctx, interaction, triples)
+            await queue_songs(self.ctx, interaction, triples, source)
 
     async def on_timeout(self):
         # Without this, a click after the 5-minute timeout just fails
@@ -683,7 +707,12 @@ class LibraryBrowseView(LibraryView):
             # omits the field.
             await self.render(interaction, sync_attachments=True)
 
-    async def descend(self, interaction: discord.Interaction, chosen: str):
+    async def descend(
+        self,
+        interaction: discord.Interaction,
+        chosen: str,
+        label: Optional[str] = None,
+    ):
         # only a change of level resets the page. Queueing a track
         # doesn't re-render, so zeroing it there would leave the
         # displayed page and self.page disagreeing, and the next
@@ -697,7 +726,13 @@ class LibraryBrowseView(LibraryView):
             self.album = chosen
             await self._enter_level(interaction)
         else:
-            await self.queue(interaction, [(self.artist, self.album, chosen)])
+            # ASCII throughout: unlike everything else built here this
+            # ends up in print(), and a redirected stdout encodes with
+            # the locale's codec rather than UTF-8
+            source = f"browse: {self.artist} - {self.album} - {label}"
+            await self.queue(
+                interaction, [(self.artist, self.album, chosen)], source
+            )
 
     async def go_back(self, interaction: discord.Interaction):
         self.page = 0
@@ -755,13 +790,15 @@ class LibraryBrowseView(LibraryView):
                 (self.artist, self.album, song.filename)
                 for song in self._songs()
             ]
+            source = f"browse: entire album {self.artist} - {self.album}"
         else:
             triples = [
                 (self.artist, album, song.filename)
                 for album, songs in self.index.get(self.artist, {}).items()
                 for song in songs
             ]
-        await self.queue(interaction, triples)
+            source = f"browse: entire discography of {self.artist}"
+        await self.queue(interaction, triples, source)
 
 
 class SearchSelect(discord.ui.Select):
@@ -842,7 +879,8 @@ class LibrarySearchView(LibraryView):
     async def queue_result(
         self, interaction: discord.Interaction, result: library.SearchResult
     ):
-        await self.queue(interaction, self._expand(result))
+        source = f"search {self.query!r}: {result.kind} {result.label!r}"
+        await self.queue(interaction, self._expand(result), source)
 
 
 class Library(commands.Cog):

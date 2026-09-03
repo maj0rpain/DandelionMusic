@@ -47,7 +47,7 @@ class General(commands.Cog):
     async def _disconnect(self, ctx):
         await ctx.defer()  # ANNOUNCE_DISCONNECT will take a while
         audiocontroller = ctx.bot.audio_controllers[ctx.guild]
-        if await audiocontroller.udisconnect():
+        if await audiocontroller.udisconnect("command"):
             await ctx.send("Disconnected.")
         else:
             await ctx.send(config.NOT_CONNECTED_MESSAGE)
@@ -61,7 +61,9 @@ class General(commands.Cog):
     @commands.check(voice_check)
     async def _reset(self, ctx):
         await ctx.defer()
-        if await ctx.bot.audio_controllers[ctx.guild].udisconnect():
+        if await ctx.bot.audio_controllers[ctx.guild].udisconnect(
+            "reset command"
+        ):
             # bot was connected and need some rest
             await asyncio.sleep(1)
 

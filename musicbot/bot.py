@@ -104,7 +104,7 @@ class MusicBot(commands.Bot):
 
         await asyncio.gather(
             *(
-                audiocontroller.udisconnect()
+                audiocontroller.udisconnect("bot shutdown")
                 for audiocontroller in self.audio_controllers.values()
             )
         )
@@ -169,7 +169,7 @@ class MusicBot(commands.Bot):
                     guild.voice_client.resume()
             else:
                 # did not reconnect, clear state
-                await audiocontroller.udisconnect()
+                await audiocontroller.udisconnect("removed from voice channel")
         elif (
             guild.voice_client
             and guild.voice_client.channel == before.channel
