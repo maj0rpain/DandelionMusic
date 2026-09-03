@@ -199,7 +199,8 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
     that led here (e.g. "browse: Artist - Album - Song") - passed
     straight through to process_local_tracks() for the console log,
     since a bare file path doesn't say that."""
-    if not interaction.response.is_done():
+    owns_placeholder = not interaction.response.is_done()
+    if owns_placeholder:
         # A real ephemeral placeholder, edited in place below - not a
         # deferred "thinking" response. Deferring a component
         # interaction with thinking=True sends response type 5
@@ -212,6 +213,18 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
         # like a button that did nothing. Responding for real up front
         # sidesteps both problems.
         await interaction.response.send_message("Queueing...", ephemeral=True)
+
+    async def reply(content: str) -> None:
+        """Fills in the placeholder above, or sends an ephemeral
+        message of its own if something else already answered this
+        interaction. Editing the original response would then edit
+        whatever that answer was - and for the plain defer() used by
+        interaction_check() and _enter_level(), that is the browse
+        message itself, so the result would land on the embed."""
+        if owns_placeholder:
+            await interaction.edit_original_response(content=content)
+        else:
+            await interaction.followup.send(content, ephemeral=True)
 
     # walked twice below (once to build the URIs, once to name what
     # was skipped), so it must not be something that can be consumed
@@ -230,11 +243,11 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
             tracks, source, user=ctx.author
         )
     except CheckError as e:
-        await interaction.edit_original_response(content=str(e))
+        await reply(str(e))
         return
     except Exception:
         print_exc(file=sys.stderr)
-        await interaction.edit_original_response(content=config.SONGINFO_ERROR)
+        await reply(config.SONGINFO_ERROR)
         return
 
     missing = [
@@ -255,7 +268,7 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
         message += ". The index may be stale - ask the bot owner to run"
         message += " `d!lib refresh`."
 
-    await interaction.edit_original_response(content=message)
+    await reply(message)
 
 
 class LibraryView(discord.ui.View):
@@ -713,7 +726,10 @@ class LibraryBrowseView(LibraryView):
             self.album = chosen
             await self._enter_level(interaction)
         else:
-            source = f"browse: {self.artist} – {self.album} – {label}"
+            # ASCII throughout: unlike everything else built here this
+            # ends up in print(), and a redirected stdout encodes with
+            # the locale's codec rather than UTF-8
+            source = f"browse: {self.artist} - {self.album} - {label}"
             await self.queue(
                 interaction, [(self.artist, self.album, chosen)], source
             )
@@ -774,7 +790,7 @@ class LibraryBrowseView(LibraryView):
                 (self.artist, self.album, song.filename)
                 for song in self._songs()
             ]
-            source = f"browse: entire album {self.artist} – {self.album}"
+            source = f"browse: entire album {self.artist} - {self.album}"
         else:
             triples = [
                 (self.artist, album, song.filename)

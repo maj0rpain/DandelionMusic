@@ -10,19 +10,28 @@ from musicbot.bot import MusicBot
 from musicbot.utils import check_dependencies
 
 
-class _NoTracebackFormatter(logging.Formatter):
-    """One line per record below ERROR, traceback and all.
+# discord.py's phrasing for "your code raised and I caught it" -
+# every such call site starts its message this way (View items and
+# modals, event handlers, prefix and app commands, background tasks,
+# cog unload). Those tracebacks are the only record of the crash
+# anywhere, so they are the ones worth keeping.
+_KEEP_TRACEBACK = ("Ignoring exception", "Unhandled exception")
 
-    discord.py attaches a full traceback to routine trouble - a
-    gateway reconnect, a rate limit it already handled - which is
-    noise in a console. ERROR is different: uncaught exceptions in a
-    View item, an event handler or a command reach discord.py's logger
-    and nowhere else, so stripping those would leave a bare "Ignoring
-    exception in view ..." with no file, line or exception type behind
-    it, and no other record anywhere. Those keep their traceback."""
+
+class _NoTracebackFormatter(logging.Formatter):
+    """One line per record, except where the traceback is the point.
+
+    Level cannot make this cut: discord.py logs every traceback it
+    carries at ERROR (or DEBUG, which a WARNING threshold drops
+    anyway), so keying on ERROR would strip nothing at all. The noise
+    worth losing - "Attempting a reconnect in %.2fs", "Disconnected
+    from voice... Reconnecting", a failed ffmpeg probe - is ERROR
+    exactly like a crash in one of our own callbacks is. What
+    separates them is the message, not the level."""
 
     def format(self, record: logging.LogRecord) -> str:
-        if record.levelno >= logging.ERROR:
+        msg = record.msg if isinstance(record.msg, str) else ""
+        if msg.startswith(_KEEP_TRACEBACK):
             return super().format(record)
         # blanked around the call rather than dropped, since the
         # record belongs to the logging machinery, not to us
@@ -76,6 +85,19 @@ bot = MusicBot(
 
 
 if __name__ == "__main__":
+    # A log line must never be the thing that breaks a command. Console
+    # output now carries library metadata - artist, album and track
+    # names - and stdout is a pipe under run.py (as it is whenever it's
+    # redirected to a file), which on Windows encodes with the locale
+    # codec rather than UTF-8. One track title outside cp1252 would
+    # otherwise raise UnicodeEncodeError out of print(), and in
+    # queue_songs() that lands in the blanket `except Exception` and
+    # fails the whole queue action. Only the error handling is relaxed,
+    # not the encoding, so run.py's parent still decodes what it reads.
+    for _stream in (sys.stdout, sys.stderr):
+        if hasattr(_stream, "reconfigure"):
+            _stream.reconfigure(errors="backslashreplace")
+
     check_dependencies()
     config.warn_unknown_vars()
 
