@@ -169,9 +169,7 @@ class MusicBot(commands.Bot):
                     guild.voice_client.resume()
             else:
                 # did not reconnect, clear state
-                await audiocontroller.udisconnect(
-                    "removed from voice channel"
-                )
+                await audiocontroller.udisconnect("removed from voice channel")
         elif (
             guild.voice_client
             and guild.voice_client.channel == before.channel
