@@ -382,6 +382,15 @@ class AudioController(object):
     async def play_song(self, song: Song):
         """Plays a song object"""
 
+        # captured before voice_client.play() below flips is_active()
+        # true, so this is the one place that can tell a genuine
+        # idle->playing transition apart from advancing to the next
+        # queued track - every path that starts playback (a single
+        # link, a local-library batch, skipping to a previous song)
+        # routes through here, so logging it here covers all of them
+        # instead of duplicating the check at each call site.
+        was_idle = not self.is_active()
+
         if not await loader.preload(song, self.bot):
             if self.command_channel:
                 await self.command_channel.send(
@@ -419,8 +428,14 @@ class AudioController(object):
                 after=self.next_song,
             )
         except discord.ClientException:
-            await self.udisconnect()
+            await self.udisconnect("playback error")
             return
+
+        if was_idle:
+            print(
+                f"Started playing {(song.title or song.webpage_url)!r}"
+                f" in guild {self.guild.name!r}"
+            )
 
         if (
             self.bot.settings[self.guild].announce_songs
@@ -445,25 +460,40 @@ class AudioController(object):
         serializing the whole, progressively larger playlist once per
         track, an O(n^2) blocking write."""
 
-        print(f"{user} queued {track!r} in guild {self.guild.name!r}")
-
         loaded_song = await loader.load_song(track)
         if not loaded_song:
             return None
         elif isinstance(loaded_song, Song):
             self.playlist.add(loaded_song)
+            print(
+                f"{user} queued {loaded_song.title!r}"
+                f" by {loaded_song.uploader or 'unknown'}"
+                f" ({loaded_song.host.name}) in guild {self.guild.name!r}"
+            )
         else:
             for song in loaded_song:
                 self.playlist.add(song)
-            if len(loaded_song) == 1:
+            count = len(loaded_song)
+            if count == 1:
                 # special-case one-item playlists
                 loaded_song = loaded_song[0]
+                print(
+                    f"{user} queued {loaded_song.title!r}"
+                    f" by {loaded_song.uploader or 'unknown'}"
+                    f" ({loaded_song.host.name})"
+                    f" in guild {self.guild.name!r}"
+                )
             else:
+                # a resolved playlist has no single title to show -
+                # the input is the only useful identifier left
+                print(
+                    f"{user} queued a playlist ({count} track(s))"
+                    f" via {track!r} in guild {self.guild.name!r}"
+                )
                 loaded_song = PLAYLIST
 
         self.pickle_playlist()
         if self.current_song is None:
-            print("Playing {}".format(track))
             await self.play_song(self.playlist[0])
         else:
             self.preload_queue()
@@ -473,12 +503,18 @@ class AudioController(object):
     async def process_local_tracks(
         self,
         tracks: List[str],
+        source: str,
         user: Optional[discord.abc.User] = None,
     ) -> List[Optional[Song]]:
         """Queues a batch of local-library files and settles the
         playlist once at the end. Returns a list parallel to `tracks`,
         None wherever a file could not be loaded, so the caller can
         name what it skipped.
+
+        `source` names the browse/search action that produced `tracks`
+        (e.g. "browse: entire album Artist - Album") - unlike a single
+        process_song() call, a file path alone doesn't say what the
+        user actually picked, so the caller supplies it.
 
         The per-track equivalent is process_song() in a loop, which is
         what queueing an album or a discography from the library
@@ -490,7 +526,7 @@ class AudioController(object):
         when it has to start playback first, see below), and the
         preload sweep happens once."""
         print(
-            f"{user} queued {len(tracks)} local track(s)"
+            f"{user} queued {source} ({len(tracks)} track(s))"
             f" in guild {self.guild.name!r}"
         )
 
@@ -605,7 +641,7 @@ class AudioController(object):
             not self.guild.voice_client.is_playing()
             or all(m.bot for m in self.guild.voice_client.channel.members)
         ):
-            await self.udisconnect()
+            await self.udisconnect("inactivity timeout")
 
     async def uconnect(self, ctx, move=False):
         author_vc = ctx.author.voice
@@ -621,12 +657,13 @@ class AudioController(object):
         # self.load_pickle_playlist()
         return True
 
-    async def udisconnect(self):
+    async def udisconnect(self, reason: str):
         self.pickle_playlist()
         self.stop_player()
         await self.update_view(None)
         if self.guild.voice_client is None:
             return False
+        print(f"Disconnecting from guild {self.guild.name!r} ({reason})")
         if config.ANNOUNCE_DISCONNECT:
             try:
                 self.guild.voice_client.play(

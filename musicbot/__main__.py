@@ -1,3 +1,4 @@
+import logging
 import sys
 from traceback import print_exc
 
@@ -7,6 +8,20 @@ from discord.ext import commands
 from config import config
 from musicbot.bot import MusicBot
 from musicbot.utils import check_dependencies
+
+
+class _NoTracebackFormatter(logging.Formatter):
+    """discord.py's own formatter appends a full traceback whenever a
+    record carries exc_info/stack_info (e.g. gateway reconnect
+    errors) - fine for a log file, unreadable in a console. Returning
+    "" from both hooks drops that regardless of level, leaving just
+    the one-line message."""
+
+    def formatException(self, ei) -> str:
+        return ""
+
+    def formatStack(self, stack_info: str) -> str:
+        return ""
 
 
 initial_extensions = [
@@ -51,8 +66,19 @@ if __name__ == "__main__":
     # if "--run" in sys.argv:
     #     shutdown_task = bot.loop.create_task(read_shutdown())
 
+    discord_log_formatter = _NoTracebackFormatter(
+        "[{asctime}] [{levelname:<8}] {name}: {message}",
+        "%Y-%m-%d %H:%M:%S",
+        style="{",
+    )
+
     try:
-        bot.run(config.BOT_TOKEN, reconnect=True)
+        bot.run(
+            config.BOT_TOKEN,
+            reconnect=True,
+            log_level=logging.WARNING,
+            log_formatter=discord_log_formatter,
+        )
     except discord.LoginFailure:
         print_exc(file=sys.stderr)
         print(
