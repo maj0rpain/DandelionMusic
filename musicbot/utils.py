@@ -166,7 +166,7 @@ async def dj_check(ctx: Context):
 
 async def owner_check(ctx: Context):
     """Check if the user is the owner of the bot"""
-    if ctx.author.id in [150861087976194048]:
+    if ctx.author.id in config.EXTRA_OWNERS:
         return True
     owner = await ctx.bot.is_owner(ctx.author)
     if owner:

@@ -110,6 +110,13 @@ class Config:
     # if not empty, the bot will leave non-whitelisted guilds
     GUILD_WHITELIST = []
 
+    # extra user ids treated as bot owners, on top of the application
+    # owner(s) Discord itself reports. These unlock every owner-only
+    # command, including d!execute, which runs arbitrary Python in the
+    # bot process - only add someone you would hand the host to.
+    # Format: [123456789012345678, 987654321098765432]
+    EXTRA_OWNERS = []
+
     # Track which variables have been changed
     _changed_vars = {}
 
