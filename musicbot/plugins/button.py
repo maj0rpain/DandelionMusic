@@ -78,7 +78,11 @@ class Button(commands.Cog):
             if chan.permissions_for(serv.me).manage_messages:
                 await message.remove_reaction(reaction.emoji, member)
 
-            audiocontroller = self.bot.audio_controllers[serv]
+            # a raw reaction event is not gated behind
+            # absolutely_ready - see MusicBot.on_voice_state_update
+            audiocontroller = self.bot.audio_controllers.get(serv)
+            if audiocontroller is None:
+                return
 
             ctx = await self.bot.get_context(message)
             # author is the user who added the reaction,

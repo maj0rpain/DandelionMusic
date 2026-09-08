@@ -156,8 +156,16 @@ class MusicBot(commands.Bot):
 
     async def on_voice_state_update(self, member, before, after):
         guild = member.guild
+        # A raw gateway event, unlike a prefix command, is not gated
+        # behind absolutely_ready - and on_ready registers guilds in a
+        # loop that awaits a network call apiece, so an event can
+        # arrive before this guild has a controller. There is no
+        # session to adjust in that case, so drop it rather than
+        # raising KeyError out of the event handler.
+        audiocontroller = self.audio_controllers.get(guild)
+        if audiocontroller is None:
+            return
         if member == self.user:
-            audiocontroller = self.audio_controllers[guild]
             if not guild.voice_client:
                 await asyncio.sleep(VC_CONNECT_TIMEOUT)
             if guild.voice_client:
@@ -176,7 +184,6 @@ class MusicBot(commands.Bot):
             and all(m.bot for m in before.channel.members)
         ):
             # all users left
-            audiocontroller = self.audio_controllers[guild]
             await audiocontroller.timer.start(guild.voice_client.is_playing())
 
     @tasks.loop(seconds=1)
@@ -284,10 +291,18 @@ class Context(commands.Context):
 
     async def send(self, *args, **kwargs):
         kwargs.pop("reference", None)  # not supported
-        audiocontroller = self.bot.audio_controllers[self.guild]
-        channel = audiocontroller.command_channel
+        # .get(), because this runs for interactions too: a component
+        # click or an application command is not gated behind
+        # absolutely_ready the way process_commands gates prefix
+        # commands, so it can land before on_ready has registered this
+        # guild - and self.guild is None outside a guild entirely.
+        # With no controller there is no playback message to carry the
+        # view, so fall through to the plain send below.
+        audiocontroller = self.bot.audio_controllers.get(self.guild)
+        channel = audiocontroller.command_channel if audiocontroller else None
         if (
-            "view" in kwargs
+            audiocontroller is None
+            or "view" in kwargs
             or kwargs.get("ephemeral", False)
             or (
                 channel

@@ -117,6 +117,7 @@
   "SETTINGS_EMOJI_CHECK_MSG": "Checking the emoji...",
   "SEARCH_EMBED_TITLE": "Results:",
   "SEARCH_NO_RESULTS": "No results found. Try a different search.",
+  "BOT_NOT_READY": "The bot is still starting up. Try again in a moment.",
 
   "PauseState": {
     "NOTHING_TO_PAUSE": "Nothing to pause or resume.",

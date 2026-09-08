@@ -34,6 +34,7 @@ from musicbot.linkutils import SiteTypes, url_regex
 # avoiding circular import
 if TYPE_CHECKING:
     from musicbot.bot import Context, MusicBot
+    from musicbot.audiocontroller import AudioController
 
 
 OLD_FFMPEG_CONF = """
@@ -149,6 +150,23 @@ class CheckError(CommandError):
     pass
 
 
+def get_audiocontroller(ctx: Context) -> "AudioController":
+    """This guild's AudioController, or a CheckError explaining that
+    the bot is still starting.
+
+    on_ready registers a controller for every guild, but that loop
+    awaits a network call per guild, and only prefix commands wait for
+    it to finish (process_commands awaits absolutely_ready).
+    Application commands and component interactions are dispatched
+    straight to the command, so they can land in that gap. Indexing
+    audio_controllers directly turned that into a bare KeyError
+    traceback with nothing sent back to the user."""
+    controller = ctx.bot.audio_controllers.get(ctx.guild)
+    if controller is None:
+        raise CheckError(config.BOT_NOT_READY)
+    return controller
+
+
 async def dj_check(ctx: Context):
     """Check if the user has DJ permissions"""
     if ctx.channel.permissions_for(ctx.author).administrator:
@@ -188,9 +206,7 @@ async def voice_check(ctx: Context):
 
         if all(m.bot for m in bot_vc.channel.members):
             # current channel doesn't have any user in it
-            return await ctx.bot.audio_controllers[ctx.guild].uconnect(
-                ctx, move=True
-            )
+            return await get_audiocontroller(ctx).uconnect(ctx, move=True)
 
     try:
         if await dj_check(ctx):
@@ -215,7 +231,7 @@ async def play_check(ctx: Context):
             raise CheckError(config.WRONG_CHANNEL_MESSAGE)
 
     if not ctx.guild.voice_client:
-        return await ctx.bot.audio_controllers[ctx.guild].uconnect(ctx)
+        return await get_audiocontroller(ctx).uconnect(ctx)
 
     if vc_rule:
         return await voice_check(ctx)

@@ -9,7 +9,7 @@ from config import config
 from musicbot.bot import MusicBot
 from musicbot.settings import ConversionError
 from musicbot.audiocontroller import AudioController
-from musicbot.utils import dj_check, voice_check
+from musicbot.utils import dj_check, get_audiocontroller, voice_check
 
 
 class General(commands.Cog):
@@ -33,7 +33,7 @@ class General(commands.Cog):
     async def _connect(self, ctx):
         # connect only if not connected yet
         if not ctx.guild.voice_client:
-            audiocontroller = ctx.bot.audio_controllers[ctx.guild]
+            audiocontroller = get_audiocontroller(ctx)
             await audiocontroller.uconnect(ctx, move=True)
         await ctx.send("Connected.")
 
@@ -46,7 +46,7 @@ class General(commands.Cog):
     @commands.check(voice_check)
     async def _disconnect(self, ctx):
         await ctx.defer()  # ANNOUNCE_DISCONNECT will take a while
-        audiocontroller = ctx.bot.audio_controllers[ctx.guild]
+        audiocontroller = get_audiocontroller(ctx)
         if await audiocontroller.udisconnect("command"):
             await ctx.send("Disconnected.")
         else:
@@ -61,9 +61,7 @@ class General(commands.Cog):
     @commands.check(voice_check)
     async def _reset(self, ctx):
         await ctx.defer()
-        if await ctx.bot.audio_controllers[ctx.guild].udisconnect(
-            "reset command"
-        ):
+        if await get_audiocontroller(ctx).udisconnect("reset command"):
             # bot was connected and need some rest
             await asyncio.sleep(1)
 
