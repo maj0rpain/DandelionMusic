@@ -183,6 +183,39 @@ class TestSaveRoundTrips:
         assert after.GUILD_WHITELIST == [111, 222]
 
 
+class TestGuildWhitelistPersistence:
+    """d!guild_whitelist is the only caller of save(), so the way it
+    mutates the list decides whether save() has anything to do."""
+
+    def test_rebinding_is_persisted_from_the_default(self, config_factory):
+        config = config_factory("BOT_TOKEN=t\nGUILD_WHITELIST=[]\n", "")
+        config.GUILD_WHITELIST = config.GUILD_WHITELIST + [123]
+        config.save()
+        assert "123" in open(".env", encoding="utf-8").read()
+
+    def test_in_place_mutation_is_not_persisted(self, config_factory):
+        """Documents why the command must rebind: __setattr__ is what
+        records a changed setting, and .append() never reaches it."""
+        config = config_factory("BOT_TOKEN=t\nGUILD_WHITELIST=[]\n", "")
+        config.GUILD_WHITELIST.append(123)
+        config.save()
+        assert "123" not in open(".env", encoding="utf-8").read()
+
+    def test_the_command_rebinds_rather_than_appending(self):
+        import inspect
+
+        from musicbot.commands.developer import Developer
+
+        for cmd in (
+            Developer._guild_whitelist_add,
+            Developer._guild_whitelist_remove,
+        ):
+            src = inspect.getsource(cmd.callback)
+            assert "config.GUILD_WHITELIST = " in src
+            assert "config.GUILD_WHITELIST.append" not in src
+            assert "config.GUILD_WHITELIST.remove" not in src
+
+
 def test_extra_owners_defaults_to_empty(config_factory):
     """An unconfigured deployment must trust only the application
     owner(s) Discord reports - this replaced a hardcoded user id."""

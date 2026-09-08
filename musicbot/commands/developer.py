@@ -164,7 +164,11 @@ class Developer(commands.Cog):
     @_guild_whitelist.command(name="add")
     @commands.is_owner()
     async def _guild_whitelist_add(self, ctx, *, id: str):
-        config.GUILD_WHITELIST.append(int(id))
+        # Rebound, not appended in place: Config.__setattr__ is what
+        # records a setting as changed, and an in-place mutation never
+        # reaches it - so save() wrote nothing at all whenever the
+        # loaded whitelist still equalled the class default [].
+        config.GUILD_WHITELIST = config.GUILD_WHITELIST + [int(id)]
         config.save()
         await ctx.send("Whitelist updated.")
 
@@ -188,7 +192,12 @@ class Developer(commands.Cog):
         id: str,
     ):
         id = int(id.split()[-1])
-        config.GUILD_WHITELIST.remove(id)
+        # see _guild_whitelist_add - rebind so the change is tracked.
+        # list.remove still raises ValueError for an id that is not
+        # there, which is the existing behaviour.
+        whitelist = list(config.GUILD_WHITELIST)
+        whitelist.remove(id)
+        config.GUILD_WHITELIST = whitelist
         config.save()
 
         guild = ctx.bot.get_guild(id)
