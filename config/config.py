@@ -56,7 +56,7 @@ def parse_env_file(path: str) -> tuple:
     lines."""
     if not os.path.isfile(path):
         return "", {}
-    with open(path, "r") as f:
+    with open(path, "r", encoding="utf-8") as f:
         content = f.read()
     values = {}
     for line in content.splitlines():
@@ -385,6 +385,10 @@ class Config:
         """
         self._update_env()
         self._extend_env_sample()
+        # Cleared after both passes, as before the refactor: the
+        # entries have been persisted, so a later save() in the same
+        # process has nothing left to do with them.
+        self._changed_vars = {}
 
     def _update_env(self):
         """Write changed settings back to the .env that was loaded.
@@ -413,7 +417,7 @@ class Config:
                 )
 
         if updated:
-            with open(self._env_path, "w") as f:
+            with open(self._env_path, "w", encoding="utf-8") as f:
                 f.write(content)
 
     def _extend_env_sample(self):
@@ -449,7 +453,7 @@ class Config:
             print(f"Adding {key}={value} to .env.sample")
 
         if updated:
-            with open(self._sample_path, "w") as f:
+            with open(self._sample_path, "w", encoding="utf-8") as f:
                 f.write(content)
 
     def _replace_env_var(self, content, key, value):

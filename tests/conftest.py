@@ -26,9 +26,19 @@ def config_factory(tmp_path, monkeypatch):
     would otherwise win over the fixture's.
     """
     monkeypatch.chdir(tmp_path)
-    for key in list(os.environ):
-        if key.isupper():
-            monkeypatch.delenv(key, raising=False)
+    # Only the variables Config actually reads. An earlier version
+    # cleared every upper-case name, which on Windows (where os.environ
+    # upper-cases keys) meant PATH, SYSTEMROOT and TEMP as well - fine
+    # while nothing under test shells out or uses tempfile, and a
+    # baffling failure the moment something does.
+    for key in (
+        *ConfigClass.as_dict(),
+        "SPOTIPY_CLIENT_ID",
+        "SPOTIPY_CLIENT_SECRET",
+        "HEROKU_DB",
+        "VC_TIMOUT_DEFAULT",
+    ):
+        monkeypatch.delenv(key, raising=False)
 
     # chdir alone does not redirect the read side. Config.load()
     # resolves the .env with find_dotenv(), which walks up from the
