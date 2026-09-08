@@ -32,6 +32,7 @@ from musicbot.linkutils import SiteTypes, url_regex
 # avoiding circular import
 if TYPE_CHECKING:
     from musicbot.bot import Context, MusicBot
+    from musicbot.settings import GuildSettings
     from musicbot.audiocontroller import AudioController
 
 
@@ -165,6 +166,22 @@ def get_audiocontroller(ctx: Context) -> "AudioController":
     return controller
 
 
+def get_settings(ctx: Context) -> "GuildSettings":
+    """This guild's GuildSettings, or a CheckError explaining that the
+    bot is still starting.
+
+    The twin of get_audiocontroller(), and needed for the same reason:
+    on_ready fills bot.settings and bot.audio_controllers in the same
+    pass, so every path that could find one missing could find the
+    other missing too. Guarding only the controller just moved the
+    KeyError one line down - play_check() reads settings immediately
+    after Music.cog_check() has resolved the controller."""
+    sett = ctx.bot.settings.get(ctx.guild)
+    if sett is None:
+        raise CheckError(config.BOT_NOT_READY)
+    return sett
+
+
 async def dj_check(ctx: Context):
     """Check if the user has DJ permissions"""
     if ctx.channel.permissions_for(ctx.author).administrator:
@@ -173,7 +190,7 @@ async def dj_check(ctx: Context):
     if owner:
         return True
 
-    sett = ctx.bot.settings[ctx.guild]
+    sett = get_settings(ctx)
     if sett.dj_role:
         if int(sett.dj_role) not in [r.id for r in ctx.author.roles]:
             raise CheckError(config.NOT_A_DJ)
@@ -219,7 +236,7 @@ async def voice_check(ctx: Context):
 async def play_check(ctx: Context):
     """Prepare for music commands"""
 
-    sett = ctx.bot.settings[ctx.guild]
+    sett = get_settings(ctx)
 
     cm_channel = sett.command_channel
     vc_rule = sett.user_must_be_in_vc

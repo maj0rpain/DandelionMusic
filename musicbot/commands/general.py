@@ -9,7 +9,12 @@ from config import config
 from musicbot.bot import MusicBot
 from musicbot.settings import ConversionError
 from musicbot.audiocontroller import AudioController
-from musicbot.utils import dj_check, get_audiocontroller, voice_check
+from musicbot.utils import (
+    dj_check,
+    get_audiocontroller,
+    get_settings,
+    voice_check,
+)
 
 
 class General(commands.Cog):
@@ -91,7 +96,7 @@ class General(commands.Cog):
         fallback="show",
     )
     async def _settings(self, ctx: commands.Context):
-        sett = self.bot.settings[ctx.guild]
+        sett = get_settings(ctx)
         await ctx.send(embed=sett.format(ctx))
 
     @_settings.command(name="command_channel")
@@ -103,7 +108,7 @@ class General(commands.Cog):
             discord.Thread, discord.VoiceChannel, discord.TextChannel
         ],
     ):
-        sett = self.bot.settings[ctx.guild]
+        sett = get_settings(ctx)
         await sett.update_setting("command_channel", channel, ctx)
         await ctx.send(
             f"Setting `command_channel` updated to {channel.mention}!"
@@ -114,7 +119,7 @@ class General(commands.Cog):
     async def _set_start_voice_channel(
         self, ctx: commands.Context, channel: discord.VoiceChannel
     ):
-        sett = self.bot.settings[ctx.guild]
+        sett = get_settings(ctx)
         await sett.update_setting("start_voice_channel", channel, ctx)
         await ctx.send(
             f"Setting `start_voice_channel` updated to {channel.mention}!"
@@ -123,7 +128,7 @@ class General(commands.Cog):
     @_settings.command(name="dj_role")
     @commands.check(dj_check)
     async def _set_dj_role(self, ctx: commands.Context, role: discord.Role):
-        sett = self.bot.settings[ctx.guild]
+        sett = get_settings(ctx)
         await sett.update_setting("dj_role", role, ctx)
         await ctx.send(f"Setting `dj_role` updated to {role.name}!")
 
@@ -132,14 +137,14 @@ class General(commands.Cog):
     async def _set_user_must_be_in_vc(
         self, ctx: commands.Context, value: bool
     ):
-        sett = self.bot.settings[ctx.guild]
+        sett = get_settings(ctx)
         await sett.update_setting("user_must_be_in_vc", value, ctx)
         await ctx.send(f"Setting `user_must_be_in_vc` updated to {value}!")
 
     @_settings.command(name="button_emote")
     @commands.check(dj_check)
     async def _set_button_emote(self, ctx: commands.Context, emoji: str):
-        sett = self.bot.settings[ctx.guild]
+        sett = get_settings(ctx)
         try:
             await sett.update_setting("button_emote", emoji, ctx)
         except ConversionError as e:
@@ -150,7 +155,7 @@ class General(commands.Cog):
     @_settings.command(name="default_volume")
     @commands.check(dj_check)
     async def _set_default_volume(self, ctx: commands.Context, value: int):
-        sett = self.bot.settings[ctx.guild]
+        sett = get_settings(ctx)
         if value < 0 or value > 100:
             await ctx.send("`Error: Volume must be between 0 and 100.`")
             return
@@ -163,14 +168,14 @@ class General(commands.Cog):
         if not config.ALLOW_VC_TIMEOUT_EDIT:
             await ctx.send(config.VC_TIMEOUT_EDIT_DISABLED)
             return
-        sett = self.bot.settings[ctx.guild]
+        sett = get_settings(ctx)
         await sett.update_setting("vc_timeout", value, ctx)
         await ctx.send(f"Setting `vc_timeout` updated to {value}!")
 
     @_settings.command(name="announce_songs")
     @commands.check(dj_check)
     async def _set_announce_songs(self, ctx: commands.Context, value: bool):
-        sett = self.bot.settings[ctx.guild]
+        sett = get_settings(ctx)
         await sett.update_setting("announce_songs", value, ctx)
         await ctx.send(f"Setting `announce_songs` updated to {value}!")
 

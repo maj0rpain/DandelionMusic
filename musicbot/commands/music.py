@@ -115,7 +115,7 @@ class Music(commands.Cog):
                 await ctx.send(
                     embed=song.format_output(config.SONGINFO_QUEUE_ADDED)
                 )
-            elif not ctx.bot.settings[ctx.guild].announce_songs:
+            elif not utils.get_settings(ctx).announce_songs:
                 # auto-announce is disabled, announce here
                 await ctx.send(
                     embed=song.format_output(config.SONGINFO_NOW_PLAYING)

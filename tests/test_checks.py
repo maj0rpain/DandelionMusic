@@ -11,7 +11,13 @@ import pytest
 from discord.ext.commands import NotOwner
 
 from config import config
-from musicbot.utils import CheckError, chunks, get_audiocontroller, owner_check
+from musicbot.utils import (
+    CheckError,
+    chunks,
+    get_audiocontroller,
+    get_settings,
+    owner_check,
+)
 
 
 def make_ctx(bot, guild=None, author_id=1):
@@ -20,12 +26,14 @@ def make_ctx(bot, guild=None, author_id=1):
     )
 
 
-def make_bot(controllers=None, is_owner=False):
+def make_bot(controllers=None, is_owner=False, settings=None):
     async def _is_owner(_user):
         return is_owner
 
     return types.SimpleNamespace(
-        audio_controllers=controllers or {}, is_owner=_is_owner
+        audio_controllers=controllers or {},
+        settings=settings or {},
+        is_owner=_is_owner,
     )
 
 
@@ -54,6 +62,28 @@ class TestGetAudiocontroller:
         entirely."""
         with pytest.raises(CheckError):
             get_audiocontroller(make_ctx(make_bot(), None))
+
+
+class TestGetSettings:
+    """The twin of get_audiocontroller. on_ready fills bot.settings and
+    bot.audio_controllers in the same pass, so guarding only the
+    controller just moved the KeyError one line down into
+    play_check()."""
+
+    def test_returns_the_registered_settings(self):
+        guild = Guild()
+        bot = make_bot(settings={guild: "sett"})
+        assert get_settings(make_ctx(bot, guild)) == "sett"
+
+    def test_unregistered_guild_raises_check_error(self):
+        bot = make_bot(settings={Guild(): "sett"})
+        with pytest.raises(CheckError) as exc:
+            get_settings(make_ctx(bot, Guild()))
+        assert str(exc.value) == config.BOT_NOT_READY
+
+    def test_no_guild_raises_check_error(self):
+        with pytest.raises(CheckError):
+            get_settings(make_ctx(make_bot(), None))
 
 
 @pytest.mark.parametrize(
