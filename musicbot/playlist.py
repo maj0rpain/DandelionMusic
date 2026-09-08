@@ -101,6 +101,12 @@ class Playlist:
         return self.playque[0]
 
     def shuffle(self):
+        # guarded like clear() below: the callers gate on is_active(),
+        # which stays True for a moment after stop_player() has already
+        # emptied the queue, so `d!stop` followed straight away by
+        # `d!shuffle` can reach this with nothing to shuffle
+        if not self.playque:
+            return
         first = self.playque.popleft()
         random.shuffle(self.playque)
         self.playque.appendleft(first)
