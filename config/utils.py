@@ -66,7 +66,3 @@ def join_dicts(dicts: Iterable[dict]) -> dict:
     for d in dicts:
         result.update(d)
     return result
-
-
-def subtract_dicts(orig_dict: dict, subtract: dict) -> dict:
-    return {k: v for k, v in orig_dict.items() if k not in subtract}

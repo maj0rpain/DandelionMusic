@@ -101,9 +101,6 @@ if __name__ == "__main__":
     check_dependencies()
     config.warn_unknown_vars()
 
-    # if "--run" in sys.argv:
-    #     shutdown_task = bot.loop.create_task(read_shutdown())
-
     discord_log_formatter = _NoTracebackFormatter(
         "[{asctime}] [{levelname:<8}] {name}: {message}",
         "%Y-%m-%d %H:%M:%S",

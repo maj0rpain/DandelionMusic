@@ -14,15 +14,15 @@ Dependencies are managed exclusively with [`uv`](https://docs.astral.sh/uv/) (`u
 # install deps
 uv sync
 
-# run the bot (foreground, real entrypoint)
+# run the bot (real entrypoint)
 uv run python -m musicbot
-# or via the background-launcher wrapper (spawns a detached subprocess, `d!shutdown`/Ctrl+C to stop)
+# or via the thin wrapper README points users at (equivalent; it just forwards)
 uv run python run.py
 ```
 
 Configuration is via a `.env` file (see `.env.sample`) — at minimum `BOT_TOKEN` must be set. `SPOTIFY_ID`/`SPOTIFY_SECRET` are optional (falls back to scraping the Spotify web page when absent). `COOKIE_PATH` (default `config/cookies/cookies.txt`) supplies cookies for restricted content.
 
-There is no test suite in this repo (no `tests/` directory, no test runner configured).
+There is no test suite in this repo (`tests/` exists but is empty and untracked, and no test runner is configured).
 
 ### Git remotes / PRs
 
@@ -62,7 +62,7 @@ Produces `dist/DandelionMusic.exe` via PyInstaller (see `config/build.py` for th
 ### Entry points and process model
 
 - `musicbot/__main__.py` builds the `discord.py` intents/prefix from `config`, constructs `musicbot.bot.MusicBot`, registers command extensions (`musicbot.commands.{music,general,developer}`, plus `musicbot.plugins.button` if `ENABLE_BUTTON_PLUGIN`), and calls `bot.run()`.
-- `run.py` is an optional wrapper: it re-execs itself as a detached background subprocess (`--run` flag) and forwards stdout, letting users close the launching terminal; Ctrl+C sends a `shutdown` line over stdin which `config.SHUTDOWN_MESSAGE`-prints and exits the child. This matters mainly for the PyInstaller-built Windows exe.
+- `run.py` is a thin wrapper that just `runpy.run_module("musicbot")`. It once re-exec'd itself as a detached background subprocess (a `--run` flag, stdout forwarding, Ctrl+C over stdin), but that was removed in 67fd2b2 for breaking auto-restart. It is kept because it is the PyInstaller entry point (`config/build.py`) and what README tells users to start.
 - Track/metadata extraction (`musicbot/loader.py`) runs `yt_dlp.YoutubeDL` in a **separate spawned process** (`ProcessPoolExecutor(1)`) so that CPU-bound extraction never blocks the asyncio event loop; `musicbot.loader.extract_info`/`_load_song` etc. execute there, `preload`/`load_song`/`search_youtube` are the async wrappers called from the event loop via `_run_sync`.
 
 ### Config system (`config/config.py`)

@@ -99,8 +99,7 @@ class MusicBot(commands.Bot):
         return await super().start(*args, **kwargs)
 
     async def close(self):
-        if "--run" not in sys.argv:
-            print(config.SHUTDOWN_MESSAGE, flush=True)
+        print(config.SHUTDOWN_MESSAGE, flush=True)
 
         await asyncio.gather(
             *(

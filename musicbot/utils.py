@@ -2,7 +2,6 @@ from __future__ import annotations
 import os
 import re
 import sys
-import _thread
 import asyncio
 import discord
 import subprocess
@@ -18,7 +17,6 @@ from typing import (
     List,
 )
 
-from aioconsole import ainput
 from discord import (
     opus,
     utils,
@@ -385,12 +383,3 @@ class SimplePaginator(discord.ui.View):
             await interaction.response.edit_message(
                 embed=self.pages[self.current_page]
             )
-
-
-async def read_shutdown():
-    try:
-        line = await ainput()
-    except EOFError:
-        return
-    if line == "shutdown":
-        _thread.interrupt_main()

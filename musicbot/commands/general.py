@@ -174,10 +174,6 @@ class General(commands.Cog):
         await sett.update_setting("announce_songs", value, ctx)
         await ctx.send(f"Setting `announce_songs` updated to {value}!")
 
-    @commands.Cog.listener()
-    async def on_ready(self):
-        pass
-
     @commands.hybrid_command(
         name="addbot",
         description=config.HELP_ADDBOT_LONG,
