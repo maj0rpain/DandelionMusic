@@ -1,0 +1,71 @@
+# Build context exclusions for `docker build` / `docker compose build`.
+#
+# The Dockerfile does `COPY . .`, so anything left here is baked into
+# an image layer and ships with it - including to Docker Hub, which
+# .github/workflows/dockerhub.yml pushes to on every push to master.
+# Secrets and local state must not be in that layer.
+#
+# The project is `virtual` in uv.lock, so `uv sync --frozen` never
+# builds it - only pyproject.toml and uv.lock are needed at sync time,
+# and musicbot/, config/, run.py and assets/ at runtime. Nothing below
+# is required for either.
+
+# Secrets and per-host state. .env is the reason this file exists:
+# it holds BOT_TOKEN, and without this it lands in the image.
+.env
+config/cookies/cookies.txt
+
+# Runtime data - the live guild settings DB and the pickled playlists
+# are the host's, not the image's. Both are bind-mounted or volumed in
+# by docker-compose.yaml at run time.
+settings.db
+backup/
+log.txt
+
+# Virtualenv. Besides being ~54 MB, a venv built on the host is
+# wrong for the image - a Windows one has Scripts/*.exe and absolute
+# host paths, and uv would be syncing on top of it.
+.venv/
+venv/
+
+# VCS. `d!update` shells out to `git pull`, but the image has no git
+# binary installed, so nothing in the container can use this anyway.
+.git/
+.gitignore
+
+# Python build/bytecode artifacts. **/ prefixes are required: unlike
+# .gitignore, a .dockerignore pattern is matched against the whole
+# relative path, so a bare `__pycache__` would only exclude one at the
+# context root and miss musicbot/__pycache__ and friends.
+**/__pycache__
+**/*.py[cod]
+**/*.egg-info
+build/
+dist/
+*.spec
+
+# Editor, tooling and agent scratch
+.idea/
+.vscode/
+.cache/
+.claude/
+.superpowers/
+.mcp.json
+.ignore
+graft/
+
+# Docs, CI and dev-only trees - not used at runtime
+.github/
+docs/
+tests/
+heroku-legacy/
+CLAUDE.md
+README.md
+LICENSE
+.pre-commit-config.yaml
+
+# Not needed inside the image: compose is what builds/runs it, and
+# the Dockerfile is already applied by the time the context is read.
+docker-compose.yaml
+Dockerfile
+.dockerignore
