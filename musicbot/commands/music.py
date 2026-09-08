@@ -608,10 +608,14 @@ class Music(commands.Cog):
         if song is None:
             await ctx.send(config.SONGINFO_ERROR)
             return
-        if isinstance(song, Song):
-            urls = [song.webpage_url]
-        else:
-            urls = [s.webpage_url for s in song]
+        # Must match the shape _playlist_save() writes: a list of
+        # {"url", "title"} objects. Appending bare url strings left a
+        # mixed list that every reader indexes by key - _playlist_load,
+        # _playlist_show and loader.preload all do song_data["url"] -
+        # so the playlist raised TypeError until the next restart
+        # normalised it via settings.migrate_old_playlists().
+        songs = [song] if isinstance(song, Song) else song
+        new_songs = [{"url": s.webpage_url, "title": s.title} for s in songs]
 
         async with ctx.bot.DbSession() as session:
             playlist = (
@@ -625,7 +629,7 @@ class Music(commands.Cog):
                 await ctx.send(config.PLAYLIST_NOT_FOUND)
                 return
             playlist.songs_json = json.dumps(
-                json.loads(playlist.songs_json) + urls
+                json.loads(playlist.songs_json) + new_songs
             )
             await session.commit()
         await ctx.send(config.PLAYLIST_UPDATED)
