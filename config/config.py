@@ -278,6 +278,15 @@ class Config:
         # List of internal variables that shouldn't be tracked
         internal_vars = [
             "COOKIE_PATH",  # can change based on runtime path
+            # Derived in __init__, like COOKIE_PATH above: the setting
+            # is authored as a hex *string* ("0x4DD4D0") and rewritten
+            # in place as the int it parses to. Tracking that rewrite
+            # made save() persist the int, which the next startup read
+            # back through int(value, 16) and parsed as hex again -
+            # 0x4DD4D0 -> 5100752 -> 84936530, a different colour on
+            # every save. Nothing sets this at runtime, so there is no
+            # change here worth persisting.
+            "EMBED_COLOR",
             "DATABASE",  # Internal database connection string
             "DATABASE_LIBRARY_NAME",  # Internal database library name
             "messages",  # Internal messages dictionary
@@ -360,11 +369,17 @@ class Config:
             if key.startswith("_") or callable(value):
                 continue
 
-            # Convert value to string representation for .env file
+            # Convert value to string representation for .env file.
+            # repr(), not str(list(...)): get_env_var() literal_evals
+            # what it reads back and then requires the result to be
+            # the *same type* as the Config default, so writing a
+            # tuple setting out as a list ("['.mp3']") made the next
+            # startup fail with "invalid value for
+            # SUPPORTED_EXTENSIONS". repr() round-trips both shapes.
             if isinstance(value, str):
                 env_value = value
             elif isinstance(value, (list, tuple)):
-                env_value = str(list(value))
+                env_value = repr(value)
             else:
                 env_value = str(value)
 
@@ -411,61 +426,50 @@ class Config:
         # Check for variables that need to be updated in .env.sample
         sample_updated = False
 
-        # Only update variables that have been explicitly changed
-        for key, value in self._changed_vars.items():
-            # Skip internal variables and methods
-            if key.startswith("_") or callable(value):
+        # .env.sample is a committed template, so this pass only ever
+        # *adds* a setting the template is missing, documented with
+        # the schema's own default - it never rewrites an entry that
+        # is already there, and it never writes the value this
+        # deployment actually loaded.
+        #
+        # It used to write the live value into both files alike, which
+        # published BOT_TOKEN, SPOTIFY_SECRET and LASTFM_API_KEY into
+        # a git-tracked file the moment anything called save() -
+        # d!guild_whitelist add/remove does. Keeping the sample in
+        # sync with the set of available *settings* is what this is
+        # for; keeping it in sync with one host's values never was,
+        # and an existing entry is either already correct or has been
+        # deliberately left blank for the reader to fill in.
+        for key in self._changed_vars:
+            if key.startswith("_") or key in sample_vars:
+                continue
+            if not hasattr(self.__class__, key):
+                # not part of the schema, so there is nothing for the
+                # template to document
+                continue
+            default = getattr(self.__class__, key)
+            if callable(default):
                 continue
 
-            # Convert value to string representation for .env.sample file
-            if isinstance(value, str):
-                sample_value = value
-            elif isinstance(value, (list, tuple)):
-                sample_value = str(list(value))
+            # Convert default to string representation for the file.
+            # repr() for the same round-tripping reason as the .env
+            # pass above.
+            if isinstance(default, str):
+                sample_value = default
+            elif isinstance(default, (list, tuple)):
+                sample_value = repr(default)
             else:
-                sample_value = str(value)
+                sample_value = str(default)
 
-            # Check if variable exists in .env.sample with a different value
-            if key in sample_vars:
-                # Variable exists in .env.sample, check if it
-                # matches current value
-                sample_var_str = sample_vars[key]
-                try:
-                    if not isinstance(value, str):
-                        sample_var = ast.literal_eval(sample_var_str)
-                    else:
-                        sample_var = sample_var_str
-                except (SyntaxError, ValueError):
-                    sample_var = sample_var_str
-
-                # Convert both to strings for comparison
-                # to handle different types
-                sample_value_str = str(sample_value)
-                current_sample_str = str(sample_var)
-
-                # If values don't match, update .env.sample
-                if sample_value_str != current_sample_str:
-                    # Update existing variable in .env.sample
-                    sample_content = self._replace_env_var(
-                        sample_content, key, sample_value
-                    )
-                    sample_updated = True
-                    print(
-                        f"Updating {key} in .env.sample"
-                        f" from {sample_var_str} to {sample_value}"
-                    )
+            if key in sample_comments:
+                # Use existing comments if available
+                sample_content += "\n" + "\n".join(sample_comments[key])
             else:
-                # Variable doesn't exist in .env.sample,
-                # append it with comments
-                if key in sample_comments:
-                    # Use existing comments if available
-                    sample_content += "\n" + "\n".join(sample_comments[key])
-                else:
-                    # Add a default comment
-                    sample_content += f"\n# {key} configuration"
-                sample_content += f"\n{key}={sample_value}\n"
-                sample_updated = True
-                print(f"Adding {key}={sample_value} to .env.sample")
+                # Add a default comment
+                sample_content += f"\n# {key} configuration"
+            sample_content += f"\n{key}={sample_value}\n"
+            sample_updated = True
+            print(f"Adding {key}={sample_value} to .env.sample")
 
         # Write updated .env.sample file if changes were made
         if sample_updated:
