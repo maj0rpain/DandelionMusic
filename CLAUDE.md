@@ -22,7 +22,15 @@ uv run python run.py
 
 Configuration is via a `.env` file (see `.env.sample`) — at minimum `BOT_TOKEN` must be set. `SPOTIFY_ID`/`SPOTIFY_SECRET` are optional (falls back to scraping the Spotify web page when absent). `COOKIE_PATH` (default `config/cookies/cookies.txt`) supplies cookies for restricted content.
 
-There is no test suite in this repo (`tests/` exists but is empty and untracked, and no test runner is configured).
+Tests live in `tests/` and run with pytest:
+
+```bash
+uv run --group dev pytest
+```
+
+They cover only the parts that need no Discord connection (config loading and the `.env` writer, `Playlist`, library search/stats, the tag/expiry/URL parsers, the permission checks); there is no integration coverage of the bot itself. CI runs them as the `run-tests` job in `.github/workflows/checks.yml`.
+
+Note for config tests: `Config.load()` calls `load_dotenv()`, and python-dotenv's `find_dotenv()` walks up from the *calling module's file* rather than from cwd, while `_update_env_files()` opens the relative path `".env"`. A test that touches `Config` must redirect both (see `tests/conftest.py`) or it will read — and `save()` will rewrite — the real `.env`.
 
 ### Git remotes / PRs
 
