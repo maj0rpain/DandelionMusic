@@ -30,36 +30,49 @@ def config_factory(tmp_path, monkeypatch):
         if key.isupper():
             monkeypatch.delenv(key, raising=False)
 
-    # chdir alone does not redirect the read side. Config.load() calls
-    # load_dotenv() with no arguments, and python-dotenv's find_dotenv()
-    # walks up from the *calling module's file* rather than from cwd, so
-    # it resolves the project's own .env no matter where the process is
-    # running - while _update_env_files() and the unknown-variable scan
-    # open the literal relative path ".env", which is cwd-relative.
-    # Without this the fixture would read the developer's real .env and
-    # write a temp one.
+    # chdir alone does not redirect the read side. Config.load()
+    # resolves the .env with find_dotenv(), which walks up from the
+    # *calling module's file* rather than from cwd, so it finds the
+    # project's own .env however the process was started - and save()
+    # then writes to that resolved path. Both have to be redirected
+    # here, not just load_dotenv: patching one and not the other is
+    # how an earlier version of this fixture overwrote the real .env
+    # with fixture values.
+    #
     # sys.modules, not `import config.config as ...`: the package's
     # __init__ binds the name `config` to the Config *instance*, which
     # shadows the submodule of the same name.
     config_module = sys.modules["config.config"]
     from dotenv import load_dotenv as real_load_dotenv
 
+    env_path = tmp_path / ".env"
+    monkeypatch.setattr(
+        config_module, "find_dotenv", lambda *a, **kw: str(env_path)
+    )
     monkeypatch.setattr(
         config_module,
         "load_dotenv",
-        lambda *a, **kw: real_load_dotenv(
-            tmp_path / ".env", override=True, **kw
-        ),
+        lambda *a, **kw: real_load_dotenv(env_path, override=True),
     )
 
     def build(env: str = "", sample: str = "") -> ConfigClass:
-        (tmp_path / ".env").write_text(env, encoding="utf-8")
+        env_path.write_text(env, encoding="utf-8")
         (tmp_path / ".env.sample").write_text(sample, encoding="utf-8")
         # _changed_vars is a *class* attribute, so it is shared by
         # every instance and would otherwise carry entries between
         # tests. Production only ever builds one Config, which is why
         # this is not a bug there.
         ConfigClass._changed_vars = {}
-        return ConfigClass()
+        cfg = ConfigClass()
+        # Belt and braces: whatever Config resolved, it must be inside
+        # tmp_path. save() writes to these paths, so a fixture that
+        # silently stopped isolating them would corrupt the developer's
+        # real configuration rather than fail a test.
+        for resolved in (cfg._env_path, cfg._sample_path):
+            assert str(tmp_path) in str(resolved), (
+                f"Config resolved {resolved!r} outside the temp dir - "
+                "refusing to run a test that would write there"
+            )
+        return cfg
 
     return build

@@ -139,6 +139,39 @@ class TestSaveRoundTrips:
         )
         assert after.SUPPORTED_EXTENSIONS == (".mp3", ".flac")
 
+    def test_writes_to_the_env_it_loaded_not_to_cwd(
+        self, config_factory, tmp_path, monkeypatch
+    ):
+        """load_dotenv()/find_dotenv() resolve the .env by walking up
+        from the calling module's file, but the writer used to open the
+        literal relative path ".env". Started from anywhere but the
+        project root, the bot read one file and d!guild_whitelist wrote
+        a different one into cwd - so the change vanished on restart."""
+        # BOT_PREFIX is left at its class default, so it never enters
+        # _changed_vars. That makes it the discriminator below: only a
+        # writer that actually read this file carries it through.
+        config = config_factory(
+            SECRETS_ENV + "BOT_PREFIX=d!\n", SECRETS_SAMPLE
+        )
+
+        elsewhere = tmp_path / "some" / "other" / "cwd"
+        elsewhere.mkdir(parents=True)
+        monkeypatch.chdir(elsewhere)
+
+        config.GUILD_WHITELIST.append(222)
+        config.save()
+
+        # nothing created in cwd ...
+        assert not (elsewhere / ".env").exists()
+        written = (tmp_path / ".env").read_text(encoding="utf-8")
+        # ... the change landed in the file that was loaded ...
+        assert "222" in written
+        # ... and the *read* side used that same file. A reader pointed
+        # at a different (missing) path sees no existing settings, so it
+        # appends every changed one and silently drops everything the
+        # file held that this run did not change.
+        assert "BOT_PREFIX=d!" in written
+
     def test_a_changed_setting_is_written(self, config_factory):
         config = config_factory(SECRETS_ENV, SECRETS_SAMPLE)
         config.GUILD_WHITELIST.append(222)

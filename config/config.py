@@ -7,7 +7,7 @@ from typing import Optional
 
 import jsonc
 from packaging.requirements import Requirement
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 sys.path.insert(0, os.path.dirname(__file__))
 from utils import (  # noqa: E402
@@ -20,6 +20,84 @@ from utils import (  # noqa: E402
 )
 
 del sys.path[0]
+
+
+DERIVED_SETTINGS = frozenset(
+    {
+        # Settings Config computes at startup rather than reading
+        # straight from the environment. save() must not persist these:
+        # what sits in memory is a *processed* form of what was
+        # configured, and writing it back produces a file the next
+        # startup either reads differently or refuses outright.
+        #
+        # EMBED_COLOR is the cautionary one - it is authored as the hex
+        # string "0x4DD4D0" and rewritten in place as the int it parses
+        # to, so persisting the int meant the next boot re-parsed it as
+        # hex: 0x4DD4D0 -> 5100752 -> 84936530, a different colour on
+        # every save.
+        "COOKIE_PATH",  # resolved against CONFIG_DIRS
+        "EMBED_COLOR",  # hex string parsed to int
+        "DATABASE",  # alchemize_url() of DATABASE_URL
+        "DATABASE_LIBRARY_NAME",  # driver name pulled out of DATABASE
+        "messages",  # loaded from en.json
+        "dicts",  # loaded from en.json
+        "unknown_vars",  # scanned out of .env
+        "prefix",  # display form of BOT_PREFIX
+    }
+)
+
+
+def parse_env_file(path: str) -> tuple:
+    """Reads an env-style file into (raw text, {key: raw value}).
+
+    One parser for .env and .env.sample alike - they have the same
+    shape, and the three hand-rolled copies of this that used to exist
+    had already drifted apart in how they treated blank and comment
+    lines."""
+    if not os.path.isfile(path):
+        return "", {}
+    with open(path, "r") as f:
+        content = f.read()
+    values = {}
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value
+    return content, values
+
+
+def format_env_value(value) -> str:
+    """The .env text for a setting's value.
+
+    repr() for lists and tuples rather than str(list(...)):
+    get_env_var() literal_evals what it reads back and then requires
+    the result to have the same type as the Config default, so writing
+    a tuple out as a list produced a file the next startup refused with
+    "invalid value for SUPPORTED_EXTENSIONS"."""
+    if isinstance(value, str):
+        return value
+    if isinstance(value, (list, tuple)):
+        return repr(value)
+    return str(value)
+
+
+def env_value_matches(raw: str, value) -> bool:
+    """Whether the file already holds `value`.
+
+    A file only ever holds text, so a non-str setting is parsed back
+    before comparing - otherwise [1, 2] and "[1, 2]" would look
+    different on every save and rewrite the file each time."""
+    if isinstance(value, str):
+        current = raw
+    else:
+        try:
+            current = ast.literal_eval(raw)
+        except (SyntaxError, ValueError):
+            current = raw
+    return format_env_value(value) == str(current)
 
 
 class Config:
@@ -170,7 +248,24 @@ class Config:
     def load(self) -> dict:
         # Start with default configuration from class attributes
         current_cfg = self.as_dict()
-        load_dotenv()
+
+        # Resolve the .env once, and reuse the resolved path for the
+        # write side. load_dotenv() with no argument searches via
+        # find_dotenv(), which walks up from the *calling module's
+        # file* - this one - rather than from cwd, while the writer
+        # below opened the literal relative path ".env". Those agree
+        # only when the process happens to be started from the project
+        # root; started anywhere else the bot read one file and
+        # d!guild_whitelist wrote a different one into cwd, so the
+        # change silently vanished on the next restart. Calling
+        # find_dotenv() from this module gives exactly the path
+        # load_dotenv() would have picked, so the read side is
+        # unchanged and only the writer moves to follow it.
+        self._env_path = find_dotenv() or os.path.abspath(".env")
+        self._sample_path = os.path.join(
+            os.path.dirname(self._env_path), ".env.sample"
+        )
+        load_dotenv(self._env_path)
 
         # Check for deprecated environment variable with typo
         if "VC_TIMOUT_DEFAULT" in os.environ:
@@ -189,22 +284,10 @@ class Config:
             current_cfg["SUPPORTED_EXTENSIONS"]
         )
 
-        # Read .env file directly to check for unknown variables
-        env_file = ".env"
-        if os.path.isfile(env_file):
-            with open(env_file, "r") as f:
-                env_content = f.read()
-
-            # Parse .env file
-            for line in env_content.splitlines():
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    # Check if this variable is defined in the Config class
-                    if key not in current_cfg and not key.startswith("_"):
-                        self.unknown_vars[key] = value
+        # Read .env directly to check for unknown variables
+        for key, value in parse_env_file(self._env_path)[1].items():
+            if key not in current_cfg and not key.startswith("_"):
+                self.unknown_vars[key] = value
 
         for key, default in current_cfg.items():
             current_cfg[key] = get_env_var(key, default)
@@ -275,28 +358,8 @@ class Config:
         """
         Override __setattr__ to track changes to variables.
         """
-        # List of internal variables that shouldn't be tracked
-        internal_vars = [
-            "COOKIE_PATH",  # can change based on runtime path
-            # Derived in __init__, like COOKIE_PATH above: the setting
-            # is authored as a hex *string* ("0x4DD4D0") and rewritten
-            # in place as the int it parses to. Tracking that rewrite
-            # made save() persist the int, which the next startup read
-            # back through int(value, 16) and parsed as hex again -
-            # 0x4DD4D0 -> 5100752 -> 84936530, a different colour on
-            # every save. Nothing sets this at runtime, so there is no
-            # change here worth persisting.
-            "EMBED_COLOR",
-            "DATABASE",  # Internal database connection string
-            "DATABASE_LIBRARY_NAME",  # Internal database library name
-            "messages",  # Internal messages dictionary
-            "dicts",  # Internal dictionaries
-            "unknown_vars",  # Internal tracking of unknown variables
-            "prefix",  # Internal prefix for display
-        ]
-
         # Track changes to non-internal variables
-        if not name.startswith("_") and name not in internal_vars:
+        if not name.startswith("_") and name not in DERIVED_SETTINGS:
             if hasattr(self.__class__, name):
                 # Get the default value from the class
                 default_value = getattr(self.__class__, name)
@@ -312,136 +375,65 @@ class Config:
 
     def _update_env_files(self):
         """
-        Update .env and .env.sample files with configuration values
-        from the Config class that have been explicitly changed and
-        don't match the current environment variables.
+        Persist settings changed at runtime.
+
+        Two passes over _changed_vars with deliberately different
+        rules, because the two files are for different things: .env is
+        this deployment's configuration and gets the live values,
+        .env.sample is a committed template and only ever gains
+        settings it is missing, at their schema defaults.
         """
-        # Read .env file if it exists
-        env_file = ".env"
-        env_vars = {}
-        env_content = ""
-        if os.path.isfile(env_file):
-            with open(env_file, "r") as f:
-                env_content = f.read()
+        self._update_env()
+        self._extend_env_sample()
 
-            # Parse .env file
-            for line in env_content.splitlines():
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    env_vars[key] = value
+    def _update_env(self):
+        """Write changed settings back to the .env that was loaded.
 
-        # Read .env.sample file if it exists
-        sample_file = ".env.sample"
-        sample_vars = {}
-        sample_content = ""
-        sample_comments = {}
-        current_comment = []
+        The path comes from load(), not from cwd - see the note there.
+        """
+        content, existing = parse_env_file(self._env_path)
+        updated = False
 
-        if os.path.isfile(sample_file):
-            with open(sample_file, "r") as f:
-                sample_content = f.read()
-
-            # Parse .env.sample file
-            for line in sample_content.splitlines():
-                line_stripped = line.strip()
-                if not line_stripped:
-                    current_comment = []
-                    continue
-                if line_stripped.startswith("#"):
-                    current_comment.append(line)
-                    continue
-                if "=" in line_stripped:
-                    key, value = line_stripped.split("=", 1)
-                    sample_vars[key] = value
-                    if current_comment:
-                        sample_comments[key] = current_comment
-                    current_comment = []
-
-        # Check for variables that need to be updated in .env
-        env_updated = False
-
-        # Only update variables that have been explicitly changed
         for key, value in self._changed_vars.items():
             # Skip internal variables and methods
             if key.startswith("_") or callable(value):
                 continue
 
-            # Convert value to string representation for .env file.
-            # repr(), not str(list(...)): get_env_var() literal_evals
-            # what it reads back and then requires the result to be
-            # the *same type* as the Config default, so writing a
-            # tuple setting out as a list ("['.mp3']") made the next
-            # startup fail with "invalid value for
-            # SUPPORTED_EXTENSIONS". repr() round-trips both shapes.
-            if isinstance(value, str):
-                env_value = value
-            elif isinstance(value, (list, tuple)):
-                env_value = repr(value)
-            else:
-                env_value = str(value)
+            new_value = format_env_value(value)
+            if key not in existing:
+                content += f"\n{key}={new_value}"
+                updated = True
+                print(f"Adding {key}={new_value} to .env")
+            elif not env_value_matches(existing[key], value):
+                content = self._replace_env_var(content, key, new_value)
+                updated = True
+                print(
+                    f"Updating {key} in .env"
+                    f" from {existing[key]} to {new_value}"
+                )
 
-            # Check if variable exists in .env file with a different value
-            if key in env_vars:
-                # Variable exists in .env file, check if it matches
-                # current value
-                env_var_str = env_vars[key]
-                try:
-                    if not isinstance(value, str):
-                        env_var = ast.literal_eval(env_var_str)
-                    else:
-                        env_var = env_var_str
-                except (SyntaxError, ValueError):
-                    env_var = env_var_str
+        if updated:
+            with open(self._env_path, "w") as f:
+                f.write(content)
 
-                # Convert both to strings for comparison
-                # to handle different types
-                env_value_str = str(env_value)
-                current_env_str = str(env_var)
+    def _extend_env_sample(self):
+        """Add settings the committed template is missing, documented
+        with the schema's own default.
 
-                # If values don't match, update .env
-                if env_value_str != current_env_str:
-                    # Update existing variable in .env
-                    env_content = self._replace_env_var(
-                        env_content, key, env_value
-                    )
-                    env_updated = True
-                    print(
-                        f"Updating {key} in .env"
-                        f" from {env_var_str} to {env_value}"
-                    )
-            else:
-                # Variable doesn't exist in .env, append it
-                env_content += f"\n{key}={env_value}"
-                env_updated = True
-                print(f"Adding {key}={env_value} to .env")
+        Append-only, and never the live value. Writing live values here
+        published BOT_TOKEN, SPOTIFY_SECRET and LASTFM_API_KEY into a
+        git-tracked file the moment anything called save() -
+        d!guild_whitelist add/remove does. Keeping the template in sync
+        with the set of available *settings* is what this is for;
+        keeping it in sync with one host's values never was, and an
+        entry that is already there is either correct or has been
+        deliberately left blank for the reader to fill in.
+        """
+        content, existing = parse_env_file(self._sample_path)
+        updated = False
 
-        # Write updated .env file if changes were made
-        if env_updated:
-            with open(env_file, "w") as f:
-                f.write(env_content)
-
-        # Check for variables that need to be updated in .env.sample
-        sample_updated = False
-
-        # .env.sample is a committed template, so this pass only ever
-        # *adds* a setting the template is missing, documented with
-        # the schema's own default - it never rewrites an entry that
-        # is already there, and it never writes the value this
-        # deployment actually loaded.
-        #
-        # It used to write the live value into both files alike, which
-        # published BOT_TOKEN, SPOTIFY_SECRET and LASTFM_API_KEY into
-        # a git-tracked file the moment anything called save() -
-        # d!guild_whitelist add/remove does. Keeping the sample in
-        # sync with the set of available *settings* is what this is
-        # for; keeping it in sync with one host's values never was,
-        # and an existing entry is either already correct or has been
-        # deliberately left blank for the reader to fill in.
         for key in self._changed_vars:
-            if key.startswith("_") or key in sample_vars:
+            if key.startswith("_") or key in existing:
                 continue
             if not hasattr(self.__class__, key):
                 # not part of the schema, so there is nothing for the
@@ -451,33 +443,14 @@ class Config:
             if callable(default):
                 continue
 
-            # Convert default to string representation for the file.
-            # repr() for the same round-tripping reason as the .env
-            # pass above.
-            if isinstance(default, str):
-                sample_value = default
-            elif isinstance(default, (list, tuple)):
-                sample_value = repr(default)
-            else:
-                sample_value = str(default)
+            value = format_env_value(default)
+            content += f"\n# {key} configuration\n{key}={value}\n"
+            updated = True
+            print(f"Adding {key}={value} to .env.sample")
 
-            if key in sample_comments:
-                # Use existing comments if available
-                sample_content += "\n" + "\n".join(sample_comments[key])
-            else:
-                # Add a default comment
-                sample_content += f"\n# {key} configuration"
-            sample_content += f"\n{key}={sample_value}\n"
-            sample_updated = True
-            print(f"Adding {key}={sample_value} to .env.sample")
-
-        # Write updated .env.sample file if changes were made
-        if sample_updated:
-            with open(sample_file, "w") as f:
-                f.write(sample_content)
-
-        # Clear the changed variables after saving
-        self._changed_vars = {}
+        if updated:
+            with open(self._sample_path, "w") as f:
+                f.write(content)
 
     def _replace_env_var(self, content, key, value):
         """
