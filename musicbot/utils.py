@@ -312,9 +312,22 @@ class Timer:
         self._task = asyncio.create_task(self._job())
 
     def cancel(self):
-        if self._task:
-            self._task.cancel()
-            self._task = None
+        """Drop the pending timeout.
+
+        Never cancels the task it is running inside. The inactivity
+        path is _job -> timeout_handler() -> udisconnect(), and
+        udisconnect() cancels this timer partway through its teardown -
+        so self._task is the *current* task there. Cancelling it raised
+        CancelledError at udisconnect()'s next await, which is inside
+        the disconnect announcement, and `except Exception` does not
+        catch it (CancelledError is a BaseException since 3.8) - so
+        voice_client.disconnect() never ran and the bot stayed sitting
+        in the channel after every inactivity timeout. By that point
+        the timer has already fired and there is nothing pending to
+        cancel; only clearing the reference matters."""
+        task, self._task = self._task, None
+        if task is not None and task is not asyncio.current_task():
+            task.cancel()
 
 
 class OutputWrapper:
