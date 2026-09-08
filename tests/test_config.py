@@ -1,0 +1,167 @@
+"""Config loading and the .env / .env.sample writer.
+
+save() is the riskiest code in the project that isn't Discord-facing:
+it rewrites two files on disk, one of which is committed, and its
+output is read back by the next startup. Every test here is a
+regression test for something it actually got wrong.
+"""
+
+import pytest
+
+from config.utils import alchemize_url, get_env_var
+
+SECRETS_ENV = (
+    "BOT_TOKEN=real-token-abc123\n"
+    "SPOTIFY_SECRET=real-spotify-secret\n"
+    "LASTFM_API_KEY=real-lastfm-key\n"
+    "GUILD_WHITELIST=[111]\n"
+)
+SECRETS_SAMPLE = (
+    "# token\nBOT_TOKEN=\n\n"
+    "# spotify\nSPOTIFY_SECRET=\n\n"
+    "# lastfm\nLASTFM_API_KEY=\n\n"
+    "# whitelist\nGUILD_WHITELIST=[]\n"
+)
+
+
+class TestGetEnvVar:
+    def test_returns_default_when_unset(self):
+        assert get_env_var("DEFINITELY_UNSET_XYZ", 42) == 42
+
+    def test_literal_evals_against_a_non_str_default(self, monkeypatch):
+        monkeypatch.setenv("SOME_INT", "7")
+        assert get_env_var("SOME_INT", 0) == 7
+
+    def test_leaves_a_str_default_alone(self, monkeypatch):
+        # no literal_eval, so "7" stays the string "7"
+        monkeypatch.setenv("SOME_STR", "7")
+        assert get_env_var("SOME_STR", "x") == "7"
+
+    def test_rejects_a_value_of_the_wrong_type(self, monkeypatch):
+        monkeypatch.setenv("SOME_TUPLE", "['a']")
+        with pytest.raises(TypeError):
+            get_env_var("SOME_TUPLE", ("a",))
+
+    def test_empty_string_fails_a_non_str_default(self, monkeypatch):
+        """What made the old docker-compose file unbootable: Compose
+        interpolates an unset ${VAR} to "" and then sets it, which is
+        not the same as leaving it unset."""
+        monkeypatch.setenv("ENABLE_LOCAL_LIBRARY", "")
+        with pytest.raises(TypeError):
+            get_env_var("ENABLE_LOCAL_LIBRARY", False)
+
+
+@pytest.mark.parametrize(
+    "url, expected",
+    [
+        ("sqlite:///settings.db", "sqlite+aiosqlite:///settings.db"),
+        ("postgres://h/d", "postgresql+asyncpg://h/d"),
+        ("mysql://h/d", "mysql+aiomysql://h/d"),
+        ("weird+driver://h/d", "weird+driver://h/d"),
+    ],
+)
+def test_alchemize_url(url, expected):
+    assert alchemize_url(url) == expected
+
+
+class TestSaveDoesNotLeakSecrets:
+    def test_env_sample_never_receives_a_live_value(self, config_factory):
+        """.env.sample is committed. save() used to write every changed
+        setting into it using the loaded value, so one d!guild_whitelist
+        add published BOT_TOKEN, SPOTIFY_SECRET and LASTFM_API_KEY into
+        a tracked file."""
+        config = config_factory(SECRETS_ENV, SECRETS_SAMPLE)
+        config.save()
+
+        sample = open(".env.sample", encoding="utf-8").read()
+        for secret in (
+            "real-token-abc123",
+            "real-spotify-secret",
+            "real-lastfm-key",
+        ):
+            assert secret not in sample
+
+    def test_env_keeps_the_live_values(self, config_factory):
+        config = config_factory(SECRETS_ENV, SECRETS_SAMPLE)
+        config.save()
+
+        env = open(".env", encoding="utf-8").read()
+        assert "real-token-abc123" in env
+
+    def test_existing_sample_entries_are_left_alone(self, config_factory):
+        """The sample pass is append-only. Rewriting an entry that is
+        already there is churn on a tracked file at best, and the
+        placeholder it overwrites is deliberate."""
+        config = config_factory(SECRETS_ENV, SECRETS_SAMPLE)
+        config.save()
+
+        assert open(".env.sample", encoding="utf-8").read() == SECRETS_SAMPLE
+
+    def test_a_missing_setting_is_added_at_its_default(self, config_factory):
+        config = config_factory("BOT_TOKEN=t\nGUILD_WHITELIST=[1]\n", "")
+        config.save()
+
+        sample = open(".env.sample", encoding="utf-8").read()
+        # the schema default, not the [1] this deployment loaded
+        assert "GUILD_WHITELIST=[]" in sample
+
+
+class TestSaveRoundTrips:
+    """What save() writes to .env, the next startup has to be able to
+    read back."""
+
+    def test_embed_color_survives_a_save(self, config_factory):
+        """EMBED_COLOR is authored as a hex string and rewritten in
+        __init__ as the int it parses to. Persisting that int meant the
+        next boot re-parsed it as hex: 0x4DD4D0 -> 5100752 -> 84936530,
+        a different colour on every save."""
+        before = config_factory(SECRETS_ENV, SECRETS_SAMPLE)
+        original = before.EMBED_COLOR
+        before.save()
+
+        after = config_factory(
+            open(".env", encoding="utf-8").read(), SECRETS_SAMPLE
+        )
+        assert after.EMBED_COLOR == original
+
+    def test_a_tuple_setting_survives_a_save(self, config_factory):
+        """get_env_var() requires the reloaded value to have the same
+        type as the default, so writing a tuple out as a list made the
+        next startup die with "invalid value for
+        SUPPORTED_EXTENSIONS"."""
+        env = SECRETS_ENV + "SUPPORTED_EXTENSIONS=('.mp3', '.flac')\n"
+        before = config_factory(env, SECRETS_SAMPLE)
+        before.save()
+
+        # would raise TypeError before the fix
+        after = config_factory(
+            open(".env", encoding="utf-8").read(), SECRETS_SAMPLE
+        )
+        assert after.SUPPORTED_EXTENSIONS == (".mp3", ".flac")
+
+    def test_a_changed_setting_is_written(self, config_factory):
+        config = config_factory(SECRETS_ENV, SECRETS_SAMPLE)
+        config.GUILD_WHITELIST.append(222)
+        config.save()
+
+        after = config_factory(
+            open(".env", encoding="utf-8").read(), SECRETS_SAMPLE
+        )
+        assert after.GUILD_WHITELIST == [111, 222]
+
+
+def test_extra_owners_defaults_to_empty(config_factory):
+    """An unconfigured deployment must trust only the application
+    owner(s) Discord reports - this replaced a hardcoded user id."""
+    assert config_factory(SECRETS_ENV, SECRETS_SAMPLE).EXTRA_OWNERS == []
+
+
+def test_message_strings_do_not_pick_up_stray_substitutions(
+    config_factory,
+):
+    """config.Formatter is a string.Template with an empty delimiter,
+    so any bare identifier in en.json that matches a config key is
+    substituted. Naming a setting inside its own message renders the
+    value instead of the name."""
+    config = config_factory(SECRETS_ENV, SECRETS_SAMPLE)
+    assert "True" not in config.VC_TIMEOUT_EDIT_DISABLED
