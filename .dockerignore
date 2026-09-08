@@ -19,6 +19,7 @@ config/cookies/cookies.txt
 # are the host's, not the image's. Both are bind-mounted or volumed in
 # by docker-compose.yaml at run time.
 settings.db
+data/
 backup/
 log.txt
 

@@ -33,9 +33,26 @@ services:
       # the container the library is always at the read-only mount
       # below, so the host value must not be passed through.
       - MUSIC_LIBRARY_PATH=/music
+      # Default the database into the mounted ./data directory, so a
+      # deployment that sets nothing still keeps it on the host rather
+      # than in the container layer. A DATABASE_URL set in .env still
+      # wins - which is what a postgres/mysql deployment needs - so if
+      # you keep sqlite there, point it inside data/ as well or the
+      # file lands in the container and is lost on the next recreate.
+      - DATABASE_URL=${DATABASE_URL:-sqlite:///data/settings.db}
     volumes:
       - backup:/app/backup
-      - ./settings.db:/app/settings.db
+      # A directory, not the database file itself. Docker creates a
+      # missing bind-mount source as a *directory*, so mounting
+      # ./settings.db directly meant a first run on a fresh clone -
+      # settings.db is gitignored and never present - produced a
+      # directory where the database should be, and sqlite failed with
+      # a bare "unable to open database file". Mounting the directory
+      # also keeps sqlite's journal beside the database on the host
+      # instead of in the container, and lets a backup be restored by
+      # renaming a file (a file bind mount pins the inode, so the
+      # container would keep using the replaced one).
+      - ./data:/app/data
       # Host path to the music library. Set MUSIC_LIBRARY_HOST_PATH in
       # .env to point this somewhere else; the default preserves the
       # path this file used to hardcode. (The bot warns about

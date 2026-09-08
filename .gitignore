@@ -8,6 +8,7 @@ __pycache__
 /config.json
 /config/config_comments.json
 /settings.db
+/data/
 /log.txt
 .env
 .idea/
