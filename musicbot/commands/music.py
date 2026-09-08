@@ -166,6 +166,13 @@ class Music(commands.Cog):
     async def _search(self, ctx, *, query: str):
         await ctx.defer()
         results = await search_youtube(query, config.SEARCH_RESULTS)
+        # search_youtube returns None when extraction fails outright
+        # (yt-dlp error, rate limit, blocked request) - without this
+        # the loop below raised TypeError and on_command_error echoed
+        # it into the channel
+        if not results:
+            await ctx.send(config.SEARCH_NO_RESULTS)
+            return
         songs = []
         for data in results:
             song = Song(
