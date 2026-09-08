@@ -53,6 +53,11 @@ services:
       # renaming a file (a file bind mount pins the inode, so the
       # container would keep using the replaced one).
       - ./data:/app/data
+      # cookies.txt is excluded from the image by .dockerignore - it is
+      # a credential file once filled in - so mount it back in, or
+      # restricted-content playback silently loses its cookies (yt-dlp
+      # skips an unreadable cookiefile rather than failing).
+      - ./config/cookies:/app/config/cookies:ro
       # Host path to the music library. Set MUSIC_LIBRARY_HOST_PATH in
       # .env to point this somewhere else; the default preserves the
       # path this file used to hardcode. (The bot warns about
