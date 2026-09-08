@@ -160,6 +160,9 @@ class General(commands.Cog):
     @_settings.command(name="vc_timeout")
     @commands.check(dj_check)
     async def _set_vc_timeout(self, ctx: commands.Context, value: bool):
+        if not config.ALLOW_VC_TIMEOUT_EDIT:
+            await ctx.send(config.VC_TIMEOUT_EDIT_DISABLED)
+            return
         sett = self.bot.settings[ctx.guild]
         await sett.update_setting("vc_timeout", value, ctx)
         await ctx.send(f"Setting `vc_timeout` updated to {value}!")

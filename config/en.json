@@ -118,6 +118,7 @@
   "SEARCH_EMBED_TITLE": "Results:",
   "SEARCH_NO_RESULTS": "No results found. Try a different search.",
   "BOT_NOT_READY": "The bot is still starting up. Try again in a moment.",
+  "VC_TIMEOUT_EDIT_DISABLED": "Editing `vc_timeout` is disabled by the bot owner.",
 
   "PauseState": {
     "NOTHING_TO_PAUSE": "Nothing to pause or resume.",
