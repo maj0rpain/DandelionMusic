@@ -147,9 +147,12 @@ class BrowseCursor:
 
         The held Screen needs no separate key - `scope` is assigned
         once, at build, so comparing it against the cursor's own
-        position is the check. That is also why nothing exposes the
-        current level key directly: a key built from `screen().scope`
-        cannot describe a level other than the one actually rendered.
+        position is the check. `scope` is also what a caller wanting
+        the current level key should read, so that the key and the
+        entries it describes come off one Screen - but note that the
+        rebuild above keeps it equal to (artist, album), so it buys
+        consistency of source, not protection from a cursor that
+        moves mid-render. Only the caller not awaiting buys that.
         """
         if self._screen is None or self._screen.scope != (
             self.artist,

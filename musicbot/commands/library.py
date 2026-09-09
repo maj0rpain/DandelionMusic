@@ -526,9 +526,13 @@ class LibraryBrowseView(LibraryView):
         art = self._enrichment.art if self._enrichment else None
         if art is None or not art.data:
             return None
-        # built from the screen's own scope rather than from the
-        # cursor's position, so the key cannot end up describing a
-        # level other than the one actually rendered
+        # The scope of the same Screen build_items() and embed() just
+        # read, so the key names the level they drew. Reading it here
+        # is not what makes that true: screen() rebuilds as soon as
+        # its scope stops matching the cursor, which makes this
+        # equivalent to reading cursor.artist/album directly. What
+        # keeps all three agreeing is render() never awaiting between
+        # them - see there.
         artist, album = self.cursor.screen().scope
         return f"{artist}/{album}.{art.extension}"
 
@@ -638,10 +642,20 @@ class LibraryBrowseView(LibraryView):
         await self.queue(interaction, [descent.track], source)
 
     async def go_back(self, interaction: discord.Interaction):
-        # False at the root, where there is no level to enter and
-        # nothing on the message would change
-        if self.cursor.back():
-            await self._enter_level(interaction)
+        if not self.cursor.back():
+            # Already at the root: no level to enter, and nothing on
+            # the message would change. The interaction still has to
+            # be answered, or the client shows "This interaction
+            # failed" three seconds later. No click reaches here
+            # today - build_items() only adds BackButton below the
+            # root, and discord.py drops a cleared item's custom_id
+            # from its ViewStore, so a stale Back no longer dispatches
+            # - but every other entry point answers unconditionally
+            # and this one should not be the exception that stops
+            # being true quietly.
+            await interaction.response.defer()
+            return
+        await self._enter_level(interaction)
 
     async def _enter_level(self, interaction: discord.Interaction):
         """Shows the new level immediately, then fills the enrichment
