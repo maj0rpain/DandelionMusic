@@ -112,6 +112,17 @@ A session that produced a plan does not implement it. A session that implemented
 
 `/handoff` is user-invocable only (`disable-model-invocation: true` in its frontmatter), so an agent cannot call it. At a boundary the agent writes the document into `handoffs/` itself, in that format, and stops.
 
+### The review session runs the branch to green
+
+Review is a loop, not a pass: the fixes written in response to a review are themselves unreviewed code. The session repeats until a round changes nothing.
+
+1. `/code-review` against the base branch.
+2. Act on the findings — including deciding a finding warrants no change, with that reasoning in the commit message.
+3. Push, then verify CI **on the commit just pushed**: `gh pr checks <n> --repo maj0rpain/DandelionMusic --watch`. Pushing is not a result. A green local `pytest` and `pre-commit run --all` predict CI rather than standing in for it — `checks.yml` runs the hooks under Python 3.11 in `run-checks`, against the 3.13 that `run-tests` and local development use. A red run is a finding: re-enter at step 2.
+4. Repeat from step 1. The commits step 2 added are the ones not yet reviewed; the rest of the branch has been.
+
+**Done is a head commit that has been both reviewed clean and seen green**: a review round that produced no code change, over a CI run that concluded passing on that same commit.
+
 ## Agent skills
 
 ### Issue tracker
