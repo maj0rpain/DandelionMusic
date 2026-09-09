@@ -98,3 +98,17 @@ Adding a new setting means adding a class attribute to `Config` (with a comment 
 ### Discord command surface
 
 Commands are `hybrid_command`s (usable both as `d!`-prefixed text commands and slash commands, gated by `ENABLE_SLASH_COMMANDS`). Prefix, mention-as-prefix and slash command sync are config-driven in `musicbot/__main__.py`/`bot.py`; the guild whitelist is not — it lives in the database (see `musicbot/settings.py`). See `README.md` for the end-user command reference (`d!p`, `d!skip`, `d!q`, `d!loop`, `d!settings`, etc.).
+
+## Agent skills
+
+### Issue tracker
+
+GitHub Issues on `maj0rpain/DandelionMusic`, via `gh` with `--repo maj0rpain/DandelionMusic` pinned explicitly on every call (bare `gh` resolves to the original `solaluset` repo). See `docs/agents/issue-tracker.md`.
+
+### Triage labels
+
+The five canonical roles, unchanged (`needs-triage`, `needs-info`, `ready-for-agent`, `ready-for-human`, `wontfix`). See `docs/agents/triage-labels.md`.
+
+### Domain docs
+
+Single-context: `CONTEXT.md` + `docs/adr/` at the repo root (neither exists yet; created lazily by `/domain-modeling`). See `docs/agents/domain.md`.
