@@ -703,6 +703,16 @@ class AudioController(object):
         self.pickle_playlist()
         self.stop_player()
         await self.update_view(None)
+        # Cancelled here rather than after the disconnect below, so
+        # the no-connection branch cancels it too. timeout_handler()
+        # reads self.guild.voice_client, which is guild-global and not
+        # this controller's own - so a timer left pending on a
+        # controller that is being torn down (the bot was dragged out
+        # of voice and did not reconnect, say) fires VC_TIMEOUT later
+        # and disconnects whatever session has since taken its place.
+        # d!reset, which replaces the controller outright, is the
+        # easiest way to see it.
+        self.timer.cancel()
         if self.guild.voice_client is None:
             # No connection left to close, but state was still torn
             # down above - and for a bot dragged out of voice that
@@ -729,5 +739,4 @@ class AudioController(object):
             except Exception:
                 print_exc(file=sys.stderr)
         await self.guild.voice_client.disconnect(force=True)
-        self.timer.cancel()
         return True

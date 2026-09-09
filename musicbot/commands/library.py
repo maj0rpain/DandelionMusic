@@ -13,7 +13,12 @@ from discord.ext import commands
 from config import config
 from musicbot import library, library_metadata
 from musicbot.bot import MusicBot
-from musicbot.utils import CheckError, owner_check, play_check
+from musicbot.utils import (
+    CheckError,
+    get_audiocontroller,
+    owner_check,
+    play_check,
+)
 
 PAGE_SIZE = 25
 
@@ -888,7 +893,7 @@ class Library(commands.Cog):
         self.bot = bot
 
     async def cog_check(self, ctx):
-        ctx.audiocontroller = ctx.bot.audio_controllers[ctx.guild]
+        ctx.audiocontroller = get_audiocontroller(ctx)
         return True
 
     async def cog_before_invoke(self, ctx):

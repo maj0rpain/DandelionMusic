@@ -13,12 +13,15 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from config import config
+from config.utils import ensure_sqlite_parent
 from musicbot.audiocontroller import VC_CONNECT_TIMEOUT, AudioController
 from musicbot import library
 from musicbot.settings import (
     GuildSettings,
     run_migrations,
     extract_legacy_settings,
+    get_guild_whitelist,
+    import_env_whitelist,
     migrate_old_playlists,
 )
 from musicbot.utils import CheckError
@@ -70,6 +73,7 @@ class MusicBot(commands.Bot):
         # A dictionary that remembers which settings belongs to which guild
         self.settings: Dict[discord.Guild, GuildSettings] = {}
 
+        ensure_sqlite_parent(config.DATABASE)
         self.db_engine = create_async_engine(config.DATABASE)
         self.DbSession = sessionmaker(
             self.db_engine, expire_on_commit=False, class_=AsyncSession
@@ -95,12 +99,12 @@ class MusicBot(commands.Bot):
             await connection.run_sync(run_migrations)
         await extract_legacy_settings(self)
         await migrate_old_playlists(self)
+        await import_env_whitelist(self)
 
         return await super().start(*args, **kwargs)
 
     async def close(self):
-        if "--run" not in sys.argv:
-            print(config.SHUTDOWN_MESSAGE, flush=True)
+        print(config.SHUTDOWN_MESSAGE, flush=True)
 
         await asyncio.gather(
             *(
@@ -119,11 +123,10 @@ class MusicBot(commands.Bot):
     async def on_ready(self):
         self.settings.update(await GuildSettings.load_many(self, self.guilds))
 
+        # read once for the whole sweep rather than per guild
+        whitelist = await get_guild_whitelist(self)
         for guild in self.guilds:
-            if (
-                config.GUILD_WHITELIST
-                and guild.id not in config.GUILD_WHITELIST
-            ):
+            if whitelist and guild.id not in whitelist:
                 print(f"{guild.name} is not whitelisted, leaving.")
                 await guild.leave()
                 continue
@@ -140,7 +143,8 @@ class MusicBot(commands.Bot):
 
     async def on_guild_join(self, guild):
         print(guild.name)
-        if config.GUILD_WHITELIST and guild.id not in config.GUILD_WHITELIST:
+        whitelist = await get_guild_whitelist(self)
+        if whitelist and guild.id not in whitelist:
             print("Not whitelisted, leaving.")
             await guild.leave()
             return
@@ -156,8 +160,16 @@ class MusicBot(commands.Bot):
 
     async def on_voice_state_update(self, member, before, after):
         guild = member.guild
+        # A raw gateway event, unlike a prefix command, is not gated
+        # behind absolutely_ready - and on_ready registers guilds in a
+        # loop that awaits a network call apiece, so an event can
+        # arrive before this guild has a controller. There is no
+        # session to adjust in that case, so drop it rather than
+        # raising KeyError out of the event handler.
+        audiocontroller = self.audio_controllers.get(guild)
+        if audiocontroller is None:
+            return
         if member == self.user:
-            audiocontroller = self.audio_controllers[guild]
             if not guild.voice_client:
                 await asyncio.sleep(VC_CONNECT_TIMEOUT)
             if guild.voice_client:
@@ -176,7 +188,6 @@ class MusicBot(commands.Bot):
             and all(m.bot for m in before.channel.members)
         ):
             # all users left
-            audiocontroller = self.audio_controllers[guild]
             await audiocontroller.timer.start(guild.voice_client.is_playing())
 
     @tasks.loop(seconds=1)
@@ -284,10 +295,18 @@ class Context(commands.Context):
 
     async def send(self, *args, **kwargs):
         kwargs.pop("reference", None)  # not supported
-        audiocontroller = self.bot.audio_controllers[self.guild]
-        channel = audiocontroller.command_channel
+        # .get(), because this runs for interactions too: a component
+        # click or an application command is not gated behind
+        # absolutely_ready the way process_commands gates prefix
+        # commands, so it can land before on_ready has registered this
+        # guild - and self.guild is None outside a guild entirely.
+        # With no controller there is no playback message to carry the
+        # view, so fall through to the plain send below.
+        audiocontroller = self.bot.audio_controllers.get(self.guild)
+        channel = audiocontroller.command_channel if audiocontroller else None
         if (
-            "view" in kwargs
+            audiocontroller is None
+            or "view" in kwargs
             or kwargs.get("ephemeral", False)
             or (
                 channel

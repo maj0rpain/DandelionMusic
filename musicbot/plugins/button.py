@@ -57,7 +57,15 @@ class Button(commands.Cog):
         if not user_vc:
             return
 
-        sett = self.bot.settings[serv]
+        # Before the settings lookup, not after the controller one
+        # further down: a raw reaction event is not gated behind
+        # absolutely_ready (unlike on_message above), and on_ready
+        # fills settings and audio_controllers together - so whichever
+        # is read first is where the KeyError lands.
+        sett = self.bot.settings.get(serv)
+        audiocontroller = self.bot.audio_controllers.get(serv)
+        if sett is None or audiocontroller is None:
+            return
         button = sett.button_emote
 
         if not button:
@@ -77,8 +85,6 @@ class Button(commands.Cog):
 
             if chan.permissions_for(serv.me).manage_messages:
                 await message.remove_reaction(reaction.emoji, member)
-
-            audiocontroller = self.bot.audio_controllers[serv]
 
             ctx = await self.bot.get_context(message)
             # author is the user who added the reaction,

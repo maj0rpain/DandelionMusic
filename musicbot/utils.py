@@ -2,7 +2,6 @@ from __future__ import annotations
 import os
 import re
 import sys
-import _thread
 import asyncio
 import discord
 import subprocess
@@ -18,7 +17,6 @@ from typing import (
     List,
 )
 
-from aioconsole import ainput
 from discord import (
     opus,
     utils,
@@ -34,6 +32,8 @@ from musicbot.linkutils import SiteTypes, url_regex
 # avoiding circular import
 if TYPE_CHECKING:
     from musicbot.bot import Context, MusicBot
+    from musicbot.settings import GuildSettings
+    from musicbot.audiocontroller import AudioController
 
 
 OLD_FFMPEG_CONF = """
@@ -149,6 +149,39 @@ class CheckError(CommandError):
     pass
 
 
+def get_audiocontroller(ctx: Context) -> "AudioController":
+    """This guild's AudioController, or a CheckError explaining that
+    the bot is still starting.
+
+    on_ready registers a controller for every guild, but that loop
+    awaits a network call per guild, and only prefix commands wait for
+    it to finish (process_commands awaits absolutely_ready).
+    Application commands and component interactions are dispatched
+    straight to the command, so they can land in that gap. Indexing
+    audio_controllers directly turned that into a bare KeyError
+    traceback with nothing sent back to the user."""
+    controller = ctx.bot.audio_controllers.get(ctx.guild)
+    if controller is None:
+        raise CheckError(config.BOT_NOT_READY)
+    return controller
+
+
+def get_settings(ctx: Context) -> "GuildSettings":
+    """This guild's GuildSettings, or a CheckError explaining that the
+    bot is still starting.
+
+    The twin of get_audiocontroller(), and needed for the same reason:
+    on_ready fills bot.settings and bot.audio_controllers in the same
+    pass, so every path that could find one missing could find the
+    other missing too. Guarding only the controller just moved the
+    KeyError one line down - play_check() reads settings immediately
+    after Music.cog_check() has resolved the controller."""
+    sett = ctx.bot.settings.get(ctx.guild)
+    if sett is None:
+        raise CheckError(config.BOT_NOT_READY)
+    return sett
+
+
 async def dj_check(ctx: Context):
     """Check if the user has DJ permissions"""
     if ctx.channel.permissions_for(ctx.author).administrator:
@@ -157,7 +190,7 @@ async def dj_check(ctx: Context):
     if owner:
         return True
 
-    sett = ctx.bot.settings[ctx.guild]
+    sett = get_settings(ctx)
     if sett.dj_role:
         if int(sett.dj_role) not in [r.id for r in ctx.author.roles]:
             raise CheckError(config.NOT_A_DJ)
@@ -166,7 +199,7 @@ async def dj_check(ctx: Context):
 
 async def owner_check(ctx: Context):
     """Check if the user is the owner of the bot"""
-    if ctx.author.id in [150861087976194048]:
+    if ctx.author.id in config.EXTRA_OWNERS:
         return True
     owner = await ctx.bot.is_owner(ctx.author)
     if owner:
@@ -188,9 +221,7 @@ async def voice_check(ctx: Context):
 
         if all(m.bot for m in bot_vc.channel.members):
             # current channel doesn't have any user in it
-            return await ctx.bot.audio_controllers[ctx.guild].uconnect(
-                ctx, move=True
-            )
+            return await get_audiocontroller(ctx).uconnect(ctx, move=True)
 
     try:
         if await dj_check(ctx):
@@ -205,7 +236,7 @@ async def voice_check(ctx: Context):
 async def play_check(ctx: Context):
     """Prepare for music commands"""
 
-    sett = ctx.bot.settings[ctx.guild]
+    sett = get_settings(ctx)
 
     cm_channel = sett.command_channel
     vc_rule = sett.user_must_be_in_vc
@@ -215,7 +246,7 @@ async def play_check(ctx: Context):
             raise CheckError(config.WRONG_CHANNEL_MESSAGE)
 
     if not ctx.guild.voice_client:
-        return await ctx.bot.audio_controllers[ctx.guild].uconnect(ctx)
+        return await get_audiocontroller(ctx).uconnect(ctx)
 
     if vc_rule:
         return await voice_check(ctx)
@@ -298,9 +329,33 @@ class Timer:
         self._task = asyncio.create_task(self._job())
 
     def cancel(self):
-        if self._task:
-            self._task.cancel()
-            self._task = None
+        """Drop the pending timeout.
+
+        Never cancels the task it is running inside. The inactivity
+        path is _job -> timeout_handler() -> udisconnect(), and
+        udisconnect() cancels this timer partway through its teardown -
+        so self._task is the *current* task there. Cancelling it raised
+        CancelledError at udisconnect()'s next await, which is inside
+        the disconnect announcement, and `except Exception` does not
+        catch it (CancelledError is a BaseException since 3.8) - so
+        voice_client.disconnect() never ran and the bot stayed sitting
+        in the channel after every inactivity timeout. By that point
+        the timer has already fired and there is nothing pending to
+        cancel; only clearing the reference matters."""
+        # current_task() before dropping the reference, and tolerant
+        # of there being no running loop: it raises RuntimeError off
+        # the loop, which would otherwise clear self._task while
+        # leaving the real task alive and still due to fire. No caller
+        # does that today, but next_song() runs on discord.py's audio
+        # thread and reaches this code through add_task() for exactly
+        # that reason.
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:
+            current = None
+        task, self._task = self._task, None
+        if task is not None and task is not current:
+            task.cancel()
 
 
 class OutputWrapper:
@@ -369,12 +424,3 @@ class SimplePaginator(discord.ui.View):
             await interaction.response.edit_message(
                 embed=self.pages[self.current_page]
             )
-
-
-async def read_shutdown():
-    try:
-        line = await ainput()
-    except EOFError:
-        return
-    if line == "shutdown":
-        _thread.interrupt_main()

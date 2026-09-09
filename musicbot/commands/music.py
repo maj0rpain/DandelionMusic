@@ -59,7 +59,7 @@ class Music(commands.Cog):
         self.bot = bot
 
     async def cog_check(self, ctx):
-        ctx.audiocontroller = ctx.bot.audio_controllers[ctx.guild]
+        ctx.audiocontroller = utils.get_audiocontroller(ctx)
         return await utils.play_check(ctx)
 
     async def cog_before_invoke(self, ctx):
@@ -115,7 +115,7 @@ class Music(commands.Cog):
                 await ctx.send(
                     embed=song.format_output(config.SONGINFO_QUEUE_ADDED)
                 )
-            elif not ctx.bot.settings[ctx.guild].announce_songs:
+            elif not utils.get_settings(ctx).announce_songs:
                 # auto-announce is disabled, announce here
                 await ctx.send(
                     embed=song.format_output(config.SONGINFO_NOW_PLAYING)
@@ -166,6 +166,13 @@ class Music(commands.Cog):
     async def _search(self, ctx, *, query: str):
         await ctx.defer()
         results = await search_youtube(query, config.SEARCH_RESULTS)
+        # search_youtube returns None when extraction fails outright
+        # (yt-dlp error, rate limit, blocked request) - without this
+        # the loop below raised TypeError and on_command_error echoed
+        # it into the channel
+        if not results:
+            await ctx.send(config.SEARCH_NO_RESULTS)
+            return
         songs = []
         for data in results:
             song = Song(
@@ -608,10 +615,14 @@ class Music(commands.Cog):
         if song is None:
             await ctx.send(config.SONGINFO_ERROR)
             return
-        if isinstance(song, Song):
-            urls = [song.webpage_url]
-        else:
-            urls = [s.webpage_url for s in song]
+        # Must match the shape _playlist_save() writes: a list of
+        # {"url", "title"} objects. Appending bare url strings left a
+        # mixed list that every reader indexes by key - _playlist_load,
+        # _playlist_show and loader.preload all do song_data["url"] -
+        # so the playlist raised TypeError until the next restart
+        # normalised it via settings.migrate_old_playlists().
+        songs = [song] if isinstance(song, Song) else song
+        new_songs = [{"url": s.webpage_url, "title": s.title} for s in songs]
 
         async with ctx.bot.DbSession() as session:
             playlist = (
@@ -625,7 +636,7 @@ class Music(commands.Cog):
                 await ctx.send(config.PLAYLIST_NOT_FOUND)
                 return
             playlist.songs_json = json.dumps(
-                json.loads(playlist.songs_json) + urls
+                json.loads(playlist.songs_json) + new_songs
             )
             await session.commit()
         await ctx.send(config.PLAYLIST_UPDATED)

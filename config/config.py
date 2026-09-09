@@ -7,7 +7,7 @@ from typing import Optional
 
 import jsonc
 from packaging.requirements import Requirement
-from dotenv import load_dotenv
+from dotenv import find_dotenv, load_dotenv
 
 sys.path.insert(0, os.path.dirname(__file__))
 from utils import (  # noqa: E402
@@ -20,6 +20,28 @@ from utils import (  # noqa: E402
 )
 
 del sys.path[0]
+
+
+def parse_env_file(path: str) -> tuple:
+    """Reads an env-style file into (raw text, {key: raw value}).
+
+    One parser for .env and .env.sample alike - they have the same
+    shape, and the three hand-rolled copies of this that used to exist
+    had already drifted apart in how they treated blank and comment
+    lines."""
+    if not os.path.isfile(path):
+        return "", {}
+    with open(path, "r", encoding="utf-8") as f:
+        content = f.read()
+    values = {}
+    for line in content.splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        if "=" in line:
+            key, value = line.split("=", 1)
+            values[key] = value
+    return content, values
 
 
 class Config:
@@ -107,11 +129,18 @@ class Config:
 
     ENABLE_PLAYLISTS = True
 
-    # if not empty, the bot will leave non-whitelisted guilds
+    # DEPRECATED seed for the guild whitelist, which the database
+    # owns (see musicbot/settings.py). Imported once on the first
+    # startup after upgrading, then ignored; manage the whitelist
+    # with d!guild_whitelist.
     GUILD_WHITELIST = []
 
-    # Track which variables have been changed
-    _changed_vars = {}
+    # extra user ids treated as bot owners, on top of the application
+    # owner(s) Discord itself reports. These unlock every owner-only
+    # command, including d!execute, which runs arbitrary Python in the
+    # bot process - only add someone you would hand the host to.
+    # Format: [123456789012345678, 987654321098765432]
+    EXTRA_OWNERS = []
 
     def __init__(self):
         current_cfg = self.load()
@@ -163,7 +192,15 @@ class Config:
     def load(self) -> dict:
         # Start with default configuration from class attributes
         current_cfg = self.as_dict()
-        load_dotenv()
+
+        # Resolve the .env explicitly rather than letting
+        # load_dotenv() search: find_dotenv() walks up from the
+        # *calling module's file* - this one - and the path is
+        # reused below for the unknown-variable scan, which would
+        # otherwise read a different file whenever the process was
+        # started from somewhere other than the project root.
+        self._env_path = find_dotenv() or os.path.abspath(".env")
+        load_dotenv(self._env_path)
 
         # Check for deprecated environment variable with typo
         if "VC_TIMOUT_DEFAULT" in os.environ:
@@ -182,22 +219,10 @@ class Config:
             current_cfg["SUPPORTED_EXTENSIONS"]
         )
 
-        # Read .env file directly to check for unknown variables
-        env_file = ".env"
-        if os.path.isfile(env_file):
-            with open(env_file, "r") as f:
-                env_content = f.read()
-
-            # Parse .env file
-            for line in env_content.splitlines():
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    # Check if this variable is defined in the Config class
-                    if key not in current_cfg and not key.startswith("_"):
-                        self.unknown_vars[key] = value
+        # Read .env directly to check for unknown variables
+        for key, value in parse_env_file(self._env_path)[1].items():
+            if key not in current_cfg and not key.startswith("_"):
+                self.unknown_vars[key] = value
 
         for key, default in current_cfg.items():
             current_cfg[key] = get_env_var(key, default)
@@ -225,14 +250,6 @@ class Config:
 
     def get_dict(self, name: str) -> dict:
         return self.dicts[name]
-
-    def save(self):
-        """
-        Save configuration to .env and .env.sample files
-        if the variable in the Config class doesn't match.
-        """
-        # Update .env and .env.sample files
-        self._update_env_files()
 
     def warn_unknown_vars(self):
         """
@@ -263,226 +280,6 @@ class Config:
     def update(self, data: dict):
         for k, v in data.items():
             setattr(self, k, v)
-
-    def __setattr__(self, name, value):
-        """
-        Override __setattr__ to track changes to variables.
-        """
-        # List of internal variables that shouldn't be tracked
-        internal_vars = [
-            "COOKIE_PATH",  # can change based on runtime path
-            "DATABASE",  # Internal database connection string
-            "DATABASE_LIBRARY_NAME",  # Internal database library name
-            "messages",  # Internal messages dictionary
-            "dicts",  # Internal dictionaries
-            "unknown_vars",  # Internal tracking of unknown variables
-            "prefix",  # Internal prefix for display
-        ]
-
-        # Track changes to non-internal variables
-        if not name.startswith("_") and name not in internal_vars:
-            if hasattr(self.__class__, name):
-                # Get the default value from the class
-                default_value = getattr(self.__class__, name)
-                # If the value is different from the default, track it
-                if value != default_value:
-                    self._changed_vars[name] = value
-            else:
-                # Track new variables that don't exist in the class
-                self._changed_vars[name] = value
-
-        # Call the parent __setattr__
-        super().__setattr__(name, value)
-
-    def _update_env_files(self):
-        """
-        Update .env and .env.sample files with configuration values
-        from the Config class that have been explicitly changed and
-        don't match the current environment variables.
-        """
-        # Read .env file if it exists
-        env_file = ".env"
-        env_vars = {}
-        env_content = ""
-        if os.path.isfile(env_file):
-            with open(env_file, "r") as f:
-                env_content = f.read()
-
-            # Parse .env file
-            for line in env_content.splitlines():
-                line = line.strip()
-                if not line or line.startswith("#"):
-                    continue
-                if "=" in line:
-                    key, value = line.split("=", 1)
-                    env_vars[key] = value
-
-        # Read .env.sample file if it exists
-        sample_file = ".env.sample"
-        sample_vars = {}
-        sample_content = ""
-        sample_comments = {}
-        current_comment = []
-
-        if os.path.isfile(sample_file):
-            with open(sample_file, "r") as f:
-                sample_content = f.read()
-
-            # Parse .env.sample file
-            for line in sample_content.splitlines():
-                line_stripped = line.strip()
-                if not line_stripped:
-                    current_comment = []
-                    continue
-                if line_stripped.startswith("#"):
-                    current_comment.append(line)
-                    continue
-                if "=" in line_stripped:
-                    key, value = line_stripped.split("=", 1)
-                    sample_vars[key] = value
-                    if current_comment:
-                        sample_comments[key] = current_comment
-                    current_comment = []
-
-        # Check for variables that need to be updated in .env
-        env_updated = False
-
-        # Only update variables that have been explicitly changed
-        for key, value in self._changed_vars.items():
-            # Skip internal variables and methods
-            if key.startswith("_") or callable(value):
-                continue
-
-            # Convert value to string representation for .env file
-            if isinstance(value, str):
-                env_value = value
-            elif isinstance(value, (list, tuple)):
-                env_value = str(list(value))
-            else:
-                env_value = str(value)
-
-            # Check if variable exists in .env file with a different value
-            if key in env_vars:
-                # Variable exists in .env file, check if it matches
-                # current value
-                env_var_str = env_vars[key]
-                try:
-                    if not isinstance(value, str):
-                        env_var = ast.literal_eval(env_var_str)
-                    else:
-                        env_var = env_var_str
-                except (SyntaxError, ValueError):
-                    env_var = env_var_str
-
-                # Convert both to strings for comparison
-                # to handle different types
-                env_value_str = str(env_value)
-                current_env_str = str(env_var)
-
-                # If values don't match, update .env
-                if env_value_str != current_env_str:
-                    # Update existing variable in .env
-                    env_content = self._replace_env_var(
-                        env_content, key, env_value
-                    )
-                    env_updated = True
-                    print(
-                        f"Updating {key} in .env"
-                        f" from {env_var_str} to {env_value}"
-                    )
-            else:
-                # Variable doesn't exist in .env, append it
-                env_content += f"\n{key}={env_value}"
-                env_updated = True
-                print(f"Adding {key}={env_value} to .env")
-
-        # Write updated .env file if changes were made
-        if env_updated:
-            with open(env_file, "w") as f:
-                f.write(env_content)
-
-        # Check for variables that need to be updated in .env.sample
-        sample_updated = False
-
-        # Only update variables that have been explicitly changed
-        for key, value in self._changed_vars.items():
-            # Skip internal variables and methods
-            if key.startswith("_") or callable(value):
-                continue
-
-            # Convert value to string representation for .env.sample file
-            if isinstance(value, str):
-                sample_value = value
-            elif isinstance(value, (list, tuple)):
-                sample_value = str(list(value))
-            else:
-                sample_value = str(value)
-
-            # Check if variable exists in .env.sample with a different value
-            if key in sample_vars:
-                # Variable exists in .env.sample, check if it
-                # matches current value
-                sample_var_str = sample_vars[key]
-                try:
-                    if not isinstance(value, str):
-                        sample_var = ast.literal_eval(sample_var_str)
-                    else:
-                        sample_var = sample_var_str
-                except (SyntaxError, ValueError):
-                    sample_var = sample_var_str
-
-                # Convert both to strings for comparison
-                # to handle different types
-                sample_value_str = str(sample_value)
-                current_sample_str = str(sample_var)
-
-                # If values don't match, update .env.sample
-                if sample_value_str != current_sample_str:
-                    # Update existing variable in .env.sample
-                    sample_content = self._replace_env_var(
-                        sample_content, key, sample_value
-                    )
-                    sample_updated = True
-                    print(
-                        f"Updating {key} in .env.sample"
-                        f" from {sample_var_str} to {sample_value}"
-                    )
-            else:
-                # Variable doesn't exist in .env.sample,
-                # append it with comments
-                if key in sample_comments:
-                    # Use existing comments if available
-                    sample_content += "\n" + "\n".join(sample_comments[key])
-                else:
-                    # Add a default comment
-                    sample_content += f"\n# {key} configuration"
-                sample_content += f"\n{key}={sample_value}\n"
-                sample_updated = True
-                print(f"Adding {key}={sample_value} to .env.sample")
-
-        # Write updated .env.sample file if changes were made
-        if sample_updated:
-            with open(sample_file, "w") as f:
-                f.write(sample_content)
-
-        # Clear the changed variables after saving
-        self._changed_vars = {}
-
-    def _replace_env_var(self, content, key, value):
-        """
-        Replace a variable in the .env file content.
-        """
-        lines = content.splitlines()
-        for i, line in enumerate(lines):
-            line_stripped = line.strip()
-            if not line_stripped or line_stripped.startswith("#"):
-                continue
-            if "=" in line_stripped:
-                line_key, _ = line_stripped.split("=", 1)
-                if line_key == key:
-                    lines[i] = f"{key}={value}"
-                    break
-        return "\n".join(lines)
 
     @classmethod
     def as_dict(cls) -> dict:
