@@ -28,7 +28,7 @@ Tests live in `tests/` and run with pytest:
 uv run --group dev pytest
 ```
 
-They cover only the parts that need no Discord connection (config loading and the `.env` writer, `Playlist`, library search/stats, the tag/expiry/URL parsers, the permission checks); there is no integration coverage of the bot itself. CI runs them as the `run-tests` job in `.github/workflows/checks.yml`.
+They cover only the parts that need no Discord connection (config loading and the `.env` writer, `Playlist`, library search/stats, the browse cursor, the tag/expiry/URL parsers, the permission checks); there is no integration coverage of the bot itself. CI runs them as the `run-tests` job in `.github/workflows/checks.yml`.
 
 Note for config tests: `Config.load()` calls `load_dotenv()`, and python-dotenv's `find_dotenv()` walks up from the *calling module's file* rather than from cwd, while `_update_env_files()` opens the relative path `".env"`. A test that touches `Config` must redirect both (see `tests/conftest.py`) or it will read — and `save()` will rewrite — the real `.env`.
 
@@ -92,12 +92,36 @@ Adding a new setting means adding a class attribute to `Config` (with a comment 
 - `AudioController` (`musicbot/audiocontroller.py`) is the per-guild playback state machine: owns a `Playlist`, the voice connection lifecycle (`uconnect`/`udisconnect`/`register_voice_channel`), volume, looping, an inactivity `Timer` (`musicbot/utils.py`) that auto-disconnects, and periodically pickles the playlist to `backup/playlist_<guild_id>.pickle` for crash recovery (restored only via the explicit `d!restore` command — nothing restores it automatically on reconnect). It also builds the Discord UI `View` (`MusicButton` instances) shown under the "now playing" message. `next_song()` (its `after=` callback passed to `voice_client.play()`) is invoked by discord.py from its own audio-player **thread**, not the event loop thread; `add_task()` detects this (`asyncio.get_running_loop()` raising) and falls back to `asyncio.run_coroutine_threadsafe` instead of the non-thread-safe `loop.create_task()` — keep this in mind before adding new scheduling calls reachable from that callback.
 - `Playlist`/`Song` (`musicbot/playlist.py`, `musicbot/song.py`) hold queue/history and per-track metadata (title, url, playlist membership, expiry-based re-fetch via `_parse_expire` in `loader.py` for expiring stream URLs).
 - `musicbot/linkutils.py` classifies an input string into a `SiteTypes` enum or a `yt_dlp` extractor instance (`identify_url`/`get_site_type`) and implements Spotify resolution (via the official API when `SPOTIFY_ID`/`SPOTIFY_SECRET` are set, otherwise by scraping the Spotify webpage with BeautifulSoup) by turning Spotify tracks into a YouTube search.
+- `musicbot/library_browse.py` holds the browse cursor (`BrowseCursor`, `Screen`, `Descent`): where a `d!lib browse` session is in the library and every rule for moving it — descending, paging with its clamp, what the current scope stands for, and the `level_revision` counter that lets a slow enrichment tell it is describing a level nobody is looking at any more. It imports `musicbot.library` and `typing`, and nothing else: these rules used to live on `LibraryBrowseView` (`musicbot/commands/library.py`), whose every entry point took a `discord.Interaction`, so the only way to exercise them was a human clicking buttons in Discord — and the same class of bug kept coming back. `LibraryBrowseView` is now an adapter over it, owning the Discord side (components, message edits, deferral, the `_busy` guard, the enrichment and `KIND_EMOJI`) and keeping no copy of the cursor's state. Keep the import list as it is; a `discord` or `config` import there costs the tests (`tests/test_library_browse.py`, which asserts it) their reason to exist.
 - `musicbot/commands/` holds the three `commands.Cog`/extension modules loaded by `__main__.py`: `music.py` (playback commands, largest module), `general.py` (settings/utility), `developer.py` (owner-only). `musicbot/plugins/button.py` is the optional reaction-button "click to play" plugin gated by `ENABLE_BUTTON_PLUGIN`.
 - `musicbot/settings.py` defines the SQLAlchemy models (`GuildSettings`, `SavedPlaylist`, `WhitelistedGuild` — the guild whitelist, with `get/add_to/remove_from_guild_whitelist` helpers — and `BotState`, a small key/value table currently holding only the marker that records the one-time `GUILD_WHITELIST` env import) and per-setting value converters/validators (`CONFIG_CONVERTERS`) used by the `d!settings` command.
 
 ### Discord command surface
 
 Commands are `hybrid_command`s (usable both as `d!`-prefixed text commands and slash commands, gated by `ENABLE_SLASH_COMMANDS`). Prefix, mention-as-prefix and slash command sync are config-driven in `musicbot/__main__.py`/`bot.py`; the guild whitelist is not — it lives in the database (see `musicbot/settings.py`). See `README.md` for the end-user command reference (`d!p`, `d!skip`, `d!q`, `d!loop`, `d!settings`, etc.).
+
+## Workflow
+
+### Planning, implementation and review are separate sessions
+
+A session that produced a plan does not implement it. A session that implemented something does not review it. Each of those boundaries is crossed by writing a handoff document and starting a fresh session against it — not by carrying on in the same context.
+
+**Every handoff goes in `handoffs/`**, named `handoff-<what-the-next-session-does>.md` (e.g. `handoffs/handoff-implement-browse-cursor.md`). This deliberately overrides the `handoff` skill's own instruction to save to the OS temp directory: a file under `/tmp/claude-*/…/scratchpad/` is effectively unfindable from a later session, which is the failure this rule exists to prevent. Everything else that skill says still applies — reference plans, specs, ADRs, issues and commits by path or URL instead of duplicating them, include a "suggested skills" section naming what the next session should invoke, and redact secrets.
+
+`handoffs/` is gitignored (the directory is tracked via `.gitkeep`, its contents are not), so a handoff is working state and never appears in a commit or a PR.
+
+`/handoff` is user-invocable only (`disable-model-invocation: true` in its frontmatter), so an agent cannot call it. At a boundary the agent writes the document into `handoffs/` itself, in that format, and stops.
+
+### The review session runs the branch to green
+
+Review is a loop, not a pass: the fixes written in response to a review are themselves unreviewed code. The session repeats until a round changes nothing.
+
+1. `/code-review` against the base branch.
+2. Act on the findings — including deciding a finding warrants no change, with that reasoning in the commit message.
+3. Push, then verify CI **on the commit just pushed**: `gh pr checks <n> --repo maj0rpain/DandelionMusic --watch`. Pushing is not a result. A green local `pytest` and `pre-commit run --all` predict CI rather than standing in for it — `checks.yml` runs the hooks under Python 3.11 in `run-checks`, against the 3.13 that `run-tests` and local development use. A red run is a finding: re-enter at step 2.
+4. Repeat from step 1. The commits step 2 added are the ones not yet reviewed; the rest of the branch has been.
+
+**Done is a head commit that has been both reviewed clean and seen green**: a review round that produced no code change, over a CI run that concluded passing on that same commit.
 
 ## Agent skills
 

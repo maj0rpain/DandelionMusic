@@ -2,16 +2,15 @@ import asyncio
 import io
 import sys
 from contextlib import contextmanager
-from pathlib import Path
 from traceback import print_exc
-from typing import List, NamedTuple, Optional, Tuple
+from typing import List, Optional
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from config import config
-from musicbot import library, library_metadata
+from musicbot import library, library_browse, library_metadata
 from musicbot.bot import MusicBot
 from musicbot.utils import (
     CheckError,
@@ -105,28 +104,6 @@ def _fmt_years(stats: library.LevelStats) -> Optional[str]:
     return str(stats.year_min)
 
 
-class LevelData(NamedTuple):
-    """Everything one browse screen derives from the index: the
-    entries, their display labels, and the aggregate statistics for
-    the level. All of it is a pure function of (index, artist, album)
-    - the index is a snapshot taken when the view was built and never
-    replaced - so it is computed once per level rather than per
-    render.
-
-    It used to be computed several times per *render*: build_items()
-    asked for entries and for labels, which are the same list above the
-    song level, and embed() asked a third time just to decide whether
-    the level was empty. At the root each of those is a sort of every
-    artist in the library, next to a counts() walk of every album and
-    every song - and all of it ran again on each page turn, where by
-    definition nothing has changed."""
-
-    entries: List[str]
-    labels: List[str]
-    counts: Optional[Tuple[int, int, int]]  # root level only
-    stats: Optional[library.LevelStats]  # every level below the root
-
-
 class LibrarySelect(discord.ui.Select):
     def __init__(
         self,
@@ -183,7 +160,7 @@ class QueueLevelButton(discord.ui.Button):
     def __init__(self, browse_view: "LibraryBrowseView"):
         label = (
             "Queue this Album"
-            if browse_view.album is not None
+            if browse_view.cursor.at_album_level
             else "Queue this Artist"
         )
         super().__init__(label=label, style=discord.ButtonStyle.green, row=1)
@@ -380,127 +357,52 @@ class LibraryView(discord.ui.View):
 
 
 class LibraryBrowseView(LibraryView):
-    def __init__(self, ctx):
-        super().__init__(ctx, library.get_index())
-        self.artist: Optional[str] = None
-        self.album: Optional[str] = None
-        self.page = 0
+    """The Discord half of the browser: components, message edits,
+    deferral, the _busy guard and the enrichment. Where the browse
+    session is and how it moves is self.cursor's - see
+    musicbot/library_browse.py, which is testable precisely because
+    none of this is in it. Nothing here may keep its own copy of the
+    cursor's state; read it back through self.cursor every time."""
+
+    def __init__(self, ctx, index: library.LibraryIndex):
+        super().__init__(ctx, index)
+        self.cursor = library_browse.BrowseCursor(index, PAGE_SIZE)
         self._enrichment: Optional[library_metadata.Enrichment] = None
-        # bumped on every level change, so an enrichment that resolves
-        # after the user has navigated on can tell that it describes a
-        # level nobody is looking at any more and drop itself
-        self._nav = 0
         # what _attachment_key() described the last time an edit
         # actually carried an `attachments` field - see render()
         self._attached: Optional[str] = None
-        # (level key, data) for the level currently shown - see level()
-        self._level: Optional[
-            Tuple[Tuple[Optional[str], Optional[str]], LevelData]
-        ] = None
         # serialises the message edits themselves - see render()
         self._render_lock = asyncio.Lock()
         self.build_items()
 
-    def _songs(self) -> List[library.LibrarySong]:
-        return self.index.get(self.artist, {}).get(self.album, [])
-
-    def _first_sample_file(self) -> Optional[Path]:
-        # only ever called at the artist level, whose entries are
-        # already that artist's sorted album folder names
-        albums = self.level().entries
-        if not albums:
-            return None
-        songs = self.index.get(self.artist, {}).get(albums[0], [])
-        if not songs:
-            return None
-        return library.song_path(self.artist, albums[0], songs[0].filename)
-
     async def _resolve_enrichment(
         self,
     ) -> Optional[library_metadata.Enrichment]:
-        if self.artist is None:
+        """Whatever the online backends know about the current
+        level, or None where there is nothing to ask about: the root,
+        and any scope holding no file to read tags and embedded
+        artwork off."""
+        sample = self.cursor.sample_track()
+        if sample is None:
             return None
-        if self.album is None:
-            sample = self._first_sample_file()
-            if sample is None:
-                return None
+        path = library.song_path(*sample)
+        if self.cursor.album is None:
             return await library_metadata.get_artist_enrichment(
-                self.artist, sample
+                self.cursor.artist, path
             )
-        songs = self._songs()
-        if not songs:
-            return None
-        sample = library.song_path(self.artist, self.album, songs[0].filename)
         return await library_metadata.get_album_enrichment(
-            self.artist, self.album, sample
+            self.cursor.artist, self.cursor.album, path
         )
-
-    def _build_level(self) -> LevelData:
-        if self.artist is None:
-            entries = sorted(self.index.keys())
-            # entries and labels are the same list above the song
-            # level; nothing mutates either, so they can share it
-            return LevelData(
-                entries, entries, library.counts(self.index), None
-            )
-        if self.album is None:
-            entries = sorted(self.index.get(self.artist, {}).keys())
-            return LevelData(
-                entries,
-                entries,
-                None,
-                library.artist_stats(self.index, self.artist),
-            )
-        songs = self._songs()
-        return LevelData(
-            # already sorted by filename in build_index(), preserving
-            # track-number order - don't re-sort
-            [song.filename for song in songs],
-            [song.title for song in songs],
-            None,
-            library.album_stats(self.index, self.artist, self.album),
-        )
-
-    def level(self) -> LevelData:
-        """The current level's data, computed on first use and held
-        until the level changes. One slot rather than a per-level
-        cache: what this is worth is not recomputing within a render or
-        across a page turn, and keeping every level a long browse
-        touched would retain the whole index a second time over."""
-        key = (self.artist, self.album)
-        if self._level is None or self._level[0] != key:
-            self._level = (key, self._build_level())
-        return self._level[1]
-
-    def entries(self) -> List[str]:
-        """Selection values - filenames at the song level, folder
-        names above it. Always use these (not labels()) for anything
-        that needs to look the entry back up in the index."""
-        return self.level().entries
-
-    def labels(self) -> List[str]:
-        """Display text, parallel to entries() - tag-derived titles
-        at the song level, folder names above it."""
-        return self.level().labels
-
-    def level_kind(self) -> str:
-        """What the entries at this level are - every option in one
-        screen's Select is the same kind of thing."""
-        if self.artist is None:
-            return "artist"
-        if self.album is None:
-            return "album"
-        return "song"
 
     def title(self) -> str:
         """Only the current scope, prefixed with the icon for what
         that scope is - the path to it lives in the footer, and
         "Music Library" in the author line."""
-        if self.artist is None:
+        if self.cursor.artist is None:
             return f"{KIND_EMOJI['artist']} Artists"
-        if self.album is None:
-            return f"{KIND_EMOJI['artist']} {self.artist}"
-        return f"{KIND_EMOJI['album']} {self.album}"
+        if self.cursor.album is None:
+            return f"{KIND_EMOJI['artist']} {self.cursor.artist}"
+        return f"{KIND_EMOJI['album']} {self.cursor.album}"
 
     def footer(self) -> Optional[str]:
         """In the breadcrumb the icons mark entities only - the
@@ -508,12 +410,12 @@ class LibraryBrowseView(LibraryView):
         so it stays plain. title() runs the other way round, because
         there "Artists" *is* the screen being shown and takes the icon
         for the kind of thing it lists."""
-        if self.artist is None:
+        if self.cursor.artist is None:
             return None
-        artist = f"{KIND_EMOJI['artist']} {self.artist}"
-        if self.album is None:
+        artist = f"{KIND_EMOJI['artist']} {self.cursor.artist}"
+        if self.cursor.album is None:
             return f"Artists \u203a {artist}"
-        return f"{artist} \u203a {KIND_EMOJI['album']} {self.album}"
+        return f"{artist} \u203a {KIND_EMOJI['album']} {self.cursor.album}"
 
     @staticmethod
     def _field(embed: discord.Embed, name: str, value) -> None:
@@ -526,16 +428,18 @@ class LibraryBrowseView(LibraryView):
 
     def _add_stat_fields(self, embed: discord.Embed) -> None:
         stats = self._enrichment.stats if self._enrichment else None
-        level = self.level()
-        if self.artist is None:
-            artists, albums, songs = level.counts
+        screen = self.cursor.screen()
+        if self.cursor.artist is None:
+            # non-None exactly at the root, which is what the test
+            # above is standing in for - see Screen
+            artists, albums, songs = screen.counts
             self._field(embed, "Artists", f"{artists:,}")
             self._field(embed, "Albums", f"{albums:,}")
             self._field(embed, "Songs", f"{songs:,}")
             return
 
-        local = level.stats
-        if self.album is None:
+        local = screen.stats
+        if self.cursor.album is None:
             self._field(embed, "Albums", local.albums)
             self._field(embed, "Tracks", local.tracks)
             self._field(embed, "Runtime", _fmt_duration(local.runtime))
@@ -591,7 +495,7 @@ class LibraryBrowseView(LibraryView):
         footer = self.footer()
         if footer:
             embed.set_footer(text=footer)
-        if not self.entries():
+        if not self.cursor.screen().entries:
             embed.description = config.LIBRARY_EMPTY
         else:
             self._add_stat_fields(embed)
@@ -622,28 +526,34 @@ class LibraryBrowseView(LibraryView):
         art = self._enrichment.art if self._enrichment else None
         if art is None or not art.data:
             return None
-        return f"{self.artist}/{self.album}.{art.extension}"
+        # The scope of the same Screen build_items() and embed() just
+        # read, so the key names the level they drew. Reading it here
+        # is not what makes that true: screen() rebuilds as soon as
+        # its scope stops matching the cursor, which makes this
+        # equivalent to reading cursor.artist/album directly. What
+        # keeps all three agreeing is render() never awaiting between
+        # them - see there.
+        artist, album = self.cursor.screen().scope
+        return f"{artist}/{album}.{art.extension}"
 
     def build_items(self):
         self.clear_items()
-        level = self.level()
-        entries = level.entries
-        labels = level.labels
-        page = slice(self.page * PAGE_SIZE, (self.page + 1) * PAGE_SIZE)
-        page_entries = entries[page]
-        page_labels = labels[page]
+        page_entries = self.cursor.page_entries()
         if page_entries:
             self.add_item(
                 LibrarySelect(
-                    page_entries, page_labels, self.level_kind(), self
+                    page_entries,
+                    self.cursor.page_labels(),
+                    self.cursor.screen().kind,
+                    self,
                 )
             )
-        if self.artist is not None:
+        if not self.cursor.at_root:
             self.add_item(QueueLevelButton(self))
             self.add_item(BackButton(self))
-        if self.page > 0:
+        if self.cursor.has_prev():
             self.add_item(PageButton(self, -1, "◀ Prev"))
-        if (self.page + 1) * PAGE_SIZE < len(entries):
+        if self.cursor.has_next():
             self.add_item(PageButton(self, 1, "Next ▶"))
 
     async def render(
@@ -667,7 +577,14 @@ class LibraryBrowseView(LibraryView):
         the lasting damage: the record of what the message carries ends
         up disagreeing with the message, so a later navigation omits an
         `attachments` field it needed and strands a cover under an
-        embed that no longer references it."""
+        embed that no longer references it.
+
+        Nothing may await between the first read of self.cursor below
+        and the edit: build_items(), embed() and _attachment_key() each
+        read the cursor separately, and a click landing between them
+        would move it, leaving the components, the embed and the
+        attachment key describing two different levels on one
+        message."""
         async with self._render_lock:
             self.build_items()
             kwargs = {"embed": self.embed(), "view": self}
@@ -683,20 +600,15 @@ class LibraryBrowseView(LibraryView):
 
     async def turn_page(self, interaction: discord.Interaction, delta: int):
         """Applies a page delta under the same guard as everything
-        else, and clamps the result.
+        else.
 
-        Both matter. The button stays clickable until the edit lands
-        and discord.py dispatches every click in its own task, so a
-        double-click used to apply the delta twice; the guard is what
-        keeps the second click from doing that, and the clamp is what
-        keeps any other route to an out-of-range page from being
-        silently destructive. Out of range in either direction the page
-        slice comes back empty - past the end because there is nothing
-        there, and below zero because slice(-25, 0) selects nothing -
-        and build_items() then draws a screen with no Select on it at
-        all, and no button that leads back."""
-        last = max(0, (len(self.entries()) - 1) // PAGE_SIZE)
-        self.page = min(max(self.page + delta, 0), last)
+        The guard matters on its own account: the button stays
+        clickable until the edit lands and discord.py dispatches every
+        click in its own task, so without it a double-click applies the
+        delta twice. The cursor clamps the result - see
+        BrowseCursor.page_by() for why an unclamped page is silently
+        destructive."""
+        self.cursor.page_by(delta)
         with self.busy():
             # deferred before render() for the reason given there: a
             # render can have to wait for one already in flight
@@ -718,33 +630,36 @@ class LibraryBrowseView(LibraryView):
         chosen: str,
         label: Optional[str] = None,
     ):
-        # only a change of level resets the page. Queueing a track
-        # doesn't re-render, so zeroing it there would leave the
-        # displayed page and self.page disagreeing, and the next
-        # "Next" click would jump back to page 1.
-        if self.artist is None:
-            self.page = 0
-            self.artist = chosen
+        descent = self.cursor.descend(chosen)
+        if descent.changed_level:
             await self._enter_level(interaction)
-        elif self.album is None:
-            self.page = 0
-            self.album = chosen
-            await self._enter_level(interaction)
-        else:
-            # ASCII throughout: unlike everything else built here this
-            # ends up in print(), and a redirected stdout encodes with
-            # the locale's codec rather than UTF-8
-            source = f"browse: {self.artist} - {self.album} - {label}"
-            await self.queue(
-                interaction, [(self.artist, self.album, chosen)], source
-            )
+            return
+        artist, album, _ = descent.track
+        # ASCII throughout: unlike everything else built here this
+        # ends up in print(), and a redirected stdout encodes with
+        # the locale's codec rather than UTF-8
+        source = f"browse: {artist} - {album} - {label}"
+        await self.queue(interaction, [descent.track], source)
 
     async def go_back(self, interaction: discord.Interaction):
-        self.page = 0
-        if self.album is not None:
-            self.album = None
-        else:
-            self.artist = None
+        if not self.cursor.back():
+            # Already at the root: no level to enter, and nothing on
+            # the message would change, so answer the interaction and
+            # stop - an unanswered one shows the user "This
+            # interaction failed" three seconds later.
+            #
+            # Defensive: no click reaches here. BackButton is only
+            # added below the root, and a stale one left on an
+            # already-drawn message cannot dispatch either way. After
+            # a render that landed, discord.py has popped its
+            # custom_id from the ViewStore; after one that raised,
+            # build_items() has already detached the old children and
+            # dispatch_view() drops any item whose .view is None. It
+            # stays because back() returning False is part of the
+            # cursor's contract, and one defer costs less than being
+            # wrong about that.
+            await interaction.response.defer()
+            return
         await self._enter_level(interaction)
 
     async def _enter_level(self, interaction: discord.Interaction):
@@ -766,9 +681,20 @@ class LibraryBrowseView(LibraryView):
         can't interleave its own edit between them, but the wait
         between them is deliberately left unguarded: that is exactly
         when someone browsing quickly clicks again, and they should be
-        able to."""
-        self._nav += 1
-        nav = self._nav
+        able to.
+
+        The cursor has already moved by the time this is called, and
+        bumped level_revision doing it. Nothing may be awaited between
+        that move and the capture below, or a click could bump it again
+        first and this call would drop its own enrichment. (It holds:
+        descend() and back() both mutate synchronously, and the first
+        suspension here is the defer().) For the same reason
+        level_revision has to stay a plain attribute - a coroutine
+        property would put an await inside the staleness check below -
+        and _enrichment has to stay on the view, since it describes
+        what this message is showing rather than where the cursor
+        is."""
+        nav = self.cursor.level_revision
         self._enrichment = None
         with self.busy():
             await interaction.response.defer()
@@ -783,27 +709,19 @@ class LibraryBrowseView(LibraryView):
         # Checked *and* acted on without awaiting in between, so a
         # click can neither slip past the check nor find _busy clear
         # while this second edit is in flight.
-        if nav != self._nav:
+        if nav != self.cursor.level_revision:
             return
         with self.busy():
             self._enrichment = enrichment
             await self.render(interaction, sync_attachments=True)
 
     async def queue_current_level(self, interaction: discord.Interaction):
-        if self.album is not None:
-            triples = [
-                (self.artist, self.album, song.filename)
-                for song in self._songs()
-            ]
-            source = f"browse: entire album {self.artist} - {self.album}"
+        artist, album = self.cursor.artist, self.cursor.album
+        if album is not None:
+            source = f"browse: entire album {artist} - {album}"
         else:
-            triples = [
-                (self.artist, album, song.filename)
-                for album, songs in self.index.get(self.artist, {}).items()
-                for song in songs
-            ]
-            source = f"browse: entire discography of {self.artist}"
-        await self.queue(interaction, triples, source)
+            source = f"browse: entire discography of {artist}"
+        await self.queue(interaction, self.cursor.tracks(), source)
 
 
 class SearchSelect(discord.ui.Select):
@@ -863,29 +781,21 @@ class LibrarySearchView(LibraryView):
         )
         return embed
 
-    def _expand(self, result: library.SearchResult):
-        """One hit to the (artist, album, filename) triples it stands
-        for - a song is itself, an album is its tracks, an artist is
-        their whole discography."""
-        if result.kind == "song":
-            return [(result.artist, result.album, result.filename)]
-        albums = self.index.get(result.artist, {})
-        if result.kind == "album":
-            return [
-                (result.artist, result.album, song.filename)
-                for song in albums.get(result.album, [])
-            ]
-        return [
-            (result.artist, album, song.filename)
-            for album, songs in albums.items()
-            for song in songs
-        ]
-
     async def queue_result(
         self, interaction: discord.Interaction, result: library.SearchResult
     ):
         source = f"search {self.query!r}: {result.kind} {result.label!r}"
-        await self.queue(interaction, self._expand(result), source)
+        # No dispatch on result.kind: SearchResult already carries
+        # exactly the path components its kind implies - album is None
+        # for an artist hit, filename is set only for a song hit - so
+        # the three cases are the three tracks_for() already handles.
+        await self.queue(
+            interaction,
+            library.tracks_for(
+                self.index, result.artist, result.album, result.filename
+            ),
+            source,
+        )
 
 
 class Library(commands.Cog):
@@ -1002,11 +912,16 @@ class Library(commands.Cog):
         if not config.MUSIC_LIBRARY_PATH:
             await ctx.send(config.LIBRARY_NOT_CONFIGURED)
             return
-        if not library.get_index():
+        # taken once and handed in: called twice, a `d!lib refresh`
+        # landing between them (it replaces the module global) would
+        # give the view a different - possibly empty - index than the
+        # one that passed this check
+        index = library.get_index()
+        if not index:
             await ctx.send(config.LIBRARY_EMPTY)
             return
 
-        view = LibraryBrowseView(ctx)
+        view = LibraryBrowseView(ctx, index)
         kwargs = {"embed": view.embed(), "view": view}
         # ephemeral only makes sense for an interaction (slash) response -
         # a plain text message from a prefix command can't be ephemeral
