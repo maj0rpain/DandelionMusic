@@ -8,7 +8,7 @@ regression test for something it actually got wrong.
 
 import pytest
 
-from config.utils import alchemize_url, get_env_var
+from config.utils import alchemize_url, ensure_sqlite_parent, get_env_var
 
 SECRETS_ENV = (
     "BOT_TOKEN=real-token-abc123\n"
@@ -201,6 +201,34 @@ class TestGuildWhitelistPersistence:
         config.save()
         assert "123" not in open(".env", encoding="utf-8").read()
 
+    def test_removing_the_last_id_is_persisted(self, config_factory):
+        """Back to [] is back to the class default, so the old
+        "differs from the default" tracking never recorded it: save()
+        left the id in .env and the next restart re-read it and left
+        every other guild again."""
+        config = config_factory("BOT_TOKEN=t\nGUILD_WHITELIST=[123]\n", "")
+        whitelist = list(config.GUILD_WHITELIST)
+        whitelist.remove(123)
+        config.GUILD_WHITELIST = whitelist
+        config.save()
+        written = open(".env", encoding="utf-8").read()
+        assert "GUILD_WHITELIST=[]" in written
+        assert "123" not in written
+
+    def test_add_then_remove_in_one_process_is_persisted(self, config_factory):
+        """save() clears _changed_vars, so the second save has to
+        record the revert on its own."""
+        config = config_factory("BOT_TOKEN=t\nGUILD_WHITELIST=[]\n", "")
+        config.GUILD_WHITELIST = config.GUILD_WHITELIST + [7]
+        config.save()
+        assert "GUILD_WHITELIST=[7]" in open(".env", encoding="utf-8").read()
+
+        whitelist = list(config.GUILD_WHITELIST)
+        whitelist.remove(7)
+        config.GUILD_WHITELIST = whitelist
+        config.save()
+        assert "GUILD_WHITELIST=[]" in open(".env", encoding="utf-8").read()
+
     def test_the_command_rebinds_rather_than_appending(self):
         import inspect
 
@@ -231,3 +259,37 @@ def test_message_strings_do_not_pick_up_stray_substitutions(
     value instead of the name."""
     config = config_factory(SECRETS_ENV, SECRETS_SAMPLE)
     assert "True" not in config.VC_TIMEOUT_EDIT_DISABLED
+
+
+class TestEnsureSqliteParent:
+    """sqlite will not create a missing parent directory, and the
+    default database now lives in data/."""
+
+    def test_creates_a_missing_directory(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ensure_sqlite_parent("sqlite+aiosqlite:///data/settings.db")
+        assert (tmp_path / "data").is_dir()
+
+    def test_existing_directory_is_fine(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        (tmp_path / "data").mkdir()
+        ensure_sqlite_parent("sqlite:///data/settings.db")
+        assert (tmp_path / "data").is_dir()
+
+    def test_bare_filename_needs_no_directory(self, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ensure_sqlite_parent("sqlite:///settings.db")
+        assert list(tmp_path.iterdir()) == []
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "postgresql+asyncpg://host/db",
+            "mysql+aiomysql://host/db",
+            "sqlite:///:memory:",
+        ],
+    )
+    def test_leaves_non_file_databases_alone(self, url, tmp_path, monkeypatch):
+        monkeypatch.chdir(tmp_path)
+        ensure_sqlite_parent(url)
+        assert list(tmp_path.iterdir()) == []

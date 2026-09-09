@@ -245,6 +245,10 @@ class Config:
             elif isinstance(v, dict):
                 self.dicts[k] = v
 
+        # Startup is complete: from here on __setattr__ treats any
+        # assignment as a runtime change worth persisting.
+        self._loaded = True
+
     def load(self) -> dict:
         # Start with default configuration from class attributes
         current_cfg = self.as_dict()
@@ -360,10 +364,24 @@ class Config:
         """
         # Track changes to non-internal variables
         if not name.startswith("_") and name not in DERIVED_SETTINGS:
-            if hasattr(self.__class__, name):
-                # Get the default value from the class
+            # __dict__, not getattr(): __getattr__ below falls through
+            # to self.messages, which does not exist yet this early in
+            # __init__ and would recurse.
+            if self.__dict__.get("_loaded"):
+                # Startup is over, so this is a deliberate runtime
+                # change (d!guild_whitelist) and has to be persisted
+                # whatever its value. "Differs from the class default"
+                # is the wrong test here: removing the last whitelisted
+                # guild sets GUILD_WHITELIST back to [], which is the
+                # default, so it went unrecorded and save() left the old
+                # id in .env - and the next restart read it back and
+                # left every other guild again.
+                self._changed_vars[name] = value
+            elif hasattr(self.__class__, name):
+                # During startup, only a value that differs from the
+                # schema default counts as configured - that is what
+                # drives the .env.sample pass.
                 default_value = getattr(self.__class__, name)
-                # If the value is different from the default, track it
                 if value != default_value:
                     self._changed_vars[name] = value
             else:

@@ -42,6 +42,26 @@ def alchemize_url(url: str) -> str:
     return url
 
 
+def ensure_sqlite_parent(url: str) -> None:
+    """Create the directory a sqlite database is going to live in.
+
+    sqlite refuses to create a missing parent and fails with a bare
+    "unable to open database file". The default database now sits in
+    data/, which exists in a repo checkout (data/.gitkeep) and is
+    created by docker-compose's mount - but not next to a freshly
+    unpacked DandelionMusic.exe, where the .env is copied from the
+    sample into an empty directory.
+    """
+    if not url.startswith("sqlite"):
+        return
+    path = url.partition(":///")[2].partition("?")[0]
+    if not path or path == ":memory:":
+        return
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+
+
 class Formatter(string.Template):
     delimiter = ""
     format = string.Template.safe_substitute

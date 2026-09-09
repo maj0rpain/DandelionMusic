@@ -342,8 +342,19 @@ class Timer:
         in the channel after every inactivity timeout. By that point
         the timer has already fired and there is nothing pending to
         cancel; only clearing the reference matters."""
+        # current_task() before dropping the reference, and tolerant
+        # of there being no running loop: it raises RuntimeError off
+        # the loop, which would otherwise clear self._task while
+        # leaving the real task alive and still due to fire. No caller
+        # does that today, but next_song() runs on discord.py's audio
+        # thread and reaches this code through add_task() for exactly
+        # that reason.
+        try:
+            current = asyncio.current_task()
+        except RuntimeError:
+            current = None
         task, self._task = self._task, None
-        if task is not None and task is not asyncio.current_task():
+        if task is not None and task is not current:
             task.cancel()
 
 

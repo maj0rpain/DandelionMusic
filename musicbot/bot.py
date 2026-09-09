@@ -13,6 +13,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
 from config import config
+from config.utils import ensure_sqlite_parent
 from musicbot.audiocontroller import VC_CONNECT_TIMEOUT, AudioController
 from musicbot import library
 from musicbot.settings import (
@@ -70,6 +71,7 @@ class MusicBot(commands.Bot):
         # A dictionary that remembers which settings belongs to which guild
         self.settings: Dict[discord.Guild, GuildSettings] = {}
 
+        ensure_sqlite_parent(config.DATABASE)
         self.db_engine = create_async_engine(config.DATABASE)
         self.DbSession = sessionmaker(
             self.db_engine, expire_on_commit=False, class_=AsyncSession
