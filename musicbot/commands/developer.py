@@ -12,8 +12,12 @@ from discord.ext import commands
 from discord import app_commands
 from aioconsole import aexec
 
-from config import config
 from musicbot.bot import MusicBot
+from musicbot.settings import (
+    add_to_guild_whitelist,
+    get_guild_whitelist,
+    remove_from_guild_whitelist,
+)
 from musicbot.utils import owner_check
 
 
@@ -145,11 +149,12 @@ class Developer(commands.Cog):
             await self._show_guild_whitelist_callback(ctx)
 
     async def _show_guild_whitelist_callback(self, ctx):
-        if not config.GUILD_WHITELIST:
+        whitelist = await get_guild_whitelist(ctx.bot)
+        if not whitelist:
             await ctx.send("Whitelist is disabled.")
             return
         lines = []
-        for id_ in config.GUILD_WHITELIST:
+        for id_ in sorted(whitelist):
             guild = ctx.bot.get_guild(id_)
             if guild:
                 lines.append(f"{id_} {guild.name}")
@@ -164,13 +169,10 @@ class Developer(commands.Cog):
     @_guild_whitelist.command(name="add")
     @commands.is_owner()
     async def _guild_whitelist_add(self, ctx, *, id: str):
-        # Rebound, not appended in place: Config.__setattr__ is what
-        # records a setting as changed, and an in-place mutation never
-        # reaches it - so save() wrote nothing at all whenever the
-        # loaded whitelist still equalled the class default [].
-        config.GUILD_WHITELIST = config.GUILD_WHITELIST + [int(id)]
-        config.save()
-        await ctx.send("Whitelist updated.")
+        if await add_to_guild_whitelist(ctx.bot, int(id)):
+            await ctx.send("Whitelist updated.")
+        else:
+            await ctx.send("That guild is already whitelisted.")
 
     async def _guild_whitelist_remove_autocomplete(
         self, interaction: discord.Interaction, current: str
@@ -192,13 +194,9 @@ class Developer(commands.Cog):
         id: str,
     ):
         id = int(id.split()[-1])
-        # see _guild_whitelist_add - rebind so the change is tracked.
-        # list.remove still raises ValueError for an id that is not
-        # there, which is the existing behaviour.
-        whitelist = list(config.GUILD_WHITELIST)
-        whitelist.remove(id)
-        config.GUILD_WHITELIST = whitelist
-        config.save()
+        if not await remove_from_guild_whitelist(ctx.bot, id):
+            await ctx.send("That guild is not whitelisted.")
+            return
 
         guild = ctx.bot.get_guild(id)
         if guild is not None:

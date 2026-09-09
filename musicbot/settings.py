@@ -2,7 +2,7 @@ import json
 import os
 import re
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Union
+from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
 
 import discord
 from discord import (
@@ -15,7 +15,8 @@ from discord import (
     utils,
 )
 import sqlalchemy
-from sqlalchemy import String, select
+from sqlalchemy import String, delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from alembic.migration import MigrationContext
 from alembic.autogenerate import produce_migrations, render_python_code
@@ -305,6 +306,114 @@ class SavedPlaylist(Base):
     guild_id: Mapped[DiscordIdStr] = mapped_column(primary_key=True)
     name: Mapped[str] = mapped_column(primary_key=True)
     songs_json: Mapped[str]
+
+
+class WhitelistedGuild(Base):
+    """One row per guild the bot is allowed to stay in.
+
+    This used to be config.GUILD_WHITELIST, a list in .env that
+    d!guild_whitelist rewrote through Config.save(). Writing a config
+    file back out at runtime turned out to be the single buggiest
+    thing in the project - a leaked BOT_TOKEN, a colour that changed on
+    every save, a tuple setting that made the next startup fail, writes
+    landing in the wrong directory, and a removal that silently did not
+    persist - so the whitelist lives here instead and the config file
+    is read-only again.
+    """
+
+    __tablename__ = "guild_whitelist"
+
+    guild_id: Mapped[DiscordIdStr] = mapped_column(primary_key=True)
+
+
+class BotState(Base):
+    """Small key/value store for bot-wide state that is not a setting.
+
+    Currently just the marker recording that the deprecated
+    GUILD_WHITELIST environment variable has been imported.
+    """
+
+    __tablename__ = "bot_state"
+
+    key: Mapped[str] = mapped_column(String(64), primary_key=True)
+    value: Mapped[str]
+
+
+# marker key for import_env_whitelist() below
+ENV_WHITELIST_IMPORTED = "env_guild_whitelist_imported"
+
+
+async def get_guild_whitelist(bot: "MusicBot") -> Set[int]:
+    """Guild ids the bot may stay in. Empty means "no whitelist".
+
+    Read straight from the database on every use rather than cached on
+    the bot. The whitelist is consulted only on connect and on joining
+    a guild, so the query is free at that rate - and a cache would have
+    to be kept in step with the commands that edit it, which is exactly
+    the kind of second copy that produced the bugs this table replaces.
+    """
+    async with bot.DbSession() as session:
+        rows = (
+            (await session.execute(select(WhitelistedGuild.guild_id)))
+            .scalars()
+            .all()
+        )
+    return {int(guild_id) for guild_id in rows}
+
+
+async def add_to_guild_whitelist(bot: "MusicBot", guild_id: int) -> bool:
+    """Returns False if the guild was already whitelisted."""
+    async with bot.DbSession() as session:
+        session.add(WhitelistedGuild(guild_id=str(guild_id)))
+        try:
+            await session.commit()
+        except IntegrityError:
+            return False
+    return True
+
+
+async def remove_from_guild_whitelist(bot: "MusicBot", guild_id: int) -> bool:
+    """Returns False if the guild was not whitelisted."""
+    async with bot.DbSession() as session:
+        result = await session.execute(
+            delete(WhitelistedGuild).where(
+                WhitelistedGuild.guild_id == str(guild_id)
+            )
+        )
+        await session.commit()
+    return result.rowcount > 0
+
+
+async def import_env_whitelist(bot: "MusicBot"):
+    """Seed the whitelist table from the deprecated GUILD_WHITELIST
+    environment variable, once.
+
+    Guarded by a marker row rather than by the table being empty:
+    emptying the whitelist through d!guild_whitelist is a legitimate
+    state, and re-importing whenever the table is empty would resurrect
+    every id on the next restart - the same failure the move to the
+    database is meant to end.
+    """
+    async with bot.DbSession() as session:
+        if await session.get(BotState, ENV_WHITELIST_IMPORTED) is not None:
+            return
+        for guild_id in config.GUILD_WHITELIST:
+            session.add(WhitelistedGuild(guild_id=str(guild_id)))
+        session.add(
+            BotState(
+                key=ENV_WHITELIST_IMPORTED,
+                value=str(len(config.GUILD_WHITELIST)),
+            )
+        )
+        await session.commit()
+    if config.GUILD_WHITELIST:
+        print(
+            f"Imported {len(config.GUILD_WHITELIST)} guild(s) from the"
+            " GUILD_WHITELIST environment variable into the database."
+            " That variable is no longer read after this point - manage"
+            " the whitelist with d!guild_whitelist and remove it from"
+            " your .env."
+        )
 
 
 # Operation types that only ever add to the schema (new table,

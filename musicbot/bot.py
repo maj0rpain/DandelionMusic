@@ -20,6 +20,8 @@ from musicbot.settings import (
     GuildSettings,
     run_migrations,
     extract_legacy_settings,
+    get_guild_whitelist,
+    import_env_whitelist,
     migrate_old_playlists,
 )
 from musicbot.utils import CheckError
@@ -97,6 +99,7 @@ class MusicBot(commands.Bot):
             await connection.run_sync(run_migrations)
         await extract_legacy_settings(self)
         await migrate_old_playlists(self)
+        await import_env_whitelist(self)
 
         return await super().start(*args, **kwargs)
 
@@ -120,11 +123,10 @@ class MusicBot(commands.Bot):
     async def on_ready(self):
         self.settings.update(await GuildSettings.load_many(self, self.guilds))
 
+        # read once for the whole sweep rather than per guild
+        whitelist = await get_guild_whitelist(self)
         for guild in self.guilds:
-            if (
-                config.GUILD_WHITELIST
-                and guild.id not in config.GUILD_WHITELIST
-            ):
+            if whitelist and guild.id not in whitelist:
                 print(f"{guild.name} is not whitelisted, leaving.")
                 await guild.leave()
                 continue
@@ -141,7 +143,8 @@ class MusicBot(commands.Bot):
 
     async def on_guild_join(self, guild):
         print(guild.name)
-        if config.GUILD_WHITELIST and guild.id not in config.GUILD_WHITELIST:
+        whitelist = await get_guild_whitelist(self)
+        if whitelist and guild.id not in whitelist:
             print("Not whitelisted, leaving.")
             await guild.leave()
             return

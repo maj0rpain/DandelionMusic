@@ -68,21 +68,15 @@ def config_factory(tmp_path, monkeypatch):
     def build(env: str = "", sample: str = "") -> ConfigClass:
         env_path.write_text(env, encoding="utf-8")
         (tmp_path / ".env.sample").write_text(sample, encoding="utf-8")
-        # _changed_vars is a *class* attribute, so it is shared by
-        # every instance and would otherwise carry entries between
-        # tests. Production only ever builds one Config, which is why
-        # this is not a bug there.
-        ConfigClass._changed_vars = {}
         cfg = ConfigClass()
-        # Belt and braces: whatever Config resolved, it must be inside
-        # tmp_path. save() writes to these paths, so a fixture that
-        # silently stopped isolating them would corrupt the developer's
-        # real configuration rather than fail a test.
-        for resolved in (cfg._env_path, cfg._sample_path):
-            assert str(tmp_path) in str(resolved), (
-                f"Config resolved {resolved!r} outside the temp dir - "
-                "refusing to run a test that would write there"
-            )
+        # Belt and braces: whatever Config resolved must be inside
+        # tmp_path. Config no longer writes anything, but it is still
+        # read from here, and a fixture that silently stopped isolating
+        # it would quietly test the developer's real configuration.
+        assert str(tmp_path) in str(cfg._env_path), (
+            f"Config resolved {cfg._env_path!r} outside the temp dir - "
+            "refusing to run a test against the real .env"
+        )
         return cfg
 
     return build
