@@ -10,15 +10,12 @@ from config.config import Config as ConfigClass  # noqa: E402
 
 @pytest.fixture
 def config_factory(tmp_path, monkeypatch):
-    """Builds Config instances against a throwaway .env/.env.sample in
-    a temp cwd.
+    """Builds Config instances against a throwaway .env in a temp cwd.
 
-    Isolation matters more than usual here. Config reads ".env" and
-    ".env.sample" by relative path and Config.save() *writes* them, so
-    without the chdir a test would rewrite the developer's real .env -
-    and python-dotenv walks parent directories looking for one, so an
-    empty temp dir is not enough on its own; each call writes the files
-    it wants.
+    Config is read-only now, but isolation still matters: without the
+    chdir a test reads the developer's real .env, and python-dotenv
+    walks parent directories looking for one, so an empty temp dir is
+    not enough on its own.
 
     os.environ is cleared as well, because get_env_var() reads it
     directly and load_dotenv() will not override a variable that is
@@ -43,11 +40,10 @@ def config_factory(tmp_path, monkeypatch):
     # chdir alone does not redirect the read side. Config.load()
     # resolves the .env with find_dotenv(), which walks up from the
     # *calling module's file* rather than from cwd, so it finds the
-    # project's own .env however the process was started - and save()
-    # then writes to that resolved path. Both have to be redirected
-    # here, not just load_dotenv: patching one and not the other is
-    # how an earlier version of this fixture overwrote the real .env
-    # with fixture values.
+    # project's own .env however the process was started. Both it and
+    # load_dotenv have to be redirected - patching one and not the
+    # other is how an earlier version of this fixture read, and back
+    # when Config could still write, overwrote the real .env.
     #
     # sys.modules, not `import config.config as ...`: the package's
     # __init__ binds the name `config` to the Config *instance*, which
@@ -65,9 +61,8 @@ def config_factory(tmp_path, monkeypatch):
         lambda *a, **kw: real_load_dotenv(env_path, override=True),
     )
 
-    def build(env: str = "", sample: str = "") -> ConfigClass:
+    def build(env: str = "") -> ConfigClass:
         env_path.write_text(env, encoding="utf-8")
-        (tmp_path / ".env.sample").write_text(sample, encoding="utf-8")
         cfg = ConfigClass()
         # Belt and braces: whatever Config resolved must be inside
         # tmp_path. Config no longer writes anything, but it is still

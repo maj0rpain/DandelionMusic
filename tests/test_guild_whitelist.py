@@ -12,6 +12,7 @@ import asyncio
 import types
 
 import pytest
+from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -31,8 +32,13 @@ from musicbot.settings import (
 def bot(tmp_path):
     """A stand-in exposing just the DbSession the helpers use, backed
     by a real sqlite file with the schema applied."""
+    # NullPool because each helper below runs under its own
+    # asyncio.run(): a pooled connection would be reused across event
+    # loops, which happens to work with aiosqlite but is the classic
+    # shape of a connection bound to a closed loop.
     engine = create_async_engine(
-        f"sqlite+aiosqlite:///{tmp_path / 'settings.db'}"
+        f"sqlite+aiosqlite:///{tmp_path / 'settings.db'}",
+        poolclass=NullPool,
     )
     stub = types.SimpleNamespace(
         DbSession=sessionmaker(
@@ -107,6 +113,19 @@ class TestEnvImport:
         run(import_env_whitelist(bot))  # the next startup
 
         assert run(get_guild_whitelist(bot)) == set()
+
+    def test_tolerates_rows_that_already_exist(self, bot, monkeypatch):
+        """A missing marker does not imply an empty table: two processes
+        sharing one database can both pass the guard, and a restored
+        backup can have rows without the marker. Inserting blindly
+        raised IntegrityError out of MusicBot.start() and the bot never
+        logged in."""
+        run(add_to_guild_whitelist(bot, 111))
+        monkeypatch.setattr(config, "GUILD_WHITELIST", [111, 222])
+
+        run(import_env_whitelist(bot))  # must not raise
+
+        assert run(get_guild_whitelist(bot)) == {111, 222}
 
     def test_marker_is_written_even_with_an_empty_env_var(
         self, bot, monkeypatch

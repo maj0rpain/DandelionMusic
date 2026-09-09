@@ -97,4 +97,4 @@ Adding a new setting means adding a class attribute to `Config` (with a comment 
 
 ### Discord command surface
 
-Commands are `hybrid_command`s (usable both as `d!`-prefixed text commands and slash commands, gated by `ENABLE_SLASH_COMMANDS`). Prefix, mention-as-prefix, slash command sync, and per-guild whitelisting are all config-driven in `musicbot/__main__.py`/`bot.py`. See `README.md` for the end-user command reference (`d!p`, `d!skip`, `d!q`, `d!loop`, `d!settings`, etc.).
+Commands are `hybrid_command`s (usable both as `d!`-prefixed text commands and slash commands, gated by `ENABLE_SLASH_COMMANDS`). Prefix, mention-as-prefix and slash command sync are config-driven in `musicbot/__main__.py`/`bot.py`; the guild whitelist is not — it lives in the database (see `musicbot/settings.py`). See `README.md` for the end-user command reference (`d!p`, `d!skip`, `d!q`, `d!loop`, `d!settings`, etc.).

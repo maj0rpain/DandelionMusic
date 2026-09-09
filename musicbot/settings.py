@@ -336,7 +336,13 @@ class BotState(Base):
     __tablename__ = "bot_state"
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
-    value: Mapped[str]
+    # explicit length: MySQL rejects VARCHAR without one. The same
+    # applies to SavedPlaylist.name/songs_json above, which have
+    # always lacked it - so the mysql extra has never been able to
+    # create a schema. Fixing those needs a reviewed migration
+    # (run_migrations refuses AlterColumnOp by design), so it is left
+    # alone here rather than breaking every sqlite deployment.
+    value: Mapped[str] = mapped_column(String(255))
 
 
 # marker key for import_env_whitelist() below
@@ -397,8 +403,20 @@ async def import_env_whitelist(bot: "MusicBot"):
     async with bot.DbSession() as session:
         if await session.get(BotState, ENV_WHITELIST_IMPORTED) is not None:
             return
+        # Skip ids the table already holds rather than assuming a
+        # missing marker means an empty table. Two processes sharing
+        # one database can both pass the check above, and a restored
+        # backup can have rows without the marker; inserting blindly
+        # then raises IntegrityError out of MusicBot.start() and the
+        # bot never logs in.
+        existing = set(
+            (await session.execute(select(WhitelistedGuild.guild_id)))
+            .scalars()
+            .all()
+        )
         for guild_id in config.GUILD_WHITELIST:
-            session.add(WhitelistedGuild(guild_id=str(guild_id)))
+            if str(guild_id) not in existing:
+                session.add(WhitelistedGuild(guild_id=str(guild_id)))
         session.add(
             BotState(
                 key=ENV_WHITELIST_IMPORTED,

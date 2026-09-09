@@ -129,7 +129,10 @@ class Config:
 
     ENABLE_PLAYLISTS = True
 
-    # if not empty, the bot will leave non-whitelisted guilds
+    # DEPRECATED seed for the guild whitelist, which the database
+    # owns (see musicbot/settings.py). Imported once on the first
+    # startup after upgrading, then ignored; manage the whitelist
+    # with d!guild_whitelist.
     GUILD_WHITELIST = []
 
     # extra user ids treated as bot owners, on top of the application
