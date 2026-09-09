@@ -371,6 +371,44 @@ def song_uri(artist: str, album: str, filename: str) -> str:
     return song_path(artist, album, filename).as_uri()
 
 
+def tracks_for(
+    index: LibraryIndex,
+    artist: str,
+    album: Optional[str] = None,
+    filename: Optional[str] = None,
+) -> List[Tuple[str, str, str]]:
+    """The (artist, album, filename) triples one scope stands for: a
+    single song when `filename` is given, one album's tracks when only
+    `album` is, and the artist's whole discography when neither.
+
+    A song is returned as itself, without being looked up in the
+    index. That is load-bearing rather than an oversight: a stale
+    entry - a file deleted from disk since the last build_index() -
+    has to reach process_local_tracks() so that queue_songs() (see
+    commands/library.py) can name it in its "skipped (file not found)"
+    report and tell the user to ask the owner to run `d!lib refresh`.
+    Dropping it here would give them "Queued 0 song(s)." and no reason
+    why.
+
+    `filename` without `album` raises ValueError - the triple it would
+    have to build has no album component, so it could not name a file.
+    """
+    if filename is not None:
+        if album is None:
+            raise ValueError("tracks_for(): filename requires album")
+        return [(artist, album, filename)]
+    albums = index.get(artist, {})
+    if album is not None:
+        return [
+            (artist, album, song.filename) for song in albums.get(album, [])
+        ]
+    return [
+        (artist, album_name, song.filename)
+        for album_name, songs in albums.items()
+        for song in songs
+    ]
+
+
 def counts(index: LibraryIndex) -> Tuple[int, int, int]:
     """Returns (artist_count, album_count, song_count)."""
     artist_count = len(index)

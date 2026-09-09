@@ -863,29 +863,21 @@ class LibrarySearchView(LibraryView):
         )
         return embed
 
-    def _expand(self, result: library.SearchResult):
-        """One hit to the (artist, album, filename) triples it stands
-        for - a song is itself, an album is its tracks, an artist is
-        their whole discography."""
-        if result.kind == "song":
-            return [(result.artist, result.album, result.filename)]
-        albums = self.index.get(result.artist, {})
-        if result.kind == "album":
-            return [
-                (result.artist, result.album, song.filename)
-                for song in albums.get(result.album, [])
-            ]
-        return [
-            (result.artist, album, song.filename)
-            for album, songs in albums.items()
-            for song in songs
-        ]
-
     async def queue_result(
         self, interaction: discord.Interaction, result: library.SearchResult
     ):
         source = f"search {self.query!r}: {result.kind} {result.label!r}"
-        await self.queue(interaction, self._expand(result), source)
+        # No dispatch on result.kind: SearchResult already carries
+        # exactly the path components its kind implies - album is None
+        # for an artist hit, filename is set only for a song hit - so
+        # the three cases are the three tracks_for() already handles.
+        await self.queue(
+            interaction,
+            library.tracks_for(
+                self.index, result.artist, result.album, result.filename
+            ),
+            source,
+        )
 
 
 class Library(commands.Cog):
