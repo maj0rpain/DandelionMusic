@@ -644,19 +644,20 @@ class LibraryBrowseView(LibraryView):
     async def go_back(self, interaction: discord.Interaction):
         if not self.cursor.back():
             # Already at the root: no level to enter, and nothing on
-            # the message would change. The interaction still has to
-            # be answered, or the client shows "This interaction
-            # failed" three seconds later.
+            # the message would change, so answer the interaction and
+            # stop - an unanswered one shows the user "This
+            # interaction failed" three seconds later.
             #
-            # Reached after a failed render, which is what makes this
-            # a recovery path rather than a dead branch: the cursor
-            # moves before the edit, and discord.py only drops a
-            # cleared item's custom_id from its ViewStore once
-            # edit_original_response() has returned (it stores the
-            # view after the HTTP call). An edit that raises - the
-            # 429 or 5xx turn_page() already anticipates - therefore
-            # leaves the old Back button both drawn on the message
-            # and still dispatching, with the cursor already here.
+            # Defensive: no click reaches here. BackButton is only
+            # added below the root, and a stale one left on an
+            # already-drawn message cannot dispatch either way. After
+            # a render that landed, discord.py has popped its
+            # custom_id from the ViewStore; after one that raised,
+            # build_items() has already detached the old children and
+            # dispatch_view() drops any item whose .view is None. It
+            # stays because back() returning False is part of the
+            # cursor's contract, and one defer costs less than being
+            # wrong about that.
             await interaction.response.defer()
             return
         await self._enter_level(interaction)
