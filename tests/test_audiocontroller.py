@@ -46,8 +46,6 @@ def test_controller_starts_at_the_guild_default_volume(controller):
 
 
 def test_stub_loader_records_preload_calls(controller, stub_loader):
-    import asyncio
-
     song = object()
     assert asyncio.run(stub_loader.preload(song, controller.bot)) is True
     assert stub_loader.calls == [("preload", (song, controller.bot))]
@@ -106,13 +104,7 @@ async def _settle():
 def test_ensure_playing_starts_the_head_of_the_queue_when_idle(
     controller, monkeypatch
 ):
-    import discord
-
-    monkeypatch.setattr(
-        discord,
-        "FFmpegPCMAudio",
-        type("FakeFFmpeg", (_FakeFFmpeg, discord.AudioSource), {}),
-    )
+    _fake_ffmpeg(monkeypatch)
     _queue(controller, "first track", "second track")
 
     async def run():
@@ -142,9 +134,7 @@ def test_ensure_playing_only_preloads_while_something_is_playing(
     asyncio.run(run())
 
     assert controller.guild.voice_client.played == []
-    assert [args[0].title for name, args in stub_loader.calls] == [
-        "next track"
-    ]
+    assert _preloaded(stub_loader) == ["next track"]
 
 
 def _fake_ffmpeg(monkeypatch):
@@ -173,7 +163,9 @@ def _titles(controller):
     return [song.title for song in controller.playlist.playque]
 
 
-def test_skip_moves_on_to_the_next_track(controller, monkeypatch, tmp_path):
+def test_skip_moves_on_to_the_next_track(
+    controller, stub_loader, monkeypatch, tmp_path
+):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second", "third")
 
@@ -188,10 +180,14 @@ def test_skip_moves_on_to_the_next_track(controller, monkeypatch, tmp_path):
     assert _played(controller) == ["first", "second"]
     assert _titles(controller) == ["second", "third"]
     assert _backup(tmp_path) == ["second", "third"]
+    # play_song preloads the track it starts, then the queue behind
+    # it: "third" once behind "first" (after skip moved past it) and
+    # once behind "second"
+    assert _preloaded(stub_loader) == ["first", "third", "second", "third"]
 
 
 def test_stop_ends_playback_and_empties_the_queue_but_keeps_the_backup(
-    controller, monkeypatch, tmp_path
+    controller, stub_loader, monkeypatch, tmp_path
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second", "third")
@@ -210,6 +206,9 @@ def test_stop_ends_playback_and_empties_the_queue_but_keeps_the_backup(
     # the snapshot is taken before the queue is cleared: d!restore
     # brings back what was queued at the time of d!stop
     assert _backup(tmp_path) == ["first", "second", "third"]
+    # only the track that started; the queue behind it was gone
+    # before its preload ran
+    assert _preloaded(stub_loader) == ["first"]
 
 
 def test_after_a_stop_track_changes_no_longer_refresh_the_backup(
@@ -236,7 +235,7 @@ def test_after_a_stop_track_changes_no_longer_refresh_the_backup(
 
 
 def test_restore_brings_back_the_queue_a_stop_cleared(
-    controller, monkeypatch, tmp_path
+    controller, stub_loader, monkeypatch, tmp_path
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
@@ -253,6 +252,9 @@ def test_restore_brings_back_the_queue_a_stop_cleared(
     assert _played(controller) == ["first", "first"]
     assert _titles(controller) == ["first", "second"]
     assert _backup(tmp_path) == ["first", "second"]
+    # "first" each time it starts; "second" by both queue preloads,
+    # which run only once restore() has brought it back
+    assert _preloaded(stub_loader) == ["first", "first", "second", "second"]
 
 
 def test_restore_with_no_backup_and_an_empty_queue_plays_nothing(
