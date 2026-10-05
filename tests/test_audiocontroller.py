@@ -102,7 +102,7 @@ async def _settle():
 
 
 def test_ensure_playing_starts_the_head_of_the_queue_when_idle(
-    controller, monkeypatch
+    controller, stub_loader, monkeypatch, tmp_path
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first track", "second track")
@@ -118,10 +118,15 @@ def test_ensure_playing_starts_the_head_of_the_queue_when_idle(
     assert [source.original.url for source in played] == [
         "https://stream.invalid/first track"
     ]
+    assert _titles(controller) == ["first track", "second track"]
+    # ensure_playing() writes no backup: that is queue()'s job
+    assert not (tmp_path / "backup" / "playlist_1234.pickle").exists()
+    # play_song preloads the track it starts, then the queue behind it
+    assert _preloaded(stub_loader) == ["first track", "second track"]
 
 
 def test_ensure_playing_only_preloads_while_something_is_playing(
-    controller, stub_loader
+    controller, stub_loader, tmp_path
 ):
     controller.guild.voice_client.playing = True
     _queue(controller, "current track", "next track")
@@ -134,6 +139,8 @@ def test_ensure_playing_only_preloads_while_something_is_playing(
     asyncio.run(run())
 
     assert controller.guild.voice_client.played == []
+    assert _titles(controller) == ["current track", "next track"]
+    assert not (tmp_path / "backup" / "playlist_1234.pickle").exists()
     assert _preloaded(stub_loader) == ["next track"]
 
 
@@ -293,11 +300,19 @@ def test_restore_during_playback_disconnects(
     assert _titles(controller) == []
 
 
-def test_set_volume_sets_the_playing_source_volume(controller):
+def test_set_volume_sets_the_playing_source_volume(
+    controller, stub_loader, tmp_path
+):
+    _queue(controller, "current", "next")
+
     controller.set_volume(30)
 
     assert controller.volume == 30
     assert controller.guild.voice_client.source.volume == 0.3
+    # the queue, its backup and its preloads are left alone
+    assert _titles(controller) == ["current", "next"]
+    assert not (tmp_path / "backup" / "playlist_1234.pickle").exists()
+    assert stub_loader.calls == []
 
 
 def _preloaded(stub_loader):
@@ -389,7 +404,7 @@ def test_queue_appends_while_playing_and_refreshes_backup_and_preload(
 
 
 def test_queue_starts_the_first_track_when_idle(
-    controller, monkeypatch, tmp_path
+    controller, stub_loader, monkeypatch, tmp_path
 ):
     _fake_ffmpeg(monkeypatch)
     songs = _songs(controller, "a", "b")
@@ -404,6 +419,8 @@ def test_queue_starts_the_first_track_when_idle(
     assert _played(controller) == ["a"]
     assert _titles(controller) == ["a", "b"]
     assert _backup(tmp_path) == ["a", "b"]
+    # play_song preloads the track it starts, then the queue behind it
+    assert _preloaded(stub_loader) == ["a", "b"]
 
 
 class _FakeMessage:
