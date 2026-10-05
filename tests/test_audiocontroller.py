@@ -30,7 +30,7 @@ def test_controller_pickles_its_playlist_into_the_temp_backup_dir(
             )
         )
 
-    controller.pickle_playlist()
+    controller._pickle_playlist()
 
     backup = tmp_path / "backup" / "playlist_1234.pickle"
     with open(backup, "rb") as f:
@@ -60,7 +60,7 @@ def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
 
     with controller_seam(tmp_path / "work") as (built, _):
         assert isinstance(sys.modules["musicbot.loader"], StubLoader)
-        built.pickle_playlist()
+        built._pickle_playlist()
 
     after = sys.modules.get("musicbot.loader")
     assert after is before
@@ -281,7 +281,7 @@ def test_restore_during_playback_disconnects(
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
         await controller.ensure_playing()
-        controller.pickle_playlist()
+        controller._pickle_playlist()
         await controller.restore()
         await _settle()
 
@@ -440,7 +440,9 @@ def test_attach_view_moves_the_buttons_onto_the_new_message(controller):
     assert old_message.edits == [None]
     assert len(sent) == 1 and isinstance(sent[0], discord.ui.View)
     assert result is new_message
-    assert controller.last_message is new_message
+    # the next attach_view takes the buttons off the new message
+    asyncio.run(controller.attach_view(lambda view: _return(_FakeMessage())))
+    assert new_message.edits == [None]
 
 
 def test_attach_view_records_an_interactions_original_response(controller):
@@ -465,4 +467,10 @@ def test_attach_view_records_an_interactions_original_response(controller):
     result = asyncio.run(controller.attach_view(send))
 
     assert result is interaction
-    assert controller.last_message is response
+    # the buttons the next attach_view takes off are the response's
+
+    async def send_plain(view):
+        return _FakeMessage()
+
+    asyncio.run(controller.attach_view(send_plain))
+    assert response.edits == [None]
