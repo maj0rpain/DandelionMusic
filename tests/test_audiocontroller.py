@@ -296,3 +296,109 @@ def test_set_volume_sets_the_playing_source_volume(controller):
 
     assert controller.volume == 30
     assert controller.guild.voice_client.source.volume == 0.3
+
+
+def _preloaded(stub_loader):
+    return [args[0].title for name, args in stub_loader.calls]
+
+
+def _while_playing(controller, intent):
+    """Runs `intent` with a track already playing, then lets the
+    preload it scheduled finish."""
+    controller.guild.voice_client.playing = True
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        result = intent()
+        await _settle()
+        return result
+
+    return asyncio.run(run())
+
+
+def test_move_reorders_the_queue_and_refreshes_backup_and_preload(
+    controller, stub_loader, tmp_path
+):
+    _queue(controller, "current", "a", "b", "c")
+
+    _while_playing(controller, lambda: controller.move(3, 1))
+
+    assert _titles(controller) == ["current", "c", "a", "b"]
+    assert _backup(tmp_path) == ["current", "c", "a", "b"]
+    assert _preloaded(stub_loader) == ["c", "a", "b"]
+
+
+def test_remove_drops_a_track_and_refreshes_backup_and_preload(
+    controller, stub_loader, tmp_path
+):
+    _queue(controller, "current", "a", "b", "c")
+
+    removed = _while_playing(controller, lambda: controller.remove(2))
+
+    assert removed.title == "b"
+    assert _titles(controller) == ["current", "a", "c"]
+    assert _backup(tmp_path) == ["current", "a", "c"]
+    assert _preloaded(stub_loader) == ["a", "c"]
+
+
+def test_clear_keeps_the_current_track_refreshes_backup_and_preloads_nothing(
+    controller, stub_loader, tmp_path
+):
+    _queue(controller, "current", "a", "b")
+
+    _while_playing(controller, controller.clear)
+
+    assert _titles(controller) == ["current"]
+    assert _backup(tmp_path) == ["current"]
+    assert stub_loader.calls == []
+
+
+def _songs(controller, *titles):
+    ac = sys.modules[type(controller).__module__]
+    return [
+        ac.Song(
+            ac.SiteTypes.YT_DLP,
+            f"https://example.invalid/{title}",
+            url=f"https://stream.invalid/{title}",
+            title=title,
+        )
+        for title in titles
+    ]
+
+
+def test_queue_appends_while_playing_and_refreshes_backup_and_preload(
+    controller, stub_loader, tmp_path
+):
+    _queue(controller, "current")
+    songs = _songs(controller, "a", "b")
+
+    async def run():
+        controller.guild.voice_client.playing = True
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.queue(songs)
+        await _settle()
+
+    asyncio.run(run())
+
+    assert controller.guild.voice_client.played == []
+    assert _titles(controller) == ["current", "a", "b"]
+    assert _backup(tmp_path) == ["current", "a", "b"]
+    assert _preloaded(stub_loader) == ["a", "b"]
+
+
+def test_queue_starts_the_first_track_when_idle(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    songs = _songs(controller, "a", "b")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.queue(songs)
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _played(controller) == ["a"]
+    assert _titles(controller) == ["a", "b"]
+    assert _backup(tmp_path) == ["a", "b"]

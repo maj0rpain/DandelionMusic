@@ -3,7 +3,15 @@ import asyncio
 from itertools import islice
 from inspect import isawaitable
 from traceback import print_exc
-from typing import TYPE_CHECKING, Coroutine, List, Literal, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Coroutine,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Union,
+)
 
 import discord
 from config import config
@@ -346,6 +354,29 @@ class AudioController(object):
         self.pickle_playlist()
         self.preload_queue()
 
+    def move(self, src: int, dest: int):
+        """Moves the queued track at index `src` to index `dest`
+        (0 is the current track, which cannot be moved). Raises
+        PlaylistError for an index that cannot be moved."""
+        self.playlist.move(src, dest)
+        self.pickle_playlist()
+        self.preload_queue()
+
+    def remove(self, index: int) -> Song:
+        """Removes and returns the queued track at `index` (0 is the
+        current track, which cannot be removed). Raises PlaylistError
+        for an index that cannot be removed."""
+        song = self.playlist.remove(index)
+        self.pickle_playlist()
+        self.preload_queue()
+        return song
+
+    def clear(self):
+        """Empties the queue, keeping the current track. Nothing new
+        is queued behind it, so there is nothing to preload."""
+        self.playlist.clear()
+        self.pickle_playlist()
+
     def skip(self):
         """Ends the current track and moves on to the next one,
         ignoring a single-track loop"""
@@ -479,6 +510,14 @@ class AudioController(object):
         else:
             self.preload_queue()
 
+    async def queue(self, songs: Iterable[Song]):
+        """Appends `songs` to the queue, refreshes the backup and
+        starts playing if nothing is (see ensure_playing())."""
+        for song in songs:
+            self.playlist.add(song)
+        self.pickle_playlist()
+        await self.ensure_playing()
+
     async def restore(self) -> bool:
         """Reloads the playlist backup and starts its head. Returns
         False, playing nothing, when there is no queue to restore.
@@ -527,15 +566,14 @@ class AudioController(object):
             )
             return None
         elif isinstance(loaded_song, Song):
-            self.playlist.add(loaded_song)
+            added = [loaded_song]
             print(
                 f"{user} queued {loaded_song.title!r}"
                 f" by {loaded_song.uploader or 'unknown'}"
                 f" ({loaded_song.host.name}) in guild {self.guild.name!r}"
             )
         else:
-            for song in loaded_song:
-                self.playlist.add(song)
+            added = list(loaded_song)
             count = len(loaded_song)
             if count == 1:
                 # special-case one-item playlists
@@ -555,8 +593,7 @@ class AudioController(object):
                 )
                 loaded_song = PLAYLIST
 
-        self.pickle_playlist()
-        await self.ensure_playing()
+        await self.queue(added)
 
         return loaded_song
 
@@ -605,9 +642,7 @@ class AudioController(object):
             songs += await loader.load_local_songs(tracks[:1])
             tail = tracks[1:]
             if songs[0] is not None:
-                self.playlist.add(songs[0])
-                self.pickle_playlist()
-                await self.ensure_playing()
+                await self.queue(songs[:1])
 
         loaded_tail = await loader.load_local_songs(tail)
         songs += loaded_tail
@@ -616,11 +651,7 @@ class AudioController(object):
         if not added:
             return songs
 
-        for song in added:
-            self.playlist.add(song)
-        self.pickle_playlist()
-
-        await self.ensure_playing()
+        await self.queue(added)
 
         return songs
 

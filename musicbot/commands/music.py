@@ -125,10 +125,7 @@ class Music(commands.Cog):
                     src_pos = len(ctx.audiocontroller.playlist)
                     dest_pos = 2
                     try:
-                        ctx.audiocontroller.playlist.move(
-                            src_pos - 1, dest_pos - 1
-                        )
-                        ctx.audiocontroller.preload_queue()
+                        ctx.audiocontroller.move(src_pos - 1, dest_pos - 1)
                     except PlaylistError as e:
                         await ctx.send(e)
 
@@ -271,8 +268,7 @@ class Music(commands.Cog):
             dest_pos = 2
 
         try:
-            ctx.audiocontroller.playlist.move(src_pos - 1, dest_pos - 1)
-            ctx.audiocontroller.preload_queue()
+            ctx.audiocontroller.move(src_pos - 1, dest_pos - 1)
             await ctx.send("Moved ↔️")
         except PlaylistError as e:
             await ctx.send(e)
@@ -293,8 +289,7 @@ class Music(commands.Cog):
         if queue_number is None:
             queue_number = len(ctx.audiocontroller.playlist)
         try:
-            song = ctx.audiocontroller.playlist.remove(queue_number - 1)
-            ctx.audiocontroller.preload_queue()
+            song = ctx.audiocontroller.remove(queue_number - 1)
             title = song.title or song.webpage_url
             await ctx.send(f"Removed #{queue_number}: {title}")
         except PlaylistError as e:
@@ -332,7 +327,7 @@ class Music(commands.Cog):
     )
     @commands.check(dj_check)
     async def _clear(self, ctx):
-        ctx.audiocontroller.playlist.clear()
+        ctx.audiocontroller.clear()
         await ctx.send("Cleared queue :no_entry_sign:")
 
     @commands.hybrid_command(
@@ -485,16 +480,15 @@ class Music(commands.Cog):
         if playlist is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
-        for song_data in json.loads(playlist.songs_json):
-            ctx.audiocontroller.playlist.add(
-                Song(
-                    get_site_type(song_data["url"]),
-                    song_data["url"],
-                    title=song_data["title"],
-                    playlist=playlist,
-                )
+        await ctx.audiocontroller.queue(
+            Song(
+                get_site_type(song_data["url"]),
+                song_data["url"],
+                title=song_data["title"],
+                playlist=playlist,
             )
-        await ctx.audiocontroller.ensure_playing()
+            for song_data in json.loads(playlist.songs_json)
+        )
         await ctx.send(config.SONGINFO_PLAYLIST_QUEUED)
 
     @_playlist.command(
