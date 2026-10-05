@@ -76,9 +76,18 @@ class FakeVoiceClient:
         self.playing = False
         self.stopped = 0
         self.source = FakeSource()
+        self.played = []
 
     def is_playing(self):
         return self.playing
+
+    def is_paused(self):
+        return False
+
+    def play(self, source, *, after=None):
+        self.played.append(source)
+        self.source = source
+        self.playing = True
 
     def stop(self):
         self.stopped += 1

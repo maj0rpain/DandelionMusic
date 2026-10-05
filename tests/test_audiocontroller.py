@@ -6,6 +6,7 @@ musicbot.loader, a fake bot, guild and voice client, with the working
 directory set to tmp_path so the controller's backup/ lands there.
 """
 
+import asyncio
 import pickle
 import sys
 from pathlib import Path
@@ -71,3 +72,76 @@ def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
         getattr(controller_module, "loader", None), StubLoader
     )
     assert not (repo / "backup").exists()
+
+
+def _queue(controller, *titles):
+    ac = sys.modules[type(controller).__module__]
+    for title in titles:
+        controller.playlist.add(
+            ac.Song(
+                ac.SiteTypes.YT_DLP,
+                f"https://example.invalid/{title}",
+                url=f"https://stream.invalid/{title}",
+                title=title,
+            )
+        )
+
+
+class _FakeFFmpeg:
+    """Stands in for ffmpeg: records the stream it was asked to open."""
+
+    def __init__(self, url, **kwargs):
+        self.url = url
+
+    def read(self):
+        return b""
+
+
+async def _settle():
+    # lets the preload task the controller scheduled run to the end
+    for _ in range(10):
+        await asyncio.sleep(0)
+
+
+def test_ensure_playing_starts_the_head_of_the_queue_when_idle(
+    controller, monkeypatch
+):
+    import discord
+
+    monkeypatch.setattr(
+        discord,
+        "FFmpegPCMAudio",
+        type("FakeFFmpeg", (_FakeFFmpeg, discord.AudioSource), {}),
+    )
+    _queue(controller, "first track", "second track")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+
+    asyncio.run(run())
+
+    played = controller.guild.voice_client.played
+    assert [source.original.url for source in played] == [
+        "https://stream.invalid/first track"
+    ]
+
+
+def test_ensure_playing_only_preloads_while_something_is_playing(
+    controller, stub_loader
+):
+    controller.guild.voice_client.playing = True
+    _queue(controller, "current track", "next track")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+
+    asyncio.run(run())
+
+    assert controller.guild.voice_client.played == []
+    assert [args[0].title for name, args in stub_loader.calls] == [
+        "next track"
+    ]

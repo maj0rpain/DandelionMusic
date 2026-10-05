@@ -465,6 +465,15 @@ class AudioController(object):
 
         self.preload_queue()
 
+    async def ensure_playing(self):
+        """Starts the head of the queue if nothing is playing and the
+        queue is non-empty; otherwise preloads the queue. The one
+        "start if idle" rule for everything that adds to the queue."""
+        if self.current_song is None and len(self.playlist) > 0:
+            await self.play_song(self.playlist[0])
+        else:
+            self.preload_queue()
+
     async def process_song(
         self,
         track: str,
@@ -529,10 +538,7 @@ class AudioController(object):
                 loaded_song = PLAYLIST
 
         self.pickle_playlist()
-        if self.current_song is None:
-            await self.play_song(self.playlist[0])
-        else:
-            self.preload_queue()
+        await self.ensure_playing()
 
         return loaded_song
 
@@ -583,7 +589,7 @@ class AudioController(object):
             if songs[0] is not None:
                 self.playlist.add(songs[0])
                 self.pickle_playlist()
-                await self.play_song(self.playlist[0])
+                await self.ensure_playing()
 
         loaded_tail = await loader.load_local_songs(tail)
         songs += loaded_tail
@@ -596,10 +602,7 @@ class AudioController(object):
             self.playlist.add(song)
         self.pickle_playlist()
 
-        if self.current_song is None:
-            await self.play_song(self.playlist[0])
-        else:
-            self.preload_queue()
+        await self.ensure_playing()
 
         return songs
 

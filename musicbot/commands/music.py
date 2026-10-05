@@ -496,12 +496,7 @@ class Music(commands.Cog):
                     playlist=playlist,
                 )
             )
-        if not ctx.audiocontroller.is_active():
-            await ctx.audiocontroller.play_song(
-                ctx.audiocontroller.playlist[0]
-            )
-        else:
-            ctx.audiocontroller.preload_queue()
+        await ctx.audiocontroller.ensure_playing()
         await ctx.send(config.SONGINFO_PLAYLIST_QUEUED)
 
     @_playlist.command(
