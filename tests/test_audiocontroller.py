@@ -402,3 +402,67 @@ def test_queue_starts_the_first_track_when_idle(
     assert _played(controller) == ["a"]
     assert _titles(controller) == ["a", "b"]
     assert _backup(tmp_path) == ["a", "b"]
+
+
+class _FakeMessage:
+    """A sent message: records every view it is edited to."""
+
+    def __init__(self):
+        self.edits = []
+
+    async def edit(self, *, view):
+        self.edits.append(view)
+
+
+def test_attach_view_moves_the_buttons_onto_the_new_message(controller):
+    import discord
+
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
+    sent = []
+    new_message = _FakeMessage()
+
+    async def send(view):
+        sent.append(view)
+        return new_message
+
+    async def run():
+        old_message = _FakeMessage()
+        await controller.attach_view(lambda view: _return(old_message))
+        result = await controller.attach_view(send)
+        return old_message, result
+
+    async def _return(message):
+        return message
+
+    old_message, result = asyncio.run(run())
+
+    assert old_message.edits == [None]
+    assert len(sent) == 1 and isinstance(sent[0], discord.ui.View)
+    assert result is new_message
+    assert controller.last_message is new_message
+
+
+def test_attach_view_records_an_interactions_original_response(controller):
+    import discord
+
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
+    response = _FakeMessage()
+
+    class FakeInteraction(discord.Interaction):
+        def __init__(self):
+            pass
+
+        async def original_response(self):
+            return response
+
+    interaction = FakeInteraction()
+
+    async def send(view):
+        return interaction
+
+    result = asyncio.run(controller.attach_view(send))
+
+    assert result is interaction
+    assert controller.last_message is response

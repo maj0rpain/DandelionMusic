@@ -325,28 +325,20 @@ class Context(commands.Context):
                     *args, **kwargs
                 )
             return await super().send(*args, **kwargs)
-        async with audiocontroller.message_lock:
-            await audiocontroller.update_view(None)
-            view = audiocontroller.make_view()
+
+        async def send(view):
             if view:
                 kwargs["view"] = view
-
             if self.interaction:
                 if self.interaction.response.is_done():
-                    res = await self.interaction.followup.send(*args, **kwargs)
-                else:
-                    await self.interaction.response.send_message(
+                    return await self.interaction.followup.send(
                         *args, **kwargs
                     )
-                    res = await self.interaction.original_response()
-            else:
-                res = await super().send(*args, **kwargs)
+                await self.interaction.response.send_message(*args, **kwargs)
+                return await self.interaction.original_response()
+            return await super(Context, self).send(*args, **kwargs)
 
-            if isinstance(res, discord.Interaction):
-                audiocontroller.last_message = await res.original_response()
-            else:
-                audiocontroller.last_message = res
-        return res
+        return await audiocontroller.attach_view(send)
 
 
 class UniversalHelpCommand(DefaultHelpCommand):

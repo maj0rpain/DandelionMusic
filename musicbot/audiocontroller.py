@@ -276,6 +276,24 @@ class AudioController(object):
             embed=self.playlist.queue_embed(),
         )
 
+    async def attach_view(self, send):
+        """Moves the playback buttons onto the message `send` sends.
+
+        `send(view)` is an async callable that sends the message,
+        carrying `view` when it is not None, and returns what it sent.
+        That becomes the message whose buttons later refreshes edit; an
+        interaction stands for its original response. Returns what
+        `send` returned.
+        """
+        async with self.message_lock:
+            await self.update_view(None)
+            res = await send(self.make_view())
+            if isinstance(res, discord.Interaction):
+                self.last_message = await res.original_response()
+            else:
+                self.last_message = res
+        return res
+
     async def update_view(self, view=_not_provided):
         msg = self.last_message
         if not msg:
