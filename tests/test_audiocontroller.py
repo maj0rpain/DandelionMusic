@@ -145,3 +145,154 @@ def test_ensure_playing_only_preloads_while_something_is_playing(
     assert [args[0].title for name, args in stub_loader.calls] == [
         "next track"
     ]
+
+
+def _fake_ffmpeg(monkeypatch):
+    import discord
+
+    monkeypatch.setattr(
+        discord,
+        "FFmpegPCMAudio",
+        type("FakeFFmpeg", (_FakeFFmpeg, discord.AudioSource), {}),
+    )
+
+
+def _played(controller):
+    return [
+        source.original.url.rsplit("/", 1)[-1]
+        for source in controller.guild.voice_client.played
+    ]
+
+
+def _backup(tmp_path):
+    with open(tmp_path / "backup" / "playlist_1234.pickle", "rb") as f:
+        return [song.title for song in pickle.load(f).playque]
+
+
+def _titles(controller):
+    return [song.title for song in controller.playlist.playque]
+
+
+def test_skip_moves_on_to_the_next_track(controller, monkeypatch, tmp_path):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second", "third")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        controller.skip()
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _played(controller) == ["first", "second"]
+    assert _titles(controller) == ["second", "third"]
+    assert _backup(tmp_path) == ["second", "third"]
+
+
+def test_stop_ends_playback_and_empties_the_queue_but_keeps_the_backup(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second", "third")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        controller.stop()
+        await _settle()
+
+    asyncio.run(run())
+
+    assert controller.guild.voice_client.stopped == 1
+    assert _played(controller) == ["first"]
+    assert _titles(controller) == []
+    # the snapshot is taken before the queue is cleared: d!restore
+    # brings back what was queued at the time of d!stop
+    assert _backup(tmp_path) == ["first", "second", "third"]
+
+
+def test_after_a_stop_track_changes_no_longer_refresh_the_backup(
+    controller, monkeypatch, tmp_path
+):
+    # today's behaviour, defect included: _stopping is a one-way
+    # latch (#25), so the backup stays frozen at the d!stop snapshot
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        controller.stop()
+        _queue(controller, "second", "third")
+        await controller.ensure_playing()
+        controller.skip()
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _played(controller) == ["first", "second", "third"]
+    assert _backup(tmp_path) == ["first"]
+
+
+def test_restore_brings_back_the_queue_a_stop_cleared(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        controller.stop()
+        restored = await controller.restore()
+        await _settle()
+        return restored
+
+    assert asyncio.run(run()) is True
+    assert _played(controller) == ["first", "first"]
+    assert _titles(controller) == ["first", "second"]
+    assert _backup(tmp_path) == ["first", "second"]
+
+
+def test_restore_with_no_backup_and_an_empty_queue_plays_nothing(
+    controller,
+):
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        return await controller.restore()
+
+    assert asyncio.run(run()) is False
+    assert controller.guild.voice_client.played == []
+
+
+def test_restore_during_playback_disconnects(
+    controller, monkeypatch, tmp_path
+):
+    # today's behaviour, defect included (#24): restore() starts the
+    # head of the queue without checking that something is already
+    # playing, discord.py refuses, and the controller disconnects
+    from config import config
+
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        controller.pickle_playlist()
+        await controller.restore()
+        await _settle()
+
+    asyncio.run(run())
+
+    assert controller.guild.voice_client.disconnected is True
+    assert _titles(controller) == []
+
+
+def test_set_volume_sets_the_playing_source_volume(controller):
+    controller.set_volume(30)
+
+    assert controller.volume == 30
+    assert controller.guild.voice_client.source.volume == 0.3

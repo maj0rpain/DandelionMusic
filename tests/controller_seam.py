@@ -71,12 +71,24 @@ class FakeSource:
         self.volume = 1.0
 
 
+class FakeChannel:
+    def __init__(self):
+        self.members = []
+
+
 class FakeVoiceClient:
+    """Behaves like discord.py's VoiceClient where the controller can
+    tell: play() refuses while something is playing, and stop() ends
+    the track and runs the `after` callback play() was given."""
+
     def __init__(self):
         self.playing = False
         self.stopped = 0
         self.source = FakeSource()
         self.played = []
+        self.channel = FakeChannel()
+        self.disconnected = False
+        self._after = None
 
     def is_playing(self):
         return self.playing
@@ -85,13 +97,24 @@ class FakeVoiceClient:
         return False
 
     def play(self, source, *, after=None):
+        import discord
+
+        if self.playing:
+            raise discord.ClientException("Already playing audio.")
         self.played.append(source)
         self.source = source
         self.playing = True
+        self._after = after
 
     def stop(self):
         self.stopped += 1
         self.playing = False
+        after, self._after = self._after, None
+        if after is not None:
+            after(None)
+
+    async def disconnect(self, *, force=False):
+        self.disconnected = True
 
 
 class FakeGuild:

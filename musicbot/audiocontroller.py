@@ -122,8 +122,8 @@ class AudioController(object):
     def volume(self) -> int:
         return self._volume
 
-    @volume.setter
-    def volume(self, value: int):
+    def set_volume(self, value: int):
+        """Sets the volume, in percent, for this and every later track"""
         self._volume = value
         try:
             self.guild.voice_client.source.volume = float(value) / 100.0
@@ -143,10 +143,10 @@ class AudioController(object):
                 self.playlist = pickle.load(f)
 
     def volume_up(self):
-        self.volume = min(self.volume + 10, 100)
+        self.set_volume(min(self.volume + 10, 100))
 
     def volume_down(self):
-        self.volume = max(self.volume - 10, 10)
+        self.set_volume(max(self.volume - 10, 10))
 
     async def register_voice_channel(self, channel: discord.VoiceChannel):
         perms = channel.permissions_for(self.guild.me)
@@ -186,7 +186,7 @@ class AudioController(object):
         )
         view.add_item(
             MusicButton(
-                lambda _: self.next_song(forced=True),
+                lambda _: self.skip(),
                 custom_id="next",
                 disabled=not self.playlist.has_next(),
                 emoji="⏭️",
@@ -230,7 +230,7 @@ class AudioController(object):
         )
         view.add_item(
             MusicButton(
-                lambda _: self.stop_player(),
+                lambda _: self.stop(),
                 custom_id="stop",
                 row=1,
                 emoji="⏹️",
@@ -346,6 +346,11 @@ class AudioController(object):
         self.pickle_playlist()
         self.preload_queue()
 
+    def skip(self):
+        """Ends the current track and moves on to the next one,
+        ignoring a single-track loop"""
+        self.next_song(forced=True)
+
     def next_song(self, error=None, *, forced=False):
         """Invoked after a song is finished
         Plays the next song if there is one"""
@@ -425,7 +430,7 @@ class AudioController(object):
         # see the value that callback left, announce a track that has
         # already finished, and leave the flag set with nothing
         # playing - silencing the next genuine start. A play() that
-        # raises below disconnects, and stop_player() clears it there.
+        # raises below disconnects, and stop() clears it there.
         was_idle = not self._playing
         self._playing = True
         try:
@@ -473,6 +478,19 @@ class AudioController(object):
             await self.play_song(self.playlist[0])
         else:
             self.preload_queue()
+
+    async def restore(self) -> bool:
+        """Reloads the playlist backup and starts its head. Returns
+        False, playing nothing, when there is no queue to restore.
+
+        Starts the head unconditionally, as d!restore always has -
+        while something is already playing that ends in a disconnect
+        (#24), which this deliberately leaves as it is."""
+        self.load_pickle_playlist()
+        if not self.playlist:
+            return False
+        await self.play_song(self.playlist[0])
+        return True
 
     async def process_song(
         self,
@@ -642,7 +660,7 @@ class AudioController(object):
         """Preloads the first MAX_SONG_PRELOAD songs asynchronously"""
         self.add_task(self._preload_queue())
 
-    def stop_player(self):
+    def stop(self):
         """Stops the player and removes all songs from the queue"""
         self._stopping = True
         # whatever starts after this is a new session, not a track
@@ -704,7 +722,7 @@ class AudioController(object):
         # no-connection branch
         had_session = self._playing or bool(self.playlist)
         self.pickle_playlist()
-        self.stop_player()
+        self.stop()
         await self.update_view(None)
         # Cancelled here rather than after the disconnect below, so
         # the no-connection branch cancels it too. timeout_handler()
