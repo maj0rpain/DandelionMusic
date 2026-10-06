@@ -41,10 +41,20 @@ _not_provided = object()
 
 
 class MusicButton(discord.ui.Button):
-    def __init__(self, callback, check=play_check, **kwargs):
+    """A button running `callback` once `check` admits the click.
+    Only a button that starts playback passes joins_voice=True and
+    joins voice (connects, or moves the bot) before its action: the
+    player buttons never touch voice, a search pick does. A click's
+    context has no command, so the flag rides on the context as
+    ctx.joins_voice, where join_needed() reads it."""
+
+    def __init__(
+        self, callback, check=play_check, joins_voice=False, **kwargs
+    ):
         super().__init__(**kwargs)
         self._callback = callback
         self._check = check
+        self._joins_voice = joins_voice
 
     async def callback(self, inter: discord.Interaction):
         # Acknowledge first: the join below can be slow, and it must
@@ -54,6 +64,7 @@ class MusicButton(discord.ui.Button):
         # makes the bot join.
         await inter.response.defer()
         ctx = await inter.client.get_context(inter)
+        ctx.joins_voice = self._joins_voice
         try:
             await self._check(ctx)
             if inter.data.get("custom_id") in [

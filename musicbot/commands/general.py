@@ -14,6 +14,7 @@ from musicbot.utils import (
     get_audiocontroller,
     get_settings,
     join_voice,
+    joins_voice,
     voice_check,
 )
 
@@ -43,6 +44,7 @@ class General(commands.Cog):
         aliases=["c", "cc"],  # this command replaces removed changechannel
     )
     @commands.check(voice_check)
+    @joins_voice
     async def _connect(self, ctx):
         # connects, or moves the bot out of a channel with only bots
         # in it; otherwise the bot stays where it is
@@ -72,6 +74,7 @@ class General(commands.Cog):
         aliases=["rs", "restart"],
     )
     @commands.check(voice_check)
+    @joins_voice
     async def _reset(self, ctx):
         await ctx.defer()
         get_audiocontroller(ctx)  # CheckError while the bot is starting

@@ -10,7 +10,7 @@ from config import config
 from musicbot import linkutils, utils, loader, playlists
 from musicbot.song import Song
 from musicbot.bot import MusicBot, Context
-from musicbot.utils import dj_check, chunks, SimplePaginator
+from musicbot.utils import dj_check, chunks, joins_voice, SimplePaginator
 from musicbot.audiocontroller import (
     PLAYLIST,
     AudioController,
@@ -93,7 +93,12 @@ class SongButton(MusicButton):
                 await view.show()
                 await cog._play_song(ctx, song)
 
-        super().__init__(play, cog.cog_check, emoji=f"{num}⃣")
+        super().__init__(
+            play,
+            cog.cog_check,
+            joins_voice=True,
+            emoji=f"{num}⃣",
+        )
 
     def on_refused(self, error: utils.CheckError):
         # the pick was refused (not in voice, a failed join): release
@@ -150,6 +155,7 @@ class Music(commands.Cog):
         # never makes the bot join. A slow connect must not push a
         # slash command past Discord's 3-second deadline, so it is
         # deferred first - publicly, as the reply that follows is.
+        # Only a joining command (@joins_voice) ever needs a join.
         if utils.join_needed(ctx):
             await ctx.defer()
             await utils.join_voice(ctx)
@@ -160,6 +166,7 @@ class Music(commands.Cog):
         help=config.HELP_YT_SHORT,
         aliases=["p", "yt"],
     )
+    @joins_voice
     async def _play(self, ctx, *, track: str = None, file: Attachment = None):
         if track is None:
             if ctx.message:
@@ -224,6 +231,7 @@ class Music(commands.Cog):
         help=config.HELP_YT_SHORT,
         aliases=["pn"],
     )
+    @joins_voice
     async def _play_next(
         self, ctx, *, track: str = None, file: Attachment = None
     ):
@@ -249,6 +257,7 @@ class Music(commands.Cog):
         help=config.HELP_SEARCH_SHORT,
         aliases=["sc"],
     )
+    @joins_voice
     async def _search(self, ctx, *, query: str):
         await ctx.defer()
         results = await search_youtube(query, config.SEARCH_RESULTS)
@@ -402,6 +411,7 @@ class Music(commands.Cog):
         help=config.HELP_RESTORE,
     )
     @commands.check(dj_check)
+    @joins_voice
     async def _restore(self, ctx):
         result = await ctx.audiocontroller.restore()
         if result is RestoreResult.REFUSED_WHILE_ACTIVE:
@@ -429,6 +439,7 @@ class Music(commands.Cog):
         aliases=["back"],
     )
     @commands.check(dj_check)
+    @joins_voice
     async def _prev(self, ctx):
         if ctx.audiocontroller.prev_song():
             await ctx.send("Playing previous song :track_previous:")
@@ -538,6 +549,7 @@ class Music(commands.Cog):
         help=config.HELP_LOAD_PLAYLIST_SHORT,
     )
     @app_commands.autocomplete(name=_playlist_autocomplete)
+    @joins_voice
     async def _playlist_load(
         self,
         ctx,

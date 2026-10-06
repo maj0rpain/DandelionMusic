@@ -187,13 +187,13 @@ def test_a_refused_dj_only_click_does_not_join_voice():
     assert inter.guild.events == []
 
 
-def test_an_admitted_click_joins_voice_before_its_action():
+def test_an_admitted_click_on_a_joining_button_joins_before_its_action():
     inter = FakeInteraction()
 
     def action(ctx):
         inter.guild.events.append("action")
 
-    run(MusicButton(action, check=admit).callback(inter))
+    run(MusicButton(action, check=admit, joins_voice=True).callback(inter))
     assert inter.guild.events == ["connect", "action"]
 
 
@@ -204,7 +204,7 @@ def test_a_failed_join_is_an_ephemeral_followup_and_skips_the_action(
     inter.guild.fail = discord.ClientException("x")
     ran = []
 
-    run(MusicButton(ran.append, check=admit).callback(inter))
+    run(MusicButton(ran.append, check=admit, joins_voice=True).callback(inter))
     assert as_text(inter.followups) == [
         (config.VOICE_CONNECT_FAILED, {"ephemeral": True})
     ]
