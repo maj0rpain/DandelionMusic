@@ -85,15 +85,6 @@ class SearchView(View):
 
 class SongButton(MusicButton):
     def __init__(self, cog: "Music", num: int, song: str):
-        async def check(ctx):
-            try:
-                return await cog.cog_check(ctx)
-            except utils.CheckError:
-                # the pick was refused (e.g. not in voice): release the
-                # claim so the owner can fix it and pick again
-                self.view.picked = False
-                raise
-
         async def play(ctx):
             view = self.view
             view.stop()
@@ -102,14 +93,19 @@ class SongButton(MusicButton):
                 await view.show()
                 await cog._play_song(ctx, song)
 
-        super().__init__(play, check, emoji=f"{num}⃣")
+        super().__init__(play, cog.cog_check, emoji=f"{num}⃣")
+
+    def on_refused(self, error: utils.CheckError):
+        # the pick was refused (not in voice, a failed join): release
+        # the claim so the owner can fix it and pick again
+        self.view.picked = False
 
     async def callback(self, inter: discord.Interaction):
         try:
             await super().callback(inter)
         except Exception as e:
-            # anything but a refused check (a failed voice join, a
-            # failed defer) uses up the pick: the stale message must
+            # anything but a refusal (a failed defer, a failed
+            # action) uses up the pick: the stale message must
             # not invite clicks that are silently refused
             view = self.view
             if not view.is_finished():

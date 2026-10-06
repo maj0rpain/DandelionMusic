@@ -69,6 +69,7 @@ class MusicButton(discord.ui.Button):
                 await dj_check(ctx)
             await join_voice(ctx)
         except CheckError as e:
+            self.on_refused(e)
             await ctx.send(e, ephemeral=True)
             return
         res = self._callback(ctx)
@@ -81,6 +82,11 @@ class MusicButton(discord.ui.Button):
                 await ctx.send(f"{inter.user} Skipped a Song")
             else:
                 await controller.update_view()
+
+    def on_refused(self, error: CheckError):
+        """Called with every CheckError that refuses a click (its
+        check, the DJ check or a failed voice join), before the
+        ephemeral refusal goes out. Does nothing by default."""
 
 
 class RestoreResult(Enum):

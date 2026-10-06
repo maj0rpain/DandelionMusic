@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import discord
 
+from config import config
 from musicbot.bot import MusicBot
 from musicbot.commands.music import SearchView, SongButton
 from musicbot.utils import CheckError
@@ -69,6 +70,22 @@ class FakeContext:
 
     async def send(self, *args, **kwargs):
         self.sent.append((args, kwargs))
+
+    def bot_out_of_voice(self, connect_error):
+        """The bot is in no voice channel, so a pick has to join the
+        author's one, and that connect raises `connect_error`."""
+
+        async def connect(**kwargs):
+            raise connect_error
+
+        channel = SimpleNamespace(
+            connect=connect,
+            permissions_for=lambda member: SimpleNamespace(
+                connect=True, speak=True
+            ),
+        )
+        self.guild = SimpleNamespace(voice_client=None, me=SimpleNamespace())
+        self.author.voice = SimpleNamespace(channel=channel)
 
 
 class FakeCog:
@@ -229,6 +246,32 @@ def test_a_pick_failing_the_play_check_is_refused_and_can_be_retried():
     assert played == []
     assert [(str(a[0]), k) for a, k in sent] == [
         ("Join a voice channel first.", {"ephemeral": True})
+    ]
+    assert not finished
+    assert enabled
+    assert retry_admitted is True
+
+
+def test_a_pick_whose_join_fails_is_refused_and_can_be_retried():
+    async def go():
+        view, cog = make_view(message=FakeMessage())
+        inter = FakeInteraction()
+        inter.ctx.bot_out_of_voice(connect_error=asyncio.TimeoutError())
+        assert await view.interaction_check(inter)
+        await view.children[0].callback(inter)
+        state = (
+            list(cog.played),
+            inter.ctx.sent,
+            view.is_finished(),
+            buttons_enabled(view),
+        )
+        retry_admitted = await view.interaction_check(FakeInteraction())
+        return state, retry_admitted
+
+    (played, sent, finished, enabled), retry_admitted = run(go)
+    assert played == []
+    assert [(str(a[0]), k) for a, k in sent] == [
+        (config.VOICE_CONNECT_FAILED, {"ephemeral": True})
     ]
     assert not finished
     assert enabled
