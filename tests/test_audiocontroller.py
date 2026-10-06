@@ -49,7 +49,9 @@ def test_controller_starts_at_the_guild_default_volume(controller):
 
 def test_stub_loader_records_preload_calls(controller, stub_loader):
     song = object()
-    assert asyncio.run(stub_loader.preload(song)) is True
+    assert (
+        asyncio.run(stub_loader.preload(song)) is stub_loader.Preload.EXTRACTED
+    )
     assert stub_loader.calls == [("preload", (song,))]
 
 
@@ -883,13 +885,10 @@ async def _drain(controller):
         await asyncio.gather(*controller._tasks)
 
 
-@pytest.mark.parametrize(
-    "from_saved_playlist, stored_title",
-    [(True, "fresh title"), (False, "stale title")],
-)
-def test_preloading_a_saved_playlist_song_refreshes_its_stored_title(
-    controller, from_saved_playlist, stored_title
-):
+def _queue_saved_playlist_song(controller, from_saved_playlist=True):
+    """Queues one song behind a playing track, stored as "stale title"
+    in a saved playlist and loaded as "fresh title"; lets the preload
+    run, and returns the saved playlist's entries and the queue."""
     ac = sys.modules[type(controller).__module__]
     url = "https://example.invalid/track"
     _queue(controller, "current")
@@ -918,10 +917,55 @@ def test_preloading_a_saved_playlist_song_refreshes_its_stored_title(
             )
             await _drain(controller)
             playlist = await ac.playlists.get(factory, "1234", "mix")
-            return ac.playlists.entries(playlist)
+            return ac.playlists.entries(playlist), _titles(controller)
         finally:
             await engine.dispose()
 
-    assert asyncio.run(run()) == [
-        ac.playlists.PlaylistEntry(url, stored_title)
-    ]
+    return asyncio.run(run())
+
+
+def _entry(controller, title):
+    ac = sys.modules[type(controller).__module__]
+    return ac.playlists.PlaylistEntry("https://example.invalid/track", title)
+
+
+@pytest.mark.parametrize(
+    "from_saved_playlist, stored_title",
+    [(True, "fresh title"), (False, "stale title")],
+)
+def test_preloading_a_saved_playlist_song_refreshes_its_stored_title(
+    controller, from_saved_playlist, stored_title
+):
+    entries, _ = _queue_saved_playlist_song(controller, from_saved_playlist)
+    assert entries == [_entry(controller, stored_title)]
+
+
+@pytest.mark.parametrize(
+    "outcome, queue",
+    [
+        ("CURRENT", ["current", "fresh title"]),
+        # a failed preload drops the song, as before
+        ("FAILED", ["current"]),
+    ],
+)
+def test_a_preload_that_extracted_nothing_leaves_the_stored_title_stale(
+    controller, stub_loader, outcome, queue
+):
+    stub_loader.results["preload"] = stub_loader.Preload[outcome]
+    entries, titles = _queue_saved_playlist_song(controller)
+    assert entries == [_entry(controller, "stale title")]
+    assert titles == queue
+
+
+def test_a_failing_title_refresh_still_counts_as_a_successful_preload(
+    controller, monkeypatch
+):
+    ac = sys.modules[type(controller).__module__]
+
+    async def set_title(*args):
+        raise RuntimeError("database is gone")
+
+    monkeypatch.setattr(ac.playlists, "set_title", set_title)
+    entries, titles = _queue_saved_playlist_song(controller)
+    assert entries == [_entry(controller, "stale title")]
+    assert titles == ["current", "fresh title"]

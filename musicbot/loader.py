@@ -2,6 +2,7 @@ import sys
 import atexit
 import asyncio
 import threading
+from enum import Enum
 from inspect import getmodule
 from pathlib import Path
 from traceback import print_exc
@@ -139,6 +140,21 @@ class LoaderNotRunning(RuntimeError):
 
 class SongError(Exception):
     pass
+
+
+class Preload(Enum):
+    """What preload() did. It defines no __bool__: compare with `is`.
+
+    FAILED: an extraction was needed and failed.
+    CURRENT: nothing needed extracting - the song has no webpage_url,
+    its stream url has not expired, or another caller's in-flight
+    extraction of it succeeded.
+    EXTRACTED: this call ran an extraction and updated the song.
+    """
+
+    FAILED = "failed"
+    CURRENT = "current"
+    EXTRACTED = "extracted"
 
 
 def extract_info(url: str, ie: Optional[ExtractorT] = None) -> Optional[dict]:
@@ -324,22 +340,26 @@ def _parse_expire(url: str) -> Optional[int]:
         return None
 
 
-async def preload(song: Song) -> bool:
+async def preload(song: Song) -> Preload:
     if song.webpage_url is None:
-        return True
+        return Preload.CURRENT
 
     if song.url is not None:
         expire = _parse_expire(song.url)
         if expire is None or expire == _parse_expire(song.webpage_url):
-            return True
+            return Preload.CURRENT
         if datetime.now(timezone.utc) < datetime.fromtimestamp(
             expire, timezone.utc
         ):
-            return True
+            return Preload.CURRENT
 
     future = _preloading.get(song)
     if future:
-        return await future
+        # only the caller that ran the extraction reports EXTRACTED,
+        # so one extraction is acted on at most once
+        if await future:
+            return Preload.CURRENT
+        return Preload.FAILED
     _preloading[song] = asyncio.Future()
 
     # any exception here (not just SongError) must still resolve the
@@ -361,7 +381,7 @@ async def preload(song: Song) -> bool:
     finally:
         _preloading.pop(song).set_result(success)
 
-    return success
+    return Preload.EXTRACTED if success else Preload.FAILED
 
 
 async def _run_sync(f, *args):
