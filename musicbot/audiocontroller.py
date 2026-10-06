@@ -43,6 +43,10 @@ class MusicButton(discord.ui.Button):
         self._check = check
 
     async def callback(self, inter: discord.Interaction):
+        # Acknowledge first: the check can join voice, and a slow join
+        # must not push the response past Discord's 3-second deadline.
+        # Refusals below then go out as ephemeral followups.
+        await inter.response.defer()
         ctx = await inter.client.get_context(inter)
         try:
             await self._check(ctx)
@@ -64,7 +68,6 @@ class MusicButton(discord.ui.Button):
             except CheckError as e:
                 await ctx.send(e, ephemeral=True)
                 return
-        await inter.response.defer()
         res = self._callback(ctx)
         if isawaitable(res):
             await res
