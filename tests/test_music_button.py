@@ -1,10 +1,10 @@
 """What a MusicButton click does - the player-controller buttons and
 the d!search result buttons alike.
 
-The click is acknowledged before any check runs: a check can join
-voice, and a slow join must not push the response past Discord's
-3-second deadline. Refusals then reach the clicking user as an
-ephemeral followup, through the bot's real Context.send.
+The click is acknowledged before any check runs: a joining button's
+join hook can join voice, and a slow join must not push the response
+past Discord's 3-second deadline. Refusals then reach the clicking
+user as an ephemeral followup, through the bot's real Context.send.
 
 Each test runs its coroutine through asyncio.run(): constructing a
 discord.ui.Button item needs no loop, but the callbacks are async and
@@ -19,7 +19,7 @@ import discord
 from config import config
 from musicbot.audiocontroller import MusicButton
 from musicbot.bot import Context
-from musicbot.utils import CheckError
+from musicbot.utils import CheckError, join_voice
 
 DJ_ROLE = 99
 
@@ -187,13 +187,21 @@ def test_a_refused_dj_only_click_does_not_join_voice():
     assert inter.guild.events == []
 
 
+class JoiningButton(MusicButton):
+    """A button that starts playback, as a search pick does: it
+    overrides the join hook to join voice."""
+
+    async def join(self, ctx):
+        await join_voice(ctx)
+
+
 def test_an_admitted_click_on_a_joining_button_joins_before_its_action():
     inter = FakeInteraction()
 
     def action(ctx):
         inter.guild.events.append("action")
 
-    run(MusicButton(action, check=admit, joins_voice=True).callback(inter))
+    run(JoiningButton(action, check=admit).callback(inter))
     assert inter.guild.events == ["connect", "action"]
 
 
@@ -204,7 +212,7 @@ def test_a_failed_join_is_an_ephemeral_followup_and_skips_the_action(
     inter.guild.fail = discord.ClientException("x")
     ran = []
 
-    run(MusicButton(ran.append, check=admit, joins_voice=True).callback(inter))
+    run(JoiningButton(ran.append, check=admit).callback(inter))
     assert as_text(inter.followups) == [
         (config.VOICE_CONNECT_FAILED, {"ephemeral": True})
     ]

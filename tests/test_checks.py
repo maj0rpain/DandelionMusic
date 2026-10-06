@@ -652,11 +652,39 @@ PLAYER_BUTTONS = [
 ]
 
 
+def recording_send(ctx):
+    """Replaces ctx.send with one recording each refusal's text."""
+    refused = []
+
+    async def send(content, **kwargs):
+        refused.append(str(content))
+
+    ctx.send = send
+    return refused
+
+
 class TestButtons:
     @pytest.mark.parametrize("custom_id", PLAYER_BUTTONS)
     def test_a_player_button_does_not_connect(self, custom_id):
+        """With no voice client a player button is refused instead:
+        a stale player view must not act on a bot out of voice."""
         guild = VoiceGuild()
         ctx = voice_ctx(guild, guild.channel("a"), admin=True)
+        refused = recording_send(ctx)
+        ran = []
+        click(MusicButton(ran.append, custom_id=custom_id), ctx, custom_id)
+        assert refused == [config.NOT_CONNECTED_MESSAGE]
+        assert ran == []
+        assert guild.events == []
+
+    @pytest.mark.parametrize("custom_id", PLAYER_BUTTONS)
+    def test_a_player_button_runs_on_a_connected_bot_without_joining(
+        self, custom_id
+    ):
+        guild = VoiceGuild()
+        here = guild.channel("a", humans=1)
+        guild.put_bot_in(here)
+        ctx = voice_ctx(guild, here, admin=True)
         ran = []
         click(MusicButton(ran.append, custom_id=custom_id), ctx, custom_id)
         assert ran == [ctx]
@@ -683,30 +711,53 @@ class TestButtons:
         ctx = voice_ctx(
             guild, guild.channel("b", connect=False, speak=False), admin=True
         )
-        refused = []
-
-        async def send(content, **kwargs):
-            refused.append(content)
-
-        ctx.send = send
+        refused = recording_send(ctx)
         ran = []
         click(MusicButton(ran.append, custom_id=custom_id), ctx, custom_id)
         assert refused == []
         assert ran == [ctx]
 
-    def test_a_player_button_admits_a_user_outside_voice_while_idle(self):
+    def test_a_player_button_refuses_a_user_outside_voice_while_idle(self):
         guild = VoiceGuild()
         ctx = voice_ctx(guild, None)
-        refused = []
-
-        async def send(content, **kwargs):
-            refused.append(content)
-
-        ctx.send = send
+        refused = recording_send(ctx)
         ran = []
         click(MusicButton(ran.append, custom_id="queue"), ctx, "queue")
-        assert refused == []
-        assert ran == [ctx]
+        assert refused == [config.NOT_CONNECTED_MESSAGE]
+        assert ran == []
+
+    def test_a_player_button_obeys_the_command_channel(self):
+        guild = VoiceGuild()
+        here = guild.channel("a", humans=1)
+        guild.put_bot_in(here)
+        ctx = voice_ctx(guild, here, command_channel=COMMAND_CHANNEL + 1)
+        refused = recording_send(ctx)
+        ran = []
+        click(MusicButton(ran.append, custom_id="queue"), ctx, "queue")
+        assert refused == [config.WRONG_CHANNEL_MESSAGE]
+        assert ran == []
+
+    def test_a_player_button_obeys_the_voice_rule(self):
+        guild = VoiceGuild()
+        guild.put_bot_in(guild.channel("a", humans=1))
+        # with a DJ role set, a non-DJ is not let through as one
+        ctx = voice_ctx(guild, guild.channel("b"), dj_role=99)
+        refused = recording_send(ctx)
+        ran = []
+        click(MusicButton(ran.append, custom_id="queue"), ctx, "queue")
+        assert refused == [config.USER_NOT_IN_VC_MESSAGE]
+        assert ran == []
+
+    def test_a_player_button_obeys_the_dj_check(self):
+        guild = VoiceGuild()
+        here = guild.channel("a", humans=1)
+        guild.put_bot_in(here)
+        ctx = voice_ctx(guild, here, dj_role=99)
+        refused = recording_send(ctx)
+        ran = []
+        click(MusicButton(ran.append, custom_id="next"), ctx, "next")
+        assert refused == [config.NOT_A_DJ]
+        assert ran == []
 
     def test_a_search_pick_connects(self):
         guild = VoiceGuild()
