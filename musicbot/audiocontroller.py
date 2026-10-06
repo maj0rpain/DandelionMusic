@@ -23,6 +23,7 @@ from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
 from musicbot.utils import CheckError, asset, play_check, dj_check
 from pathlib import Path
 import pickle
+from enum import Enum, auto
 
 # avoiding circular import
 if TYPE_CHECKING:
@@ -74,6 +75,14 @@ class MusicButton(discord.ui.Button):
                 await ctx.send(f"{inter.user} Skipped a Song")
             else:
                 await controller.update_view()
+
+
+class RestoreResult(Enum):
+    """What AudioController.restore() did."""
+
+    RESTORED = auto()
+    NOTHING_TO_RESTORE = auto()
+    REFUSED_WHILE_ACTIVE = auto()
 
 
 class AudioController(object):
@@ -538,18 +547,21 @@ class AudioController(object):
         self._pickle_playlist()
         await self.ensure_playing()
 
-    async def restore(self) -> bool:
-        """Reloads the playlist backup and starts its head. Returns
-        False, playing nothing, when there is no queue to restore.
+    async def restore(self) -> RestoreResult:
+        """Reloads the playlist backup and starts its head.
 
-        Starts the head unconditionally, as d!restore always has -
-        while something is already playing that ends in a disconnect
-        (#24), which this deliberately leaves as it is."""
+        Refuses while something is playing or paused, before touching
+        the backup or the queue: starting the head then would make
+        discord.py refuse play() and the controller disconnect (#24).
+        Reports NOTHING_TO_RESTORE, playing nothing, when there is no
+        queue to restore."""
+        if self.is_active():
+            return RestoreResult.REFUSED_WHILE_ACTIVE
         self.load_pickle_playlist()
         if not self.playlist:
-            return False
+            return RestoreResult.NOTHING_TO_RESTORE
         await self.play_song(self.playlist[0])
-        return True
+        return RestoreResult.RESTORED
 
     async def process_song(
         self,
