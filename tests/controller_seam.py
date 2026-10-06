@@ -43,8 +43,8 @@ class StubLoader(types.ModuleType):
         self.calls.append((name, args))
         return self.results.get(name, default)
 
-    async def preload(self, song, bot):
-        return self._record("preload", song, bot)
+    async def preload(self, song):
+        return self._record("preload", song)
 
     async def load_song(self, track):
         return self._record("load_song", track)

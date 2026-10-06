@@ -1,5 +1,4 @@
 import sys
-import json
 import atexit
 import asyncio
 import threading
@@ -10,7 +9,7 @@ from urllib.parse import urlparse
 from datetime import datetime, timezone
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context as mp_context
-from typing import TYPE_CHECKING, List, Optional, Union
+from typing import List, Optional, Union
 
 from aiohttp import ClientResponseError
 from yt_dlp import YoutubeDL
@@ -30,10 +29,6 @@ from musicbot.linkutils import (
     init as init_session,
     stop as stop_session,
 )
-
-# avoiding circular import: musicbot.bot imports this module at runtime
-if TYPE_CHECKING:
-    from musicbot.bot import MusicBot
 
 _context = mp_context("spawn")
 
@@ -329,7 +324,7 @@ def _parse_expire(url: str) -> Optional[int]:
         return None
 
 
-async def preload(song: Song, bot: "MusicBot") -> bool:
+async def preload(song: Song) -> bool:
     if song.webpage_url is None:
         return True
 
@@ -363,16 +358,6 @@ async def preload(song: Song, bot: "MusicBot") -> bool:
 
         if success:
             song.update(preloaded)
-
-            if song.playlist is not None:
-                saved_songs_data = json.loads(song.playlist.songs_json)
-                for song_data in saved_songs_data:
-                    if song_data["url"] == song.webpage_url:
-                        song_data["title"] = song.title
-                song.playlist.songs_json = json.dumps(saved_songs_data)
-                async with bot.DbSession() as session:
-                    session.add(song.playlist)
-                    await session.commit()
     finally:
         _preloading.pop(song).set_result(success)
 
