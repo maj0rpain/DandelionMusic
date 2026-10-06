@@ -21,6 +21,7 @@ from musicbot.settings import SavedPlaylist, run_migrations
 
 GUILD = "123"
 MIX = PlaylistRef(GUILD, "mix")
+GONE = PlaylistRef(GUILD, "gone")
 
 
 def run(test):
@@ -105,9 +106,7 @@ def test_set_title_updates_only_the_matching_url():
 
 def test_set_title_on_a_missing_playlist_does_nothing():
     async def test(factory):
-        await playlists.set_title(
-            factory, PlaylistRef(GUILD, "gone"), A.url, "x"
-        )
+        await playlists.set_title(factory, GONE, A.url, "x")
         return await playlists.list_names(factory, GUILD)
 
     assert run(test) == []
@@ -166,10 +165,10 @@ def test_a_blob_written_through_the_module_is_todays_format():
 @pytest.mark.parametrize(
     "operation",
     [
-        lambda f: playlists.delete(f, PlaylistRef(GUILD, "gone")),
-        lambda f: playlists.add_songs(f, PlaylistRef(GUILD, "gone"), [A]),
-        lambda f: playlists.remove_song(f, PlaylistRef(GUILD, "gone"), 1),
-        lambda f: playlists.move_song(f, PlaylistRef(GUILD, "gone"), 1, 1),
+        lambda f: playlists.delete(f, GONE),
+        lambda f: playlists.add_songs(f, GONE, [A]),
+        lambda f: playlists.remove_song(f, GONE, 1),
+        lambda f: playlists.move_song(f, GONE, 1, 1),
     ],
     ids=["delete", "add_songs", "remove_song", "move_song"],
 )
@@ -183,7 +182,7 @@ def test_operations_on_a_missing_playlist_report_not_found(operation):
 
 def test_get_on_a_missing_playlist_returns_none():
     async def test(factory):
-        return await playlists.get(factory, PlaylistRef(GUILD, "gone"))
+        return await playlists.get(factory, GONE)
 
     assert run(test) is None
 
