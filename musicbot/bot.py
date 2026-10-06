@@ -83,8 +83,6 @@ class MusicBot(commands.Bot):
         self._default_help = self.remove_command("help")
         self.add_command(_help)
 
-        self.absolutely_ready = asyncio.Future()
-
     async def setup_hook(self):
         if config.ENABLE_LOCAL_LIBRARY:
             await library.build_index_async()
@@ -94,6 +92,9 @@ class MusicBot(commands.Bot):
             await self.tree.sync()
 
     async def start(self, *args, **kwargs):
+        # built here, inside the running loop: __init__ has no current
+        # loop to bind it to (Python 3.14 raises there)
+        self.absolutely_ready = asyncio.get_running_loop().create_future()
         print(config.STARTUP_MESSAGE)
 
         async with self.db_engine.connect() as connection:
