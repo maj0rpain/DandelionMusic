@@ -12,7 +12,7 @@ Only the parts that need no Discord connection: config loading, `Playlist`, libr
 
 ## Subprocess probes
 
-`tests/test_import_inert.py` runs fresh-interpreter subprocesses to check that importing `musicbot` changes no process-global state, that the entrypoint wraps stdout/stderr before `bot.run()`, and the loader's `init()`/`shutdown()` lifecycle - which starts a real extraction worker.
+`tests/test_import_inert.py` runs fresh-interpreter subprocesses to check that importing `musicbot` changes no process-global state, that the entrypoint wraps stdout/stderr before `bot.run()`, that `MusicBot` can be built with no current event loop, and the loader's `init()`/`shutdown()` lifecycle - which starts a real extraction worker.
 
 ## The Config/dotenv trap
 

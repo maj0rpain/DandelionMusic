@@ -163,7 +163,11 @@ from musicbot.bot import MusicBot
 # on 3.13 a loop-needing call with no current loop only warns; 3.14
 # raises, so a warning here is the 3.14 crash
 with warnings.catch_warnings():
-    warnings.simplefilter("error", DeprecationWarning)
+    # only the no-loop warning: 3.14 deprecates other asyncio calls
+    # discord.py makes while the bot is built
+    warnings.filterwarnings(
+        "error", "There is no current event loop", DeprecationWarning
+    )
     try:
         MusicBot(
             [], command_prefix="d!", intents=discord.Intents.default()
