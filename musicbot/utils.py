@@ -394,6 +394,15 @@ class OutputWrapper:
         return cls.log_file
 
 
+def wrap_stdio():
+    """Wraps sys.stdout/sys.stderr in OutputWrapper. A second call does
+    nothing."""
+    if not isinstance(sys.stdout, OutputWrapper):
+        sys.stdout = OutputWrapper(sys.stdout)
+    if not isinstance(sys.stderr, OutputWrapper):
+        sys.stderr = OutputWrapper(sys.stderr)
+
+
 class SimplePaginator(discord.ui.View):
     def __init__(self, pages: List[Embed], timeout: int = 60):
         super().__init__(timeout=timeout)

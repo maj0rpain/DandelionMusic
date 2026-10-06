@@ -1,10 +1,11 @@
 """Builds a real AudioController with no Discord connection.
 
-musicbot.loader is the one import on AudioController's path with side
-effects: it rewraps stdout/stderr, opens an aiohttp session on its own
-event loop and starts a spawn-context process pool. Until #20 makes
-importing it inert, the seam puts a StubLoader in sys.modules first and
-imports musicbot.audiocontroller fresh against it.
+Importing musicbot.loader is inert, but calling it is not: its
+preload and load_* functions run extraction in a spawned worker that
+only loader.init() starts, and reach the network from there. The seam
+puts a StubLoader in sys.modules first and imports
+musicbot.audiocontroller fresh against it, which keeps the tests
+offline and records what the controller asks the loader for.
 
 Everything is put back on the way out: every musicbot module imported
 under the stub is dropped from sys.modules (each one could have bound

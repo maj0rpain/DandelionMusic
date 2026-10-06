@@ -7,7 +7,7 @@ from discord.ext import commands
 
 from config import config
 from musicbot.bot import MusicBot
-from musicbot.utils import check_dependencies
+from musicbot.utils import check_dependencies, wrap_stdio
 
 
 # discord.py's phrasing for "your code raised and I caught it" -
@@ -85,6 +85,12 @@ bot = MusicBot(
 
 
 if __name__ == "__main__":
+    # before anything prints, and before bot.run() builds discord.py's
+    # log handler on whatever sys.stderr is then: the wrapper falls back
+    # to log.txt when a write to the real stream fails (a frozen exe
+    # with no console, say)
+    wrap_stdio()
+
     # A log line must never be the thing that breaks a command. Console
     # output now carries library metadata - artist, album and track
     # names - and stdout is a pipe under run.py (as it is whenever it's

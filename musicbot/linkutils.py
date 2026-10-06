@@ -62,10 +62,11 @@ headers = {}
 
 # aiohttp binds a ClientSession to whatever loop is running when it is
 # constructed and refuses to be driven from any other one, raising
-# "Timeout context manager should be used inside a task". This process
-# runs two loops - the bot's own, and loader.py's private _loop that
-# drives the Spotify page lookups - so a single global session would be
-# usable from only one of them. Keep one session per loop instead.
+# "Timeout context manager should be used inside a task". This module
+# runs under two loops - the bot's own, in the bot's process, and
+# loader.py's private _loop that drives the Spotify page lookups, in the
+# extraction worker - so a session must belong to the loop that uses it.
+# Keep one session per loop instead of a single global one.
 _sessions: Dict[asyncio.AbstractEventLoop, ClientSession] = {}
 
 
