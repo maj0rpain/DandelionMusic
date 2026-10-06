@@ -10,7 +10,7 @@ from urllib.parse import urlparse
 from datetime import datetime, timezone
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context as mp_context
-from typing import List, Optional, Union
+from typing import TYPE_CHECKING, List, Optional, Union
 
 from aiohttp import ClientResponseError
 from yt_dlp import YoutubeDL
@@ -18,7 +18,6 @@ from yt_dlp.utils import DownloadError
 
 from config import config
 from musicbot.audiotags import nice_title, read_tags
-from musicbot.bot import MusicBot
 from musicbot.song import Song
 from musicbot.utils import OutputWrapper
 from musicbot.linkutils import (
@@ -31,6 +30,10 @@ from musicbot.linkutils import (
     init as init_session,
     stop as stop_session,
 )
+
+# avoiding circular import: musicbot.bot imports this module at runtime
+if TYPE_CHECKING:
+    from musicbot.bot import MusicBot
 
 sys.stdout = OutputWrapper(sys.stdout)
 sys.stderr = OutputWrapper(sys.stderr)
@@ -284,7 +287,7 @@ def _parse_expire(url: str) -> Optional[int]:
         return None
 
 
-async def preload(song: Song, bot: MusicBot) -> bool:
+async def preload(song: Song, bot: "MusicBot") -> bool:
     if song.webpage_url is None:
         return True
 
