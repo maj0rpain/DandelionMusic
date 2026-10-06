@@ -592,3 +592,29 @@ def test_dispose_cancels_the_timer_and_every_pending_task(
     assert pending_task.cancelled()
     assert pending_future.cancelled()
     assert controller.guild.voice_client.disconnected
+
+
+def _next_song_stderr(controller, capsys, error):
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        controller.next_song(error)
+        await _settle()
+
+    asyncio.run(run())
+    return capsys.readouterr().err
+
+
+def test_a_track_ended_by_an_error_logs_the_error_to_stderr(
+    controller, capsys
+):
+    err = _next_song_stderr(controller, capsys, RuntimeError("boom"))
+
+    assert "Playback error in guild 1234: RuntimeError('boom')" in err
+
+
+def test_a_track_ended_without_an_error_logs_no_playback_error(
+    controller, capsys
+):
+    err = _next_song_stderr(controller, capsys, None)
+
+    assert "Playback error" not in err
