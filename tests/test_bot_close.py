@@ -23,7 +23,7 @@ def test_close_keeps_the_loop_running_while_the_loader_shuts_down(
         shutdown_calls.append(True)
         release.wait(timeout=2)
 
-    async def no_spotify_session():
+    async def no_http_session():
         pass
 
     async def discord_close(self):
@@ -31,7 +31,7 @@ def test_close_keeps_the_loop_running_while_the_loader_shuts_down(
         closed.append(release.is_set())
 
     monkeypatch.setattr(bot_module.loader, "shutdown", blocking_shutdown)
-    monkeypatch.setattr(bot_module.linkutils, "stop", no_spotify_session)
+    monkeypatch.setattr(bot_module.linkutils, "stop", no_http_session)
     monkeypatch.setattr(commands.Bot, "close", discord_close)
 
     async def scenario():
