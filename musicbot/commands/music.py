@@ -96,9 +96,12 @@ class SongButton(MusicButton):
         super().__init__(
             play,
             cog.cog_check,
-            joins_voice=True,
             emoji=f"{num}⃣",
         )
+
+    async def join(self, ctx):
+        # a search pick starts playback, so it joins voice
+        await utils.join_voice(ctx)
 
     def on_refused(self, error: utils.CheckError):
         # the pick was refused (not in voice, a failed join): release

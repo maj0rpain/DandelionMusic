@@ -23,9 +23,8 @@ from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
 from musicbot.utils import (
     CheckError,
     asset,
-    play_check,
+    player_check,
     dj_check,
-    join_voice,
 )
 from pathlib import Path
 import pickle
@@ -42,29 +41,29 @@ _not_provided = object()
 
 class MusicButton(discord.ui.Button):
     """A button running `callback` once `check` admits the click.
-    Only a button that starts playback passes joins_voice=True and
-    joins voice (connects, or moves the bot) before its action: the
-    player buttons never touch voice, a search pick does. A click's
-    context has no command, so the flag rides on the context as
-    ctx.joins_voice, where join_needed() reads it."""
+    A player button never touches voice: its default check,
+    player_check(), refuses it while the bot is out of voice. A
+    button that starts playback (a search pick) overrides join() to
+    join voice (connect, or move the bot) before its action."""
 
-    def __init__(
-        self, callback, check=play_check, joins_voice=False, **kwargs
-    ):
+    def __init__(self, callback, check=player_check, **kwargs):
         super().__init__(**kwargs)
         self._callback = callback
         self._check = check
-        self._joins_voice = joins_voice
+
+    async def join(self, ctx):
+        """Awaited once every check has passed, before the action.
+        Does nothing by default; a CheckError from it refuses the
+        click like a failed check."""
 
     async def callback(self, inter: discord.Interaction):
-        # Acknowledge first: the join below can be slow, and it must
-        # not push the response past Discord's 3-second deadline.
-        # Refusals then go out as ephemeral followups. Voice is joined
-        # only once every check has passed, so a refused click never
-        # makes the bot join.
+        # Acknowledge first: a join can be slow, and it must not push
+        # the response past Discord's 3-second deadline. Refusals
+        # then go out as ephemeral followups. join() runs only once
+        # every check has passed, so a refused click never makes the
+        # bot join.
         await inter.response.defer()
         ctx = await inter.client.get_context(inter)
-        ctx.joins_voice = self._joins_voice
         try:
             await self._check(ctx)
             if inter.data.get("custom_id") in [
@@ -78,7 +77,7 @@ class MusicButton(discord.ui.Button):
                 "volume_up",
             ]:
                 await dj_check(ctx)
-            await join_voice(ctx)
+            await self.join(ctx)
         except CheckError as e:
             self.on_refused(e)
             await ctx.send(e, ephemeral=True)

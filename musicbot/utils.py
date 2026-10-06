@@ -250,21 +250,14 @@ def joins_voice(func):
 
 def join_needed(ctx: Context) -> bool:
     """Whether the bot has to join the user's voice channel before a
-    music command or button runs: it has no voice client (a connect),
-    or user_must_be_in_vc is on, its channel has only bots and the
-    user is in another one (a move). Only a joining command ever
-    needs to: when ctx.command is set but not marked with
+    music command or a search pick runs: it has no voice client (a
+    connect), or user_must_be_in_vc is on, its channel has only bots
+    and the user is in another one (a move). Only a joining command
+    ever needs to: when ctx.command is set but not marked with
     @joins_voice, this is False and the command answers without
-    touching voice. A button's context has no command; a MusicButton
-    sets ctx.joins_voice instead, and when that is False this is
-    False too (player buttons, unlike search picks). Music commands
-    and buttons decide it here: play_check(), join_voice() and the
-    defer before a join all read it, so they cannot disagree.
-    d!connect, d!reset and the library views ask it too, through
-    join_voice(), so their commands carry the marker. The
-    reaction-button plugin still joins voice without asking it."""
-    if getattr(ctx, "joins_voice", True) is False:
-        return False
+    touching voice. A button's context has no command, so this reads
+    only the voice state; a button decides in its own code whether to
+    ask at all."""
     command = getattr(ctx, "command", None)
     if command is not None and not getattr(
         command.callback, "__joins_voice__", False
@@ -302,26 +295,45 @@ async def connect_to(guild: discord.Guild, channel):
         await channel.connect(reconnect=True, timeout=VC_CONNECT_TIMEOUT)
 
 
+def _check_command_channel(ctx: Context, sett):
+    """Refuses a command or button used outside the guild's command
+    channel, when one is set."""
+    cm_channel = sett.command_channel
+    if cm_channel is not None and int(cm_channel) != ctx.channel.id:
+        raise CheckError(config.WRONG_CHANNEL_MESSAGE)
+
+
 async def play_check(ctx: Context):
-    """Refuses a music command or button that may not run. Never
-    touches voice: join_voice() does that once every check has
-    passed."""
+    """Refuses a music command or a search pick that may not run.
+    Never touches voice: join_voice() does that once every check has
+    passed. Player buttons use player_check() instead."""
 
     sett = get_settings(ctx)
-
-    cm_channel = sett.command_channel
-    vc_rule = sett.user_must_be_in_vc
-
-    if cm_channel is not None:
-        if int(cm_channel) != ctx.channel.id:
-            raise CheckError(config.WRONG_CHANNEL_MESSAGE)
+    _check_command_channel(ctx, sett)
 
     if join_needed(ctx):
         if not ctx.author.voice:
             raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
         check_voice_permissions(ctx.guild, ctx.author.voice.channel)
 
-    if ctx.guild.voice_client and vc_rule:
+    if ctx.guild.voice_client and sett.user_must_be_in_vc:
+        return await voice_check(ctx)
+
+    return True
+
+
+async def player_check(ctx: Context):
+    """Refuses a player button that may not run. A player button
+    never joins voice, so it is refused while the bot has no voice
+    client (a stale player view), and never by play_check()'s join
+    refusals; the command channel and voice_check() still apply."""
+    if not ctx.guild.voice_client:
+        raise CheckError(config.NOT_CONNECTED_MESSAGE)
+
+    sett = get_settings(ctx)
+    _check_command_channel(ctx, sett)
+
+    if sett.user_must_be_in_vc:
         return await voice_check(ctx)
 
     return True
