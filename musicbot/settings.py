@@ -1,8 +1,18 @@
 import json
 import os
 import re
+from dataclasses import dataclass
 from inspect import isawaitable
-from typing import TYPE_CHECKING, Any, Dict, List, Optional, Set, Union
+from typing import (
+    TYPE_CHECKING,
+    Any,
+    Callable,
+    Dict,
+    List,
+    Optional,
+    Set,
+    Union,
+)
 
 import discord
 from discord import (
@@ -32,16 +42,6 @@ if TYPE_CHECKING:
 
 DIR_PATH = os.path.dirname(os.path.realpath(__file__))
 LEGACY_SETTINGS = DIR_PATH + "/generated/settings.json"
-DEFAULT_CONFIG = {
-    "command_channel": None,
-    "start_voice_channel": None,
-    "dj_role": None,
-    "user_must_be_in_vc": True,
-    "button_emote": None,
-    "default_volume": 100,
-    "vc_timeout": config.VC_TIMEOUT_DEFAULT,
-    "announce_songs": sqlalchemy.false(),
-}
 # use String for ids to be sure we won't hit overflow
 ID_LENGTH = 25  # more than enough to be sure :)
 DiscordIdStr = Annotated[str, ID_LENGTH]
@@ -113,26 +113,176 @@ def convert_volume(ctx: "Context", value: int) -> int:
     return value
 
 
-CONFIG_CONVERTERS = {
-    "command_channel": convert_object,
-    "start_voice_channel": convert_object,
-    "dj_role": convert_object,
-    "user_must_be_in_vc": convert_bool,
-    "button_emote": convert_emoji,
-    "default_volume": convert_volume,
-    "vc_timeout": convert_bool,
-    "announce_songs": convert_bool,
+def _name_or_none(found) -> Optional[str]:
+    return found.name if found else None
+
+
+def _show_channel_or_thread(ctx: "Context", stored: str) -> Optional[str]:
+    return _name_or_none(ctx.guild.get_channel_or_thread(int(stored)))
+
+
+def _show_channel(ctx: "Context", stored: str) -> Optional[str]:
+    return _name_or_none(ctx.guild.get_channel(int(stored)))
+
+
+def _show_role(ctx: "Context", stored: str) -> Optional[str]:
+    return _name_or_none(ctx.guild.get_role(int(stored)))
+
+
+def _show_emoji(ctx: "Context", stored: str):
+    return get_emoji(ctx.bot, stored)
+
+
+def _show_raw(ctx: "Context", stored: Any):
+    return stored
+
+
+def _confirm_mention(value: Any) -> str:
+    return value.mention
+
+
+def _confirm_name(value: Any) -> str:
+    return value.name
+
+
+def _confirm_raw(value: Any) -> Any:
+    return value
+
+
+def _vc_timeout_gate() -> Optional[str]:
+    if config.ALLOW_VC_TIMEOUT_EDIT:
+        return None
+    return config.VC_TIMEOUT_EDIT_DISABLED
+
+
+@dataclass(frozen=True)
+class SettingDescriptor:
+    """Everything about one guild setting except its database column.
+
+    The column stays hand-written on GuildSettings: Alembic
+    autogeneration diffs against it, so it must not be generated.
+    """
+
+    name: str
+    # the value a new guild starts with
+    default: Any
+    # the Discord type of the subcommand's parameter
+    param_type: Any
+    # the subcommand's parameter name
+    param_name: str
+    # Discord value -> stored value; may be async and may raise
+    # ConversionError
+    converter: Callable[["Context", Any], Any]
+    # (ctx, stored value) -> what the settings embed shows,
+    # or None when the stored value no longer resolves
+    display: Callable[["Context", Any], Any]
+    # shown instead when display returns None
+    invalid: Optional[str]
+    # Discord value -> how the success confirmation shows it
+    confirm: Callable[[Any], Any]
+    # returns the refusal message while the setting may not be
+    # edited, None otherwise
+    edit_gate: Optional[Callable[[], Optional[str]]] = None
+
+    def show(self, ctx: "Context", stored: Any) -> Any:
+        "The settings embed's value for this setting"
+        if not stored:
+            return SettingsEmbed.FIELD_EMPTY
+        shown = self.display(ctx, stored)
+        return self.invalid if shown is None else shown
+
+
+SETTINGS: Dict[str, SettingDescriptor] = {
+    d.name: d
+    for d in (
+        SettingDescriptor(
+            name="command_channel",
+            default=None,
+            param_type=Union[Thread, VoiceChannel, TextChannel],
+            param_name="channel",
+            converter=convert_object,
+            display=_show_channel_or_thread,
+            invalid=SettingsEmbed.INVALID_CHANNEL,
+            confirm=_confirm_mention,
+        ),
+        SettingDescriptor(
+            name="start_voice_channel",
+            default=None,
+            param_type=VoiceChannel,
+            param_name="channel",
+            converter=convert_object,
+            display=_show_channel,
+            invalid=SettingsEmbed.INVALID_VOICE_CHANNEL,
+            confirm=_confirm_mention,
+        ),
+        SettingDescriptor(
+            name="dj_role",
+            default=None,
+            param_type=Role,
+            param_name="role",
+            converter=convert_object,
+            display=_show_role,
+            invalid=SettingsEmbed.INVALID_ROLE,
+            confirm=_confirm_name,
+        ),
+        SettingDescriptor(
+            name="user_must_be_in_vc",
+            default=True,
+            param_type=bool,
+            param_name="value",
+            converter=convert_bool,
+            display=_show_raw,
+            invalid=None,
+            confirm=_confirm_raw,
+        ),
+        SettingDescriptor(
+            name="button_emote",
+            default=None,
+            param_type=str,
+            param_name="emoji",
+            converter=convert_emoji,
+            display=_show_emoji,
+            invalid=SettingsEmbed.INVALID_EMOJI,
+            confirm=_confirm_raw,
+        ),
+        SettingDescriptor(
+            name="default_volume",
+            default=100,
+            param_type=int,
+            param_name="value",
+            converter=convert_volume,
+            display=_show_raw,
+            invalid=None,
+            confirm=_confirm_raw,
+        ),
+        SettingDescriptor(
+            name="vc_timeout",
+            default=config.VC_TIMEOUT_DEFAULT,
+            param_type=bool,
+            param_name="value",
+            converter=convert_bool,
+            display=_show_raw,
+            invalid=None,
+            confirm=_confirm_raw,
+            edit_gate=_vc_timeout_gate,
+        ),
+        SettingDescriptor(
+            name="announce_songs",
+            default=False,
+            param_type=bool,
+            param_name="value",
+            converter=convert_bool,
+            display=_show_raw,
+            invalid=None,
+            confirm=_confirm_raw,
+        ),
+    )
 }
-CONFIG_OPTIONS = {
-    "command_channel": Union[TextChannel, VoiceChannel, Thread],
-    "start_voice_channel": VoiceChannel,
-    "dj_role": Role,
-    "user_must_be_in_vc": bool,
-    "button_emote": str,
-    "default_volume": int,
-    "vc_timeout": bool,
-    "announce_songs": bool,
-}
+
+
+def default_settings() -> Dict[str, Any]:
+    "A fresh copy of every setting's default, keyed by setting name"
+    return {name: d.default for name, d in SETTINGS.items()}
 
 
 class GuildSettings(Base):
@@ -147,7 +297,7 @@ class GuildSettings(Base):
     default_volume: Mapped[int]
     vc_timeout: Mapped[bool]
     announce_songs: Mapped[bool] = mapped_column(
-        server_default=DEFAULT_CONFIG["announce_songs"]
+        server_default=sqlalchemy.false()
     )
 
     @classmethod
@@ -166,7 +316,7 @@ class GuildSettings(Base):
             ).scalar_one_or_none()
             if sett:
                 return sett
-            session.add(GuildSettings(guild_id=guild_id, **DEFAULT_CONFIG))
+            session.add(GuildSettings(guild_id=guild_id, **default_settings()))
             # avoiding incomplete detached object
             sett = (
                 await session.execute(
@@ -200,7 +350,9 @@ class GuildSettings(Base):
             )
             missing = set(ids) - {sett.guild_id for sett in settings}
             for new_id in missing:
-                session.add(GuildSettings(guild_id=new_id, **DEFAULT_CONFIG))
+                session.add(
+                    GuildSettings(guild_id=new_id, **default_settings())
+                )
             settings.extend(
                 (
                     await session.execute(
@@ -228,69 +380,23 @@ class GuildSettings(Base):
             embed.set_thumbnail(url=ctx.guild.icon.url)
         embed.set_footer(text=SettingsEmbed.FOOTER)
 
-        # exclusion_keys = ['id']
-
-        for key in DEFAULT_CONFIG.keys():
-            # if key in exclusion_keys:
-            #     continue
-
-            if not getattr(self, key):
-                embed.add_field(
-                    name=key, value=SettingsEmbed.FIELD_EMPTY, inline=False
-                )
-                continue
-
-            elif key == "start_voice_channel":
-                vc = ctx.guild.get_channel(int(self.start_voice_channel))
-                embed.add_field(
-                    name=key,
-                    value=(
-                        vc.name if vc else SettingsEmbed.INVALID_VOICE_CHANNEL
-                    ),
-                    inline=False,
-                )
-                continue
-
-            elif key == "command_channel":
-                chan = ctx.guild.get_channel_or_thread(
-                    int(self.command_channel)
-                )
-                embed.add_field(
-                    name=key,
-                    value=chan.name if chan else SettingsEmbed.INVALID_CHANNEL,
-                    inline=False,
-                )
-                continue
-
-            elif key == "dj_role":
-                role = ctx.guild.get_role(int(self.dj_role))
-                embed.add_field(
-                    name=key,
-                    value=role.name if role else SettingsEmbed.INVALID_ROLE,
-                    inline=False,
-                )
-                continue
-
-            elif key == "button_emote":
-                emote = get_emoji(ctx.bot, self.button_emote)
-                embed.add_field(
-                    name=key,
-                    value=emote or SettingsEmbed.INVALID_EMOJI,
-                    inline=False,
-                )
-                continue
-
-            embed.add_field(name=key, value=getattr(self, key), inline=False)
+        for name, descriptor in SETTINGS.items():
+            embed.add_field(
+                name=name,
+                value=descriptor.show(ctx, getattr(self, name)),
+                inline=False,
+            )
 
         return embed
 
     async def update_setting(
         self, setting: str, value: Any, ctx: "Context"
     ) -> bool:
-        if setting not in DEFAULT_CONFIG:
+        descriptor = SETTINGS.get(setting)
+        if descriptor is None:
             return False
 
-        value = CONFIG_CONVERTERS[setting](ctx, value)
+        value = descriptor.converter(ctx, value)
         if isawaitable(value):
             value = await value
         setattr(self, setting, value)
@@ -506,7 +612,7 @@ async def extract_legacy_settings(bot: "MusicBot"):
         for guild_id, data in json_data.items():
             if guild_id in existing:
                 continue
-            new_settings = DEFAULT_CONFIG.copy()
+            new_settings = default_settings()
             new_settings.update(
                 {k: v for k, v in data.items() if k in new_settings}
             )
