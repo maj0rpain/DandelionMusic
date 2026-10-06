@@ -88,7 +88,35 @@ if __name__ == "__main__":
 """
 
 
-def _run_in_fresh_interpreter(cwd: Path, script: str):
+ENTRYPOINT_PROBE = """
+import asyncio
+import json
+import runpy
+import sys
+
+from musicbot import utils
+from musicbot.bot import MusicBot
+
+seen = {}
+
+
+def run_without_connecting(self, *args, **kwargs):
+    # by now discord.py would build its logging handler on sys.stderr
+    seen["stdout_wrapped"] = isinstance(sys.stdout, utils.OutputWrapper)
+    seen["stderr_wrapped"] = isinstance(sys.stderr, utils.OutputWrapper)
+
+
+# the network and the ffmpeg binary are the boundaries stubbed here
+MusicBot.run = run_without_connecting
+utils.check_dependencies = lambda: None
+# MusicBot() builds an asyncio.Future, which needs a current loop
+asyncio.set_event_loop(asyncio.new_event_loop())
+runpy.run_module("musicbot", run_name="__main__")
+print(json.dumps(seen))
+"""
+
+
+def _run_in_fresh_interpreter(cwd: Path, script: str, as_file=False):
     # without the settings an earlier test's load_dotenv() may have left
     # in os.environ - a half-set Spotify credential, say, makes the
     # import print a traceback
@@ -97,12 +125,17 @@ def _run_in_fresh_interpreter(cwd: Path, script: str):
     env["PYTHONPATH"] = os.pathsep.join(
         filter(None, [str(REPO_ROOT), env.get("PYTHONPATH")])
     )
-    # a file rather than -c: spawn workers re-import the parent's main
-    # module, and the lifecycle probe submits a function defined there
-    probe = cwd / "probe.py"
-    probe.write_text(textwrap.dedent(script))
+    script = textwrap.dedent(script)
+    if as_file:
+        # spawn workers re-import the parent's main module, which -c
+        # does not leave them to find
+        probe = cwd / "probe.py"
+        probe.write_text(script)
+        command = [sys.executable, str(probe)]
+    else:
+        command = [sys.executable, "-c", script]
     return subprocess.run(
-        [sys.executable, str(probe)],
+        command,
         cwd=cwd,
         env=env,
         capture_output=True,
@@ -127,7 +160,9 @@ def import_result(tmp_path_factory):
 def lifecycle(tmp_path_factory):
     return _observed(
         _run_in_fresh_interpreter(
-            tmp_path_factory.mktemp("lifecycle"), LIFECYCLE_PROBE
+            tmp_path_factory.mktemp("lifecycle"),
+            LIFECYCLE_PROBE,
+            as_file=True,
         )
     )
 
@@ -168,6 +203,16 @@ def test_importing_musicbot_leaves_the_spawn_process_class_alone(
     import_result,
 ):
     assert _observed(import_result)["spawn_process_is_stdlib"] is True
+
+
+def test_entrypoint_wraps_stdout_and_stderr_before_running_the_bot(
+    tmp_path,
+):
+    observed = _observed(_run_in_fresh_interpreter(tmp_path, ENTRYPOINT_PROBE))
+    assert (observed["stdout_wrapped"], observed["stderr_wrapped"]) == (
+        True,
+        True,
+    )
 
 
 def test_loader_lifecycle_init_readies_the_worker(lifecycle):

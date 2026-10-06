@@ -19,7 +19,7 @@ from yt_dlp.utils import DownloadError
 from config import config
 from musicbot.audiotags import nice_title, read_tags
 from musicbot.song import Song
-from musicbot.utils import OutputWrapper
+from musicbot.utils import wrap_stdio
 from musicbot.linkutils import (
     YT_IE,
     ExtractorT,
@@ -58,13 +58,6 @@ _loop: Optional[asyncio.AbstractEventLoop] = None
 _downloader: Optional[YoutubeDL] = None
 
 
-def _wrap_stdio():
-    if not isinstance(sys.stdout, OutputWrapper):
-        sys.stdout = OutputWrapper(sys.stdout)
-    if not isinstance(sys.stderr, OutputWrapper):
-        sys.stderr = OutputWrapper(sys.stderr)
-
-
 def _new_downloader() -> YoutubeDL:
     return YoutubeDL(
         {
@@ -93,7 +86,7 @@ def _new_downloader() -> YoutubeDL:
 def _init_worker():
     """Runs once inside the spawned worker, before any extraction."""
     global _loop, _downloader
-    _wrap_stdio()
+    wrap_stdio()
     _loop = asyncio.new_event_loop()
     _loop.run_until_complete(init_session())
     _downloader = _new_downloader()
@@ -126,7 +119,7 @@ def init():
     global _executor
     if _executor is not None:
         return
-    _wrap_stdio()
+    wrap_stdio()
     _context.Process = LoaderProcess
     _executor = ProcessPoolExecutor(1, _context, initializer=_init_worker)
     # wake it up to spawn the process immediately
