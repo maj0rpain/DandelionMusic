@@ -433,7 +433,12 @@ class AudioController(object):
         else:
             next_song = self.playlist.next(forced)
 
-        if not self._stopping:
+        if self._stopping:
+            # the teardown callback of a stop(): the queue it sees is
+            # the one stop() just emptied, so keep stop()'s snapshot.
+            # One-shot - every later advance snapshots again.
+            self._stopping = False
+        else:
             self._pickle_playlist()
 
         if next_song is None:
@@ -733,7 +738,6 @@ class AudioController(object):
 
     def stop(self):
         """Stops the player and removes all songs from the queue"""
-        self._stopping = True
         # whatever starts after this is a new session, not a track
         # change - see play_song()
         self._playing = False
@@ -745,6 +749,9 @@ class AudioController(object):
         if not self.is_active():
             return
 
+        # only stopping an active voice client runs an `after`
+        # callback; its next_song() consumes this - see next_song()
+        self._stopping = True
         self.guild.voice_client.stop()
 
     def prev_song(self) -> bool:
