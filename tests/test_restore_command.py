@@ -27,10 +27,7 @@ class OutcomeController:
     [
         (RestoreResult.RESTORED, "Restored playlist"),
         (RestoreResult.NOTHING_TO_RESTORE, config.QUEUE_EMPTY),
-        (
-            RestoreResult.REFUSED_WHILE_ACTIVE,
-            "Something is already playing - stop it before restoring :x:",
-        ),
+        (RestoreResult.REFUSED_WHILE_ACTIVE, config.RESTORE_WHILE_ACTIVE),
     ],
 )
 def test_restore_command_replies_with_the_outcome(outcome, reply):

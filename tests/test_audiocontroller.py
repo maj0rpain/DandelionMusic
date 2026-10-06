@@ -11,6 +11,8 @@ import pickle
 import sys
 from pathlib import Path
 
+import pytest
+
 from controller_seam import StubLoader, controller_seam
 
 
@@ -301,29 +303,13 @@ def _restore_while_active(controller, monkeypatch, tmp_path, pause):
     return asyncio.run(run())
 
 
-def test_restore_while_playing_is_refused_and_changes_nothing(
-    controller, monkeypatch, tmp_path
+@pytest.mark.parametrize("pause", [False, True])
+def test_restore_while_active_is_refused_and_changes_nothing(
+    controller, monkeypatch, tmp_path, pause
 ):
     ac = sys.modules[type(controller).__module__]
     (playlist, backup_bytes), result = _restore_while_active(
-        controller, monkeypatch, tmp_path, pause=False
-    )
-
-    assert result is ac.RestoreResult.REFUSED_WHILE_ACTIVE
-    assert controller.guild.voice_client.disconnected is False
-    assert _played(controller) == ["first"]
-    assert _titles(controller) == ["first", "second"]
-    assert controller.playlist is playlist
-    backup = tmp_path / "backup" / "playlist_1234.pickle"
-    assert backup.read_bytes() == backup_bytes
-
-
-def test_restore_while_paused_is_refused_and_changes_nothing(
-    controller, monkeypatch, tmp_path
-):
-    ac = sys.modules[type(controller).__module__]
-    (playlist, backup_bytes), result = _restore_while_active(
-        controller, monkeypatch, tmp_path, pause=True
+        controller, monkeypatch, tmp_path, pause
     )
 
     assert result is ac.RestoreResult.REFUSED_WHILE_ACTIVE
