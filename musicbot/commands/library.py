@@ -584,8 +584,22 @@ class LibraryBrowseView(LibraryView):
         read the cursor separately, and a click landing between them
         would move it, leaving the components, the embed and the
         attachment key describing two different levels on one
-        message."""
+        message.
+
+        Returns True when the edit lands. When it raises
+        discord.HTTPException (a 429 that outlives its retries, a
+        5xx) this puts the previous components back, logs the failure
+        and returns False; any other exception puts them back and
+        propagates. Putting them back is what keeps the message
+        usable: build_items() detaches every old child before the
+        edit, discord.py only re-registers the view once the edit
+        returns, and its ViewStore drops any click on an item whose
+        .view is None - so without the restore every component still
+        showing on the message would be dead until the timeout. The
+        ViewStore still holds those old items, so giving them their
+        .view back is all it takes."""
         async with self._render_lock:
+            previous = list(self.children)
             self.build_items()
             kwargs = {"embed": self.embed(), "view": self}
             attached = self._attached
@@ -593,10 +607,26 @@ class LibraryBrowseView(LibraryView):
                 attached = self._attachment_key()
                 if attached != self._attached:
                     kwargs["attachments"] = self._attachments()
-            await interaction.edit_original_response(**kwargs)
+            try:
+                await interaction.edit_original_response(**kwargs)
+            except discord.HTTPException as e:
+                self._restore_items(previous)
+                print(f"library: render failed: {e}", file=sys.stderr)
+                return False
+            except BaseException:
+                self._restore_items(previous)
+                raise
             # only once the edit has landed: a failed edit leaves
             # whatever was already on the message
             self._attached = attached
+            return True
+
+    def _restore_items(self, items) -> None:
+        """Puts back the components a failed edit left on the
+        message, each with .view pointing at this view again."""
+        self.clear_items()
+        for item in items:
+            self.add_item(item)
 
     async def turn_page(self, interaction: discord.Interaction, delta: int):
         """Applies a page delta under the same guard as everything
@@ -630,9 +660,10 @@ class LibraryBrowseView(LibraryView):
         chosen: str,
         label: Optional[str] = None,
     ):
+        previous = self._level_snapshot()
         descent = self.cursor.descend(chosen)
         if descent.changed_level:
-            await self._enter_level(interaction)
+            await self._enter_level(interaction, previous)
             return
         artist, album, _ = descent.track
         # ASCII throughout: unlike everything else built here this
@@ -642,6 +673,7 @@ class LibraryBrowseView(LibraryView):
         await self.queue(interaction, [descent.track], source)
 
     async def go_back(self, interaction: discord.Interaction):
+        previous = self._level_snapshot()
         if not self.cursor.back():
             # Already at the root: no level to enter, and nothing on
             # the message would change, so answer the interaction and
@@ -653,16 +685,46 @@ class LibraryBrowseView(LibraryView):
             # already-drawn message cannot dispatch either way. After
             # a render that landed, discord.py has popped its
             # custom_id from the ViewStore; after one that raised,
-            # build_items() has already detached the old children and
-            # dispatch_view() drops any item whose .view is None. It
+            # render() put the old children back and _enter_level()
+            # undid the level change, so a Back still showing acts on
+            # the level it was drawn for - which is not the root. It
             # stays because back() returning False is part of the
             # cursor's contract, and one defer costs less than being
             # wrong about that.
             await interaction.response.defer()
             return
-        await self._enter_level(interaction)
+        await self._enter_level(interaction, previous)
 
-    async def _enter_level(self, interaction: discord.Interaction):
+    def _level_snapshot(self):
+        """Where the cursor is and what the message shows, taken
+        before a level change so _enter_level() can undo it."""
+        return (
+            self.cursor.artist,
+            self.cursor.album,
+            self.cursor.page,
+            self._enrichment,
+        )
+
+    def _undo_level_change(self, previous) -> None:
+        """Moves the cursor back to `previous` through its own API,
+        after a level change whose first draw failed. The message -
+        and the components render() restored - still show that level,
+        so the cursor has to agree with them again. level_revision is
+        left bumped: any enrichment still in flight for the old level
+        was started before the move and is dropped either way."""
+        artist, album, page, enrichment = previous
+        depth = (artist is not None) + (album is not None)
+        here = (self.cursor.artist is not None) + (
+            self.cursor.album is not None
+        )
+        if here > depth:
+            self.cursor.back()
+        else:
+            self.cursor.descend(album if album is not None else artist)
+        self.cursor.page_by(page)
+        self._enrichment = enrichment
+
+    async def _enter_level(self, interaction: discord.Interaction, previous):
         """Shows the new level immediately, then fills the enrichment
         in behind it.
 
@@ -693,12 +755,20 @@ class LibraryBrowseView(LibraryView):
         property would put an await inside the staleness check below -
         and _enrichment has to stay on the view, since it describes
         what this message is showing rather than where the cursor
-        is."""
+        is.
+
+        `previous` is the caller's _level_snapshot() from before the
+        move. When the first draw fails the message still shows that
+        level, with render() having put its components back, so the
+        move is undone and no enrichment is resolved for a level
+        nobody can see."""
         nav = self.cursor.level_revision
         self._enrichment = None
         with self.busy():
             await interaction.response.defer()
-            await self.render(interaction, sync_attachments=True)
+            if not await self.render(interaction, sync_attachments=True):
+                self._undo_level_change(previous)
+                return
 
         try:
             enrichment = await self._resolve_enrichment()
