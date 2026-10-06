@@ -415,6 +415,13 @@ class AudioController(object):
         """Invoked after a song is finished
         Plays the next song if there is one"""
 
+        if error is not None:
+            # a plain print: this runs on discord.py's audio thread
+            print(
+                f"Playback error in guild {self.guild.id}: {error!r}",
+                file=sys.stderr,
+            )
+
         # the teardown callback of a stop() - one-shot, see stop()
         teardown, self._stopping = self._stopping, False
         if teardown and self.is_active():
