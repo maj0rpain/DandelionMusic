@@ -128,7 +128,6 @@ if __name__ == "__main__":
 
 
 ENTRYPOINT_PROBE = """
-import asyncio
 import json
 import runpy
 import sys
@@ -148,10 +147,36 @@ def run_without_connecting(self, *args, **kwargs):
 # the network and the ffmpeg binary are the boundaries stubbed here
 MusicBot.run = run_without_connecting
 utils.check_dependencies = lambda: None
-# MusicBot() builds an asyncio.Future, which needs a current loop
-asyncio.set_event_loop(asyncio.new_event_loop())
 runpy.run_module("musicbot", run_name="__main__")
 print(json.dumps(seen))
+"""
+
+
+CONSTRUCTION_PROBE = """
+import json
+import warnings
+
+import discord
+
+from musicbot.bot import MusicBot
+
+# on 3.13 a loop-needing call with no current loop only warns; 3.14
+# raises, so a warning here is the 3.14 crash
+with warnings.catch_warnings():
+    # only the no-loop warning: 3.14 deprecates other asyncio calls
+    # discord.py makes while the bot is built
+    warnings.filterwarnings(
+        "error", "There is no current event loop", DeprecationWarning
+    )
+    try:
+        MusicBot(
+            [], command_prefix="d!", intents=discord.Intents.default()
+        )
+    except Exception as e:
+        raised = f"{type(e).__name__}: {e}"
+    else:
+        raised = None
+print(json.dumps({"raised": raised}))
 """
 
 
@@ -252,6 +277,13 @@ def test_entrypoint_wraps_stdout_and_stderr_before_running_the_bot(
         True,
         True,
     )
+
+
+def test_music_bot_can_be_built_with_no_current_event_loop(tmp_path):
+    observed = _observed(
+        _run_in_fresh_interpreter(tmp_path, CONSTRUCTION_PROBE)
+    )
+    assert observed["raised"] is None
 
 
 def test_loader_lifecycle_init_readies_the_worker(lifecycle):
