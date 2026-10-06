@@ -59,11 +59,25 @@ class FakeSettings:
         self.announce_songs = False
 
 
+class FakeSessions:
+    """The registry's settings half: what AudioController reads."""
+
+    def __init__(self):
+        self._settings = {}
+
+    def settings(self, guild):
+        return self._settings.get(guild)
+
+    def add_settings(self, guild, settings):
+        self._settings[guild] = settings
+
+
 class FakeBot:
-    """`settings[guild]` and `loop`: what AudioController reads."""
+    """`sessions.settings(guild)` and `loop`: what AudioController
+    reads."""
 
     def __init__(self, loop=None):
-        self.settings = {}
+        self.sessions = FakeSessions()
         self.loop = loop
 
 
@@ -154,7 +168,7 @@ def controller_seam(workdir: Path) -> Iterator[Tuple[object, StubLoader]]:
         voice_client = FakeVoiceClient()
         guild = FakeGuild(voice_client=voice_client)
         bot = FakeBot()
-        bot.settings[guild] = FakeSettings()
+        bot.sessions.add_settings(guild, FakeSettings())
         yield audiocontroller.AudioController(bot, guild), stub
     finally:
         os.chdir(old_cwd)

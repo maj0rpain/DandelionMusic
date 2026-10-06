@@ -225,3 +225,25 @@ def test_a_reset_whose_factory_fails_leaves_the_guild_settings_only(
     assert old.disposed
     assert sessions.controller(guild) is None
     assert sessions.settings(guild) is not None
+
+
+def test_on_guild_remove_discards_the_guilds_session(sessions):
+    """Leaving a guild (kicked, banned, or a guild.leave() of our own)
+    must not leak its session: MusicBot.on_guild_remove discards it."""
+    import types
+
+    from musicbot.bot import MusicBot
+
+    guild = FakeGuild(1)
+    bot = types.SimpleNamespace(sessions=sessions)
+
+    async def scenario():
+        controller = await sessions.get_or_create(guild)
+        await MusicBot.on_guild_remove(bot, guild)
+        return controller
+
+    controller = asyncio.run(scenario())
+
+    assert controller.disposed
+    assert sessions.controller(guild) is None
+    assert sessions.settings(guild) is None

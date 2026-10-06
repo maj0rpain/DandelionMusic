@@ -158,9 +158,9 @@ def get_audiocontroller(ctx: Context) -> "AudioController":
     it to finish (process_commands awaits absolutely_ready).
     Application commands and component interactions are dispatched
     straight to the command, so they can land in that gap. Indexing
-    audio_controllers directly turned that into a bare KeyError
+    the controllers directly turned that into a bare KeyError
     traceback with nothing sent back to the user."""
-    controller = ctx.bot.audio_controllers.get(ctx.guild)
+    controller = ctx.bot.sessions.controller(ctx.guild)
     if controller is None:
         raise CheckError(config.BOT_NOT_READY)
     return controller
@@ -171,12 +171,12 @@ def get_settings(ctx: Context) -> "GuildSettings":
     bot is still starting.
 
     The twin of get_audiocontroller(), and needed for the same reason:
-    on_ready fills bot.settings and bot.audio_controllers in the same
+    on_ready fills both halves of every guild's session in the same
     pass, so every path that could find one missing could find the
     other missing too. Guarding only the controller just moved the
     KeyError one line down - play_check() reads settings immediately
     after Music.cog_check() has resolved the controller."""
-    sett = ctx.bot.settings.get(ctx.guild)
+    sett = ctx.bot.sessions.settings(ctx.guild)
     if sett is None:
         raise CheckError(config.BOT_NOT_READY)
     return sett

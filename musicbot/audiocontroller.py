@@ -68,7 +68,7 @@ class MusicButton(discord.ui.Button):
         if isawaitable(res):
             await res
 
-        controller = inter.client.audio_controllers.get(inter.guild)
+        controller = inter.client.sessions.controller(inter.guild)
         if controller:
             if inter.data.get("custom_id") in ["next", "prev"]:
                 await ctx.send(f"{inter.user} Skipped a Song")
@@ -104,7 +104,7 @@ class AudioController(object):
         # nothing was playing at all.
         self._playing = False
 
-        sett = bot.settings[guild]
+        sett = bot.sessions.settings(guild)
         self._volume: int = sett.default_volume
 
         self.timer = utils.Timer(self.timeout_handler)
@@ -512,7 +512,7 @@ class AudioController(object):
             )
 
         if (
-            self.bot.settings[self.guild].announce_songs
+            self.bot.sessions.settings(self.guild).announce_songs
             and self.command_channel
         ):
             await self.command_channel.send(
@@ -754,7 +754,7 @@ class AudioController(object):
         if not self.guild.voice_client:
             return
 
-        sett = self.bot.settings[self.guild]
+        sett = self.bot.sessions.settings(self.guild)
 
         if sett.vc_timeout and (
             not self.guild.voice_client.is_playing()

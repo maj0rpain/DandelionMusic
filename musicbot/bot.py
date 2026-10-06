@@ -1,8 +1,7 @@
 import re
-import sys
 import asyncio
 from traceback import print_exception
-from typing import Dict, List
+from typing import List
 
 import discord
 from discord.ext import commands, tasks
@@ -24,6 +23,7 @@ from musicbot.settings import (
     import_env_whitelist,
     migrate_old_playlists,
 )
+from musicbot.sessions import GuildSessions
 from musicbot.utils import CheckError
 
 
@@ -66,12 +66,13 @@ class MusicBot(commands.Bot):
         super().__init__(*args, **kwargs)
         self.initial_extensions = initial_extensions
 
-        # A dictionary that remembers
-        # which guild belongs to which audiocontroller
-        self.audio_controllers: Dict[discord.Guild, AudioController] = {}
-
-        # A dictionary that remembers which settings belongs to which guild
-        self.settings: Dict[discord.Guild, GuildSettings] = {}
+        # every guild's session: its settings and its audio controller
+        self.sessions: GuildSessions[
+            discord.Guild, AudioController, GuildSettings
+        ] = GuildSessions(
+            lambda guild: AudioController(self, guild),
+            lambda guilds: GuildSettings.load_many(self, guilds),
+        )
 
         ensure_sqlite_parent(config.DATABASE)
         self.db_engine = create_async_engine(config.DATABASE)
@@ -110,7 +111,7 @@ class MusicBot(commands.Bot):
         await asyncio.gather(
             *(
                 audiocontroller.udisconnect("bot shutdown")
-                for audiocontroller in self.audio_controllers.values()
+                for audiocontroller in self.sessions
             )
         )
         # this loop's aiohttp session (see linkutils.get_session);
@@ -120,7 +121,7 @@ class MusicBot(commands.Bot):
         return await super().close()
 
     async def on_ready(self):
-        self.settings.update(await GuildSettings.load_many(self, self.guilds))
+        await self.sessions.load_settings(self.guilds)
 
         # read once for the whole sweep rather than per guild
         whitelist = await get_guild_whitelist(self)
@@ -149,6 +150,11 @@ class MusicBot(commands.Bot):
             return
         await self.register(guild)
 
+    async def on_guild_remove(self, guild):
+        # every way out of a guild lands here, guild.leave() included,
+        # so this is the one place its session is dropped
+        await self.sessions.discard(guild)
+
     async def on_command_error(self, ctx, error):
         await ctx.send(error)
         if not isinstance(error, (CheckError, NotOwner)):
@@ -165,7 +171,7 @@ class MusicBot(commands.Bot):
         # arrive before this guild has a controller. There is no
         # session to adjust in that case, so drop it rather than
         # raising KeyError out of the event handler.
-        audiocontroller = self.audio_controllers.get(guild)
+        audiocontroller = self.sessions.controller(guild)
         if audiocontroller is None:
             return
         if member == self.user:
@@ -194,7 +200,7 @@ class MusicBot(commands.Bot):
         await asyncio.gather(
             *(
                 audiocontroller.update_view()
-                for audiocontroller in self.audio_controllers.values()
+                for audiocontroller in self.sessions
             )
         )
 
@@ -231,32 +237,7 @@ class MusicBot(commands.Bot):
         await self.invoke(ctx)
 
     async def register(self, guild: discord.Guild):
-        if guild in self.audio_controllers:
-            return
-
-        if guild not in self.settings:
-            self.settings[guild] = await GuildSettings.load(self, guild)
-
-        sett = self.settings[guild]
-        controller = self.audio_controllers[guild] = AudioController(
-            self, guild
-        )
-
-        if config.GLOBAL_DISABLE_AUTOJOIN_VC:
-            return
-
-        if not sett.vc_timeout:
-            try:
-                await controller.register_voice_channel(
-                    guild.get_channel(int(sett.start_voice_channel or 0))
-                    or guild.voice_channels[0]
-                )
-            except Exception as e:
-                print(
-                    f"Couldn't autojoin VC at {guild.name}:",
-                    e,
-                    file=sys.stderr,
-                )
+        await self.sessions.get_or_create(guild)
 
 
 class Context(commands.Context):
@@ -301,7 +282,7 @@ class Context(commands.Context):
         # guild - and self.guild is None outside a guild entirely.
         # With no controller there is no playback message to carry the
         # view, so fall through to the plain send below.
-        audiocontroller = self.bot.audio_controllers.get(self.guild)
+        audiocontroller = self.bot.sessions.controller(self.guild)
         channel = audiocontroller.command_channel if audiocontroller else None
         if (
             audiocontroller is None

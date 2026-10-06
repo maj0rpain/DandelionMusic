@@ -29,7 +29,9 @@ class Button(commands.Cog):
 
         await self.bot.absolutely_ready
 
-        sett = self.bot.settings[message.guild]
+        sett = self.bot.sessions.settings(message.guild)
+        if sett is None:
+            return
         button = sett.button_emote
 
         if not button:
@@ -60,10 +62,10 @@ class Button(commands.Cog):
         # Before the settings lookup, not after the controller one
         # further down: a raw reaction event is not gated behind
         # absolutely_ready (unlike on_message above), and on_ready
-        # fills settings and audio_controllers together - so whichever
+        # fills both halves of the session together - so whichever
         # is read first is where the KeyError lands.
-        sett = self.bot.settings.get(serv)
-        audiocontroller = self.bot.audio_controllers.get(serv)
+        sett = self.bot.sessions.settings(serv)
+        audiocontroller = self.bot.sessions.controller(serv)
         if sett is None or audiocontroller is None:
             return
         button = sett.button_emote

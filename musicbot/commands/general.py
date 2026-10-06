@@ -8,7 +8,6 @@ from discord.ext import commands
 from config import config
 from musicbot.bot import MusicBot
 from musicbot.settings import ConversionError
-from musicbot.audiocontroller import AudioController
 from musicbot.utils import (
     dj_check,
     get_audiocontroller,
@@ -70,9 +69,7 @@ class General(commands.Cog):
             # bot was connected and need some rest
             await asyncio.sleep(1)
 
-        audiocontroller = ctx.bot.audio_controllers[ctx.guild] = (
-            AudioController(self.bot, ctx.guild)
-        )
+        audiocontroller = await ctx.bot.sessions.reset(ctx.guild)
         await audiocontroller.uconnect(ctx)
         await ctx.send(
             "{} Connected to {}".format(
