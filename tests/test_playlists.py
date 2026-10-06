@@ -6,7 +6,9 @@ deployment holds.
 """
 
 import asyncio
+import inspect
 import json
+import typing
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
@@ -54,15 +56,15 @@ async def stored_json(factory, name="mix"):
 
 
 async def load(factory, name="mix"):
-    return playlists.entries(await playlists.get(factory, GUILD, name))
+    return (await playlists.get(factory, PlaylistRef(GUILD, name))).entries
 
 
 def test_save_add_move_remove_and_load_round_trip():
     async def test(factory):
-        await playlists.save(factory, GUILD, "mix", [A, B])
-        await playlists.add_songs(factory, GUILD, "mix", [C])
-        await playlists.move_song(factory, GUILD, "mix", 3, 1)
-        await playlists.remove_song(factory, GUILD, "mix", 2)
+        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A, B])
+        await playlists.add_songs(factory, PlaylistRef(GUILD, "mix"), [C])
+        await playlists.move_song(factory, PlaylistRef(GUILD, "mix"), 3, 1)
+        await playlists.remove_song(factory, PlaylistRef(GUILD, "mix"), 2)
         return await load(factory)
 
     assert run(test) == [C, B]
@@ -70,10 +72,10 @@ def test_save_add_move_remove_and_load_round_trip():
 
 def test_list_names_filters_by_guild_and_prefix():
     async def test(factory):
-        await playlists.save(factory, GUILD, "rock", [A])
-        await playlists.save(factory, GUILD, "rap", [A])
-        await playlists.save(factory, GUILD, "jazz", [A])
-        await playlists.save(factory, "999", "rock2", [A])
+        await playlists.save(factory, PlaylistRef(GUILD, "rock"), [A])
+        await playlists.save(factory, PlaylistRef(GUILD, "rap"), [A])
+        await playlists.save(factory, PlaylistRef(GUILD, "jazz"), [A])
+        await playlists.save(factory, PlaylistRef("999", "rock2"), [A])
         return (
             sorted(await playlists.list_names(factory, GUILD)),
             sorted(await playlists.list_names(factory, GUILD, prefix="r")),
@@ -84,16 +86,16 @@ def test_list_names_filters_by_guild_and_prefix():
 
 def test_delete_removes_the_playlist():
     async def test(factory):
-        await playlists.save(factory, GUILD, "mix", [A])
-        await playlists.delete(factory, GUILD, "mix")
-        return await playlists.get(factory, GUILD, "mix")
+        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A])
+        await playlists.delete(factory, PlaylistRef(GUILD, "mix"))
+        return await playlists.get(factory, PlaylistRef(GUILD, "mix"))
 
     assert run(test) is None
 
 
 def test_set_title_updates_only_the_matching_url():
     async def test(factory):
-        await playlists.save(factory, GUILD, "mix", [A, B])
+        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A, B])
         await playlists.set_title(
             factory, PlaylistRef(GUILD, "mix"), B.url, "New B"
         )
@@ -153,8 +155,8 @@ def test_a_blob_in_todays_format_reads_back():
 
 def test_a_blob_written_through_the_module_is_todays_format():
     async def test(factory):
-        await playlists.save(factory, GUILD, "mix", [A])
-        await playlists.add_songs(factory, GUILD, "mix", [B, C])
+        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A])
+        await playlists.add_songs(factory, PlaylistRef(GUILD, "mix"), [B, C])
         return await stored_json(factory)
 
     assert run(test) == json.dumps(
@@ -169,10 +171,10 @@ def test_a_blob_written_through_the_module_is_todays_format():
 @pytest.mark.parametrize(
     "operation",
     [
-        lambda f: playlists.delete(f, GUILD, "gone"),
-        lambda f: playlists.add_songs(f, GUILD, "gone", [A]),
-        lambda f: playlists.remove_song(f, GUILD, "gone", 1),
-        lambda f: playlists.move_song(f, GUILD, "gone", 1, 1),
+        lambda f: playlists.delete(f, PlaylistRef(GUILD, "gone")),
+        lambda f: playlists.add_songs(f, PlaylistRef(GUILD, "gone"), [A]),
+        lambda f: playlists.remove_song(f, PlaylistRef(GUILD, "gone"), 1),
+        lambda f: playlists.move_song(f, PlaylistRef(GUILD, "gone"), 1, 1),
     ],
     ids=["delete", "add_songs", "remove_song", "move_song"],
 )
@@ -186,16 +188,16 @@ def test_operations_on_a_missing_playlist_report_not_found(operation):
 
 def test_get_on_a_missing_playlist_returns_none():
     async def test(factory):
-        return await playlists.get(factory, GUILD, "gone")
+        return await playlists.get(factory, PlaylistRef(GUILD, "gone"))
 
     assert run(test) is None
 
 
 def test_saving_a_duplicate_name_reports_it_and_keeps_the_original():
     async def test(factory):
-        await playlists.save(factory, GUILD, "mix", [A])
+        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A])
         with pytest.raises(playlists.PlaylistExists):
-            await playlists.save(factory, GUILD, "mix", [B])
+            await playlists.save(factory, PlaylistRef(GUILD, "mix"), [B])
         return await load(factory)
 
     assert run(test) == [A]
@@ -204,16 +206,16 @@ def test_saving_a_duplicate_name_reports_it_and_keeps_the_original():
 @pytest.mark.parametrize(
     "operation",
     [
-        lambda f: playlists.remove_song(f, GUILD, "mix", 0),
-        lambda f: playlists.remove_song(f, GUILD, "mix", 3),
-        lambda f: playlists.move_song(f, GUILD, "mix", 0, 1),
-        lambda f: playlists.move_song(f, GUILD, "mix", 1, 3),
+        lambda f: playlists.remove_song(f, PlaylistRef(GUILD, "mix"), 0),
+        lambda f: playlists.remove_song(f, PlaylistRef(GUILD, "mix"), 3),
+        lambda f: playlists.move_song(f, PlaylistRef(GUILD, "mix"), 0, 1),
+        lambda f: playlists.move_song(f, PlaylistRef(GUILD, "mix"), 1, 3),
     ],
     ids=["remove-0", "remove-past-end", "move-from-0", "move-past-end"],
 )
 def test_an_out_of_range_position_reports_the_playlist_size(operation):
     async def test(factory):
-        await playlists.save(factory, GUILD, "mix", [A, B])
+        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A, B])
         with pytest.raises(playlists.InvalidPosition) as excinfo:
             await operation(factory)
         return excinfo.value.size, await load(factory)
@@ -223,9 +225,45 @@ def test_an_out_of_range_position_reports_the_playlist_size(operation):
 
 def test_removing_the_only_song_is_refused():
     async def test(factory):
-        await playlists.save(factory, GUILD, "mix", [A])
+        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A])
         with pytest.raises(playlists.OnlySongInPlaylist):
-            await playlists.remove_song(factory, GUILD, "mix", 1)
+            await playlists.remove_song(factory, PlaylistRef(GUILD, "mix"), 1)
         return await load(factory)
 
     assert run(test) == [A]
+
+
+def test_get_returns_the_ref_it_was_given_and_the_saved_entries():
+    ref = PlaylistRef(GUILD, "mix")
+
+    async def test(factory):
+        await playlists.save(factory, ref, [A, C])
+        return await playlists.get(factory, ref)
+
+    assert run(test) == playlists.PlaylistContents(ref, [A, C])
+
+
+def test_no_public_function_takes_or_returns_the_row():
+    # The row is the module's to hold: callers get PlaylistRef,
+    # PlaylistEntry and PlaylistContents, never SavedPlaylist.
+    public = [
+        value
+        for name, value in vars(playlists).items()
+        if not name.startswith("_")
+        and inspect.isfunction(value)
+        and value.__module__ == playlists.__name__
+    ]
+    assert public
+
+    def mentions_row(hint):
+        return hint is SavedPlaylist or any(
+            mentions_row(arg) for arg in typing.get_args(hint)
+        )
+
+    leaking = [
+        function.__name__
+        for function in public
+        if any(map(mentions_row, typing.get_type_hints(function).values()))
+    ]
+    assert leaking == []
+    assert not hasattr(playlists, "entries")
