@@ -30,8 +30,8 @@ def filled(*titles):
 class TestShuffle:
     def test_empty_queue_is_a_no_op(self):
         """The callers gate on is_active(), which stays true for a
-        moment after stop_player() has emptied the queue - so d!stop
-        followed straight away by d!shuffle reached popleft() with
+        moment after AudioController.stop() has emptied the queue - so
+        d!stop followed straight away by d!shuffle reached popleft() with
         nothing there."""
         Playlist().shuffle()  # must not raise
 

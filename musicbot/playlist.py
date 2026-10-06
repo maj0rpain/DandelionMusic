@@ -102,8 +102,8 @@ class Playlist:
 
     def shuffle(self):
         # guarded like clear() below: the callers gate on is_active(),
-        # which stays True for a moment after stop_player() has already
-        # emptied the queue, so `d!stop` followed straight away by
+        # which stays True for a moment after AudioController.stop()
+        # has already emptied the queue, so `d!stop` followed straight away by
         # `d!shuffle` can reach this with nothing to shuffle
         if not self.playque:
             return

@@ -3,7 +3,15 @@ import asyncio
 from itertools import islice
 from inspect import isawaitable
 from traceback import print_exc
-from typing import TYPE_CHECKING, Coroutine, List, Literal, Optional, Union
+from typing import (
+    TYPE_CHECKING,
+    Coroutine,
+    Iterable,
+    List,
+    Literal,
+    Optional,
+    Union,
+)
 
 import discord
 from config import config
@@ -103,8 +111,8 @@ class AudioController(object):
 
         self.command_channel: Optional[discord.abc.Messageable] = None
 
-        self.last_message = None
-        self.last_view = None
+        self._last_message = None
+        self._last_view = None
 
         # according to Python documentation, we need
         # to keep strong references to all tasks
@@ -122,8 +130,8 @@ class AudioController(object):
     def volume(self) -> int:
         return self._volume
 
-    @volume.setter
-    def volume(self, value: int):
+    def set_volume(self, value: int):
+        """Sets the volume, in percent, for this and every later track"""
         self._volume = value
         try:
             self.guild.voice_client.source.volume = float(value) / 100.0
@@ -133,7 +141,7 @@ class AudioController(object):
             print("Unknown error when setting volume:", file=sys.stderr)
             print_exc(file=sys.stderr)
 
-    def pickle_playlist(self):
+    def _pickle_playlist(self):
         with open(self.pickle_file, "wb") as f:
             pickle.dump(self.playlist, f)
 
@@ -143,10 +151,10 @@ class AudioController(object):
                 self.playlist = pickle.load(f)
 
     def volume_up(self):
-        self.volume = min(self.volume + 10, 100)
+        self.set_volume(min(self.volume + 10, 100))
 
     def volume_down(self):
-        self.volume = max(self.volume - 10, 10)
+        self.set_volume(max(self.volume - 10, 10))
 
     async def register_voice_channel(self, channel: discord.VoiceChannel):
         perms = channel.permissions_for(self.guild.me)
@@ -163,12 +171,12 @@ class AudioController(object):
 
     def make_view(self):
         if not self.is_active():
-            self.last_view = None
+            self._last_view = None
             return None
 
         is_empty = len(self.playlist) == 0
 
-        view = self.last_view = discord.ui.View(timeout=None)
+        view = self._last_view = discord.ui.View(timeout=None)
         view.add_item(
             MusicButton(
                 lambda _: self.prev_song(),
@@ -186,7 +194,7 @@ class AudioController(object):
         )
         view.add_item(
             MusicButton(
-                lambda _: self.next_song(forced=True),
+                lambda _: self.skip(),
                 custom_id="next",
                 disabled=not self.playlist.has_next(),
                 emoji="⏭️",
@@ -230,7 +238,7 @@ class AudioController(object):
         )
         view.add_item(
             MusicButton(
-                lambda _: self.stop_player(),
+                lambda _: self.stop(),
                 custom_id="stop",
                 row=1,
                 emoji="⏹️",
@@ -256,7 +264,7 @@ class AudioController(object):
             )
         )
 
-        return self.last_view
+        return self._last_view
 
     async def current_song_callback(self, ctx):
         await ctx.send(
@@ -268,13 +276,31 @@ class AudioController(object):
             embed=self.playlist.queue_embed(),
         )
 
+    async def attach_view(self, send):
+        """Moves the playback buttons onto the message `send` sends.
+
+        `send(view)` is an async callable that sends the message,
+        carrying `view` when it is not None, and returns what it sent.
+        That becomes the message whose buttons later refreshes edit; an
+        interaction stands for its original response. Returns what
+        `send` returned.
+        """
+        async with self.message_lock:
+            await self.update_view(None)
+            res = await send(self.make_view())
+            if isinstance(res, discord.Interaction):
+                self._last_message = await res.original_response()
+            else:
+                self._last_message = res
+        return res
+
     async def update_view(self, view=_not_provided):
-        msg = self.last_message
+        msg = self._last_message
         if not msg:
             return
-        old_view = self.last_view
+        old_view = self._last_view
         if view is None:
-            self.last_message = None
+            self._last_message = None
         elif view is _not_provided:
             view = self.make_view()
         if view is old_view:
@@ -290,10 +316,12 @@ class AudioController(object):
         except discord.HTTPException as e:
             if e.code == 50027:  # Invalid Webhook Token
                 try:
-                    self.last_message = await msg.channel.fetch_message(msg.id)
+                    self._last_message = await msg.channel.fetch_message(
+                        msg.id
+                    )
                     await self.update_view(view)
                 except discord.NotFound:
-                    self.last_message = None
+                    self._last_message = None
             else:
                 print("Failed to update view:", file=sys.stderr)
                 print_exc(file=sys.stderr)
@@ -311,7 +339,7 @@ class AudioController(object):
         return history_string
 
     def pause(self):
-        self.pickle_playlist()
+        self._pickle_playlist()
         client = self.guild.voice_client
         if client:
             if client.is_playing():
@@ -343,8 +371,36 @@ class AudioController(object):
 
     def shuffle(self):
         self.playlist.shuffle()
-        self.pickle_playlist()
-        self.preload_queue()
+        self._pickle_playlist()
+        self._preload_queue()
+
+    def move(self, src: int, dest: int):
+        """Moves the queued track at index `src` to index `dest`
+        (0 is the current track, which cannot be moved). Raises
+        PlaylistError for an index that cannot be moved."""
+        self.playlist.move(src, dest)
+        self._pickle_playlist()
+        self._preload_queue()
+
+    def remove(self, index: int) -> Song:
+        """Removes and returns the queued track at `index` (0 is the
+        current track, which cannot be removed). Raises PlaylistError
+        for an index that cannot be removed."""
+        song = self.playlist.remove(index)
+        self._pickle_playlist()
+        self._preload_queue()
+        return song
+
+    def clear(self):
+        """Empties the queue, keeping the current track. Nothing new
+        is queued behind it, so there is nothing to preload."""
+        self.playlist.clear()
+        self._pickle_playlist()
+
+    def skip(self):
+        """Ends the current track and moves on to the next one,
+        ignoring a single-track loop"""
+        self.next_song(forced=True)
 
     def next_song(self, error=None, *, forced=False):
         """Invoked after a song is finished
@@ -369,7 +425,7 @@ class AudioController(object):
             next_song = self.playlist.next(forced)
 
         if not self._stopping:
-            self.pickle_playlist()
+            self._pickle_playlist()
 
         if next_song is None:
             # nothing left to advance to - the next song to start is a
@@ -425,7 +481,7 @@ class AudioController(object):
         # see the value that callback left, announce a track that has
         # already finished, and leave the flag set with nothing
         # playing - silencing the next genuine start. A play() that
-        # raises below disconnects, and stop_player() clears it there.
+        # raises below disconnects, and stop() clears it there.
         was_idle = not self._playing
         self._playing = True
         try:
@@ -463,7 +519,37 @@ class AudioController(object):
                 embed=song.format_output(config.SONGINFO_NOW_PLAYING)
             )
 
-        self.preload_queue()
+        self._preload_queue()
+
+    async def ensure_playing(self):
+        """Starts the head of the queue if nothing is playing and the
+        queue is non-empty; otherwise preloads the queue. The one
+        "start if idle" rule for everything that adds to the queue."""
+        if self.current_song is None and len(self.playlist) > 0:
+            await self.play_song(self.playlist[0])
+        else:
+            self._preload_queue()
+
+    async def queue(self, songs: Iterable[Song]):
+        """Appends `songs` to the queue, refreshes the backup and
+        starts playing if nothing is (see ensure_playing())."""
+        for song in songs:
+            self.playlist.add(song)
+        self._pickle_playlist()
+        await self.ensure_playing()
+
+    async def restore(self) -> bool:
+        """Reloads the playlist backup and starts its head. Returns
+        False, playing nothing, when there is no queue to restore.
+
+        Starts the head unconditionally, as d!restore always has -
+        while something is already playing that ends in a disconnect
+        (#24), which this deliberately leaves as it is."""
+        self.load_pickle_playlist()
+        if not self.playlist:
+            return False
+        await self.play_song(self.playlist[0])
+        return True
 
     async def process_song(
         self,
@@ -500,15 +586,14 @@ class AudioController(object):
             )
             return None
         elif isinstance(loaded_song, Song):
-            self.playlist.add(loaded_song)
+            added = [loaded_song]
             print(
                 f"{user} queued {loaded_song.title!r}"
                 f" by {loaded_song.uploader or 'unknown'}"
                 f" ({loaded_song.host.name}) in guild {self.guild.name!r}"
             )
         else:
-            for song in loaded_song:
-                self.playlist.add(song)
+            added = list(loaded_song)
             count = len(loaded_song)
             if count == 1:
                 # special-case one-item playlists
@@ -528,11 +613,7 @@ class AudioController(object):
                 )
                 loaded_song = PLAYLIST
 
-        self.pickle_playlist()
-        if self.current_song is None:
-            await self.play_song(self.playlist[0])
-        else:
-            self.preload_queue()
+        await self.queue(added)
 
         return loaded_song
 
@@ -581,9 +662,7 @@ class AudioController(object):
             songs += await loader.load_local_songs(tracks[:1])
             tail = tracks[1:]
             if songs[0] is not None:
-                self.playlist.add(songs[0])
-                self.pickle_playlist()
-                await self.play_song(self.playlist[0])
+                await self.queue(songs[:1])
 
         loaded_tail = await loader.load_local_songs(tail)
         songs += loaded_tail
@@ -592,14 +671,7 @@ class AudioController(object):
         if not added:
             return songs
 
-        for song in added:
-            self.playlist.add(song)
-        self.pickle_playlist()
-
-        if self.current_song is None:
-            await self.play_song(self.playlist[0])
-        else:
-            self.preload_queue()
+        await self.queue(added)
 
         return songs
 
@@ -620,7 +692,7 @@ class AudioController(object):
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    async def _preload_queue(self):
+    async def _preload_songs(self):
         rerun_needed = False
         for song in list(
             islice(self.playlist.playque, 1, config.MAX_SONG_PRELOAD)
@@ -633,19 +705,19 @@ class AudioController(object):
                     # already removed
                     pass
         if rerun_needed:
-            self.add_task(self._preload_queue())
+            self.add_task(self._preload_songs())
 
-    def preload_queue(self):
+    def _preload_queue(self):
         """Preloads the first MAX_SONG_PRELOAD songs asynchronously"""
-        self.add_task(self._preload_queue())
+        self.add_task(self._preload_songs())
 
-    def stop_player(self):
+    def stop(self):
         """Stops the player and removes all songs from the queue"""
         self._stopping = True
         # whatever starts after this is a new session, not a track
         # change - see play_song()
         self._playing = False
-        self.pickle_playlist()
+        self._pickle_playlist()
         self.playlist.loop = LoopMode.OFF
         self.playlist.clear()
         self.playlist.next()
@@ -667,7 +739,7 @@ class AudioController(object):
         else:
             self._next_song = prev_song
             self.guild.voice_client.stop()
-        self.pickle_playlist()
+        self._pickle_playlist()
         return True
 
     async def timeout_handler(self):
@@ -700,8 +772,8 @@ class AudioController(object):
         # sampled before the teardown below wipes both - see the
         # no-connection branch
         had_session = self._playing or bool(self.playlist)
-        self.pickle_playlist()
-        self.stop_player()
+        self._pickle_playlist()
+        self.stop()
         await self.update_view(None)
         # Cancelled here rather than after the disconnect below, so
         # the no-connection branch cancels it too. timeout_handler()

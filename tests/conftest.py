@@ -75,3 +75,27 @@ def config_factory(tmp_path, monkeypatch):
         return cfg
 
     return build
+
+
+@pytest.fixture
+def controller_and_stub(tmp_path):
+    """A real AudioController over a stub loader, run from tmp_path.
+
+    See tests/controller_seam.py: the stub replaces musicbot.loader
+    (the one import with side effects) for this test only, and the
+    controller's backup/ directory lands in tmp_path, not the repo.
+    """
+    from controller_seam import controller_seam
+
+    with controller_seam(tmp_path) as built:
+        yield built
+
+
+@pytest.fixture
+def controller(controller_and_stub):
+    return controller_and_stub[0]
+
+
+@pytest.fixture
+def stub_loader(controller_and_stub):
+    return controller_and_stub[1]
