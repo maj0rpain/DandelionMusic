@@ -876,7 +876,9 @@ async def _saved_playlist_db(ac, guild_id, name, entries):
     async with engine.connect() as conn:
         await conn.run_sync(settings.run_migrations)
     factory = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-    await ac.playlists.save(factory, guild_id, name, entries)
+    await ac.playlists.save(
+        factory, ac.playlists.PlaylistRef(guild_id, name), entries
+    )
     return engine, factory
 
 
@@ -921,8 +923,10 @@ def _queue_saved_playlist_song(controller, from_saved_playlist=True):
                 ]
             )
             await _drain(controller)
-            playlist = await ac.playlists.get(factory, "1234", "mix")
-            return ac.playlists.entries(playlist), _titles(controller)
+            contents = await ac.playlists.get(
+                factory, ac.playlists.PlaylistRef("1234", "mix")
+            )
+            return contents.entries, _titles(controller)
         finally:
             await engine.dispose()
 
