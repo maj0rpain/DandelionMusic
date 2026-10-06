@@ -856,20 +856,6 @@ class AudioController(object):
         ):
             await self.udisconnect("inactivity timeout")
 
-    async def uconnect(self, ctx):
-        author_vc = ctx.author.voice
-        bot_vc = self.guild.voice_client
-
-        if not author_vc:
-            raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
-
-        if bot_vc is None:
-            await self.register_voice_channel(author_vc.channel)
-        else:
-            raise CheckError(config.ALREADY_CONNECTED_MESSAGE)
-        # self.load_pickle_playlist()
-        return True
-
     async def udisconnect(self, reason: str):
         # sampled before the teardown below wipes both - see the
         # no-connection branch

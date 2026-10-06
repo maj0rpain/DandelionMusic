@@ -9,6 +9,7 @@ from config import config
 from musicbot.bot import MusicBot
 from musicbot.settings import ConversionError
 from musicbot.utils import (
+    CheckError,
     dj_check,
     get_audiocontroller,
     get_settings,
@@ -78,14 +79,15 @@ class General(commands.Cog):
         # reset() disposes of the old controller, which disconnects it -
         # so not here as well: a second udisconnect() would back the
         # already-cleared queue up over the one d!restore reloads
-        audiocontroller = await ctx.bot.sessions.reset(
-            ctx.guild, "reset command"
-        )
+        await ctx.bot.sessions.reset(ctx.guild, "reset command")
         if was_connected:
             # bot was connected and need some rest
             await asyncio.sleep(1)
 
-        await audiocontroller.uconnect(ctx)
+        if ctx.guild.voice_client is not None:
+            # join_voice() would do nothing, or move the bot
+            raise CheckError(config.ALREADY_CONNECTED_MESSAGE)
+        await join_voice(ctx)
         await ctx.send(
             "{} Connected to {}".format(
                 ":white_check_mark:", ctx.author.voice.channel.name

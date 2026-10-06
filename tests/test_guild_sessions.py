@@ -8,6 +8,7 @@ needs Discord or a database.
 
 import asyncio
 
+import discord
 import pytest
 
 from musicbot.sessions import GuildSessions
@@ -19,6 +20,7 @@ class FakeGuild:
         self.name = f"guild {guild_id}"
         self.voice_channels = []
         self.voice_client = None
+        self.me = None
 
     def get_channel(self, channel_id):
         return None
@@ -251,11 +253,10 @@ def test_on_guild_remove_discards_the_guilds_session(sessions):
 
 
 class ResettableController(FakeController):
-    """Enough of a controller for d!reset: disconnect, then connect."""
+    """Enough of a controller for d!reset: dispose() disconnects."""
 
     def __init__(self, guild):
         super().__init__(guild)
-        self.connected_from = None
         self.disconnects = []
 
     async def udisconnect(self, reason):
@@ -267,19 +268,38 @@ class ResettableController(FakeController):
         await self.udisconnect(reason)
         await super().dispose(reason)
 
-    async def uconnect(self, ctx):
-        self.connected_from = ctx
+
+class FakeVoiceChannel:
+    """The user's voice channel: connect() joins it, or raises `fail`."""
+
+    def __init__(self, guild, name="General", fail=None):
+        self.guild = guild
+        self.name = name
+        self.fail = fail
+        self.connects = 0
+
+    def permissions_for(self, member):
+        import types
+
+        return types.SimpleNamespace(connect=True, speak=True)
+
+    async def connect(self, **kwargs):
+        self.connects += 1
+        if self.fail is not None:
+            raise self.fail
+        self.guild.voice_client = object()
 
 
-def test_reset_command_replaces_the_controller_and_keeps_settings():
-    """d!reset goes through the registry: the old controller is
-    disposed of, a fresh one is connected, the settings stay."""
+def run_reset(guild, channel):
+    """Runs d!reset in `guild` for a user in `channel`; returns the
+    old controller, its settings, the replies, and the CheckError
+    message reset raised (None if it raised nothing)."""
     import types
 
     from musicbot.commands.general import General
+    from musicbot.utils import CheckError
 
     sessions = GuildSessions(ResettableController, load_settings)
-    guild = FakeGuild(1)
     sent = []
 
     async def defer():
@@ -298,24 +318,74 @@ def test_reset_command_replaces_the_controller_and_keeps_settings():
             defer=defer,
             send=send,
             author=types.SimpleNamespace(
-                voice=types.SimpleNamespace(
-                    channel=types.SimpleNamespace(name="General")
-                )
+                voice=types.SimpleNamespace(channel=channel)
             ),
         )
-        await General._reset.callback(General(bot), ctx)
-        return old, settings, ctx
+        try:
+            await General._reset.callback(General(bot), ctx)
+        except CheckError as e:
+            return old, settings, str(e)
+        return old, settings, None
 
-    old, settings, ctx = asyncio.run(scenario())
+    old, settings, refusal = asyncio.run(scenario())
+    return sessions, old, settings, sent, refusal
 
-    new = sessions.controller(guild)
+
+def test_reset_command_replaces_the_controller_and_keeps_settings():
+    """d!reset goes through the registry: the old controller is
+    disposed of, the bot joins the user's channel, the settings stay."""
+    guild = FakeGuild(1)
+    channel = FakeVoiceChannel(guild)
+
+    sessions, old, settings, sent, refusal = run_reset(guild, channel)
+
+    assert refusal is None
     assert old.disposed
     # once, through dispose(): a second udisconnect() would back the
     # already-cleared queue up over the one d!restore reloads
     assert old.disconnects == ["reset command"]
-    assert new is not old
-    assert new.connected_from is ctx
+    assert sessions.controller(guild) is not old
     assert sessions.settings(guild) is settings
+    assert channel.connects == 1
+    assert guild.voice_client is not None
+    assert sent == [":white_check_mark: Connected to General"]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [asyncio.TimeoutError(), discord.ClientException("x")],
+)
+def test_reset_tells_the_user_when_the_voice_connect_fails(error, capsys):
+    from config import config
+
+    guild = FakeGuild(1)
+    channel = FakeVoiceChannel(guild, fail=error)
+
+    _, _, _, sent, refusal = run_reset(guild, channel)
+
+    assert refusal == config.VOICE_CONNECT_FAILED
+    assert channel.connects == 1
+    assert sent == []
+
+
+def test_reset_refuses_when_the_bot_is_still_in_voice(monkeypatch):
+    """A voice client the reset did not clear: reset refuses rather
+    than claim it connected, and connects nothing."""
+    from config import config
+
+    async def no_sleep(_):
+        pass
+
+    monkeypatch.setattr(asyncio, "sleep", no_sleep)
+    guild = FakeGuild(1)
+    guild.voice_client = object()
+    channel = FakeVoiceChannel(guild)
+
+    _, _, _, sent, refusal = run_reset(guild, channel)
+
+    assert refusal == config.ALREADY_CONNECTED_MESSAGE
+    assert channel.connects == 0
+    assert sent == []
 
 
 def test_button_plugin_ignores_a_message_from_an_unregistered_guild():
