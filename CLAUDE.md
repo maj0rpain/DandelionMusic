@@ -30,7 +30,7 @@ Always pass `--repo maj0rpain/DandelionMusic` to `gh pr create`: bare `gh` resol
 - `musicbot/loader.py` - yt-dlp extraction in a worker process; calling it before `init()` raises `LoaderNotRunning`.
 - `musicbot/linkutils.py` - URL classification and Spotify resolution.
 - `musicbot/library_browse.py` - the library browse cursor; `LibraryBrowseView` is its Discord adapter.
-- `musicbot/settings.py` - SQLAlchemy models, auto-migrations, `d!settings` converters, guild whitelist.
+- `musicbot/settings.py` - SQLAlchemy models, auto-migrations, guild whitelist; the `SETTINGS` table of `SettingDescriptor`s is the single place a guild setting is described (its column aside): it drives defaults, conversion, the `d!setting show` embed and the generated `d!setting` subcommands.
 - `musicbot/commands/` - the `music`, `general`, `developer` cogs.
 - `musicbot/plugins/button.py` - optional reaction-button plugin (`ENABLE_BUTTON_PLUGIN`).
 - `config/config.py` - `Config`: class attributes are the settings schema and defaults, overridden from `.env`.
