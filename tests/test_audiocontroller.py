@@ -9,6 +9,7 @@ directory set to tmp_path so the controller's backup/ lands there.
 import asyncio
 import pickle
 import sys
+import threading
 from pathlib import Path
 
 import pytest
@@ -566,8 +567,6 @@ def test_attach_view_records_an_interactions_original_response(controller):
 def test_dispose_cancels_the_timer_and_every_pending_task(
     controller, monkeypatch
 ):
-    import concurrent.futures
-
     from config import config
 
     monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
@@ -578,43 +577,263 @@ def test_dispose_cancels_the_timer_and_every_pending_task(
         timer_task = controller.timer._task
         controller.add_task(asyncio.sleep(3600))
         (pending_task,) = controller._tasks
-        # what add_task() records when called off the loop's thread
-        pending_future = concurrent.futures.Future()
-        controller._tasks.add(pending_future)
 
         await controller.dispose()
         await _settle()
-        return timer_task, pending_task, pending_future
+        return timer_task, pending_task
 
-    timer_task, pending_task, pending_future = asyncio.run(run())
+    timer_task, pending_task = asyncio.run(run())
 
     assert timer_task.cancelled()
     assert pending_task.cancelled()
-    assert pending_future.cancelled()
     assert controller.guild.voice_client.disconnected
 
 
-def _next_song_stderr(controller, capsys, error):
+class _RecordingLoop:
+    """Stands in for bot.loop: records call_soon_threadsafe and runs
+    nothing."""
+
+    def __init__(self):
+        self.calls = []
+
+    def call_soon_threadsafe(self, callback, *args):
+        self.calls.append((callback, args))
+
+
+def _in_thread(fn, *args):
+    """Runs fn(*args) on a fresh plain thread, as discord.py's audio
+    thread would; returns (thread id, exception or None)."""
+    outcome = {}
+
+    def body():
+        outcome["thread"] = threading.get_ident()
+        try:
+            fn(*args)
+        except BaseException as e:  # noqa: B036 - reported to the test
+            outcome["error"] = e
+
+    thread = threading.Thread(target=body)
+    thread.start()
+    thread.join()
+    return outcome["thread"], outcome.get("error")
+
+
+def _end_track(voice_client):
+    """Ends the playing track as the audio itself running out does:
+    the player goes idle, and the track's `after` callback is handed
+    back for the test to fire from whichever thread it likes."""
+    voice_client.playing = False
+    return voice_client.detach_after()
+
+
+def _record_threads(controller, monkeypatch):
+    """Wraps the queue writes and the pickle to record the thread
+    each one runs on."""
+    seen = []
+
+    def recording(name, original):
+        def wrapper(*args, **kwargs):
+            seen.append((name, threading.get_ident()))
+            return original(*args, **kwargs)
+
+        return wrapper
+
+    monkeypatch.setattr(
+        controller,
+        "_pickle_playlist",
+        recording("pickle", controller._pickle_playlist),
+    )
+    # on the class: the playlist itself is pickled, and a wrapper set
+    # on the instance would be pickled along with it
+    playlist_type = type(controller.playlist)
+    for name in ("next", "add_name"):
+        monkeypatch.setattr(
+            playlist_type,
+            name,
+            recording(name, getattr(playlist_type, name)),
+        )
+    return seen
+
+
+def test_the_after_callback_only_hands_the_track_end_to_the_loop(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def start():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        return _end_track(controller.guild.voice_client)
+
+    after = asyncio.run(start())
+    seen = _record_threads(controller, monkeypatch)
+    fake_loop = controller.bot.loop = _RecordingLoop()
+
+    _, error = _in_thread(after, None)
+
+    assert error is None
+    assert fake_loop.calls == [
+        (controller._on_track_end, (None, controller._generation))
+    ]
+    assert seen == []
+    assert _titles(controller) == ["first", "second"]
+    assert not (tmp_path / "backup" / "playlist_1234.pickle").exists()
+
+
+def test_a_track_end_writes_the_queue_and_backup_only_on_the_loop(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    seen = _record_threads(controller, monkeypatch)
+
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
-        controller.next_song(error)
+        await controller.ensure_playing()
+        after = _end_track(controller.guild.voice_client)
+        _in_thread(after, None)
+        await _settle()
+        return threading.get_ident()
+
+    loop_thread = asyncio.run(run())
+
+    assert _played(controller) == ["first", "second"]
+    assert {name for name, _ in seen} == {"pickle", "next", "add_name"}
+    assert {thread for _, thread in seen} == {loop_thread}
+
+
+def _track_end_stderr(controller, capsys, monkeypatch, error):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second", "third")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        after = _end_track(controller.guild.voice_client)
+        _in_thread(after, error)
         await _settle()
 
     asyncio.run(run())
     return capsys.readouterr().err
 
 
-def test_a_track_ended_by_an_error_logs_the_error_to_stderr(
-    controller, capsys
+def test_a_track_ended_by_an_error_logs_the_error_and_advances_once(
+    controller, capsys, monkeypatch
 ):
-    err = _next_song_stderr(controller, capsys, RuntimeError("boom"))
+    err = _track_end_stderr(
+        controller, capsys, monkeypatch, RuntimeError("boom")
+    )
 
     assert "Playback error in guild 1234: RuntimeError('boom')" in err
+    assert _played(controller) == ["first", "second"]
+    assert _titles(controller) == ["second", "third"]
 
 
 def test_a_track_ended_without_an_error_logs_no_playback_error(
-    controller, capsys
+    controller, capsys, monkeypatch
 ):
-    err = _next_song_stderr(controller, capsys, None)
+    err = _track_end_stderr(controller, capsys, monkeypatch, None)
 
     assert "Playback error" not in err
+    assert _played(controller) == ["first", "second"]
+
+
+def test_next_song_off_the_loop_raises(controller):
+    _queue(controller, "first", "second")
+
+    _, error = _in_thread(controller.next_song)
+
+    assert isinstance(error, RuntimeError)
+    assert _titles(controller) == ["first", "second"]
+
+
+def test_a_track_end_from_a_replaced_track_changes_nothing(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    voice_client = controller.guild.voice_client
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        seen = _record_threads(controller, monkeypatch)
+        controller._on_track_end(None, controller._generation - 1)
+        await _settle()
+        return seen
+
+    seen = asyncio.run(run())
+
+    assert seen == []
+    assert _titles(controller) == ["first", "second"]
+    assert voice_client.stopped == 0
+    assert voice_client.is_playing()
+    assert _played(controller) == ["first"]
+    assert not (tmp_path / "backup" / "playlist_1234.pickle").exists()
+
+
+def test_a_stop_skips_the_backup_after_the_hop(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        controller.stop()
+        # stop() snapshots the queue itself; what follows is the hop
+        seen = _record_threads(controller, monkeypatch)
+        await _settle()
+        return seen
+
+    seen = asyncio.run(run())
+
+    assert [name for name, _ in seen if name == "pickle"] == []
+    assert controller.guild.voice_client.stopped == 1
+
+
+def test_the_idle_timer_starts_after_the_last_track_ends(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "only")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        assert controller.timer._task is None
+        after = _end_track(controller.guild.voice_client)
+        _in_thread(after, None)
+        await _settle()
+        return controller.timer._task
+
+    timer_task = asyncio.run(run())
+
+    assert timer_task is not None
+    assert _titles(controller) == []
+
+
+def test_the_after_callback_drops_the_track_end_once_the_loop_is_closed(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def start():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        return _end_track(controller.guild.voice_client)
+
+    # asyncio.run() closes its loop on the way out, as bot shutdown does
+    after = asyncio.run(start())
+    assert controller.bot.loop.is_closed()
+
+    _, error = _in_thread(after, None)
+
+    assert error is None
+    assert _titles(controller) == ["first", "second"]
+    assert _played(controller) == ["first"]

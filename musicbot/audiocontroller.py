@@ -102,13 +102,16 @@ class AudioController(object):
         self.pickle_file = Path("backup") / f"playlist_{guild.id}.pickle"
         self.pickle_file.parent.mkdir(parents=True, exist_ok=True)
         self._next_song = None
+        # bumped by play_song() for every track it starts; a track
+        # end carries the generation it was started as
+        self._generation = 0
         self.guild = guild
 
         # True from the moment playback starts until the queue runs
         # dry or the player is stopped - see play_song(). is_active()
-        # cannot stand in for this: by the time next_song() advances
+        # cannot stand in for this: by the time _advance() moves
         # the queue, discord.py has already cleared the player state
-        # (see next_song()'s own comment below), so is_active() reads
+        # (see _advance()'s own comment below), so is_active() reads
         # False on an ordinary track change just as it does when
         # nothing was playing at all.
         self._playing = False
@@ -411,30 +414,63 @@ class AudioController(object):
         ignoring a single-track loop"""
         self.next_song(forced=True)
 
-    def next_song(self, error=None, *, forced=False):
-        """Invoked after a song is finished
-        Plays the next song if there is one"""
+    def next_song(self, *, forced=False):
+        """Ends the current track and moves on to the next one. Runs
+        on the event loop only - raises RuntimeError anywhere else.
 
-        if error is not None:
-            # a plain print: this runs on discord.py's audio thread
-            print(
-                f"Playback error in guild {self.guild.id}: {error!r}",
-                file=sys.stderr,
-            )
-
-        # the teardown callback of a stop() - one-shot, see stop()
-        teardown, self._stopping = self._stopping, False
-        if teardown and self.is_active():
-            # it fired late, on the audio thread, after a new track
-            # had already started: that track is not this callback's
-            # to end
-            return
+        With a track playing, it picks the next track and stops the
+        voice client: the after= hop of that track (see
+        _on_track_end()) does the advance. With nothing playing, it
+        advances directly."""
+        asyncio.get_running_loop()
 
         if self.is_active():
             self._next_song = self.playlist.next(forced)
             self.guild.voice_client.stop()
             return
 
+        self._advance(forced)
+
+    def _track_end_callback(self, generation: int):
+        """The after= callable for the track play_song() starts as
+        `generation`. discord.py calls it on its audio-player thread,
+        so it does only thread-safe work: print the error, then hand
+        the track end to the loop."""
+
+        def after(error):
+            if error is not None:
+                print(
+                    f"Playback error in guild {self.guild.id}: {error!r}",
+                    file=sys.stderr,
+                )
+            try:
+                self.bot.loop.call_soon_threadsafe(
+                    self._on_track_end, error, generation
+                )
+            except RuntimeError:
+                # the loop is closed: the bot is shutting down, and
+                # there is nothing left to advance to
+                pass
+
+        return after
+
+    def _on_track_end(self, error, generation: int):
+        """Runs on the loop once the track play_song() started as
+        `generation` has ended, and advances the queue."""
+        asyncio.get_running_loop()
+
+        # the teardown callback of a stop() - one-shot, see stop()
+        teardown, self._stopping = self._stopping, False
+        if generation != self._generation:
+            # a newer track has already started: it is not this
+            # callback's to end
+            return
+
+        self._advance(teardown=teardown)
+
+    def _advance(self, forced=False, *, teardown=False):
+        """Moves the queue on past the finished track and starts the
+        next one, or the idle timer when there is none. Loop only."""
         if self.playlist:
             # current_song is unusable here: is_active() is always
             # False at this point, so it would always return None.
@@ -502,14 +538,17 @@ class AudioController(object):
         # Claimed before play() rather than after it, because play()
         # starts the audio thread there and then: a source that yields
         # nothing (a truncated file, a stream URL that died) ends
-        # immediately and runs next_song() on that thread, which with
-        # an empty queue clears this flag. Reading it afterwards would
+        # immediately, and its after= hop advances an empty queue,
+        # which clears this flag. Reading it afterwards would
         # see the value that callback left, announce a track that has
         # already finished, and leave the flag set with nothing
         # playing - silencing the next genuine start. A play() that
         # raises below disconnects, and stop() clears it there.
         was_idle = not self._playing
         self._playing = True
+        # a track end from an earlier track arriving after this one
+        # has started must not end it - see _on_track_end()
+        self._generation += 1
         try:
             self.guild.voice_client.play(
                 discord.PCMVolumeTransformer(
@@ -521,7 +560,7 @@ class AudioController(object):
                     ),
                     float(self.volume) / 100.0,
                 ),
-                after=self.next_song,
+                after=self._track_end_callback(self._generation),
             )
         except discord.ClientException:
             await self.udisconnect("playback error")
@@ -705,26 +744,16 @@ class AudioController(object):
         return songs
 
     def add_task(self, coro: Coroutine):
-        # next_song is invoked by discord.py as the `after` callback
-        # of voice_client.play(), which runs on its own audio-player
-        # thread rather than the event loop thread. loop.create_task()
-        # is not thread-safe, so detect that case and use the
-        # thread-safe scheduling API instead.
-        try:
-            asyncio.get_running_loop()
-        except RuntimeError:
-            future = asyncio.run_coroutine_threadsafe(coro, self.bot.loop)
-            self._tasks.add(future)
-            future.add_done_callback(self._tasks.discard)
-            return
+        # loop only: discord.py's audio thread never reaches this - its
+        # after= callback only hops to the loop (see
+        # _track_end_callback()), and next_song() runs on the loop
         task = self.bot.loop.create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
     async def dispose(self, reason: str = "left guild"):
         """Tear this controller down for good: disconnect, then cancel
-        every task it still has pending - asyncio tasks and the
-        concurrent futures add_task() makes off the loop's thread."""
+        every task add_task() still has pending."""
         await self.udisconnect(reason)
         for task in list(self._tasks):
             task.cancel()
@@ -762,7 +791,7 @@ class AudioController(object):
             return
 
         # only stopping an active voice client runs an `after`
-        # callback; its next_song() consumes this - see next_song()
+        # callback; its _on_track_end() consumes this - see there
         self._stopping = True
         self.guild.voice_client.stop()
 

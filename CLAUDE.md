@@ -38,7 +38,7 @@ Always pass `--repo maj0rpain/DandelionMusic` to `gh pr create`: bare `gh` resol
 - `Config` is read-only; runtime state goes in the DB - see ADR-0001 (`docs/adr/0001-config-is-read-only.md`).
 - A new setting is a `Config` class attribute with a comment directly above it (parsed by `get_comments()`).
 - Don't move `_help`/`_help_autocomplete` into `MusicBot`; they stay module-level (`musicbot/bot.py`).
-- `next_song` runs on discord.py's audio thread; schedule from it via `add_task` (`musicbot/audiocontroller.py`).
+- discord.py's `after=` callback runs on its audio thread; it only hops to the loop (`call_soon_threadsafe`). `next_song` and everything it calls are loop-only (`musicbot/audiocontroller.py`).
 - `musicbot/library_browse.py` imports only `musicbot.library` and `typing` (`tests/test_library_browse.py` asserts it) - don't add imports.
 
 ## Agent skills
