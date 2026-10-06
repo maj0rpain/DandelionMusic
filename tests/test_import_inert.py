@@ -57,6 +57,7 @@ print(json.dumps({
 """
 
 LIFECYCLE_PROBE = """
+import asyncio
 import json
 import multiprocessing
 
@@ -69,17 +70,55 @@ def worker_state_is_set():
     return loader._loop is not None and loader._downloader is not None
 
 
+async def _observe_call(call):
+    try:
+        await call()
+    except Exception as e:
+        raised = type(e).__name__
+        is_runtime_error = isinstance(e, RuntimeError)
+    else:
+        raised, is_runtime_error = None, False
+    return {
+        "raised": raised,
+        "is_runtime_error": is_runtime_error,
+        "default_executor_unused": (
+            asyncio.get_running_loop()._default_executor is None
+        ),
+    }
+
+
+def calls_without_worker():
+    return {
+        "load_song": asyncio.run(
+            _observe_call(
+                lambda: loader.load_song("https://example.com/a.mp3")
+            )
+        ),
+        "search_youtube": asyncio.run(
+            _observe_call(lambda: loader.search_youtube("a song"))
+        ),
+    }
+
+
 if __name__ == "__main__":
+    before_init = calls_without_worker()
     loader.shutdown()  # safe without a prior init()
     loader.init()
     worker_ready = loader._executor.submit(worker_state_is_set).result()
     children_after_init = len(multiprocessing.active_children())
     loader.init()
     children_after_second_init = len(multiprocessing.active_children())
+    run_sync_reaches_worker = asyncio.run(
+        loader._run_sync(worker_state_is_set)
+    )
     loader.shutdown()
     children_after_shutdown = len(multiprocessing.active_children())
+    after_shutdown = calls_without_worker()
     loader.shutdown()  # and a second time
     print(json.dumps({
+        "before_init": before_init,
+        "after_shutdown": after_shutdown,
+        "run_sync_reaches_worker": run_sync_reaches_worker,
         "worker_ready": worker_ready,
         "children_after_init": children_after_init,
         "children_after_second_init": children_after_second_init,
@@ -228,3 +267,27 @@ def test_loader_lifecycle_second_init_spawns_no_second_worker(lifecycle):
 
 def test_loader_lifecycle_shutdown_leaves_no_children(lifecycle):
     assert lifecycle["children_after_shutdown"] == 0
+
+
+@pytest.mark.parametrize("when", ["before_init", "after_shutdown"])
+@pytest.mark.parametrize("call", ["load_song", "search_youtube"])
+def test_loader_lifecycle_call_outside_init_raises_loader_not_running(
+    lifecycle, when, call
+):
+    observed = lifecycle[when][call]
+    assert (observed["raised"], observed["is_runtime_error"]) == (
+        "LoaderNotRunning",
+        True,
+    )
+
+
+@pytest.mark.parametrize("when", ["before_init", "after_shutdown"])
+@pytest.mark.parametrize("call", ["load_song", "search_youtube"])
+def test_loader_lifecycle_call_outside_init_uses_no_thread_pool(
+    lifecycle, when, call
+):
+    assert lifecycle[when][call]["default_executor_unused"] is True
+
+
+def test_loader_lifecycle_run_sync_reaches_the_worker_after_init(lifecycle):
+    assert lifecycle["run_sync_reaches_worker"] is True
