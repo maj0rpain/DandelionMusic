@@ -12,6 +12,7 @@ from musicbot.utils import (
     dj_check,
     get_audiocontroller,
     get_settings,
+    join_voice,
     voice_check,
 )
 
@@ -34,7 +35,6 @@ class General(commands.Cog):
     def __init__(self, bot: MusicBot):
         self.bot = bot
 
-    # logic is split to uconnect() for wide usage
     @commands.hybrid_command(
         name="connect",
         description=config.HELP_CONNECT_LONG,
@@ -43,10 +43,10 @@ class General(commands.Cog):
     )
     @commands.check(voice_check)
     async def _connect(self, ctx):
-        # connect only if not connected yet
-        if not ctx.guild.voice_client:
-            audiocontroller = get_audiocontroller(ctx)
-            await audiocontroller.uconnect(ctx, move=True)
+        # connects, or moves the bot out of a channel with only bots
+        # in it; otherwise the bot stays where it is
+        get_audiocontroller(ctx)  # CheckError while the bot is starting
+        await join_voice(ctx)
         await ctx.send("Connected.")
 
     @commands.hybrid_command(

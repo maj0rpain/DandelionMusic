@@ -14,6 +14,9 @@ the dev group has no pytest-asyncio.
 import asyncio
 from types import SimpleNamespace
 
+import discord
+
+from config import config
 from musicbot.audiocontroller import MusicButton
 from musicbot.bot import Context
 from musicbot.utils import CheckError
@@ -21,16 +24,39 @@ from musicbot.utils import CheckError
 DJ_ROLE = 99
 
 
+class VoiceChannel:
+    """The clicking user's voice channel. A connect is logged in the
+    guild's event log, or raises the guild's `fail`."""
+
+    def __init__(self, guild):
+        self.guild = guild
+        self.members = []
+
+    def permissions_for(self, member):
+        return SimpleNamespace(connect=True, speak=True)
+
+    async def connect(self, **kwargs):
+        if self.guild.fail is not None:
+            raise self.guild.fail
+        self.guild.events.append("connect")
+        self.guild.voice_client = SimpleNamespace(channel=self)
+
+
 class FakeContext:
     """Enough of a component-click Context for the real
     Context.send and dj_check: no controller is registered, so a send
     goes to the interaction; the guild has a DJ role the author lacks
-    and the author is neither an administrator nor the bot owner."""
+    and the author is neither an administrator nor the bot owner.
+    The bot is out of voice and the author is in a voice channel."""
 
     def __init__(self, interaction):
         self.interaction = interaction
         self.guild = interaction.guild
-        self.author = SimpleNamespace(id=1, roles=[])
+        self.author = SimpleNamespace(
+            id=1,
+            roles=[],
+            voice=SimpleNamespace(channel=VoiceChannel(self.guild)),
+        )
         self.channel = SimpleNamespace(
             permissions_for=lambda member: SimpleNamespace(administrator=False)
         )
@@ -42,7 +68,9 @@ class FakeContext:
             is_owner=is_owner,
             sessions=SimpleNamespace(
                 controller=lambda guild: None,
-                settings=lambda guild: SimpleNamespace(dj_role=DJ_ROLE),
+                settings=lambda guild: SimpleNamespace(
+                    dj_role=DJ_ROLE, user_must_be_in_vc=True
+                ),
             ),
         )
 
@@ -54,7 +82,9 @@ class FakeInteraction:
     """Records the direct response and every followup."""
 
     def __init__(self, custom_id="x"):
-        self.guild = SimpleNamespace(id=1)
+        self.guild = SimpleNamespace(
+            id=1, voice_client=None, me=None, events=[], fail=None
+        )
         self.user = SimpleNamespace(id=1)
         self.data = {"custom_id": custom_id}
         self.deferred = False
@@ -147,3 +177,35 @@ def test_an_admitted_click_runs_the_buttons_action():
 
     run(MusicButton(ran.append, check=admit).callback(inter))
     assert ran == [inter.ctx]
+
+
+def test_a_refused_dj_only_click_does_not_join_voice():
+    inter = FakeInteraction(custom_id="next")
+
+    run(MusicButton(lambda ctx: None, check=admit).callback(inter))
+    assert as_text(inter.followups) == [(config.NOT_A_DJ, {"ephemeral": True})]
+    assert inter.guild.events == []
+
+
+def test_an_admitted_click_joins_voice_before_its_action():
+    inter = FakeInteraction()
+
+    def action(ctx):
+        inter.guild.events.append("action")
+
+    run(MusicButton(action, check=admit).callback(inter))
+    assert inter.guild.events == ["connect", "action"]
+
+
+def test_a_failed_join_is_an_ephemeral_followup_and_skips_the_action(
+    capsys,
+):
+    inter = FakeInteraction()
+    inter.guild.fail = discord.ClientException("x")
+    ran = []
+
+    run(MusicButton(ran.append, check=admit).callback(inter))
+    assert as_text(inter.followups) == [
+        (config.VOICE_CONNECT_FAILED, {"ephemeral": True})
+    ]
+    assert ran == []

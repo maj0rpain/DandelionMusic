@@ -46,9 +46,19 @@ class FakeMessage:
 
 
 class FakeContext:
+    """The bot is already in voice, so a pick needs no join."""
+
     def __init__(self, user_id=OWNER):
         self.author = SimpleNamespace(id=user_id)
         self.interaction = None
+        self.guild = SimpleNamespace(voice_client=SimpleNamespace())
+        self.bot = SimpleNamespace(
+            sessions=SimpleNamespace(
+                settings=lambda guild: SimpleNamespace(
+                    user_must_be_in_vc=False
+                )
+            )
+        )
         self.sent = []
 
         @asynccontextmanager

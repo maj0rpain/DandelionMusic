@@ -13,7 +13,7 @@ from sqlalchemy.orm import sessionmaker
 
 from config import config
 from config.utils import ensure_sqlite_parent
-from musicbot.audiocontroller import VC_CONNECT_TIMEOUT, AudioController
+from musicbot.audiocontroller import AudioController
 from musicbot import library, linkutils, loader
 from musicbot.settings import (
     GuildSettings,
@@ -24,7 +24,7 @@ from musicbot.settings import (
     migrate_old_playlists,
 )
 from musicbot.sessions import GuildSessions
-from musicbot.utils import CheckError
+from musicbot.utils import VC_CONNECT_TIMEOUT, CheckError
 
 
 # Deliberately module-level, not a MusicBot method: discord.py decides
@@ -266,6 +266,13 @@ class Context(commands.Context):
             ctx.guild = interaction.guild
             ctx.channel = interaction.channel
             return ctx
+
+    async def defer(self, *, ephemeral: bool = False) -> None:
+        """Context.defer, but a second call does nothing: a command
+        body may defer an interaction that Music.cog_before_invoke
+        already deferred before joining voice."""
+        if self.interaction and not self.interaction.response.is_done():
+            await self.interaction.response.defer(ephemeral=ephemeral)
 
     async def response_send_message(self, *args, **kwargs):
         if self.interaction:

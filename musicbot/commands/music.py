@@ -39,8 +39,8 @@ class SearchView(View):
         self.ctx = ctx
         self.message = None
         # the single-pick claim. discord.py dispatches every click in
-        # its own task, and a button's play check (which can join
-        # voice) runs before the pick stops the view, so stop() alone
+        # its own task, and a button's checks and voice join run
+        # before the pick stops the view, so stop() alone
         # would let two quick clicks both queue. Taken in
         # interaction_check, before the first await of the click.
         self.picked = False
@@ -149,6 +149,14 @@ class Music(commands.Cog):
 
     async def cog_before_invoke(self, ctx):
         ctx.audiocontroller.command_channel = ctx
+        # Joining voice waits until here, after every check (command
+        # level dj_check included) has passed, so a refused command
+        # never makes the bot join. A slow connect must not push a
+        # slash command past Discord's 3-second deadline, so it is
+        # deferred first - publicly, as the reply that follows is.
+        if utils.join_needed(ctx):
+            await ctx.defer()
+            await utils.join_voice(ctx)
 
     @commands.hybrid_command(
         name="play",

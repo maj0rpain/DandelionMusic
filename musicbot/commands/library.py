@@ -16,6 +16,7 @@ from musicbot.utils import (
     CheckError,
     get_audiocontroller,
     owner_check,
+    join_voice,
     play_check,
 )
 
@@ -212,14 +213,15 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
     # was skipped), so it must not be something that can be consumed
     triples = list(triples)
 
-    # play_check() is inside this, not ahead of it: it connects to
-    # voice, and a failed connect raises asyncio.TimeoutError or
-    # discord.ClientException rather than CheckError. The placeholder
-    # above is a visible message now, so anything escaping here leaves
-    # it saying "Queueing..." forever - discord.py logs the traceback
-    # and the user is told nothing at all.
+    # The checks and the join are inside this, not ahead of it: the
+    # placeholder above is a visible message now, so anything
+    # escaping here leaves it saying "Queueing..." forever -
+    # discord.py logs the traceback and the user is told nothing at
+    # all. join_voice() turns a failed connect into a CheckError, so
+    # it is reported as one rather than as a song-info error.
     try:
         await play_check(ctx)
+        await join_voice(ctx)
         tracks = [library.song_uri(*triple) for triple in triples]
         songs = await ctx.audiocontroller.process_local_tracks(
             tracks, source, user=ctx.author
