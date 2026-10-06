@@ -272,7 +272,7 @@ def test_a_late_teardown_callback_does_not_overwrite_the_stop_backup(
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
         await controller.ensure_playing()
-        stale_after, voice_client._after = voice_client._after, None
+        stale_after = voice_client.detach_after()
         controller.stop()
         _queue(controller, "third", "fourth", "fifth")
         await controller.ensure_playing()
@@ -284,7 +284,10 @@ def test_a_late_teardown_callback_does_not_overwrite_the_stop_backup(
         return frozen
 
     assert asyncio.run(run()) == ["first", "second"]
-    assert _backup(tmp_path) == ["fifth"]
+    # the stale callback neither ended "third" nor used up the latch,
+    # so the skip after it - a genuine advance - snapshots
+    assert _played(controller) == ["first", "third", "fourth"]
+    assert _backup(tmp_path) == ["fourth", "fifth"]
 
 
 def test_restore_brings_back_the_queue_a_stop_cleared(

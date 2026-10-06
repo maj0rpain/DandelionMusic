@@ -127,6 +127,13 @@ class FakeVoiceClient:
         self.playing = True
         self._after = after
 
+    def detach_after(self):
+        """Takes the playing track's `after` callback without running
+        it, so a test can fire it late - as discord.py's audio thread
+        may, after the next track has already started."""
+        after, self._after = self._after, None
+        return after
+
     def stop(self):
         self.stopped += 1
         self.playing = False
