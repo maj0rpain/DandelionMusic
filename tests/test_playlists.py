@@ -112,6 +112,28 @@ def test_set_title_on_a_missing_playlist_does_nothing():
     assert run(test) == []
 
 
+def test_set_title_that_changes_nothing_leaves_the_blob_untouched():
+    # Same entries as _encode would write, but spaced differently, so a
+    # rewrite would show up as changed bytes.
+    blob = '[{"url":"https://a.example/1","title":"A"}]'
+
+    async def test(factory):
+        async with factory() as session:
+            session.add(
+                SavedPlaylist(guild_id=GUILD, name="mix", songs_json=blob)
+            )
+            await session.commit()
+        await playlists.set_title(
+            factory, PlaylistRef(GUILD, "mix"), A.url, "A"
+        )
+        await playlists.set_title(
+            factory, PlaylistRef(GUILD, "mix"), "https://other.example", "x"
+        )
+        return await stored_json(factory)
+
+    assert run(test) == blob
+
+
 def test_a_blob_in_todays_format_reads_back():
     blob = (
         '[{"url": "https://a.example/1", "title": "A"}, '

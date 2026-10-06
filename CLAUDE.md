@@ -25,6 +25,7 @@ Always pass `--repo maj0rpain/DandelionMusic` to `gh pr create`: bare `gh` resol
 - `musicbot/sessions.py` - `GuildSessions` (`bot.sessions`): each guild's settings and controller, their creation, lookup (`None` when not registered) and disposal.
 - `musicbot/audiocontroller.py` - per-guild playback state machine (voice, volume, loop, inactivity timer, playlist backup).
 - `musicbot/playlist.py` / `musicbot/song.py` - queue/history and per-track metadata.
+- `musicbot/playlists.py` - saved playlists: the only reader/writer of `SavedPlaylist.songs_json`; callers use `PlaylistEntry`/`PlaylistRef`.
 - `musicbot/loader.py` - yt-dlp extraction in a worker process; calling it before `init()` raises `LoaderNotRunning`.
 - `musicbot/linkutils.py` - URL classification and Spotify resolution.
 - `musicbot/library_browse.py` - the library browse cursor; `LibraryBrowseView` is its Discord adapter.

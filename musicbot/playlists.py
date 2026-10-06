@@ -144,7 +144,8 @@ async def _update(
     change: Callable[[List[PlaylistEntry]], None],
 ) -> None:
     """Loads the playlist's entries, lets ``change`` edit them in
-    place (or raise), and stores the result."""
+    place (or raise), and stores the result. A change that leaves
+    the entries as they were writes nothing."""
     async with session_factory() as session:
         playlist = (
             await session.execute(_lookup(guild_id, name))
@@ -152,7 +153,10 @@ async def _update(
         if playlist is None:
             raise PlaylistNotFound(name)
         songs = _decode(playlist.songs_json)
+        before = list(songs)
         change(songs)
+        if songs == before:
+            return
         playlist.songs_json = _encode(songs)
         await session.commit()
 

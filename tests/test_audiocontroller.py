@@ -923,5 +923,5 @@ def test_preloading_a_saved_playlist_song_refreshes_its_stored_title(
             await engine.dispose()
 
     assert asyncio.run(run()) == [
-        sys.modules["musicbot.playlists"].PlaylistEntry(url, stored_title)
+        ac.playlists.PlaylistEntry(url, stored_title)
     ]

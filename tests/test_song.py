@@ -4,6 +4,7 @@ import pickle
 
 from musicbot.linkutils import SiteTypes
 from musicbot.playlists import PlaylistRef
+from musicbot.settings import SavedPlaylist
 from musicbot.song import Song
 
 URL = "https://example.invalid/track"
@@ -31,7 +32,7 @@ def test_a_song_pickled_in_the_old_shape_loads_with_no_saved_playlist():
         uploader=None,
         duration=None,
         thumbnail=None,
-        playlist=None,
+        playlist=SavedPlaylist(guild_id="123", name="mix", songs_json="[]"),
     )
 
     restored = pickle.loads(pickle.dumps(old))
