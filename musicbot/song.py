@@ -8,10 +8,14 @@ from config import config
 from musicbot.linkutils import SiteTypes
 
 if TYPE_CHECKING:
-    from musicbot.settings import SavedPlaylist
+    from musicbot.playlists import PlaylistRef
 
 
 class Song:
+    # class-level, so a Song unpickled from a queue backup written
+    # before songs carried a PlaylistRef reads as having none
+    saved_playlist: Optional[PlaylistRef] = None
+
     def __init__(
         self,
         host: SiteTypes,
@@ -21,7 +25,7 @@ class Song:
         uploader: Optional[str] = None,
         duration: Optional[int] = None,
         thumbnail: Optional[str] = None,
-        playlist: Optional[SavedPlaylist] = None,
+        saved_playlist: Optional[PlaylistRef] = None,
     ):
         self.host = host
         self.webpage_url = webpage_url
@@ -30,7 +34,7 @@ class Song:
         self.uploader = uploader
         self.duration = duration
         self.thumbnail = thumbnail
-        self.playlist = playlist
+        self.saved_playlist = saved_playlist
 
     def format_output(self, playtype: str) -> discord.Embed:
         if self.host == SiteTypes.LOCAL_LIBRARY:
@@ -76,12 +80,6 @@ class Song:
             # last thumbnail has the best resolution
             data["thumbnail"] = thumbnails[-1]["url"]
 
-        from musicbot.settings import SavedPlaylist
-
-        if "playlist" in data and not isinstance(
-            data["playlist"], SavedPlaylist
-        ):
-            del data["playlist"]
         for k, v in data.items():
             if hasattr(self, k) and v:
                 setattr(self, k, v)

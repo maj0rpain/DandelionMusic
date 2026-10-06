@@ -49,8 +49,8 @@ def test_controller_starts_at_the_guild_default_volume(controller):
 
 def test_stub_loader_records_preload_calls(controller, stub_loader):
     song = object()
-    assert asyncio.run(stub_loader.preload(song, controller.bot)) is True
-    assert stub_loader.calls == [("preload", (song, controller.bot))]
+    assert asyncio.run(stub_loader.preload(song)) is True
+    assert stub_loader.calls == [("preload", (song,))]
 
 
 def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
@@ -860,3 +860,68 @@ def test_the_after_callback_drops_the_track_end_once_the_loop_is_closed(
     assert error is None
     assert _titles(controller) == ["first", "second"]
     assert _played(controller) == ["first"]
+
+
+async def _saved_playlist_db(ac, guild_id, name, entries):
+    """An in-memory database holding one saved playlist, built on the
+    playlists and settings modules the controller itself sees."""
+    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
+    from sqlalchemy.orm import sessionmaker
+    from sqlalchemy.pool import StaticPool
+
+    settings = sys.modules["musicbot.settings"]
+    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
+    async with engine.connect() as conn:
+        await conn.run_sync(settings.run_migrations)
+    factory = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
+    await ac.playlists.save(factory, guild_id, name, entries)
+    return engine, factory
+
+
+async def _drain(controller):
+    while controller._tasks:
+        await asyncio.gather(*controller._tasks)
+
+
+@pytest.mark.parametrize(
+    "from_saved_playlist, stored_title",
+    [(True, "fresh title"), (False, "stale title")],
+)
+def test_preloading_a_saved_playlist_song_refreshes_its_stored_title(
+    controller, from_saved_playlist, stored_title
+):
+    ac = sys.modules[type(controller).__module__]
+    url = "https://example.invalid/track"
+    _queue(controller, "current")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        engine, factory = await _saved_playlist_db(
+            ac, "1234", "mix", [ac.playlists.PlaylistEntry(url, "stale title")]
+        )
+        controller.bot.DbSession = factory
+        try:
+            controller.guild.voice_client.playing = True
+            await controller.queue(
+                [
+                    ac.Song(
+                        ac.SiteTypes.YT_DLP,
+                        url,
+                        title="fresh title",
+                        saved_playlist=(
+                            ac.playlists.PlaylistRef("1234", "mix")
+                            if from_saved_playlist
+                            else None
+                        ),
+                    )
+                ]
+            )
+            await _drain(controller)
+            playlist = await ac.playlists.get(factory, "1234", "mix")
+            return ac.playlists.entries(playlist)
+        finally:
+            await engine.dispose()
+
+    assert asyncio.run(run()) == [
+        sys.modules["musicbot.playlists"].PlaylistEntry(url, stored_title)
+    ]

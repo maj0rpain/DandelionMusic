@@ -468,7 +468,7 @@ class Music(commands.Cog):
                 get_site_type(entry.url),
                 entry.url,
                 title=entry.title,
-                playlist=playlist,
+                saved_playlist=playlists.PlaylistRef(str(ctx.guild.id), name),
             )
             for entry in playlists.entries(playlist)
         )

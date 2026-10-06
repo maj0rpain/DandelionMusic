@@ -16,7 +16,7 @@ from typing import (
 import discord
 from config import config
 
-from musicbot import loader, utils
+from musicbot import loader, playlists, utils
 from musicbot.song import Song
 from musicbot.linkutils import SiteTypes
 from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
@@ -518,7 +518,7 @@ class AudioController(object):
     async def play_song(self, song: Song):
         """Plays a song object"""
 
-        if not await loader.preload(song, self.bot):
+        if not await self._preload(song):
             if self.command_channel:
                 await self.command_channel.send(
                     f"{config.SONGINFO_ERROR}\n"
@@ -767,12 +767,30 @@ class AudioController(object):
         for task in list(self._tasks):
             task.cancel()
 
+    async def _preload(self, song: Song) -> bool:
+        """Preloads `song`; once that succeeds, refreshes its title in
+        the saved playlist it was queued from. The refresh is
+        best-effort: it never changes the result."""
+        if not await loader.preload(song):
+            return False
+        if song.saved_playlist is not None:
+            try:
+                await playlists.set_title(
+                    self.bot.DbSession,
+                    song.saved_playlist,
+                    song.webpage_url,
+                    song.title,
+                )
+            except Exception:
+                print_exc(file=sys.stderr)
+        return True
+
     async def _preload_songs(self):
         rerun_needed = False
         for song in list(
             islice(self.playlist.playque, 1, config.MAX_SONG_PRELOAD)
         ):
-            if not await loader.preload(song, self.bot):
+            if not await self._preload(song):
                 try:
                     self.playlist.playque.remove(song)
                     rerun_needed = True
