@@ -15,6 +15,7 @@ import discord
 import pytest
 import sqlalchemy
 from discord import AppCommandOptionType, ChannelType
+from discord.ext.commands.view import StringView
 
 from config import config
 from musicbot.commands.general import General
@@ -263,3 +264,99 @@ def test_a_slash_subcommand_takes_its_value_by_parameter_name(
     )
 
     assert sent[-1].startswith(f"Setting `{name}` updated to")
+
+
+TEXT_ID, VOICE_ID, ROLE_ID = (
+    100000000000000021,
+    100000000000000031,
+    100000000000000022,
+)
+
+
+def guild_channel(cls, channel_id, name):
+    "A real discord.py channel object, so the converters' type checks hold"
+    channel = cls.__new__(cls)
+    channel.id = channel_id
+    channel.name = name
+    return channel
+
+
+def prefix_ctx(sent, sett, argument):
+    """A context as a prefix command sees it: the text after the
+    subcommand's name, waiting to be converted"""
+    ctx = fake_ctx(sent, sett)
+    channels = {
+        TEXT_ID: guild_channel(discord.TextChannel, TEXT_ID, "music"),
+        VOICE_ID: guild_channel(discord.VoiceChannel, VOICE_ID, "Lounge"),
+    }
+    roles = {ROLE_ID: types.SimpleNamespace(id=ROLE_ID, name="DJ")}
+
+    async def allowed(ctx):
+        return True
+
+    ctx.guild.get_channel = channels.get
+    ctx.guild.get_thread = lambda thread_id: None
+    ctx.guild.get_role = roles.get
+    ctx.guild.voice_channels = [channels[VOICE_ID]]
+    ctx.bot.can_run = allowed
+    ctx.bot._before_invoke = ctx.bot._after_invoke = None
+    ctx.channel = types.SimpleNamespace(
+        permissions_for=lambda member: types.SimpleNamespace(
+            administrator=True
+        )
+    )
+    ctx.author = types.SimpleNamespace(id=1, roles=[])
+    ctx.message = types.SimpleNamespace(attachments=[])
+    ctx.view = StringView(argument)
+    ctx.command = None
+    ctx.interaction = None
+    return ctx
+
+
+@pytest.mark.parametrize(
+    "name, param, argument, confirmation, stored",
+    [
+        (
+            "command_channel",
+            "channel",
+            f"<#{TEXT_ID}>",
+            f"<#{TEXT_ID}>",
+            str(TEXT_ID),
+        ),
+        (
+            "command_channel",
+            "channel",
+            f"<#{VOICE_ID}>",
+            f"<#{VOICE_ID}>",
+            str(VOICE_ID),
+        ),
+        (
+            "start_voice_channel",
+            "channel",
+            "Lounge",
+            f"<#{VOICE_ID}>",
+            str(VOICE_ID),
+        ),
+        ("dj_role", "role", f"<@&{ROLE_ID}>", "DJ", str(ROLE_ID)),
+        ("user_must_be_in_vc", "value", "yes", "True", True),
+        ("announce_songs", "value", "off", "False", False),
+        ("button_emote", "emoji", THUMBS_UP, THUMBS_UP, THUMBS_UP),
+        ("default_volume", "value", "55", "55", 55),
+    ],
+)
+def test_a_prefix_subcommand_converts_its_argument(
+    name, param, argument, confirmation, stored
+):
+    """d!setting <name> <arg>: discord.py converts the text by the
+    subcommand's parameter type before the setting is updated"""
+    cog = General(None)
+    command = subcommand(cog, name)
+    command.cog = cog  # as bot.add_cog() binds it
+    sett = stored_settings()
+    sent = []
+
+    asyncio.run(command.invoke(prefix_ctx(sent, sett, argument)))
+
+    assert list(command.clean_params) == [param]
+    assert sent[-1] == f"Setting `{name}` updated to {confirmation}!"
+    assert getattr(sett, name) == stored
