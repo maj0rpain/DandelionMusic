@@ -35,9 +35,6 @@ from musicbot.linkutils import (
 if TYPE_CHECKING:
     from musicbot.bot import MusicBot
 
-sys.stdout = OutputWrapper(sys.stdout)
-sys.stderr = OutputWrapper(sys.stderr)
-
 _context = mp_context("spawn")
 
 
@@ -50,49 +47,72 @@ class LoaderProcess(_context.Process):
             pass
 
 
-_context.Process = LoaderProcess
+# Importing this module changes no process-global state: everything
+# below is None until init() (in the bot's process) or _init_worker()
+# (in the spawned extraction worker) sets it up.
+_executor: Optional[ProcessPoolExecutor] = None
+# the worker's own event loop and downloader - read by extraction here
+# and by the Discord-attachment and Suno yt-dlp plugins
+# (`from musicbot.loader import _loop`)
+_loop: Optional[asyncio.AbstractEventLoop] = None
+_downloader: Optional[YoutubeDL] = None
 
 
-async def close_bot_session():
-    # close session opened in musicbot/yt_dlp_plugins/extractor/discord.py
-    from musicbot.__main__ import bot
+def _wrap_stdio():
+    if not isinstance(sys.stdout, OutputWrapper):
+        sys.stdout = OutputWrapper(sys.stdout)
+    if not isinstance(sys.stderr, OutputWrapper):
+        sys.stderr = OutputWrapper(sys.stderr)
 
-    await bot.http.close()
 
-
-_loop = asyncio.new_event_loop()
-_loop.run_until_complete(init_session())
-atexit.register(lambda: _loop.run_until_complete(stop_session()))
-atexit.register(lambda: _loop.run_until_complete(close_bot_session()))
-_executor = ProcessPoolExecutor(1, _context)
-_downloader = YoutubeDL(
-    {
-        "format": "bestaudio/best",
-        "extract_flat": True,
-        "noplaylist": True,
-        # default_search shouldn't be needed as long as
-        # we don't pass plain text to the downloader.
-        # still leaving it just in case
-        "default_search": "auto",
-        "cookiefile": config.COOKIE_PATH,
-        "quiet": True,
-        "extractor_args": {
-            "youtube": {"player-client": ["default", "tv"]},
-            "youtubepot-bgutilhttp": {
-                "base_url": ["http://bgutil-provider:4416"]
+def _new_downloader() -> YoutubeDL:
+    return YoutubeDL(
+        {
+            "format": "bestaudio/best",
+            "extract_flat": True,
+            "noplaylist": True,
+            # default_search shouldn't be needed as long as
+            # we don't pass plain text to the downloader.
+            # still leaving it just in case
+            "default_search": "auto",
+            "cookiefile": config.COOKIE_PATH,
+            "quiet": True,
+            "extractor_args": {
+                "youtube": {"player-client": ["default", "tv"]},
+                "youtubepot-bgutilhttp": {
+                    "base_url": ["http://bgutil-provider:4416"]
+                },
             },
-        },
-        "ignoreerrors": "only_download",
-        # "verbose": True
-        # "remote_components": "ejs:npm"
-    }
-)
-_preloading = {}
-_site_locks = {}
+            "ignoreerrors": "only_download",
+            # "verbose": True
+            # "remote_components": "ejs:npm"
+        }
+    )
 
 
-class SongError(Exception):
-    pass
+def _init_worker():
+    """Runs once inside the spawned worker, before any extraction."""
+    global _loop, _downloader
+    _wrap_stdio()
+    _loop = asyncio.new_event_loop()
+    _loop.run_until_complete(init_session())
+    _downloader = _new_downloader()
+    atexit.register(_teardown_worker)
+
+
+def _teardown_worker():
+    _loop.run_until_complete(stop_session())
+    _loop.run_until_complete(_close_bot_session())
+
+
+async def _close_bot_session():
+    # close the session musicbot/yt_dlp_plugins/extractor/discord.py
+    # opens when it logs in - only if it ever ran in this process:
+    # importing musicbot.__main__ here would build a whole bot
+    main = sys.modules.get("musicbot.__main__")
+    bot = getattr(main, "bot", None)
+    if bot is not None:
+        await bot.http.close()
 
 
 def _noop():
@@ -100,8 +120,33 @@ def _noop():
 
 
 def init():
+    """Sets up the loader for the bot's process: wraps stdout/stderr,
+    installs LoaderProcess and starts the single extraction worker.
+    A second call does nothing."""
+    global _executor
+    if _executor is not None:
+        return
+    _wrap_stdio()
+    _context.Process = LoaderProcess
+    _executor = ProcessPoolExecutor(1, _context, initializer=_init_worker)
     # wake it up to spawn the process immediately
     _executor.submit(_noop).result()
+
+
+def shutdown():
+    """Stops the extraction worker. Safe without init(), and twice."""
+    global _executor
+    executor, _executor = _executor, None
+    if executor is not None:
+        executor.shutdown()
+
+
+_preloading = {}
+_site_locks = {}
+
+
+class SongError(Exception):
+    pass
 
 
 def extract_info(url: str, ie: Optional[ExtractorT] = None) -> Optional[dict]:

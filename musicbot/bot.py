@@ -15,7 +15,7 @@ from sqlalchemy.orm import sessionmaker
 from config import config
 from config.utils import ensure_sqlite_parent
 from musicbot.audiocontroller import VC_CONNECT_TIMEOUT, AudioController
-from musicbot import library
+from musicbot import library, linkutils, loader
 from musicbot.settings import (
     GuildSettings,
     run_migrations,
@@ -101,6 +101,7 @@ class MusicBot(commands.Bot):
         await migrate_old_playlists(self)
         await import_env_whitelist(self)
 
+        loader.init()
         return await super().start(*args, **kwargs)
 
     async def close(self):
@@ -112,12 +113,10 @@ class MusicBot(commands.Bot):
                 for audiocontroller in self.audio_controllers.values()
             )
         )
-        # this loop's aiohttp session (see linkutils.get_session).
-        # Imported here, not at module level: linkutils pulls in
-        # loader, which imports this module.
-        from musicbot import linkutils
-
+        # this loop's aiohttp session (see linkutils.get_session);
+        # the worker closes its own when shutdown() stops it
         await linkutils.stop()
+        loader.shutdown()
         return await super().close()
 
     async def on_ready(self):
