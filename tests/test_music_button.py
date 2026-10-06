@@ -84,7 +84,7 @@ class FakeInteraction:
 
         self.client = SimpleNamespace(
             get_context=get_context,
-            sessions=SimpleNamespace(controller=lambda guild: None),
+            sessions=self.ctx.bot.sessions,
         )
 
 
