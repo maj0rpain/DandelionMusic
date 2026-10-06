@@ -17,6 +17,7 @@ from types import SimpleNamespace
 
 import discord
 
+from musicbot.bot import MusicBot
 from musicbot.commands.music import SearchView, SongButton
 from musicbot.utils import CheckError
 
@@ -97,8 +98,14 @@ class FakeInteraction:
         async def get_context(inter):
             return self.ctx
 
+        async def on_command_error(ctx, error):
+            # the bot's real handler, with no bot behind it: it uses
+            # nothing of self
+            await MusicBot.on_command_error(None, ctx, error)
+
         self.client = SimpleNamespace(
             get_context=get_context,
+            on_command_error=on_command_error,
             sessions=SimpleNamespace(controller=lambda guild: None),
         )
 
@@ -218,21 +225,18 @@ def test_a_pick_failing_the_play_check_is_refused_and_can_be_retried():
     assert retry_admitted is True
 
 
-def test_a_pick_failing_after_the_claim_is_used_up_and_still_raises():
+def test_a_pick_failing_after_the_claim_is_used_up_and_reported():
     async def go():
         message = FakeMessage()
         view, cog = make_view(message=message)
         cog.check_error = discord.ClientException("voice join failed")
-        try:
-            await click(view, 0)
-        except discord.ClientException as e:
-            raised = e
-        else:
-            raised = None
-        return view, cog, message, raised
+        inter = await click(view, 0)
+        return view, cog, message, inter
 
-    view, cog, message, raised = run(go)
-    assert str(raised) == "voice join failed"
+    view, cog, message, inter = run(go)
+    assert [(str(a[0]), k) for a, k in inter.ctx.sent] == [
+        ("voice join failed", {})
+    ]
     assert cog.played == []
     assert view.is_finished()
     assert buttons_disabled(view)

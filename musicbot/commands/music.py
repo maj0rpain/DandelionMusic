@@ -107,7 +107,7 @@ class SongButton(MusicButton):
     async def callback(self, inter: discord.Interaction):
         try:
             await super().callback(inter)
-        except Exception:
+        except Exception as e:
             # anything but a refused check (a failed voice join, a
             # failed defer) uses up the pick: the stale message must
             # not invite clicks that are silently refused
@@ -116,7 +116,10 @@ class SongButton(MusicButton):
                 view.stop()
                 view.disable()
                 await view.show()
-            raise
+            # reported as d!play's failures are, which also logs it;
+            # not re-raised, so View.on_error does not log it again
+            ctx = await inter.client.get_context(inter)
+            await inter.client.on_command_error(ctx, e)
 
 
 @commands.check
