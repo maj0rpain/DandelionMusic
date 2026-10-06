@@ -20,7 +20,13 @@ from musicbot import loader, playlists, utils
 from musicbot.song import Song
 from musicbot.linkutils import SiteTypes
 from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
-from musicbot.utils import CheckError, asset, play_check, dj_check
+from musicbot.utils import (
+    CheckError,
+    asset,
+    play_check,
+    dj_check,
+    join_voice,
+)
 from pathlib import Path
 import pickle
 from enum import Enum, auto
@@ -29,8 +35,6 @@ from enum import Enum, auto
 if TYPE_CHECKING:
     from musicbot.bot import MusicBot
 
-
-VC_CONNECT_TIMEOUT = 10
 
 PLAYLIST = object()
 _not_provided = object()
@@ -43,31 +47,31 @@ class MusicButton(discord.ui.Button):
         self._check = check
 
     async def callback(self, inter: discord.Interaction):
-        # Acknowledge first: the check can join voice, and a slow join
-        # must not push the response past Discord's 3-second deadline.
-        # Refusals below then go out as ephemeral followups.
+        # Acknowledge first: the join below can be slow, and it must
+        # not push the response past Discord's 3-second deadline.
+        # Refusals then go out as ephemeral followups. Voice is joined
+        # only once every check has passed, so a refused click never
+        # makes the bot join.
         await inter.response.defer()
         ctx = await inter.client.get_context(inter)
         try:
             await self._check(ctx)
+            if inter.data.get("custom_id") in [
+                "prev",
+                "pause",
+                "next",
+                "loop",
+                "shuffle",
+                "stop",
+                "volume_down",
+                "volume_up",
+            ]:
+                await dj_check(ctx)
+            await join_voice(ctx)
         except CheckError as e:
+            self.on_refused(e)
             await ctx.send(e, ephemeral=True)
             return
-        if inter.data.get("custom_id") in [
-            "prev",
-            "pause",
-            "next",
-            "loop",
-            "shuffle",
-            "stop",
-            "volume_down",
-            "volume_up",
-        ]:
-            try:
-                await dj_check(ctx)
-            except CheckError as e:
-                await ctx.send(e, ephemeral=True)
-                return
         res = self._callback(ctx)
         if isawaitable(res):
             await res
@@ -78,6 +82,11 @@ class MusicButton(discord.ui.Button):
                 await ctx.send(f"{inter.user} Skipped a Song")
             else:
                 await controller.update_view()
+
+    def on_refused(self, error: CheckError):
+        """Called with every CheckError that refuses a click (its
+        check, the DJ check or a failed voice join), before the
+        ephemeral refusal goes out. Does nothing by default."""
 
 
 class RestoreResult(Enum):
@@ -178,17 +187,7 @@ class AudioController(object):
         self.set_volume(max(self.volume - 10, 10))
 
     async def register_voice_channel(self, channel: discord.VoiceChannel):
-        perms = channel.permissions_for(self.guild.me)
-        if not perms.connect or not perms.speak:
-            raise CheckError(config.VOICE_PERMISSIONS_MISSING)
-
-        bot_vc = self.guild.voice_client
-        if bot_vc:
-            await bot_vc.move_to(channel)
-            # to avoid ClientException: Not connected to voice
-            await asyncio.sleep(1)
-        else:
-            await channel.connect(reconnect=True, timeout=VC_CONNECT_TIMEOUT)
+        await utils.connect_to(self.guild, channel)
 
     def make_view(self):
         if not self.is_active():
@@ -857,14 +856,14 @@ class AudioController(object):
         ):
             await self.udisconnect("inactivity timeout")
 
-    async def uconnect(self, ctx, move=False):
+    async def uconnect(self, ctx):
         author_vc = ctx.author.voice
         bot_vc = self.guild.voice_client
 
         if not author_vc:
             raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
 
-        if bot_vc is None or bot_vc.channel != author_vc.channel and move:
+        if bot_vc is None:
             await self.register_voice_channel(author_vc.channel)
         else:
             raise CheckError(config.ALREADY_CONNECTED_MESSAGE)

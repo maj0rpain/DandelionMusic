@@ -6,6 +6,7 @@ import asyncio
 import discord
 import subprocess
 from enum import Enum
+from traceback import print_exc
 from subprocess import CalledProcessError, check_output
 from typing import (
     TYPE_CHECKING,
@@ -55,6 +56,8 @@ FFMPEG_ZIP_URL = (
     "/releases/latest/download/ffmpeg.zip"
 )
 NEWEST_FFMPEG_TIMESTAMP = 1720195398
+
+VC_CONNECT_TIMEOUT = 10
 
 
 def extract_ffmpeg_timestamp(version: str) -> int:
@@ -208,7 +211,9 @@ async def owner_check(ctx: Context):
 
 
 async def voice_check(ctx: Context):
-    """Check if the user can use the bot now"""
+    """Check if the user can use the bot now. Only refuses: a bot
+    sitting in a channel with only bots admits the user, and
+    join_voice() moves it later."""
     bot_vc = ctx.guild.voice_client
     if not bot_vc:
         # the bot is free
@@ -221,7 +226,7 @@ async def voice_check(ctx: Context):
 
         if all(m.bot for m in bot_vc.channel.members):
             # current channel doesn't have any user in it
-            return await get_audiocontroller(ctx).uconnect(ctx, move=True)
+            return True
 
     try:
         if await dj_check(ctx):
@@ -233,8 +238,50 @@ async def voice_check(ctx: Context):
     raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
 
 
+def join_needed(ctx: Context) -> bool:
+    """Whether the bot has to join the user's voice channel before a
+    music command or button runs: it has no voice client (a connect),
+    or user_must_be_in_vc is on, its channel has only bots and the
+    user is in another one (a move). Music commands and buttons decide
+    it here: play_check(), join_voice() and the defer before a join all
+    read it, so they cannot disagree. d!reset (uconnect) and the
+    reaction-button plugin still join voice without asking it."""
+    bot_vc = ctx.guild.voice_client
+    if not bot_vc:
+        return True
+    if not get_settings(ctx).user_must_be_in_vc:
+        return False
+    author_voice = ctx.author.voice
+    return (
+        author_voice is not None
+        and author_voice.channel != bot_vc.channel
+        and all(m.bot for m in bot_vc.channel.members)
+    )
+
+
+def check_voice_permissions(guild: discord.Guild, channel):
+    perms = channel.permissions_for(guild.me)
+    if not perms.connect or not perms.speak:
+        raise CheckError(config.VOICE_PERMISSIONS_MISSING)
+
+
+async def connect_to(guild: discord.Guild, channel):
+    """Connects the bot to `channel`, or moves it there when it is
+    already in voice."""
+    check_voice_permissions(guild, channel)
+    bot_vc = guild.voice_client
+    if bot_vc:
+        await bot_vc.move_to(channel)
+        # to avoid ClientException: Not connected to voice
+        await asyncio.sleep(1)
+    else:
+        await channel.connect(reconnect=True, timeout=VC_CONNECT_TIMEOUT)
+
+
 async def play_check(ctx: Context):
-    """Prepare for music commands"""
+    """Refuses a music command or button that may not run. Never
+    touches voice: join_voice() does that once every check has
+    passed."""
 
     sett = get_settings(ctx)
 
@@ -245,13 +292,33 @@ async def play_check(ctx: Context):
         if int(cm_channel) != ctx.channel.id:
             raise CheckError(config.WRONG_CHANNEL_MESSAGE)
 
-    if not ctx.guild.voice_client:
-        return await get_audiocontroller(ctx).uconnect(ctx)
+    if join_needed(ctx):
+        if not ctx.author.voice:
+            raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
+        check_voice_permissions(ctx.guild, ctx.author.voice.channel)
 
-    if vc_rule:
+    if ctx.guild.voice_client and vc_rule:
         return await voice_check(ctx)
 
     return True
+
+
+async def join_voice(ctx: Context):
+    """Connects or moves the bot to the user's voice channel when
+    join_needed() says so, and does nothing otherwise. A failed
+    connect or move is logged and becomes a CheckError, so it reaches
+    on_command_error (or a button's refusal) like any other."""
+    if not join_needed(ctx):
+        return
+    author_voice = ctx.author.voice
+    if not author_voice:
+        # the user left voice since the check ran
+        raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
+    try:
+        await connect_to(ctx.guild, author_voice.channel)
+    except (asyncio.TimeoutError, discord.ClientException):
+        print_exc(file=sys.stderr)
+        raise CheckError(config.VOICE_CONNECT_FAILED)
 
 
 def get_emoji(bot: MusicBot, string: str) -> Optional[Union[str, Emoji]]:
