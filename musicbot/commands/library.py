@@ -3,7 +3,7 @@ import io
 import sys
 from contextlib import contextmanager
 from traceback import print_exc
-from typing import List, Optional
+from typing import List, NamedTuple, Optional
 
 import discord
 from discord import app_commands
@@ -251,6 +251,16 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
         message += " `d!lib refresh`."
 
     await reply(message)
+
+
+class LevelSnapshot(NamedTuple):
+    """Where the cursor was and what the message showed, taken
+    before a level change so a failed first draw can be undone."""
+
+    artist: Optional[str]
+    album: Optional[str]
+    page: int
+    enrichment: Optional[library_metadata.Enrichment]
 
 
 class LibraryView(discord.ui.View):
@@ -560,7 +570,7 @@ class LibraryBrowseView(LibraryView):
         self,
         interaction: discord.Interaction,
         sync_attachments: bool = False,
-    ):
+    ) -> bool:
         """Redraws the message. `interaction` must already have been
         deferred - every edit goes out as a followup, so that waiting
         on the lock below can never eat the three seconds an
@@ -695,17 +705,15 @@ class LibraryBrowseView(LibraryView):
             return
         await self._enter_level(interaction, previous)
 
-    def _level_snapshot(self):
-        """Where the cursor is and what the message shows, taken
-        before a level change so _enter_level() can undo it."""
-        return (
+    def _level_snapshot(self) -> LevelSnapshot:
+        return LevelSnapshot(
             self.cursor.artist,
             self.cursor.album,
             self.cursor.page,
             self._enrichment,
         )
 
-    def _undo_level_change(self, previous) -> None:
+    def _undo_level_change(self, previous: LevelSnapshot) -> None:
         """Moves the cursor back to `previous` through its own API,
         after a level change whose first draw failed. The message -
         and the components render() restored - still show that level,
@@ -724,7 +732,9 @@ class LibraryBrowseView(LibraryView):
         self.cursor.page_by(page)
         self._enrichment = enrichment
 
-    async def _enter_level(self, interaction: discord.Interaction, previous):
+    async def _enter_level(
+        self, interaction: discord.Interaction, previous: LevelSnapshot
+    ):
         """Shows the new level immediately, then fills the enrichment
         in behind it.
 
