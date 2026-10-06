@@ -100,29 +100,6 @@ Adding a new setting means adding a class attribute to `Config` (with a comment 
 
 Commands are `hybrid_command`s (usable both as `d!`-prefixed text commands and slash commands, gated by `ENABLE_SLASH_COMMANDS`). Prefix, mention-as-prefix and slash command sync are config-driven in `musicbot/__main__.py`/`bot.py`; the guild whitelist is not — it lives in the database (see `musicbot/settings.py`). See `README.md` for the end-user command reference (`d!p`, `d!skip`, `d!q`, `d!loop`, `d!settings`, etc.).
 
-## Workflow
-
-### Planning, implementation and review are separate sessions
-
-A session that produced a plan does not implement it. A session that implemented something does not review it. Each of those boundaries is crossed by writing a handoff document and starting a fresh session against it — not by carrying on in the same context.
-
-**Every handoff goes in `handoffs/`**, named `handoff-<what-the-next-session-does>.md` (e.g. `handoffs/handoff-implement-browse-cursor.md`). This deliberately overrides the `handoff` skill's own instruction to save to the OS temp directory: a file under `/tmp/claude-*/…/scratchpad/` is effectively unfindable from a later session, which is the failure this rule exists to prevent. Everything else that skill says still applies — reference plans, specs, ADRs, issues and commits by path or URL instead of duplicating them, include a "suggested skills" section naming what the next session should invoke, and redact secrets.
-
-`handoffs/` is gitignored (the directory is tracked via `.gitkeep`, its contents are not), so a handoff is working state and never appears in a commit or a PR.
-
-`/handoff` is user-invocable only (`disable-model-invocation: true` in its frontmatter), so an agent cannot call it. At a boundary the agent writes the document into `handoffs/` itself, in that format, and stops.
-
-### The review session runs the branch to green
-
-Review is a loop, not a pass: the fixes written in response to a review are themselves unreviewed code. The session repeats until a round changes nothing.
-
-1. `/code-review` against the base branch.
-2. Act on the findings — including deciding a finding warrants no change, with that reasoning in the commit message.
-3. Push, then verify CI **on the commit just pushed**: `gh pr checks <n> --repo maj0rpain/DandelionMusic --watch`. Pushing is not a result. A green local `pytest` and `pre-commit run --all` predict CI rather than standing in for it — `checks.yml` runs the hooks under Python 3.11 in `run-checks`, against the 3.13 that `run-tests` and local development use. A red run is a finding: re-enter at step 2.
-4. Repeat from step 1. The commits step 2 added are the ones not yet reviewed; the rest of the branch has been.
-
-**Done is a head commit that has been both reviewed clean and seen green**: a review round that produced no code change, over a CI run that concluded passing on that same commit.
-
 ## Agent skills
 
 ### Issue tracker
