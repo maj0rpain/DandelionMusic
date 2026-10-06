@@ -415,6 +415,14 @@ class AudioController(object):
         """Invoked after a song is finished
         Plays the next song if there is one"""
 
+        # the teardown callback of a stop() - one-shot, see stop()
+        teardown, self._stopping = self._stopping, False
+        if teardown and self.is_active():
+            # it fired late, on the audio thread, after a new track
+            # had already started: that track is not this callback's
+            # to end
+            return
+
         if self.is_active():
             self._next_song = self.playlist.next(forced)
             self.guild.voice_client.stop()
@@ -433,7 +441,9 @@ class AudioController(object):
         else:
             next_song = self.playlist.next(forced)
 
-        if not self._stopping:
+        if not teardown:
+            # a teardown sees the queue stop() just emptied - keep
+            # stop()'s snapshot instead
             self._pickle_playlist()
 
         if next_song is None:
@@ -733,7 +743,6 @@ class AudioController(object):
 
     def stop(self):
         """Stops the player and removes all songs from the queue"""
-        self._stopping = True
         # whatever starts after this is a new session, not a track
         # change - see play_song()
         self._playing = False
@@ -745,6 +754,9 @@ class AudioController(object):
         if not self.is_active():
             return
 
+        # only stopping an active voice client runs an `after`
+        # callback; its next_song() consumes this - see next_song()
+        self._stopping = True
         self.guild.voice_client.stop()
 
     def prev_song(self) -> bool:

@@ -220,11 +220,9 @@ def test_stop_ends_playback_and_empties_the_queue_but_keeps_the_backup(
     assert _preloaded(stub_loader) == ["first"]
 
 
-def test_after_a_stop_track_changes_no_longer_refresh_the_backup(
+def test_after_a_stop_track_changes_refresh_the_backup_again(
     controller, monkeypatch, tmp_path
 ):
-    # today's behaviour, defect included: _stopping is a one-way
-    # latch (#25), so the backup stays frozen at the d!stop snapshot
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first")
 
@@ -240,7 +238,56 @@ def test_after_a_stop_track_changes_no_longer_refresh_the_backup(
     asyncio.run(run())
 
     assert _played(controller) == ["first", "second", "third"]
-    assert _backup(tmp_path) == ["first"]
+    assert _backup(tmp_path) == ["third"]
+
+
+def test_a_stop_while_idle_does_not_hold_back_the_next_backup(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        controller.stop()
+        _queue(controller, "first", "second")
+        await controller.ensure_playing()
+        controller.skip()
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _played(controller) == ["first", "second"]
+    assert _backup(tmp_path) == ["second"]
+
+
+def test_a_late_teardown_callback_does_not_overwrite_the_stop_backup(
+    controller, monkeypatch, tmp_path
+):
+    # discord.py runs the `after` callback later, on its audio thread:
+    # here it fires only once a new track has already started
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    voice_client = controller.guild.voice_client
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        stale_after = voice_client.detach_after()
+        controller.stop()
+        _queue(controller, "third", "fourth", "fifth")
+        await controller.ensure_playing()
+        stale_after(None)
+        await _settle()
+        frozen = _backup(tmp_path)
+        controller.skip()
+        await _settle()
+        return frozen
+
+    assert asyncio.run(run()) == ["first", "second"]
+    # the stale callback neither ended "third" nor used up the latch,
+    # so the skip after it - a genuine advance - snapshots
+    assert _played(controller) == ["first", "third", "fourth"]
+    assert _backup(tmp_path) == ["fourth", "fifth"]
 
 
 def test_restore_brings_back_the_queue_a_stop_cleared(
