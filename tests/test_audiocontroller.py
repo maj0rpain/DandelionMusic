@@ -11,6 +11,8 @@ import pickle
 import sys
 from pathlib import Path
 
+import pytest
+
 from controller_seam import StubLoader, controller_seam
 
 
@@ -255,7 +257,8 @@ def test_restore_brings_back_the_queue_a_stop_cleared(
         await _settle()
         return restored
 
-    assert asyncio.run(run()) is True
+    ac = sys.modules[type(controller).__module__]
+    assert asyncio.run(run()) is ac.RestoreResult.RESTORED
     assert _played(controller) == ["first", "first"]
     assert _titles(controller) == ["first", "second"]
     assert _backup(tmp_path) == ["first", "second"]
@@ -271,33 +274,51 @@ def test_restore_with_no_backup_and_an_empty_queue_plays_nothing(
         controller.bot.loop = asyncio.get_running_loop()
         return await controller.restore()
 
-    assert asyncio.run(run()) is False
+    ac = sys.modules[type(controller).__module__]
+    assert asyncio.run(run()) is ac.RestoreResult.NOTHING_TO_RESTORE
     assert controller.guild.voice_client.played == []
 
 
-def test_restore_during_playback_disconnects(
-    controller, monkeypatch, tmp_path
-):
-    # today's behaviour, defect included (#24): restore() starts the
-    # head of the queue without checking that something is already
-    # playing, discord.py refuses, and the controller disconnects
+def _restore_while_active(controller, monkeypatch, tmp_path, pause):
     from config import config
 
+    # were restore() to disconnect, it must not announce it to a
+    # channel the fakes do not have
     monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
+    backup = tmp_path / "backup" / "playlist_1234.pickle"
 
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
         await controller.ensure_playing()
         controller._pickle_playlist()
-        await controller.restore()
+        if pause:
+            controller.guild.voice_client.pause()
+        before = (controller.playlist, backup.read_bytes())
+        result = await controller.restore()
         await _settle()
+        return before, result
 
-    asyncio.run(run())
+    return asyncio.run(run())
 
-    assert controller.guild.voice_client.disconnected is True
-    assert _titles(controller) == []
+
+@pytest.mark.parametrize("pause", [False, True])
+def test_restore_while_active_is_refused_and_changes_nothing(
+    controller, monkeypatch, tmp_path, pause
+):
+    ac = sys.modules[type(controller).__module__]
+    (playlist, backup_bytes), result = _restore_while_active(
+        controller, monkeypatch, tmp_path, pause
+    )
+
+    assert result is ac.RestoreResult.REFUSED_WHILE_ACTIVE
+    assert controller.guild.voice_client.disconnected is False
+    assert _played(controller) == ["first"]
+    assert _titles(controller) == ["first", "second"]
+    assert controller.playlist is playlist
+    backup = tmp_path / "backup" / "playlist_1234.pickle"
+    assert backup.read_bytes() == backup_bytes
 
 
 def test_set_volume_sets_the_playing_source_volume(

@@ -98,6 +98,7 @@ class FakeVoiceClient:
 
     def __init__(self):
         self.playing = False
+        self.paused = False
         self.stopped = 0
         self.source = FakeSource()
         self.played = []
@@ -109,7 +110,12 @@ class FakeVoiceClient:
         return self.playing
 
     def is_paused(self):
-        return False
+        return self.paused
+
+    def pause(self):
+        if self.playing:
+            self.playing = False
+            self.paused = True
 
     def play(self, source, *, after=None):
         import discord

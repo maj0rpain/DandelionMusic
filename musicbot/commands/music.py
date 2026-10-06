@@ -14,7 +14,12 @@ from musicbot import linkutils, utils, loader
 from musicbot.song import Song
 from musicbot.bot import MusicBot, Context
 from musicbot.utils import dj_check, chunks, SimplePaginator
-from musicbot.audiocontroller import PLAYLIST, AudioController, MusicButton
+from musicbot.audiocontroller import (
+    PLAYLIST,
+    AudioController,
+    MusicButton,
+    RestoreResult,
+)
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
 from musicbot.settings import SavedPlaylist
@@ -314,10 +319,13 @@ class Music(commands.Cog):
     )
     @commands.check(dj_check)
     async def _restore(self, ctx):
-        if not await ctx.audiocontroller.restore():
+        result = await ctx.audiocontroller.restore()
+        if result is RestoreResult.REFUSED_WHILE_ACTIVE:
+            await ctx.send(config.RESTORE_WHILE_ACTIVE)
+        elif result is RestoreResult.NOTHING_TO_RESTORE:
             await ctx.send(config.QUEUE_EMPTY)
-            return
-        await ctx.send("Restored playlist")
+        else:
+            await ctx.send("Restored playlist")
 
     @commands.hybrid_command(
         name="clear",
