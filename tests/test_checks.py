@@ -6,6 +6,7 @@ finished registering its guilds.
 """
 
 import asyncio
+import contextlib
 import types
 
 import discord
@@ -15,8 +16,9 @@ from discord.ext.commands import NotOwner
 from config import config
 from musicbot.bot import Context
 from musicbot.commands.general import General
-from musicbot.commands.library import queue_songs
-from musicbot.commands.music import Music
+from musicbot.commands.library import Library, queue_songs
+from musicbot.audiocontroller import MusicButton
+from musicbot.commands.music import Music, SearchView, SongButton
 from musicbot.sessions import GuildSessions
 from musicbot.utils import (
     CheckError,
@@ -24,6 +26,7 @@ from musicbot.utils import (
     get_audiocontroller,
     get_settings,
     owner_check,
+    join_needed,
     join_voice,
     play_check,
     voice_check,
@@ -445,10 +448,35 @@ class TestMusicBeforeInvoke:
         assert guild.events == [("defer", False), ("connect", "a")]
 
 
+def command_of(cog, name):
+    """A cog's command by its qualified name."""
+    return {c.qualified_name: c for c in cog(None).walk_commands()}[name]
+
+
+@pytest.mark.parametrize(
+    "cog, name",
+    [
+        (General, "connect"),
+        (General, "reset"),
+        (Library, "library browse"),
+        (Library, "library search"),
+    ],
+)
+def test_commands_outside_the_music_cog_that_join_keep_joining(cog, name):
+    """d!connect and d!reset join voice, and so do picks from the
+    library views, whose context is the command that opened them."""
+    guild = VoiceGuild()
+    ctx = voice_ctx(guild, guild.channel("a"))
+    ctx.command = command_of(cog, name)
+    asyncio.run(join_voice(ctx))
+    assert guild.events == [("connect", "a")]
+
+
 def test_connect_moves_the_bot_out_of_a_bots_only_channel(no_sleep):
     guild = VoiceGuild()
     guild.put_bot_in(guild.channel("a", bots=1))
     ctx = voice_ctx(guild, guild.channel("b", humans=1))
+    ctx.command = command_of(General, "connect")
     sent = []
 
     async def send(content, **kwargs):
@@ -472,6 +500,7 @@ def test_a_failed_join_from_the_library_says_so():
     guild = VoiceGuild()
     guild.fail = asyncio.TimeoutError()
     ctx = voice_ctx(guild, guild.channel("a"))
+    ctx.command = command_of(Library, "library browse")
     replies = []
 
     async def send_message(content, **kwargs):
@@ -489,3 +518,178 @@ def test_a_failed_join_from_the_library_says_so():
     asyncio.run(queue_songs(ctx, interaction, [("A", "B", "c.mp3")], "browse"))
     assert replies == ["Queueing...", config.VOICE_CONNECT_FAILED]
     assert guild.events == [("connect", "a")]
+
+
+# --- joining commands ------------------------------------------------
+#
+# Only a joining command (GLOSSARY.md) brings the bot into voice: one
+# that starts playback carries the opt-in marker; every other music
+# command answers without connecting or moving the bot.
+
+
+def music_command(name):
+    return command_of(Music, name)
+
+
+JOINING = {"play", "playnext", "search", "playlist load", "restore", "prev"}
+
+
+def test_the_joining_music_commands_are_exactly_those_starting_playback():
+    joining = set()
+    for cmd in Music(None).walk_commands():
+        guild = VoiceGuild()
+        ctx = voice_ctx(guild, guild.channel("a"))
+        ctx.command = cmd
+        if join_needed(ctx):
+            joining.add(cmd.qualified_name)
+    assert joining == JOINING
+
+
+class TestNonJoiningCommand:
+    """An unmarked music command never touches voice, so while the bot
+    is idle it has no voice requirement to refuse on."""
+
+    def test_admits_a_user_outside_voice_while_idle(self):
+        guild = VoiceGuild()
+        ctx = voice_ctx(guild, None)
+        ctx.command = music_command("history")
+        assert asyncio.run(play_check(ctx)) is True
+        assert guild.events == []
+
+    def test_skips_the_voice_permission_check_while_idle(self):
+        guild = VoiceGuild()
+        ctx = voice_ctx(guild, guild.channel("a", connect=False, speak=False))
+        ctx.command = music_command("playlist list")
+        assert asyncio.run(play_check(ctx)) is True
+
+    def test_does_not_connect_while_idle(self):
+        guild = VoiceGuild()
+        ctx = slash_ctx(guild, guild.channel("a", humans=1))
+        ctx.command = music_command("history")
+        asyncio.run(Music(None).cog_before_invoke(ctx))
+        assert guild.events == []
+
+    def test_does_not_move_out_of_a_bots_only_channel(self, no_sleep):
+        guild = VoiceGuild()
+        guild.put_bot_in(guild.channel("a", bots=1))
+        ctx = slash_ctx(guild, guild.channel("b", humans=1))
+        ctx.command = music_command("pause")
+        asyncio.run(Music(None).cog_before_invoke(ctx))
+        assert guild.events == []
+
+    def test_a_playlist_subcommand_other_than_load_does_not_connect(self):
+        guild = VoiceGuild()
+        ctx = slash_ctx(guild, guild.channel("a"))
+        ctx.command = music_command("playlist show")
+        asyncio.run(Music(None).cog_before_invoke(ctx))
+        assert guild.events == []
+
+
+class TestJoiningCommand:
+    def test_defers_and_connects_while_idle(self):
+        guild = VoiceGuild()
+        ctx = slash_ctx(guild, guild.channel("a"))
+        ctx.command = music_command("play")
+        asyncio.run(Music(None).cog_before_invoke(ctx))
+        assert guild.events == [("defer", False), ("connect", "a")]
+
+    def test_defers_and_moves_out_of_a_bots_only_channel(self, no_sleep):
+        guild = VoiceGuild()
+        guild.put_bot_in(guild.channel("a", bots=1))
+        ctx = slash_ctx(guild, guild.channel("b"))
+        ctx.command = music_command("prev")
+        asyncio.run(Music(None).cog_before_invoke(ctx))
+        assert guild.events == [("defer", False), ("move", "b")]
+
+    def test_playlist_load_connects(self):
+        guild = VoiceGuild()
+        ctx = slash_ctx(guild, guild.channel("a"))
+        ctx.command = music_command("playlist load")
+        asyncio.run(Music(None).cog_before_invoke(ctx))
+        assert guild.events == [("defer", False), ("connect", "a")]
+
+    def test_still_refuses_a_user_outside_voice_while_idle(self):
+        guild = VoiceGuild()
+        ctx = voice_ctx(guild, None)
+        ctx.command = music_command("search")
+        assert refusal(play_check(ctx)) == config.USER_NOT_IN_VC_MESSAGE
+
+
+def click(button, ctx, custom_id):
+    """What discord.py does with a component click: the context it
+    builds for one has no command."""
+    ctx.command = None
+
+    async def defer(**kwargs):
+        pass
+
+    async def get_context(inter):
+        return ctx
+
+    inter = types.SimpleNamespace(
+        response=types.SimpleNamespace(defer=defer),
+        data={"custom_id": custom_id},
+        guild=ctx.guild,
+        client=types.SimpleNamespace(
+            get_context=get_context,
+            sessions=types.SimpleNamespace(controller=lambda guild: None),
+        ),
+    )
+    asyncio.run(button.callback(inter))
+
+
+PLAYER_BUTTONS = [
+    "prev",
+    "pause",
+    "next",
+    "loop",
+    "shuffle",
+    "stop",
+    "volume_down",
+    "volume_up",
+    "current_song",
+    "queue",
+]
+
+
+class TestButtons:
+    @pytest.mark.parametrize("custom_id", PLAYER_BUTTONS)
+    def test_a_player_button_does_not_connect(self, custom_id):
+        guild = VoiceGuild()
+        ctx = voice_ctx(guild, guild.channel("a"), admin=True)
+        ran = []
+        click(MusicButton(ran.append, custom_id=custom_id), ctx, custom_id)
+        assert ran == [ctx]
+        assert guild.events == []
+
+    @pytest.mark.parametrize("custom_id", PLAYER_BUTTONS)
+    def test_a_player_button_does_not_move(self, custom_id, no_sleep):
+        guild = VoiceGuild()
+        guild.put_bot_in(guild.channel("a", bots=1))
+        ctx = voice_ctx(guild, guild.channel("b"), admin=True)
+        ran = []
+        click(MusicButton(ran.append, custom_id=custom_id), ctx, custom_id)
+        assert ran == [ctx]
+        assert guild.events == []
+
+    def test_a_search_pick_connects(self):
+        guild = VoiceGuild()
+        ctx = voice_ctx(guild, guild.channel("a"))
+
+        @contextlib.asynccontextmanager
+        async def typing():
+            yield
+
+        ctx.channel.typing = typing
+        ctx.interaction = None
+        played = []
+
+        async def play_song(ctx, track):
+            played.append(track)
+
+        cog = types.SimpleNamespace(cog_check=play_check, _play_song=play_song)
+        view = SearchView(ctx)
+        view.add_item(SongButton(cog, 1, "https://example.com/a"))
+        click(view.children[0], ctx, "pick")
+        assert guild.events == [("connect", "a")]
+        assert played == ["https://example.com/a"]

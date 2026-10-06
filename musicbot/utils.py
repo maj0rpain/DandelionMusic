@@ -238,15 +238,35 @@ async def voice_check(ctx: Context):
     raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
 
 
+def joins_voice(func):
+    """Marks a command as a joining command (GLOSSARY.md): one that
+    starts playback, so it brings the bot into the invoker's voice
+    channel, or moves it there, before it runs. Opt-in: a command
+    without it never joins. Place it below the command decorator,
+    like a check."""
+    func.__joins_voice__ = True
+    return func
+
+
 def join_needed(ctx: Context) -> bool:
     """Whether the bot has to join the user's voice channel before a
     music command or button runs: it has no voice client (a connect),
     or user_must_be_in_vc is on, its channel has only bots and the
-    user is in another one (a move). Music commands and buttons decide
-    it here: play_check(), join_voice() and the defer before a join all
-    read it, so they cannot disagree. d!reset asks it too, through
-    join_voice(). The reaction-button plugin still joins voice
-    without asking it."""
+    user is in another one (a move). Only a joining command ever
+    needs to: when ctx.command is set but not marked with
+    @joins_voice, this is False and the command answers without
+    touching voice. A button's context has no command, so its call
+    site decides whether to ask (player buttons do not, search picks
+    do). Music commands and buttons decide it here: play_check(),
+    join_voice() and the defer before a join all read it, so they
+    cannot disagree. d!connect, d!reset and the library views ask it
+    too, through join_voice(), so their commands carry the marker.
+    The reaction-button plugin still joins voice without asking it."""
+    command = getattr(ctx, "command", None)
+    if command is not None and not getattr(
+        command.callback, "__joins_voice__", False
+    ):
+        return False
     bot_vc = ctx.guild.voice_client
     if not bot_vc:
         return True
