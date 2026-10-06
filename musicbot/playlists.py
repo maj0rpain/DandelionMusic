@@ -82,19 +82,26 @@ def _encode(entries: Iterable[PlaylistEntry]) -> str:
     )
 
 
-def _lookup(playlist: PlaylistRef):
+def _matches(playlist: PlaylistRef):
     return (
-        select(SavedPlaylist)
-        .where(SavedPlaylist.guild_id == str(playlist.guild_id))
-        .where(SavedPlaylist.name == playlist.name)
+        SavedPlaylist.guild_id == playlist.guild_id,
+        SavedPlaylist.name == playlist.name,
     )
+
+
+async def _load_row(
+    session: AsyncSession, playlist: PlaylistRef
+) -> Optional[SavedPlaylist]:
+    return (
+        await session.execute(select(SavedPlaylist).where(*_matches(playlist)))
+    ).scalar_one_or_none()
 
 
 async def get(
     session_factory: SessionFactory, playlist: PlaylistRef
 ) -> Optional[PlaylistContents]:
     async with session_factory() as session:
-        row = (await session.execute(_lookup(playlist))).scalar_one_or_none()
+        row = await _load_row(session, playlist)
         if row is None:
             return None
         return PlaylistContents(playlist, _decode(row.songs_json))
@@ -104,7 +111,7 @@ async def list_names(
     session_factory: SessionFactory, guild_id: str, prefix: str = ""
 ) -> List[str]:
     query = select(SavedPlaylist.name).where(
-        SavedPlaylist.guild_id == str(guild_id)
+        SavedPlaylist.guild_id == guild_id
     )
     if prefix:
         query = query.where(SavedPlaylist.name.startswith(prefix))
@@ -120,7 +127,7 @@ async def save(
     async with session_factory() as session:
         session.add(
             SavedPlaylist(
-                guild_id=str(playlist.guild_id),
+                guild_id=playlist.guild_id,
                 name=playlist.name,
                 songs_json=_encode(songs),
             )
@@ -136,9 +143,7 @@ async def delete(
 ) -> None:
     async with session_factory() as session:
         result = await session.execute(
-            sql_delete(SavedPlaylist)
-            .where(SavedPlaylist.guild_id == str(playlist.guild_id))
-            .where(SavedPlaylist.name == playlist.name)
+            sql_delete(SavedPlaylist).where(*_matches(playlist))
         )
         await session.commit()
     if result.rowcount == 0:
@@ -154,7 +159,7 @@ async def _update(
     place (or raise), and stores the result. A change that leaves
     the entries as they were writes nothing."""
     async with session_factory() as session:
-        row = (await session.execute(_lookup(playlist))).scalar_one_or_none()
+        row = await _load_row(session, playlist)
         if row is None:
             raise PlaylistNotFound(playlist.name)
         songs = _decode(row.songs_json)

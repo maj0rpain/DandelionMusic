@@ -50,6 +50,10 @@ def active_only(ctx):
     return True
 
 
+def _playlist_ref(ctx, name: str) -> playlists.PlaylistRef:
+    return playlists.PlaylistRef(str(ctx.guild.id), name)
+
+
 class Music(commands.Cog):
     """A collection of the commands related to music playback.
 
@@ -435,9 +439,10 @@ class Music(commands.Cog):
         if not songs:
             await ctx.send(config.QUEUE_EMPTY)
             return
-        ref = playlists.PlaylistRef(str(ctx.guild.id), name)
         try:
-            await playlists.save(ctx.bot.DbSession, ref, songs)
+            await playlists.save(
+                ctx.bot.DbSession, _playlist_ref(ctx, name), songs
+            )
         except playlists.PlaylistExists:
             await ctx.send(config.PLAYLIST_ALREADY_EXISTS)
             return
@@ -457,7 +462,7 @@ class Music(commands.Cog):
     ):
         await ctx.defer()
         contents = await playlists.get(
-            ctx.bot.DbSession, playlists.PlaylistRef(str(ctx.guild.id), name)
+            ctx.bot.DbSession, _playlist_ref(ctx, name)
         )
         if contents is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
@@ -490,7 +495,7 @@ class Music(commands.Cog):
         try:
             await playlists.delete(
                 ctx.bot.DbSession,
-                playlists.PlaylistRef(str(ctx.guild.id), name),
+                _playlist_ref(ctx, name),
             )
         except playlists.PlaylistNotFound:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
@@ -531,7 +536,7 @@ class Music(commands.Cog):
 
         contents = await playlists.get(
             ctx.bot.DbSession,
-            playlists.PlaylistRef(str(ctx.guild.id), playlist),
+            _playlist_ref(ctx, playlist),
         )
         if contents is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
@@ -573,7 +578,7 @@ class Music(commands.Cog):
         try:
             await playlists.add_songs(
                 ctx.bot.DbSession,
-                playlists.PlaylistRef(str(ctx.guild.id), playlist),
+                _playlist_ref(ctx, playlist),
                 [PlaylistEntry(s.webpage_url, s.title) for s in songs],
             )
         except playlists.PlaylistNotFound:
@@ -600,7 +605,7 @@ class Music(commands.Cog):
         try:
             await playlists.remove_song(
                 ctx.bot.DbSession,
-                playlists.PlaylistRef(str(ctx.guild.id), playlist),
+                _playlist_ref(ctx, playlist),
                 position,
             )
         except playlists.PlaylistNotFound:
@@ -634,7 +639,7 @@ class Music(commands.Cog):
         try:
             await playlists.move_song(
                 ctx.bot.DbSession,
-                playlists.PlaylistRef(str(ctx.guild.id), playlist),
+                _playlist_ref(ctx, playlist),
                 source_position,
                 destination_position,
             )

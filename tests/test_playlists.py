@@ -20,6 +20,7 @@ from musicbot.playlists import PlaylistEntry, PlaylistRef
 from musicbot.settings import SavedPlaylist, run_migrations
 
 GUILD = "123"
+MIX = PlaylistRef(GUILD, "mix")
 
 
 def run(test):
@@ -61,10 +62,10 @@ async def load(factory, name="mix"):
 
 def test_save_add_move_remove_and_load_round_trip():
     async def test(factory):
-        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A, B])
-        await playlists.add_songs(factory, PlaylistRef(GUILD, "mix"), [C])
-        await playlists.move_song(factory, PlaylistRef(GUILD, "mix"), 3, 1)
-        await playlists.remove_song(factory, PlaylistRef(GUILD, "mix"), 2)
+        await playlists.save(factory, MIX, [A, B])
+        await playlists.add_songs(factory, MIX, [C])
+        await playlists.move_song(factory, MIX, 3, 1)
+        await playlists.remove_song(factory, MIX, 2)
         return await load(factory)
 
     assert run(test) == [C, B]
@@ -86,19 +87,17 @@ def test_list_names_filters_by_guild_and_prefix():
 
 def test_delete_removes_the_playlist():
     async def test(factory):
-        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A])
-        await playlists.delete(factory, PlaylistRef(GUILD, "mix"))
-        return await playlists.get(factory, PlaylistRef(GUILD, "mix"))
+        await playlists.save(factory, MIX, [A])
+        await playlists.delete(factory, MIX)
+        return await playlists.get(factory, MIX)
 
     assert run(test) is None
 
 
 def test_set_title_updates_only_the_matching_url():
     async def test(factory):
-        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A, B])
-        await playlists.set_title(
-            factory, PlaylistRef(GUILD, "mix"), B.url, "New B"
-        )
+        await playlists.save(factory, MIX, [A, B])
+        await playlists.set_title(factory, MIX, B.url, "New B")
         return await load(factory)
 
     assert run(test) == [A, PlaylistEntry(B.url, "New B")]
@@ -125,12 +124,8 @@ def test_set_title_that_changes_nothing_leaves_the_blob_untouched():
                 SavedPlaylist(guild_id=GUILD, name="mix", songs_json=blob)
             )
             await session.commit()
-        await playlists.set_title(
-            factory, PlaylistRef(GUILD, "mix"), A.url, "A"
-        )
-        await playlists.set_title(
-            factory, PlaylistRef(GUILD, "mix"), "https://other.example", "x"
-        )
+        await playlists.set_title(factory, MIX, A.url, "A")
+        await playlists.set_title(factory, MIX, "https://other.example", "x")
         return await stored_json(factory)
 
     assert run(test) == blob
@@ -155,8 +150,8 @@ def test_a_blob_in_todays_format_reads_back():
 
 def test_a_blob_written_through_the_module_is_todays_format():
     async def test(factory):
-        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A])
-        await playlists.add_songs(factory, PlaylistRef(GUILD, "mix"), [B, C])
+        await playlists.save(factory, MIX, [A])
+        await playlists.add_songs(factory, MIX, [B, C])
         return await stored_json(factory)
 
     assert run(test) == json.dumps(
@@ -195,9 +190,9 @@ def test_get_on_a_missing_playlist_returns_none():
 
 def test_saving_a_duplicate_name_reports_it_and_keeps_the_original():
     async def test(factory):
-        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A])
+        await playlists.save(factory, MIX, [A])
         with pytest.raises(playlists.PlaylistExists):
-            await playlists.save(factory, PlaylistRef(GUILD, "mix"), [B])
+            await playlists.save(factory, MIX, [B])
         return await load(factory)
 
     assert run(test) == [A]
@@ -206,16 +201,16 @@ def test_saving_a_duplicate_name_reports_it_and_keeps_the_original():
 @pytest.mark.parametrize(
     "operation",
     [
-        lambda f: playlists.remove_song(f, PlaylistRef(GUILD, "mix"), 0),
-        lambda f: playlists.remove_song(f, PlaylistRef(GUILD, "mix"), 3),
-        lambda f: playlists.move_song(f, PlaylistRef(GUILD, "mix"), 0, 1),
-        lambda f: playlists.move_song(f, PlaylistRef(GUILD, "mix"), 1, 3),
+        lambda f: playlists.remove_song(f, MIX, 0),
+        lambda f: playlists.remove_song(f, MIX, 3),
+        lambda f: playlists.move_song(f, MIX, 0, 1),
+        lambda f: playlists.move_song(f, MIX, 1, 3),
     ],
     ids=["remove-0", "remove-past-end", "move-from-0", "move-past-end"],
 )
 def test_an_out_of_range_position_reports_the_playlist_size(operation):
     async def test(factory):
-        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A, B])
+        await playlists.save(factory, MIX, [A, B])
         with pytest.raises(playlists.InvalidPosition) as excinfo:
             await operation(factory)
         return excinfo.value.size, await load(factory)
@@ -225,22 +220,21 @@ def test_an_out_of_range_position_reports_the_playlist_size(operation):
 
 def test_removing_the_only_song_is_refused():
     async def test(factory):
-        await playlists.save(factory, PlaylistRef(GUILD, "mix"), [A])
+        await playlists.save(factory, MIX, [A])
         with pytest.raises(playlists.OnlySongInPlaylist):
-            await playlists.remove_song(factory, PlaylistRef(GUILD, "mix"), 1)
+            await playlists.remove_song(factory, MIX, 1)
         return await load(factory)
 
     assert run(test) == [A]
 
 
 def test_get_returns_the_ref_it_was_given_and_the_saved_entries():
-    ref = PlaylistRef(GUILD, "mix")
 
     async def test(factory):
-        await playlists.save(factory, ref, [A, C])
-        return await playlists.get(factory, ref)
+        await playlists.save(factory, MIX, [A, C])
+        return await playlists.get(factory, MIX)
 
-    assert run(test) == playlists.PlaylistContents(ref, [A, C])
+    assert run(test) == playlists.PlaylistContents(MIX, [A, C])
 
 
 def test_no_public_function_takes_or_returns_the_row():
