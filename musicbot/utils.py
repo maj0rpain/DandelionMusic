@@ -242,9 +242,10 @@ def join_needed(ctx: Context) -> bool:
     """Whether the bot has to join the user's voice channel before a
     music command or button runs: it has no voice client (a connect),
     or user_must_be_in_vc is on, its channel has only bots and the
-    user is in another one (a move). The one owner of this decision:
-    play_check(), join_voice() and the defer before a join all read
-    it, so they cannot disagree."""
+    user is in another one (a move). Music commands and buttons decide
+    it here: play_check(), join_voice() and the defer before a join all
+    read it, so they cannot disagree. d!reset (uconnect) and the
+    reaction-button plugin still join voice without asking it."""
     bot_vc = ctx.guild.voice_client
     if not bot_vc:
         return True
