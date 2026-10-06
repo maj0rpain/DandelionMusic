@@ -249,6 +249,21 @@ d!shutdown
 * Stops the bot completely. May be useful after you move the bot to background. Works only for bot owner.
 * Note that unlike other commands, this one doesn't have a slash variant. This allows it to be hidden.
 
+## Development
+
+### Docker: the `bgutil-provider` sidecar
+
+`docker compose up --build` also starts a `bgutil-provider` sidecar (`brainicism/bgutil-ytdlp-pot-provider`). yt-dlp's YouTube extractor calls it over HTTP (`http://bgutil-provider:4416`) to generate PO tokens, which reliable YouTube playback requires.
+
+### Building a Windows exe
+
+```
+uv sync --frozen --group build
+uv run python -m config.build
+```
+
+This produces `dist/DandelionMusic.exe` via PyInstaller (see `config/build.py` for the bundled data and hidden imports). CI runs it on tag pushes (`.github/workflows/release.yml`).
+
 ## License
 
 This program is free software: you can redistribute it and/or modify
