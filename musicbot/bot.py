@@ -118,7 +118,9 @@ class MusicBot(commands.Bot):
         # this loop's aiohttp session (see linkutils.get_session);
         # the worker closes its own when shutdown() stops it
         await linkutils.stop()
-        loader.shutdown()
+        # joining the worker blocks; do it off the loop so other tasks
+        # keep running until it has exited
+        await asyncio.to_thread(loader.shutdown)
         return await super().close()
 
     async def on_ready(self):
