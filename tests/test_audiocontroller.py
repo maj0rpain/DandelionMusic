@@ -74,7 +74,7 @@ def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
         getattr(controller_module, "loader", None), StubLoader
     )
     assert not (caller / "backup").exists()
-    assert (work / "backup" / "playlist_1234.pickle").exists()
+    assert (work / built.pickle_file).exists()
 
 
 def _queue(controller, *titles):
