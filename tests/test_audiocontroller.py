@@ -493,3 +493,34 @@ def test_attach_view_records_an_interactions_original_response(controller):
 
     asyncio.run(controller.attach_view(send_plain))
     assert response.edits == [None]
+
+
+def test_dispose_cancels_the_timer_and_every_pending_task(
+    controller, monkeypatch
+):
+    import concurrent.futures
+
+    from config import config
+
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.timer.start()
+        timer_task = controller.timer._task
+        controller.add_task(asyncio.sleep(3600))
+        (pending_task,) = controller._tasks
+        # what add_task() records when called off the loop's thread
+        pending_future = concurrent.futures.Future()
+        controller._tasks.add(pending_future)
+
+        await controller.dispose()
+        await _settle()
+        return timer_task, pending_task, pending_future
+
+    timer_task, pending_task, pending_future = asyncio.run(run())
+
+    assert timer_task.cancelled()
+    assert pending_task.cancelled()
+    assert pending_future.cancelled()
+    assert controller.guild.voice_client.disconnected
