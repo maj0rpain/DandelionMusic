@@ -10,7 +10,6 @@ import asyncio
 import pickle
 import sys
 import threading
-from pathlib import Path
 
 import pytest
 
@@ -55,11 +54,13 @@ def test_stub_loader_records_preload_calls(controller, stub_loader):
 
 
 def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
-    repo = Path(__file__).resolve().parent.parent
-    monkeypatch.chdir(tmp_path)
+    caller = tmp_path / "caller"
+    caller.mkdir()
+    monkeypatch.chdir(caller)
+    work = tmp_path / "work"
     before = sys.modules.get("musicbot.loader")
 
-    with controller_seam(tmp_path / "work") as (built, _):
+    with controller_seam(work) as (built, _):
         assert isinstance(sys.modules["musicbot.loader"], StubLoader)
         built._pickle_playlist()
 
@@ -72,7 +73,8 @@ def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
     assert not isinstance(
         getattr(controller_module, "loader", None), StubLoader
     )
-    assert not (repo / "backup").exists()
+    assert not (caller / "backup").exists()
+    assert (work / "backup" / "playlist_1234.pickle").exists()
 
 
 def _queue(controller, *titles):
