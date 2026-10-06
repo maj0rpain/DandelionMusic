@@ -247,3 +247,96 @@ def test_on_guild_remove_discards_the_guilds_session(sessions):
     assert controller.disposed
     assert sessions.controller(guild) is None
     assert sessions.settings(guild) is None
+
+
+class ResettableController(FakeController):
+    """Enough of a controller for d!reset: disconnect, then connect."""
+
+    def __init__(self, guild):
+        super().__init__(guild)
+        self.connected_from = None
+
+    async def udisconnect(self, reason):
+        return False
+
+    async def uconnect(self, ctx):
+        self.connected_from = ctx
+
+
+def test_reset_command_replaces_the_controller_and_keeps_settings():
+    """d!reset goes through the registry: the old controller is
+    disposed of, a fresh one is connected, the settings stay."""
+    import types
+
+    from musicbot.commands.general import General
+
+    sessions = GuildSessions(ResettableController, load_settings)
+    guild = FakeGuild(1)
+    sent = []
+
+    async def defer():
+        pass
+
+    async def send(message):
+        sent.append(message)
+
+    async def scenario():
+        old = await sessions.get_or_create(guild)
+        settings = sessions.settings(guild)
+        bot = types.SimpleNamespace(sessions=sessions)
+        ctx = types.SimpleNamespace(
+            bot=bot,
+            guild=guild,
+            defer=defer,
+            send=send,
+            author=types.SimpleNamespace(
+                voice=types.SimpleNamespace(
+                    channel=types.SimpleNamespace(name="General")
+                )
+            ),
+        )
+        await General._reset.callback(General(bot), ctx)
+        return old, settings, ctx
+
+    old, settings, ctx = asyncio.run(scenario())
+
+    new = sessions.controller(guild)
+    assert old.disposed
+    assert new is not old
+    assert new.connected_from is ctx
+    assert sessions.settings(guild) is settings
+
+
+def test_button_plugin_ignores_a_message_from_an_unregistered_guild():
+    """A message can land before on_ready has loaded the guild's
+    settings; the reaction button then has nothing to read."""
+    import types
+
+    from musicbot.plugins.button import Button
+
+    guild = FakeGuild(1)
+    reactions = []
+
+    async def add_reaction(emoji):
+        reactions.append(emoji)
+
+    loop = asyncio.new_event_loop()
+    try:
+        absolutely_ready = loop.create_future()
+        absolutely_ready.set_result(True)
+        bot = types.SimpleNamespace(
+            sessions=GuildSessions(FakeController, load_settings),
+            user=object(),
+            absolutely_ready=absolutely_ready,
+        )
+        message = types.SimpleNamespace(
+            guild=guild,
+            author=object(),
+            content="https://youtu.be/dQw4w9WgXcQ",
+            add_reaction=add_reaction,
+        )
+        loop.run_until_complete(Button(bot).on_message(message))
+    finally:
+        loop.close()
+
+    assert reactions == []
