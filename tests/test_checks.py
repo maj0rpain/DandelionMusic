@@ -5,6 +5,7 @@ Python) and what happens to a command that arrives before the bot has
 finished registering its guilds.
 """
 
+import asyncio
 import types
 
 import pytest
@@ -27,22 +28,30 @@ def make_ctx(bot, guild=None, author_id=1):
     )
 
 
-async def _load_nothing(guilds):
-    return {}
-
-
 def make_bot(controllers=None, is_owner=False, settings=None):
-    """A bot whose registry is seeded with either half alone."""
+    """A bot whose registry is seeded through its own interface:
+    `settings` alone are bulk-loaded, and each of `controllers` is
+    built by get_or_create() over stand-in settings."""
+    controllers = controllers or {}
+    settings = settings or {}
 
     async def _is_owner(_user):
         return is_owner
 
-    sessions = GuildSessions(lambda guild: None, _load_nothing)
-    for guild, controller in (controllers or {}).items():
-        sessions._controllers[guild] = controller
-    for guild, sett in (settings or {}).items():
-        sessions._settings[guild] = sett
+    async def load(guilds):
+        # a vc_timeout means get_or_create() does not autojoin
+        return {
+            g: settings.get(g, types.SimpleNamespace(vc_timeout=True))
+            for g in guilds
+        }
 
+    async def seed():
+        await sessions.load_settings(settings)
+        for guild in controllers:
+            await sessions.get_or_create(guild)
+
+    sessions = GuildSessions(controllers.__getitem__, load)
+    asyncio.run(seed())
     return types.SimpleNamespace(sessions=sessions, is_owner=_is_owner)
 
 
@@ -74,10 +83,10 @@ class TestGetAudiocontroller:
 
 
 class TestGetSettings:
-    """The twin of get_audiocontroller. on_ready fills both halves of
-    every session in the same pass, so guarding only the
-    controller just moved the KeyError one line down into
-    play_check()."""
+    """The twin of get_audiocontroller. Until on_ready has loaded a
+    guild's settings, a path that finds its controller missing finds
+    its settings missing too, so guarding only the controller just
+    moved the KeyError one line down into play_check()."""
 
     def test_returns_the_registered_settings(self):
         guild = Guild()

@@ -22,6 +22,7 @@ Always pass `--repo maj0rpain/DandelionMusic` to `gh pr create`: bare `gh` resol
 
 - `musicbot/__main__.py` / `run.py` - entrypoint; `run.py` is a thin forwarder (PyInstaller entry).
 - `musicbot/bot.py` - `MusicBot`, custom `Context`; user-facing replies go through `ctx.send(...)`, not raw channel sends.
+- `musicbot/sessions.py` - `GuildSessions` (`bot.sessions`): each guild's settings and controller, their creation, lookup (`None` when not registered) and disposal.
 - `musicbot/audiocontroller.py` - per-guild playback state machine (voice, volume, loop, inactivity timer, playlist backup).
 - `musicbot/playlist.py` / `musicbot/song.py` - queue/history and per-track metadata.
 - `musicbot/loader.py` - yt-dlp extraction in a worker process; calling it before `init()` raises `LoaderNotRunning`.

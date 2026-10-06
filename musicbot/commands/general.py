@@ -65,11 +65,18 @@ class General(commands.Cog):
     @commands.check(voice_check)
     async def _reset(self, ctx):
         await ctx.defer()
-        if await get_audiocontroller(ctx).udisconnect("reset command"):
+        get_audiocontroller(ctx)  # CheckError while the bot is starting
+        was_connected = ctx.guild.voice_client is not None
+        # reset() disposes of the old controller, which disconnects it -
+        # so not here as well: a second udisconnect() would back the
+        # already-cleared queue up over the one d!restore reloads
+        audiocontroller = await ctx.bot.sessions.reset(
+            ctx.guild, "reset command"
+        )
+        if was_connected:
             # bot was connected and need some rest
             await asyncio.sleep(1)
 
-        audiocontroller = await ctx.bot.sessions.reset(ctx.guild)
         await audiocontroller.uconnect(ctx)
         await ctx.send(
             "{} Connected to {}".format(

@@ -692,11 +692,11 @@ class AudioController(object):
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
 
-    async def dispose(self):
+    async def dispose(self, reason: str = "left guild"):
         """Tear this controller down for good: disconnect, then cancel
         every task it still has pending - asyncio tasks and the
         concurrent futures add_task() makes off the loop's thread."""
-        await self.udisconnect("left guild")
+        await self.udisconnect(reason)
         for task in list(self._tasks):
             task.cancel()
 

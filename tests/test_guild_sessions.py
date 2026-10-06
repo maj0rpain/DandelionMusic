@@ -18,6 +18,7 @@ class FakeGuild:
         self.id = guild_id
         self.name = f"guild {guild_id}"
         self.voice_channels = []
+        self.voice_client = None
 
     def get_channel(self, channel_id):
         return None
@@ -36,7 +37,7 @@ class FakeController:
         self.guild = guild
         self.disposed = False
 
-    async def dispose(self):
+    async def dispose(self, reason="left guild"):
         self.disposed = True
 
 
@@ -255,9 +256,16 @@ class ResettableController(FakeController):
     def __init__(self, guild):
         super().__init__(guild)
         self.connected_from = None
+        self.disconnects = []
 
     async def udisconnect(self, reason):
+        self.disconnects.append(reason)
         return False
+
+    async def dispose(self, reason="left guild"):
+        # as AudioController.dispose(): disconnecting is part of it
+        await self.udisconnect(reason)
+        await super().dispose(reason)
 
     async def uconnect(self, ctx):
         self.connected_from = ctx
@@ -302,6 +310,9 @@ def test_reset_command_replaces_the_controller_and_keeps_settings():
 
     new = sessions.controller(guild)
     assert old.disposed
+    # once, through dispose(): a second udisconnect() would back the
+    # already-cleared queue up over the one d!restore reloads
+    assert old.disconnects == ["reset command"]
     assert new is not old
     assert new.connected_from is ctx
     assert sessions.settings(guild) is settings

@@ -171,9 +171,9 @@ def get_settings(ctx: Context) -> "GuildSettings":
     bot is still starting.
 
     The twin of get_audiocontroller(), and needed for the same reason:
-    on_ready fills both halves of every guild's session in the same
-    pass, so every path that could find one missing could find the
-    other missing too. Guarding only the controller just moved the
+    until on_ready has loaded a guild's settings, every path that
+    could find its controller missing finds its settings missing
+    too. Guarding only the controller just moved the
     KeyError one line down - play_check() reads settings immediately
     after Music.cog_check() has resolved the controller."""
     sett = ctx.bot.sessions.settings(ctx.guild)

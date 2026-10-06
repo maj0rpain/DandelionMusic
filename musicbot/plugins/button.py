@@ -59,11 +59,10 @@ class Button(commands.Cog):
         if not user_vc:
             return
 
-        # Before the settings lookup, not after the controller one
-        # further down: a raw reaction event is not gated behind
-        # absolutely_ready (unlike on_message above), and on_ready
-        # fills both halves of the session together - so whichever
-        # is read first is where the KeyError lands.
+        # Both halves, before either is used: a raw reaction event is
+        # not gated behind absolutely_ready (unlike on_message above),
+        # and while on_ready runs a guild can have its settings but no
+        # controller yet - or neither.
         sett = self.bot.sessions.settings(serv)
         audiocontroller = self.bot.sessions.controller(serv)
         if sett is None or audiocontroller is None:

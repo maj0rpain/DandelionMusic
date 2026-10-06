@@ -102,13 +102,13 @@ class GuildSessions(Generic[Guild, Controller, Settings]):
             self._controllers.pop(guild, None)
             self._settings.pop(guild, None)
 
-    async def reset(self, guild: Guild) -> Controller:
+    async def reset(self, guild: Guild, reason: str = "reset") -> Controller:
         """Replace the guild's controller with a fresh one, keeping
         its settings. Leaves the guild settings-only if disposing of
         the old controller or building the new one fails."""
         await self._ensure_settings(guild)
         old = self._controllers.pop(guild, None)
         if old is not None:
-            await old.dispose()
+            await old.dispose(reason)
         controller = self._controllers[guild] = self._build_controller(guild)
         return controller
