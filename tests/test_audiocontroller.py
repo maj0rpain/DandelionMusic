@@ -635,6 +635,15 @@ async def _start_and_end_first_track(controller):
     return _end_track(controller.guild.voice_client)
 
 
+async def _end_first_track_on_audio_thread(controller, error=None):
+    """Starts the queue head on the running loop, fires its `after`
+    callback with `error` from a plain thread, as discord.py's audio
+    thread would, and lets the loop run the hop."""
+    after = await _start_and_end_first_track(controller)
+    _in_thread(after, error)
+    await _settle()
+
+
 def _record_threads(controller, monkeypatch):
     """Wraps the queue writes and the pickle to record the thread
     each one runs on."""
@@ -693,11 +702,7 @@ def test_a_track_end_writes_the_queue_and_backup_only_on_the_loop(
     seen = _record_threads(controller, monkeypatch)
 
     async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        after = _end_track(controller.guild.voice_client)
-        _in_thread(after, None)
-        await _settle()
+        await _end_first_track_on_audio_thread(controller)
         return threading.get_ident()
 
     loop_thread = asyncio.run(run())
@@ -711,14 +716,7 @@ def _track_end_stderr(controller, capsys, monkeypatch, error):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second", "third")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        after = _end_track(controller.guild.voice_client)
-        _in_thread(after, error)
-        await _settle()
-
-    asyncio.run(run())
+    asyncio.run(_end_first_track_on_audio_thread(controller, error))
     return capsys.readouterr().err
 
 
@@ -833,11 +831,8 @@ def test_the_idle_timer_starts_after_the_last_track_ends(
     _queue(controller, "only")
 
     async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
+        after = await _start_and_end_first_track(controller)
         assert controller.timer._task is None
-        after = _end_track(controller.guild.voice_client)
         _in_thread(after, None)
         await _settle()
         return controller.timer._task
