@@ -138,6 +138,10 @@ _preloading = {}
 _site_locks = {}
 
 
+class LoaderNotRunning(RuntimeError):
+    """A loader call was made with no extraction worker running."""
+
+
 class SongError(Exception):
     pass
 
@@ -376,6 +380,12 @@ async def preload(song: Song, bot: "MusicBot") -> bool:
 
 
 async def _run_sync(f, *args):
-    return await asyncio.get_running_loop().run_in_executor(
-        _executor, f, *args
-    )
+    # run_in_executor(None, ...) would pick asyncio's default thread pool
+    # and run extraction in this process, with no worker state set up
+    executor = _executor
+    if executor is None:
+        raise LoaderNotRunning(
+            "the loader is not running: loader.init() has not been called"
+            " or loader.shutdown() already ran"
+        )
+    return await asyncio.get_running_loop().run_in_executor(executor, f, *args)
