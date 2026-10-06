@@ -1,16 +1,13 @@
 from __future__ import annotations
-import json
 from typing import Iterable, List, Union, Literal
 
 import discord
 from discord import Attachment, Embed, app_commands
 from discord.ui import View
 from discord.ext import commands
-from sqlalchemy import select, delete
-from sqlalchemy.exc import IntegrityError
 
 from config import config
-from musicbot import linkutils, utils, loader
+from musicbot import linkutils, utils, loader, playlists
 from musicbot.song import Song
 from musicbot.bot import MusicBot, Context
 from musicbot.utils import dj_check, chunks, SimplePaginator
@@ -22,7 +19,7 @@ from musicbot.audiocontroller import (
 )
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
-from musicbot.settings import SavedPlaylist
+from musicbot.playlists import PlaylistEntry
 from musicbot.linkutils import get_site_type, url_regex
 
 
@@ -403,23 +400,12 @@ class Music(commands.Cog):
     async def _playlist_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
-        async with self.bot.DbSession() as session:
-            choices = (
-                (
-                    await session.execute(
-                        select(SavedPlaylist.name)
-                        .where(
-                            SavedPlaylist.guild_id == str(interaction.guild.id)
-                        )
-                        .where(SavedPlaylist.name.startswith(current))
-                    )
-                )
-                .scalars()
-                .all()
-            )
-            return [
-                app_commands.Choice(name=name, value=name) for name in choices
-            ][:25]
+        choices = await playlists.list_names(
+            self.bot.DbSession, str(interaction.guild.id), prefix=current
+        )
+        return [
+            app_commands.Choice(name=name, value=name) for name in choices
+        ][:25]
 
     @commands.hybrid_group(
         name="playlist",
@@ -443,25 +429,19 @@ class Music(commands.Cog):
 
         await ctx.defer()
         songs = [
-            {"url": song.webpage_url, "title": song.title}
+            PlaylistEntry(song.webpage_url, song.title)
             for song in ctx.audiocontroller.playlist.playque
         ]
         if not songs:
             await ctx.send(config.QUEUE_EMPTY)
             return
-        async with ctx.bot.DbSession() as session:
-            session.add(
-                SavedPlaylist(
-                    guild_id=str(ctx.guild.id),
-                    name=name,
-                    songs_json=json.dumps(songs),
-                )
+        try:
+            await playlists.save(
+                ctx.bot.DbSession, str(ctx.guild.id), name, songs
             )
-            try:
-                await session.commit()
-            except IntegrityError:
-                await ctx.send(config.PLAYLIST_ALREADY_EXISTS)
-                return
+        except playlists.PlaylistExists:
+            await ctx.send(config.PLAYLIST_ALREADY_EXISTS)
+            return
         await ctx.send(config.PLAYLIST_SAVED_MESSAGE)
 
     @_playlist.command(
@@ -477,25 +457,20 @@ class Music(commands.Cog):
         name: str,
     ):
         await ctx.defer()
-        async with ctx.bot.DbSession() as session:
-            playlist = (
-                await session.execute(
-                    select(SavedPlaylist)
-                    .where(SavedPlaylist.guild_id == str(ctx.guild.id))
-                    .where(SavedPlaylist.name == name)
-                )
-            ).scalar_one_or_none()
+        playlist = await playlists.get(
+            ctx.bot.DbSession, str(ctx.guild.id), name
+        )
         if playlist is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
         await ctx.audiocontroller.queue(
             Song(
-                get_site_type(song_data["url"]),
-                song_data["url"],
-                title=song_data["title"],
+                get_site_type(entry.url),
+                entry.url,
+                title=entry.title,
                 playlist=playlist,
             )
-            for song_data in json.loads(playlist.songs_json)
+            for entry in playlists.entries(playlist)
         )
         await ctx.send(config.SONGINFO_PLAYLIST_QUEUED)
 
@@ -513,14 +488,9 @@ class Music(commands.Cog):
         name: str,
     ):
         await ctx.defer()
-        async with ctx.bot.DbSession() as session:
-            result = await session.execute(
-                delete(SavedPlaylist)
-                .where(SavedPlaylist.guild_id == str(ctx.guild.id))
-                .where(SavedPlaylist.name == name)
-            )
-            await session.commit()
-        if result.rowcount == 0:
+        try:
+            await playlists.delete(ctx.bot.DbSession, str(ctx.guild.id), name)
+        except playlists.PlaylistNotFound:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
         await ctx.send(config.PLAYLIST_REMOVED)
@@ -532,23 +502,14 @@ class Music(commands.Cog):
         help=config.HELP_LIST_PLAYLISTS_SHORT,
     )
     async def _playlist_list(self, ctx):
-        async with ctx.bot.DbSession() as session:
-            playlists = (
-                (
-                    await session.execute(
-                        select(SavedPlaylist.name).where(
-                            SavedPlaylist.guild_id == str(ctx.guild.id)
-                        )
-                    )
-                )
-                .scalars()
-                .all()
-            )
-        if not playlists:
+        names = await playlists.list_names(
+            ctx.bot.DbSession, str(ctx.guild.id)
+        )
+        if not names:
             await ctx.send("No playlists.")
             return
 
-        playlist_names = "\n".join(f"- {name}" for name in playlists)
+        playlist_names = "\n".join(f"- {name}" for name in names)
         await ctx.send(f"**Playlists:**\n{playlist_names}")
 
     @_playlist.command(
@@ -566,24 +527,19 @@ class Music(commands.Cog):
     ):
         await ctx.defer()
 
-        async with ctx.bot.DbSession() as session:
-            playlist = (
-                await session.execute(
-                    select(SavedPlaylist)
-                    .where(SavedPlaylist.guild_id == str(ctx.guild.id))
-                    .where(SavedPlaylist.name == playlist)
-                )
-            ).scalar_one_or_none()
+        playlist = await playlists.get(
+            ctx.bot.DbSession, str(ctx.guild.id), playlist
+        )
         if playlist is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
         pages = []
         i = 1
-        for part in chunks(json.loads(playlist.songs_json), 25):
+        for part in chunks(playlists.entries(playlist), 25):
             embed = Embed(title=playlist.name)
             for song in part:
-                url = song["url"]
-                title = song["title"] or url_regex.fullmatch(url).group("bare")
+                url = song.url
+                title = song.title or url_regex.fullmatch(url).group("bare")
                 embed.add_field(
                     name=str(i), value=f"[{title}]({url})", inline=False
                 )
@@ -610,30 +566,17 @@ class Music(commands.Cog):
         if song is None:
             await ctx.send(config.SONGINFO_ERROR)
             return
-        # Must match the shape _playlist_save() writes: a list of
-        # {"url", "title"} objects. Appending bare url strings left a
-        # mixed list that every reader indexes by key - _playlist_load,
-        # _playlist_show and loader.preload all do song_data["url"] -
-        # so the playlist raised TypeError until the next restart
-        # normalised it via settings.migrate_old_playlists().
         songs = [song] if isinstance(song, Song) else song
-        new_songs = [{"url": s.webpage_url, "title": s.title} for s in songs]
-
-        async with ctx.bot.DbSession() as session:
-            playlist = (
-                await session.execute(
-                    select(SavedPlaylist)
-                    .where(SavedPlaylist.guild_id == str(ctx.guild.id))
-                    .where(SavedPlaylist.name == playlist)
-                )
-            ).scalar_one_or_none()
-            if playlist is None:
-                await ctx.send(config.PLAYLIST_NOT_FOUND)
-                return
-            playlist.songs_json = json.dumps(
-                json.loads(playlist.songs_json) + new_songs
+        try:
+            await playlists.add_songs(
+                ctx.bot.DbSession,
+                str(ctx.guild.id),
+                playlist,
+                [PlaylistEntry(s.webpage_url, s.title) for s in songs],
             )
-            await session.commit()
+        except playlists.PlaylistNotFound:
+            await ctx.send(config.PLAYLIST_NOT_FOUND)
+            return
         await ctx.send(config.PLAYLIST_UPDATED)
 
     @_playlist.command(
@@ -652,29 +595,19 @@ class Music(commands.Cog):
     ):
         await ctx.defer()
 
-        async with ctx.bot.DbSession() as session:
-            playlist = (
-                await session.execute(
-                    select(SavedPlaylist)
-                    .where(SavedPlaylist.guild_id == str(ctx.guild.id))
-                    .where(SavedPlaylist.name == playlist)
-                )
-            ).scalar_one_or_none()
-            if playlist is None:
-                await ctx.send(config.PLAYLIST_NOT_FOUND)
-                return
-            songs = json.loads(playlist.songs_json)
-            if position <= 0 or position > len(songs):
-                await ctx.send(
-                    f"Invalid position. Playlist has {len(songs)} songs."
-                )
-                return
-            if len(songs) == 1:
-                await ctx.send("Can't remove the only song from playlist.")
-                return
-            del songs[position - 1]
-            playlist.songs_json = json.dumps(songs)
-            await session.commit()
+        try:
+            await playlists.remove_song(
+                ctx.bot.DbSession, str(ctx.guild.id), playlist, position
+            )
+        except playlists.PlaylistNotFound:
+            await ctx.send(config.PLAYLIST_NOT_FOUND)
+            return
+        except playlists.InvalidPosition as e:
+            await ctx.send(f"Invalid position. Playlist has {e.size} songs.")
+            return
+        except playlists.OnlySongInPlaylist:
+            await ctx.send("Can't remove the only song from playlist.")
+            return
         await ctx.send(config.PLAYLIST_UPDATED)
 
     @_playlist.command(
@@ -694,30 +627,20 @@ class Music(commands.Cog):
     ):
         await ctx.defer()
 
-        async with ctx.bot.DbSession() as session:
-            playlist = (
-                await session.execute(
-                    select(SavedPlaylist)
-                    .where(SavedPlaylist.guild_id == str(ctx.guild.id))
-                    .where(SavedPlaylist.name == playlist)
-                )
-            ).scalar_one_or_none()
-            if playlist is None:
-                await ctx.send(config.PLAYLIST_NOT_FOUND)
-                return
-            songs = json.loads(playlist.songs_json)
-            if min(source_position, destination_position) <= 0 or max(
-                source_position, destination_position
-            ) > len(songs):
-                await ctx.send(
-                    f"Invalid position. Playlist has {len(songs)} songs."
-                )
-                return
-            songs.insert(
-                destination_position - 1, songs.pop(source_position - 1)
+        try:
+            await playlists.move_song(
+                ctx.bot.DbSession,
+                str(ctx.guild.id),
+                playlist,
+                source_position,
+                destination_position,
             )
-            playlist.songs_json = json.dumps(songs)
-            await session.commit()
+        except playlists.PlaylistNotFound:
+            await ctx.send(config.PLAYLIST_NOT_FOUND)
+            return
+        except playlists.InvalidPosition as e:
+            await ctx.send(f"Invalid position. Playlist has {e.size} songs.")
+            return
         await ctx.send(config.PLAYLIST_UPDATED)
 
 
