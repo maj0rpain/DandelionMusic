@@ -255,13 +255,16 @@ def join_needed(ctx: Context) -> bool:
     user is in another one (a move). Only a joining command ever
     needs to: when ctx.command is set but not marked with
     @joins_voice, this is False and the command answers without
-    touching voice. A button's context has no command, so its call
-    site decides whether to ask (player buttons do not, search picks
-    do). Music commands and buttons decide it here: play_check(),
-    join_voice() and the defer before a join all read it, so they
-    cannot disagree. d!connect, d!reset and the library views ask it
-    too, through join_voice(), so their commands carry the marker.
-    The reaction-button plugin still joins voice without asking it."""
+    touching voice. A button's context has no command; a MusicButton
+    sets ctx.joins_voice instead, and when that is False this is
+    False too (player buttons, unlike search picks). Music commands
+    and buttons decide it here: play_check(), join_voice() and the
+    defer before a join all read it, so they cannot disagree.
+    d!connect, d!reset and the library views ask it too, through
+    join_voice(), so their commands carry the marker. The
+    reaction-button plugin still joins voice without asking it."""
+    if getattr(ctx, "joins_voice", True) is False:
+        return False
     command = getattr(ctx, "command", None)
     if command is not None and not getattr(
         command.callback, "__joins_voice__", False

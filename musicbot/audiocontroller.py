@@ -45,8 +45,8 @@ class MusicButton(discord.ui.Button):
     Only a button that starts playback passes joins_voice=True and
     joins voice (connects, or moves the bot) before its action: the
     player buttons never touch voice, a search pick does. A click's
-    context has no command, so join_needed() cannot read a marker
-    for it - this flag is that marker."""
+    context has no command, so the flag rides on the context as
+    ctx.joins_voice, where join_needed() reads it."""
 
     def __init__(
         self, callback, check=play_check, joins_voice=False, **kwargs
@@ -64,6 +64,7 @@ class MusicButton(discord.ui.Button):
         # makes the bot join.
         await inter.response.defer()
         ctx = await inter.client.get_context(inter)
+        ctx.joins_voice = self._joins_voice
         try:
             await self._check(ctx)
             if inter.data.get("custom_id") in [
@@ -77,8 +78,7 @@ class MusicButton(discord.ui.Button):
                 "volume_up",
             ]:
                 await dj_check(ctx)
-            if self._joins_voice:
-                await join_voice(ctx)
+            await join_voice(ctx)
         except CheckError as e:
             self.on_refused(e)
             await ctx.send(e, ephemeral=True)

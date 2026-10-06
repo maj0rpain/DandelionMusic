@@ -672,6 +672,42 @@ class TestButtons:
         assert ran == [ctx]
         assert guild.events == []
 
+    @pytest.mark.parametrize("custom_id", PLAYER_BUTTONS)
+    def test_a_player_button_ignores_voice_permissions_it_never_needs(
+        self, custom_id
+    ):
+        """A player button never moves the bot, so the user's channel
+        lacking connect/speak for the bot does not refuse it."""
+        guild = VoiceGuild()
+        guild.put_bot_in(guild.channel("a", bots=1))
+        ctx = voice_ctx(
+            guild, guild.channel("b", connect=False, speak=False), admin=True
+        )
+        refused = []
+
+        async def send(content, **kwargs):
+            refused.append(content)
+
+        ctx.send = send
+        ran = []
+        click(MusicButton(ran.append, custom_id=custom_id), ctx, custom_id)
+        assert refused == []
+        assert ran == [ctx]
+
+    def test_a_player_button_admits_a_user_outside_voice_while_idle(self):
+        guild = VoiceGuild()
+        ctx = voice_ctx(guild, None)
+        refused = []
+
+        async def send(content, **kwargs):
+            refused.append(content)
+
+        ctx.send = send
+        ran = []
+        click(MusicButton(ran.append, custom_id="queue"), ctx, "queue")
+        assert refused == []
+        assert ran == [ctx]
+
     def test_a_search_pick_connects(self):
         guild = VoiceGuild()
         ctx = voice_ctx(guild, guild.channel("a"))
