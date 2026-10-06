@@ -66,4 +66,4 @@ def test_settings_command_reports_a_failed_update(
 
     asyncio.run(command.callback(General(None), fake_ctx(sent), arg))
 
-    assert sent == [f"`Error: Setting `{name}` could not be updated.`"]
+    assert sent == [f"`Error: Setting {name} could not be updated.`"]
