@@ -85,6 +85,12 @@ class RestoreResult(Enum):
     REFUSED_WHILE_ACTIVE = auto()
 
 
+def _require_loop():
+    """Raises RuntimeError unless called on a thread running an event
+    loop - the guard for AudioController's loop-only methods."""
+    asyncio.get_running_loop()
+
+
 class AudioController(object):
     """Controls the playback of audio and the sequential playing of the songs.
 
@@ -422,7 +428,7 @@ class AudioController(object):
         voice client: the after= hop of that track (see
         _on_track_end()) does the advance. With nothing playing, it
         advances directly."""
-        asyncio.get_running_loop()
+        _require_loop()
 
         if self.is_active():
             self._next_song = self.playlist.next(forced)
@@ -457,7 +463,7 @@ class AudioController(object):
     def _on_track_end(self, error, generation: int):
         """Runs on the loop once the track play_song() started as
         `generation` has ended, and advances the queue."""
-        asyncio.get_running_loop()
+        _require_loop()
 
         # the teardown callback of a stop() - one-shot, see stop()
         teardown, self._stopping = self._stopping, False
@@ -547,8 +553,11 @@ class AudioController(object):
         was_idle = not self._playing
         self._playing = True
         # a track end from an earlier track arriving after this one
-        # has started must not end it - see _on_track_end()
+        # has started must not end it - see _on_track_end() - and a
+        # track a skip picked for an earlier track's end is not this
+        # one's next
         self._generation += 1
+        self._next_song = None
         try:
             self.guild.voice_client.play(
                 discord.PCMVolumeTransformer(

@@ -11,7 +11,7 @@ This is a **single-context** repo: one `GLOSSARY.md` and one `docs/adr/` at the 
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 
-Some invariants are recorded as comments at the code they protect (`_help` in `musicbot/bot.py`, `add_task` in `musicbot/audiocontroller.py`, `SAFE_MIGRATION_OPS` in `musicbot/settings.py`, the `musicbot/library_browse.py` docstring). Treat those as binding the same way as an ADR when flagging conflicts.
+Some invariants are recorded as comments at the code they protect (`_help` in `musicbot/bot.py`, `_track_end_callback` in `musicbot/audiocontroller.py`, `SAFE_MIGRATION_OPS` in `musicbot/settings.py`, the `musicbot/library_browse.py` docstring). Treat those as binding the same way as an ADR when flagging conflicts.
 
 ## File structure
 

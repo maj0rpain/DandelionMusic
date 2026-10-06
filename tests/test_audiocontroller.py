@@ -609,7 +609,7 @@ def _in_thread(fn, *args):
         outcome["thread"] = threading.get_ident()
         try:
             fn(*args)
-        except BaseException as e:  # noqa: B036 - reported to the test
+        except BaseException as e:
             outcome["error"] = e
 
     thread = threading.Thread(target=body)
@@ -624,6 +624,15 @@ def _end_track(voice_client):
     back for the test to fire from whichever thread it likes."""
     voice_client.playing = False
     return voice_client.detach_after()
+
+
+async def _start_and_end_first_track(controller):
+    """Starts the queue head on the running loop, then ends it as in
+    _end_track(), returning its `after` callback."""
+    controller.bot.loop = asyncio.get_running_loop()
+    await controller.ensure_playing()
+    await _settle()
+    return _end_track(controller.guild.voice_client)
 
 
 def _record_threads(controller, monkeypatch):
@@ -661,13 +670,7 @@ def test_the_after_callback_only_hands_the_track_end_to_the_loop(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
-    async def start():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
-        return _end_track(controller.guild.voice_client)
-
-    after = asyncio.run(start())
+    after = asyncio.run(_start_and_end_first_track(controller))
     seen = _record_threads(controller, monkeypatch)
     fake_loop = controller.bot.loop = _RecordingLoop()
 
@@ -775,6 +778,32 @@ def test_a_track_end_from_a_replaced_track_changes_nothing(
     assert not (tmp_path / "backup" / "playlist_1234.pickle").exists()
 
 
+def test_a_track_end_from_a_replaced_track_drops_its_pending_pick(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second", "third")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        # a skip picks "second" and stops "first"; before its hop
+        # runs, the queue head - "second" - is started anew
+        controller._next_song = controller.playlist.next(True)
+        stale_after = _end_track(controller.guild.voice_client)
+        await controller.ensure_playing()
+        stale_after(None)
+        await _settle()
+        after = _end_track(controller.guild.voice_client)
+        _in_thread(after, None)
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _played(controller) == ["first", "second", "third"]
+
+
 def test_a_stop_skips_the_backup_after_the_hop(controller, monkeypatch):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
@@ -790,7 +819,10 @@ def test_a_stop_skips_the_backup_after_the_hop(controller, monkeypatch):
 
     seen = asyncio.run(run())
 
-    assert [name for name, _ in seen if name == "pickle"] == []
+    # the hop ran - it consumed stop()'s flag and advanced the
+    # emptied queue - and wrote no backup
+    assert not controller._stopping
+    assert [name for name, _ in seen] == ["next"]
     assert controller.guild.voice_client.stopped == 1
 
 
@@ -822,14 +854,8 @@ def test_the_after_callback_drops_the_track_end_once_the_loop_is_closed(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
-    async def start():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
-        return _end_track(controller.guild.voice_client)
-
     # asyncio.run() closes its loop on the way out, as bot shutdown does
-    after = asyncio.run(start())
+    after = asyncio.run(_start_and_end_first_track(controller))
     assert controller.bot.loop.is_closed()
 
     _, error = _in_thread(after, None)
