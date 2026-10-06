@@ -11,7 +11,8 @@ uv sync                          # install deps
 uv run python -m musicbot        # run the bot (run.py forwards here)
 uv run --group dev pytest        # tests (see tests/CLAUDE.md)
 docker compose up --build        # run in Docker
-pre-commit run --all             # black -l 79, flake8 --ignore E203,W503
+uv run --group dev pre-commit install  # once per clone: run the hooks on every commit
+uv run --group dev pre-commit run --all  # black -l 79, flake8 --ignore E203,W503
 ```
 
 Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.

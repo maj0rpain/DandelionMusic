@@ -15,6 +15,7 @@ package's attributes - otherwise a later test module's
 """
 
 import contextlib
+import enum
 import importlib
 import os
 import sys
@@ -26,18 +27,24 @@ from typing import Iterator, Tuple
 class StubLoader(types.ModuleType):
     """Stands in for musicbot.loader and records what it is asked.
 
-    Every call lands in `calls` as (name, args). `preload` succeeds by
-    default; the load_* functions return what `results` holds for
-    their name, an empty value otherwise.
+    Every call lands in `calls` as (name, args). `preload` reports a
+    fresh extraction (`Preload.EXTRACTED`) by default; the load_*
+    functions return what `results` holds for their name, an empty
+    value otherwise.
     """
 
     class SongError(Exception):
         pass
 
+    class Preload(enum.Enum):
+        FAILED = "failed"
+        CURRENT = "current"
+        EXTRACTED = "extracted"
+
     def __init__(self):
         super().__init__("musicbot.loader")
         self.calls = []
-        self.results = {"preload": True}
+        self.results = {"preload": self.Preload.EXTRACTED}
 
     def _record(self, name, *args, default=None):
         self.calls.append((name, args))

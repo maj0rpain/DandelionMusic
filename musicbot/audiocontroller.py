@@ -768,12 +768,17 @@ class AudioController(object):
             task.cancel()
 
     async def _preload(self, song: Song) -> bool:
-        """Preloads `song`; once that succeeds, refreshes its title in
-        the saved playlist it was queued from. The refresh is
-        best-effort: it never changes the result."""
-        if not await loader.preload(song):
+        """Preloads `song`; when that ran a fresh extraction, refreshes
+        its title in the saved playlist it was queued from. A song that
+        was already current is not refreshed, so it costs no DB read.
+        The refresh is best-effort: it never changes the result."""
+        result = await loader.preload(song)
+        if result is loader.Preload.FAILED:
             return False
-        if song.saved_playlist is not None:
+        if (
+            result is loader.Preload.EXTRACTED
+            and song.saved_playlist is not None
+        ):
             try:
                 await playlists.set_title(
                     self.bot.DbSession,
