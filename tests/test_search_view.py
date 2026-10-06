@@ -218,6 +218,27 @@ def test_a_pick_failing_the_play_check_is_refused_and_can_be_retried():
     assert retry_admitted is True
 
 
+def test_a_pick_failing_after_the_claim_is_used_up_and_still_raises():
+    async def go():
+        message = FakeMessage()
+        view, cog = make_view(message=message)
+        cog.check_error = discord.ClientException("voice join failed")
+        try:
+            await click(view, 0)
+        except discord.ClientException as e:
+            raised = e
+        else:
+            raised = None
+        return view, cog, message, raised
+
+    view, cog, message, raised = run(go)
+    assert str(raised) == "voice join failed"
+    assert cog.played == []
+    assert view.is_finished()
+    assert buttons_disabled(view)
+    assert message.edits == [{"view": view}]
+
+
 def test_a_failed_message_edit_still_queues_the_pick():
     async def go():
         view, cog = make_view(message=FakeMessage(fail=True))

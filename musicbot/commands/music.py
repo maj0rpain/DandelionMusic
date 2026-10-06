@@ -104,6 +104,20 @@ class SongButton(MusicButton):
 
         super().__init__(play, check, emoji=f"{num}⃣")
 
+    async def callback(self, inter: discord.Interaction):
+        try:
+            await super().callback(inter)
+        except Exception:
+            # anything but a refused check (a failed voice join, a
+            # failed defer) uses up the pick: the stale message must
+            # not invite clicks that are silently refused
+            view = self.view
+            if not view.is_finished():
+                view.stop()
+                view.disable()
+                await view.show()
+            raise
+
 
 @commands.check
 def active_only(ctx):
