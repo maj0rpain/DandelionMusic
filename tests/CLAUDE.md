@@ -4,7 +4,7 @@ Run with `uv run --group dev pytest`. CI runs them as the `run-tests` job in `.g
 
 ## What the tests cover
 
-Only the parts that need no Discord connection: config loading, `Playlist`, library search/stats, the browse cursor, the tag/expiry/URL parsers, the permission checks, the guild whitelist, and `AudioController` built through the seam below. There is no integration coverage of the bot itself.
+Only the parts that need no Discord connection: config loading, `Playlist`, library search/stats, the browse cursor, the tag/expiry/URL parsers, the permission checks, the guild whitelist, the guild session registry, and `AudioController` built through the seam below. There is no integration coverage of the bot itself.
 
 ## The controller seam
 
