@@ -1,5 +1,4 @@
 from __future__ import annotations
-from typing import Union
 import asyncio
 
 import discord
@@ -7,7 +6,7 @@ from discord.ext import commands
 
 from config import config
 from musicbot.bot import MusicBot
-from musicbot.settings import ConversionError
+from musicbot.settings import SETTINGS, ConversionError, SettingDescriptor
 from musicbot.utils import (
     CheckError,
     dj_check,
@@ -25,6 +24,52 @@ async def _update_or_report(ctx, sett, setting: str, value) -> bool:
         return True
     await ctx.send(f"`Error: Setting {setting} could not be updated.`")
     return False
+
+
+async def _apply_setting(ctx, descriptor: SettingDescriptor, value):
+    """The body of every d!setting <name> subcommand: replies with the
+    refusal or error, or confirms the update"""
+    refusal = descriptor.edit_gate() if descriptor.edit_gate else None
+    if refusal is not None:
+        await ctx.send(refusal)
+        return
+    sett = get_settings(ctx)
+    try:
+        updated = await _update_or_report(ctx, sett, descriptor.name, value)
+    except ConversionError as e:
+        await ctx.send(f"`Error: {e}`")
+        return
+    if updated:
+        await ctx.send(
+            f"Setting `{descriptor.name}` updated to"
+            f" {descriptor.confirm(value)}!"
+        )
+
+
+def _setting_subcommand(descriptor: SettingDescriptor):
+    """The callback of the d!setting subcommand for one setting, taking
+    the descriptor's parameter name and type"""
+
+    async def callback(self, ctx: commands.Context, value):
+        await _apply_setting(ctx, descriptor, value)
+
+    # discord.py reads the parameter's name and type from the
+    # callback's own code and annotations, and a slash command passes
+    # the value by that name. A __signature__ would not do: discord.py
+    # deletes it after reading it once, and the cog reads it again
+    # when it copies its commands.
+    code = callback.__code__
+    callback.__code__ = code.replace(
+        co_varnames=("self", "ctx", descriptor.param_name)
+        + code.co_varnames[3:]
+    )
+    callback.__annotations__ = {
+        "ctx": commands.Context,
+        descriptor.param_name: descriptor.param_type,
+    }
+    callback.__name__ = f"_set_{descriptor.name}"
+    callback.__qualname__ = f"General._set_{descriptor.name}"
+    return callback
 
 
 class General(commands.Cog):
@@ -116,96 +161,11 @@ class General(commands.Cog):
         sett = get_settings(ctx)
         await ctx.send(embed=sett.format(ctx))
 
-    @_settings.command(name="command_channel")
-    @commands.check(dj_check)
-    async def _set_command_channel(
-        self,
-        ctx: commands.Context,
-        channel: Union[
-            discord.Thread, discord.VoiceChannel, discord.TextChannel
-        ],
-    ):
-        sett = get_settings(ctx)
-        if not await _update_or_report(ctx, sett, "command_channel", channel):
-            return
-        await ctx.send(
-            f"Setting `command_channel` updated to {channel.mention}!"
-        )
-
-    @_settings.command(name="start_voice_channel")
-    @commands.check(dj_check)
-    async def _set_start_voice_channel(
-        self, ctx: commands.Context, channel: discord.VoiceChannel
-    ):
-        sett = get_settings(ctx)
-        if not await _update_or_report(
-            ctx, sett, "start_voice_channel", channel
-        ):
-            return
-        await ctx.send(
-            f"Setting `start_voice_channel` updated to {channel.mention}!"
-        )
-
-    @_settings.command(name="dj_role")
-    @commands.check(dj_check)
-    async def _set_dj_role(self, ctx: commands.Context, role: discord.Role):
-        sett = get_settings(ctx)
-        if not await _update_or_report(ctx, sett, "dj_role", role):
-            return
-        await ctx.send(f"Setting `dj_role` updated to {role.name}!")
-
-    @_settings.command(name="user_must_be_in_vc")
-    @commands.check(dj_check)
-    async def _set_user_must_be_in_vc(
-        self, ctx: commands.Context, value: bool
-    ):
-        sett = get_settings(ctx)
-        if not await _update_or_report(ctx, sett, "user_must_be_in_vc", value):
-            return
-        await ctx.send(f"Setting `user_must_be_in_vc` updated to {value}!")
-
-    @_settings.command(name="button_emote")
-    @commands.check(dj_check)
-    async def _set_button_emote(self, ctx: commands.Context, emoji: str):
-        sett = get_settings(ctx)
-        try:
-            updated = await _update_or_report(ctx, sett, "button_emote", emoji)
-        except ConversionError as e:
-            await ctx.send(f"`Error: {e}`")
-            return
-        if not updated:
-            return
-        await ctx.send(f"Setting `button_emote` updated to {emoji}!")
-
-    @_settings.command(name="default_volume")
-    @commands.check(dj_check)
-    async def _set_default_volume(self, ctx: commands.Context, value: int):
-        sett = get_settings(ctx)
-        if value < 0 or value > 100:
-            await ctx.send("`Error: Volume must be between 0 and 100.`")
-            return
-        if not await _update_or_report(ctx, sett, "default_volume", value):
-            return
-        await ctx.send(f"Setting `default_volume` updated to {value}!")
-
-    @_settings.command(name="vc_timeout")
-    @commands.check(dj_check)
-    async def _set_vc_timeout(self, ctx: commands.Context, value: bool):
-        if not config.ALLOW_VC_TIMEOUT_EDIT:
-            await ctx.send(config.VC_TIMEOUT_EDIT_DISABLED)
-            return
-        sett = get_settings(ctx)
-        if not await _update_or_report(ctx, sett, "vc_timeout", value):
-            return
-        await ctx.send(f"Setting `vc_timeout` updated to {value}!")
-
-    @_settings.command(name="announce_songs")
-    @commands.check(dj_check)
-    async def _set_announce_songs(self, ctx: commands.Context, value: bool):
-        sett = get_settings(ctx)
-        if not await _update_or_report(ctx, sett, "announce_songs", value):
-            return
-        await ctx.send(f"Setting `announce_songs` updated to {value}!")
+    for _descriptor in SETTINGS.values():
+        vars()[f"_set_{_descriptor.name}"] = _settings.command(
+            name=_descriptor.name
+        )(commands.check(dj_check)(_setting_subcommand(_descriptor)))
+    del _descriptor
 
     @commands.hybrid_command(
         name="addbot",
