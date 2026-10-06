@@ -885,18 +885,23 @@ async def _drain(controller):
         await asyncio.gather(*controller._tasks)
 
 
+SAVED_URL = "https://example.invalid/track"
+
+
 def _queue_saved_playlist_song(controller, from_saved_playlist=True):
     """Queues one song behind a playing track, stored as "stale title"
     in a saved playlist and loaded as "fresh title"; lets the preload
     run, and returns the saved playlist's entries and the queue."""
     ac = sys.modules[type(controller).__module__]
-    url = "https://example.invalid/track"
-    _queue(controller, "current")
+    _queue(controller, "playing")
 
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
         engine, factory = await _saved_playlist_db(
-            ac, "1234", "mix", [ac.playlists.PlaylistEntry(url, "stale title")]
+            ac,
+            "1234",
+            "mix",
+            [ac.playlists.PlaylistEntry(SAVED_URL, "stale title")],
         )
         controller.bot.DbSession = factory
         try:
@@ -905,7 +910,7 @@ def _queue_saved_playlist_song(controller, from_saved_playlist=True):
                 [
                     ac.Song(
                         ac.SiteTypes.YT_DLP,
-                        url,
+                        SAVED_URL,
                         title="fresh title",
                         saved_playlist=(
                             ac.playlists.PlaylistRef("1234", "mix")
@@ -926,7 +931,7 @@ def _queue_saved_playlist_song(controller, from_saved_playlist=True):
 
 def _entry(controller, title):
     ac = sys.modules[type(controller).__module__]
-    return ac.playlists.PlaylistEntry("https://example.invalid/track", title)
+    return ac.playlists.PlaylistEntry(SAVED_URL, title)
 
 
 @pytest.mark.parametrize(
@@ -943,9 +948,9 @@ def test_preloading_a_saved_playlist_song_refreshes_its_stored_title(
 @pytest.mark.parametrize(
     "outcome, queue",
     [
-        ("CURRENT", ["current", "fresh title"]),
+        ("CURRENT", ["playing", "fresh title"]),
         # a failed preload drops the song, as before
-        ("FAILED", ["current"]),
+        ("FAILED", ["playing"]),
     ],
 )
 def test_a_preload_that_extracted_nothing_leaves_the_stored_title_stale(
@@ -968,4 +973,4 @@ def test_a_failing_title_refresh_still_counts_as_a_successful_preload(
     monkeypatch.setattr(ac.playlists, "set_title", set_title)
     entries, titles = _queue_saved_playlist_song(controller)
     assert entries == [_entry(controller, "stale title")]
-    assert titles == ["current", "fresh title"]
+    assert titles == ["playing", "fresh title"]

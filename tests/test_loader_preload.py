@@ -101,3 +101,9 @@ def test_a_caller_awaiting_an_inflight_extraction_is_told_its_outcome(
         return await running, await waiting
 
     assert asyncio.run(run()) == (first, second)
+
+
+def test_the_controller_seams_stub_preload_matches_the_real_one():
+    from controller_seam import StubLoader
+
+    assert [m.name for m in StubLoader.Preload] == [m.name for m in Preload]
