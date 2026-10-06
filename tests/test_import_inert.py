@@ -70,7 +70,7 @@ def worker_state_is_set():
     return loader._loop is not None and loader._downloader is not None
 
 
-async def _guarded(call):
+async def _observe_call(call):
     try:
         await call()
     except Exception as e:
@@ -87,19 +87,21 @@ async def _guarded(call):
     }
 
 
-def guarded_calls():
+def calls_without_worker():
     return {
         "load_song": asyncio.run(
-            _guarded(lambda: loader.load_song("https://example.com/a.mp3"))
+            _observe_call(
+                lambda: loader.load_song("https://example.com/a.mp3")
+            )
         ),
         "search_youtube": asyncio.run(
-            _guarded(lambda: loader.search_youtube("a song"))
+            _observe_call(lambda: loader.search_youtube("a song"))
         ),
     }
 
 
 if __name__ == "__main__":
-    before_init = guarded_calls()
+    before_init = calls_without_worker()
     loader.shutdown()  # safe without a prior init()
     loader.init()
     worker_ready = loader._executor.submit(worker_state_is_set).result()
@@ -111,7 +113,7 @@ if __name__ == "__main__":
     )
     loader.shutdown()
     children_after_shutdown = len(multiprocessing.active_children())
-    after_shutdown = guarded_calls()
+    after_shutdown = calls_without_worker()
     loader.shutdown()  # and a second time
     print(json.dumps({
         "before_init": before_init,
