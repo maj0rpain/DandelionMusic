@@ -370,25 +370,46 @@ def test_enrichment_resolving_after_moving_on_is_not_drawn():
     async def scenario():
         view = make_view()
         gate = asyncio.Event()
-        stub_enrichment_by_level(
+        finished = stub_enrichment_by_level(
             view, {("Radiohead", None): Gated(gate, STALE)}
         )
         entering = FakeInteraction()
         entry = asyncio.create_task(view.descend(entering, "Radiohead"))
         await settle()
+        # move on to the album, and hold its own enrichment edit in
+        # flight so the render lock stays taken
         clicking = FakeInteraction()
+        clicking.hold(1)
         accepted = await view.interaction_check(clicking)
-        await view.descend(clicking, "OK Computer")
+        handler = asyncio.create_task(view.descend(clicking, "OK Computer"))
+        await clicking.in_flight.wait()
+        # a redraw of the album that queues behind that edit, so it is
+        # built only after the stale enrichment below has resolved
+        paging = FakeInteraction()
+        page_accepted = await view.interaction_check(paging)
+        page_turn = asyncio.create_task(view.turn_page(paging, 0))
+        await settle()
         gate.set()
-        await entry
-        return accepted, entering, clicking
+        await settle()
+        resolved_while_pending = ("Radiohead", None) in finished
+        clicking.release()
+        await asyncio.gather(entry, handler, page_turn)
+        redraws = clicking.edits + paging.edits
+        return (
+            accepted and page_accepted,
+            resolved_while_pending,
+            entering,
+            paging,
+            redraws,
+        )
 
-    accepted, entering, clicking = run(scenario)
+    accepted, resolved_while_pending, entering, paging, redraws = run(scenario)
 
     assert accepted is True
+    assert resolved_while_pending is True
     assert len(entering.edits) == 1
-    assert clicking.edits
-    assert not any(carries_enrichment(edit) for edit in clicking.edits)
+    assert paging.edits
+    assert not any(carries_enrichment(edit) for edit in redraws)
 
 
 def test_second_select_click_during_first_draw_is_turned_away():

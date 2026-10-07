@@ -284,9 +284,14 @@ class LibraryView(discord.ui.View):
         # click spinner and re-enables the view immediately rather than
         # showing a "thinking" placeholder, so without it a second
         # click could start while the first is still drawing or
-        # queueing. For navigation it is held only across the first
-        # draw's edit - never across the enrichment lookup that
-        # follows, or a rapid click would spend seconds being refused.
+        # queueing. For navigation it is held across the first draw's
+        # render() - its edit, and before that any wait on the render
+        # lock behind an enrichment edit already in flight, which can
+        # be uploading megabytes of artwork. It is never held across a
+        # level's own enrichment lookup and edit. So a click made
+        # while an enrichment edit uploads is accepted, but its draw
+        # then waits out that upload holding the guard, and any
+        # further click made during that wait is turned away.
         #
         # Held by the first draw of a level, a page turn and a bulk
         # queue. Not by the enrichment edit, which runs unguarded so a
@@ -328,11 +333,14 @@ class LibraryView(discord.ui.View):
             return False
         if self._busy:
             # acknowledged silently rather than answered with an
-            # ephemeral complaint: the guard's window is a single
-            # message edit for navigation and paging - a level's first
-            # draw or a page turn, never its enrichment edit - so the
-            # clicks it catches are overwhelmingly the second half of
-            # a double-click. Telling someone off for that reads as a
+            # ephemeral complaint. For navigation and paging the
+            # guard's window is a level's first draw or a page turn -
+            # its own edit, plus any wait behind an enrichment edit
+            # already in flight on the render lock, never a level's
+            # enrichment edit itself. So the clicks it catches are the
+            # second half of a double-click, or clicks made after an
+            # accepted one while its draw waits behind an artwork
+            # upload. Telling someone off for either reads as a
             # malfunction. The one operation still slow enough to be
             # worth explaining - a bulk queue - puts up its own
             # ephemeral "Queueing..." message while it runs, so the
