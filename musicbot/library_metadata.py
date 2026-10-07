@@ -1,6 +1,5 @@
 import asyncio
 import sys
-import time
 from collections import OrderedDict
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -10,6 +9,7 @@ from config import config
 from musicbot import linkutils
 from musicbot.linkutils import spotify_api
 from musicbot.audiotags import read_artwork, read_tags
+from musicbot.cached_lookup import CachedLookup
 
 # Dedicated pool (not the loop's shared default executor) for the
 # blocking calls this module makes - mutagen reads and spotipy's
@@ -18,27 +18,6 @@ from musicbot.audiotags import read_artwork, read_tags
 # external calls could otherwise pile up threads in whatever pool the
 # rest of the bot shares.
 _executor = ThreadPoolExecutor(max_workers=4)
-
-
-# A transient failure is deliberately not cached as a result, but
-# retrying it on every navigation makes a persistently broken backend
-# (bad credentials, an outage, an unreachable host) pay its full
-# timeout again for each new key. Suppress its retries for a while.
-_TRANSIENT_COOLDOWN = 60
-
-
-def _in_cooldown(deadlines: Dict[object, float], key: object) -> bool:
-    deadline = deadlines.get(key)
-    if deadline is None:
-        return False
-    if time.monotonic() < deadline:
-        return True
-    del deadlines[key]
-    return False
-
-
-def _start_cooldown(deadlines: Dict[object, float], key: object) -> None:
-    deadlines[key] = time.monotonic() + _TRANSIENT_COOLDOWN
 
 
 # distinguishes "not looked up yet" from a looked-up-and-genuinely-
@@ -124,11 +103,6 @@ class _LastfmInfo(NamedTuple):
     tags: Tuple[str, ...]
 
 
-_lastfm_cache: Dict[object, Optional[_LastfmInfo]] = {}
-_lastfm_futures: Dict[object, asyncio.Future] = {}
-_lastfm_cooldown: Dict[object, float] = {}
-
-
 # since Last.fm's 2019 image-licensing change, artist.getInfo returns
 # this one grey-star placeholder as the image for every artist - a real
 # URL, so it has to be rejected by hash rather than by being absent
@@ -188,95 +162,65 @@ async def _fetch_lastfm(method: str, params: Dict[str, str]) -> dict:
     return data
 
 
-async def _lastfm_info(
-    method: str, params: Dict[str, str], key: object
+def _parse_lastfm(data: dict) -> Optional[_LastfmInfo]:
+    """The facts worth keeping from an artist.getInfo or album.getInfo
+    response, or None when it carries none of them. A malformed
+    response raises, which the lookup treats as a transient failure."""
+    node = data.get("artist") or data.get("album")
+    if not node:
+        return None
+    # artist.getInfo nests its counters under "stats";
+    # album.getInfo puts the same keys at the top level
+    counters = node.get("stats") or node
+    listeners = _as_int(counters.get("listeners"))
+    playcount = _as_int(counters.get("playcount"))
+    tags = _lastfm_tags(node)
+
+    images = node.get("image") or []
+    image_url = next(
+        (
+            img["#text"]
+            for img in reversed(images)
+            if img.get("#text") and _PLACEHOLDER_IMAGE not in img["#text"]
+        ),
+        None,
+    )
+    if not (image_url or listeners or playcount or tags):
+        return None
+    return _LastfmInfo(
+        image_url=image_url,
+        listeners=listeners,
+        playcount=playcount,
+        tags=tags,
+    )
+
+
+async def _lastfm_artist_backend(name: str) -> Optional[_LastfmInfo]:
+    return _parse_lastfm(
+        await _fetch_lastfm("artist.getInfo", {"artist": name})
+    )
+
+
+async def _lastfm_album_backend(
+    key: Tuple[str, str],
 ) -> Optional[_LastfmInfo]:
-    if not config.LASTFM_API_KEY:
-        return None
-    if key in _lastfm_cache:
-        return _lastfm_cache[key]
-    if _in_cooldown(_lastfm_cooldown, key):
-        return None
-    future = _lastfm_futures.get(key)
-    if future:
-        # shielded: this waiter being cancelled (view teardown, bot
-        # shutdown) must not cancel the shared future out from under
-        # the call that owns it, nor the other waiters on it
-        return await asyncio.shield(future)
-    _lastfm_futures[key] = asyncio.get_running_loop().create_future()
+    artist_name, album_name = key
+    data = await _fetch_lastfm(
+        "album.getInfo", {"artist": artist_name, "album": album_name}
+    )
+    return _parse_lastfm(data)
 
-    result: Optional[_LastfmInfo] = None
-    # a timeout/exception is transient and must not be cached as a
-    # permanent "no match" - only a real fetched-successfully outcome
-    # (match or genuine no-match) is worth remembering for the rest
-    # of the process's lifetime
-    transient_failure = False
-    try:
-        try:
-            data = await asyncio.wait_for(
-                _fetch_lastfm(method, params), timeout=3
-            )
-        except asyncio.TimeoutError:
-            print(
-                f"library_metadata: Last.fm {method} timed out"
-                f" for {params}",
-                file=sys.stderr,
-            )
-            transient_failure = True
-            data = None
-        except Exception as e:
-            print(
-                f"library_metadata: Last.fm {method} failed"
-                f" for {params}: {e}",
-                file=sys.stderr,
-            )
-            transient_failure = True
-            data = None
 
-        node = (data.get("artist") or data.get("album")) if data else None
-        if node:
-            # artist.getInfo nests its counters under "stats";
-            # album.getInfo puts the same keys at the top level
-            counters = node.get("stats") or node
-            listeners = _as_int(counters.get("listeners"))
-            playcount = _as_int(counters.get("playcount"))
-            tags = _lastfm_tags(node)
+def _lastfm_enabled() -> bool:
+    return bool(config.LASTFM_API_KEY)
 
-            images = node.get("image") or []
-            image_url = next(
-                (
-                    img["#text"]
-                    for img in reversed(images)
-                    if img.get("#text")
-                    and _PLACEHOLDER_IMAGE not in img["#text"]
-                ),
-                None,
-            )
-            if image_url or listeners or playcount or tags:
-                result = _LastfmInfo(
-                    image_url=image_url,
-                    listeners=listeners,
-                    playcount=playcount,
-                    tags=tags,
-                )
 
-        if result is None and not transient_failure:
-            print(
-                f"library_metadata: Last.fm {method} found no match"
-                f" for {params}",
-                file=sys.stderr,
-            )
-
-        if transient_failure:
-            _start_cooldown(_lastfm_cooldown, key)
-        else:
-            _lastfm_cache[key] = result
-    finally:
-        pending = _lastfm_futures.pop(key)
-        if not pending.done():
-            pending.set_result(result)
-
-    return result
+_lastfm_artist: CachedLookup[str, _LastfmInfo] = CachedLookup(
+    _lastfm_enabled, _lastfm_artist_backend, "Last.fm artist.getInfo"
+)
+_lastfm_album: CachedLookup[Tuple[str, str], _LastfmInfo] = CachedLookup(
+    _lastfm_enabled, _lastfm_album_backend, "Last.fm album.getInfo"
+)
 
 
 class _SpotifyInfo(NamedTuple):
@@ -284,11 +228,6 @@ class _SpotifyInfo(NamedTuple):
     popularity: Optional[int]  # 0-100
     followers: Optional[int]  # artist level only
     release_date: Optional[str]  # album level only
-
-
-_spotify_cache: Dict[object, Optional[_SpotifyInfo]] = {}
-_spotify_futures: Dict[object, asyncio.Future] = {}
-_spotify_cooldown: Dict[object, float] = {}
 
 
 def _spotify_artist_sync(name: str) -> Optional[_SpotifyInfo]:
@@ -339,60 +278,30 @@ def _spotify_album_sync(
     )
 
 
-async def _spotify_lookup(
-    fn, key: object, label: str
+async def _spotify_artist_backend(name: str) -> Optional[_SpotifyInfo]:
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, _spotify_artist_sync, name)
+
+
+async def _spotify_album_backend(
+    key: Tuple[str, str],
 ) -> Optional[_SpotifyInfo]:
-    if spotify_api is None:
-        return None
-    if key in _spotify_cache:
-        return _spotify_cache[key]
-    if _in_cooldown(_spotify_cooldown, key):
-        return None
-    future = _spotify_futures.get(key)
-    if future:
-        # see _lastfm_info - shielded against waiter cancellation
-        return await asyncio.shield(future)
-    _spotify_futures[key] = asyncio.get_running_loop().create_future()
+    loop = asyncio.get_running_loop()
+    return await loop.run_in_executor(_executor, _spotify_album_sync, *key)
 
-    result: Optional[_SpotifyInfo] = None
-    # see _lastfm_info's identical reasoning - a timeout/exception is
-    # transient and must not be cached as a permanent "no match"
-    transient_failure = False
-    try:
-        loop = asyncio.get_running_loop()
-        try:
-            result = await asyncio.wait_for(
-                loop.run_in_executor(_executor, fn), timeout=3
-            )
-        except asyncio.TimeoutError:
-            print(
-                f"library_metadata: Spotify {label} timed out for {key}",
-                file=sys.stderr,
-            )
-            transient_failure = True
-        except Exception as e:
-            print(
-                f"library_metadata: Spotify {label} failed for {key}: {e}",
-                file=sys.stderr,
-            )
-            transient_failure = True
-        else:
-            if result is None:
-                print(
-                    f"library_metadata: Spotify found no {label}"
-                    f" for {key}",
-                    file=sys.stderr,
-                )
-        if transient_failure:
-            _start_cooldown(_spotify_cooldown, key)
-        else:
-            _spotify_cache[key] = result
-    finally:
-        pending = _spotify_futures.pop(key)
-        if not pending.done():
-            pending.set_result(result)
 
-    return result
+# read at each lookup rather than captured here, so tests can
+# monkeypatch library_metadata.spotify_api
+def _spotify_enabled() -> bool:
+    return spotify_api is not None
+
+
+_spotify_artist: CachedLookup[str, _SpotifyInfo] = CachedLookup(
+    _spotify_enabled, _spotify_artist_backend, "Spotify artist"
+)
+_spotify_album: CachedLookup[Tuple[str, str], _SpotifyInfo] = CachedLookup(
+    _spotify_enabled, _spotify_album_backend, "Spotify album"
+)
 
 
 class ExternalStats(NamedTuple):
@@ -563,10 +472,13 @@ def clear_caches() -> None:
     _names_cache.clear()
     _art_cache.clear()
     _art_cache_bytes = 0
-    _lastfm_cache.clear()
-    _lastfm_cooldown.clear()
-    _spotify_cache.clear()
-    _spotify_cooldown.clear()
+    for lookup in (
+        _lastfm_artist,
+        _lastfm_album,
+        _spotify_artist,
+        _spotify_album,
+    ):
+        lookup.clear()
 
 
 async def get_artist_enrichment(
@@ -579,10 +491,8 @@ async def get_artist_enrichment(
     concurrently overlaps their waits instead of summing them."""
     artist_name, _ = await _resolve_names(artist_folder, None, sample_file)
     spotify, lastfm = await asyncio.gather(
-        _spotify_lookup(
-            lambda: _spotify_artist_sync(artist_name), artist_name, "artist"
-        ),
-        _lastfm_info("artist.getInfo", {"artist": artist_name}, artist_name),
+        _spotify_artist.get(artist_name),
+        _lastfm_artist.get(artist_name),
     )
     return Enrichment(
         stats=_external_stats(spotify, lastfm),
@@ -603,14 +513,8 @@ async def get_album_enrichment(
     key = (artist_name, album_name)
     embedded, spotify, lastfm = await asyncio.gather(
         _embedded_art(sample_file),
-        _spotify_lookup(
-            lambda: _spotify_album_sync(artist_name, album_name), key, "album"
-        ),
-        _lastfm_info(
-            "album.getInfo",
-            {"artist": artist_name, "album": album_name},
-            key,
-        ),
+        _spotify_album.get(key),
+        _lastfm_album.get(key),
     )
     return Enrichment(
         stats=_external_stats(spotify, lastfm),
