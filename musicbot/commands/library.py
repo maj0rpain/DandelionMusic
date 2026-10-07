@@ -681,8 +681,9 @@ class LibraryBrowseView(LibraryView):
             self.add_item(item)
 
     async def turn_page(self, interaction: discord.Interaction, delta: int):
-        """Applies a page delta under the same guard as everything
-        else.
+        """Applies a page delta under the double-click guard - the one
+        the first draw of a level and a bulk queue also hold, and the
+        enrichment edit does not.
 
         The guard matters on its own account: the button stays
         clickable until the edit lands and discord.py dispatches every
