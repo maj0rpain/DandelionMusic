@@ -278,19 +278,22 @@ class LibraryView(discord.ui.View):
         # landing mid-session must not change what the already-shown
         # entries point at
         self.index = index
-        # serializes the message edits themselves. discord.py
-        # dispatches every click in its own task, and deferring a
-        # component interaction clears the click spinner and re-enables
-        # the view immediately rather than showing a "thinking"
-        # placeholder, so without this two overlapping handlers could
-        # edit the same message out of order. Held only across the
-        # edits - never across the slow work that produces them, or a
-        # rapid click would spend seconds being refused.
+        # the double-click guard: while it is held, interaction_check()
+        # refuses new clicks. discord.py dispatches every click in its
+        # own task, and deferring a component interaction clears the
+        # click spinner and re-enables the view immediately rather than
+        # showing a "thinking" placeholder, so without it a second
+        # click could start while the first is still drawing or
+        # queueing. For navigation it is held only across the first
+        # draw's edit - never across the enrichment lookup that
+        # follows, or a rapid click would spend seconds being refused.
         #
         # Held by the first draw of a level, a page turn and a bulk
-        # queue - the double-click guards. Not by the enrichment edit,
-        # which runs unguarded so a click made while its artwork
-        # uploads is accepted rather than dropped.
+        # queue. Not by the enrichment edit, which runs unguarded so a
+        # click made while its artwork uploads is accepted rather than
+        # dropped. Keeping the message edits in order is not this
+        # guard's job: the browser's render lock serialises them - see
+        # LibraryBrowseView.render().
         #
         # A depth count rather than a flag, so that two holders
         # overlapping - as the enrichment edit once did, when it took
