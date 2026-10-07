@@ -29,6 +29,7 @@ Always pass `--repo maj0rpain/DandelionMusic` to `gh pr create`: bare `gh` resol
 - `musicbot/playlists.py` - saved playlists: the only reader/writer of `SavedPlaylist.songs_json`; callers use `PlaylistEntry`/`PlaylistRef`/`PlaylistContents`.
 - `musicbot/loader.py` - yt-dlp extraction in a worker process; calling it before `init()` raises `LoaderNotRunning`.
 - `musicbot/linkutils.py` - URL classification and Spotify resolution.
+- `musicbot/cached_lookup.py` - `CachedLookup`: a remote lookup's cache, in-flight dedup (shielded), timeout and failure cooldown, around a backend passed in; imports only the standard library.
 - `musicbot/library_browse.py` - the library browse cursor; `LibraryBrowseView` is its Discord adapter.
 - `musicbot/settings.py` - SQLAlchemy models, auto-migrations, guild whitelist; the `SETTINGS` table of `SettingDescriptor`s is the single place a guild setting is described (its column aside): it drives defaults, conversion, the `d!setting show` embed and the generated `d!setting` subcommands.
 - `musicbot/commands/` - the `music`, `general`, `developer` cogs.
