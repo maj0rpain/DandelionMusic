@@ -91,6 +91,15 @@ def test_config_normalises_a_postgresql_url(config_factory):
     assert config.DATABASE_LIBRARY_NAME == "asyncpg"
 
 
+def test_config_keeps_the_rest_of_the_url_when_naming_the_driver(
+    config_factory,
+):
+    config = config_factory(
+        SECRETS_ENV + "DATABASE_URL=postgres+asyncpg://asyncpg:asyncpg@h/db\n"
+    )
+    assert config.DATABASE == "postgresql+asyncpg://asyncpg:asyncpg@h/db"
+
+
 def test_config_load_rejects_an_unmappable_url(config_factory):
     with pytest.raises(ValueError):
         config_factory(SECRETS_ENV + "DATABASE_URL=mariadb://u:p@h/db\n")

@@ -156,7 +156,9 @@ class Config:
         self.DATABASE = alchemize_url(self.DATABASE_URL)
         driver_name = self.DATABASE.partition("+")[2].partition(":")[0]
         db_req = Requirement(driver_name)
-        self.DATABASE = self.DATABASE.replace(driver_name, db_req.name, 1)
+        dialect, _, rest = self.DATABASE.partition("+")
+        rest = rest.partition("://")[2]
+        self.DATABASE = f"{dialect}+{db_req.name}://{rest}"
         self.DATABASE_LIBRARY_NAME = db_req.name
 
         # Convert EMBED_COLOR to integer if it's a string
