@@ -923,7 +923,10 @@ class AudioController(object):
         sett = self.bot.sessions.settings(self.guild)
 
         if sett.vc_timeout and (
-            not self.guild.voice_client.is_playing()
+            (
+                not self.guild.voice_client.is_playing()
+                and self._pending is None
+            )
             or all(m.bot for m in self.guild.voice_client.channel.members)
         ):
             await self.udisconnect("inactivity timeout")

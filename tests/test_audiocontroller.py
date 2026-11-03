@@ -1041,6 +1041,32 @@ def test_queueing_during_a_pending_start_starts_nothing_new(
     assert _titles(controller) == ["slow", "next", "added"]
 
 
+def test_the_inactivity_timeout_during_a_pending_start_does_not_disconnect(
+    controller, stub_loader, monkeypatch
+):
+    import types
+
+    sett = controller.bot.sessions.settings(controller.guild)
+    sett.vc_timeout = True
+    controller.guild.voice_client.channel.members = [
+        types.SimpleNamespace(bot=False)
+    ]
+
+    async def run():
+        release, task, _ = _pending_start(
+            controller, stub_loader, monkeypatch, "slow"
+        )
+        await _settle()
+        await controller.timeout_handler()
+        release.set()
+        await _finish(task)
+
+    asyncio.run(run())
+
+    assert controller.guild.voice_client.disconnected is False
+    assert _played(controller) == ["slow"]
+
+
 def test_a_local_batch_during_a_pending_start_starts_nothing_new(
     controller, stub_loader, monkeypatch
 ):
