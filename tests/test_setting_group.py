@@ -18,27 +18,14 @@ from config import config
 from musicbot.commands.general import General
 from musicbot.utils import CheckError
 from test_settings_update_failure import (
+    FakeDbSession,
     FakeMessage,
+    fake_author,
+    fake_bot,
     setting_group,
     stored_settings,
     stored_values,
 )
-
-
-class RecordingDbSession:
-    commits = 0
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return False
-
-    def add(self, obj):
-        pass
-
-    async def commit(self):
-        RecordingDbSession.commits += 1
 
 
 class RecordingContext(commands.Context):
@@ -48,23 +35,7 @@ class RecordingContext(commands.Context):
 
 
 def build_ctx(text, sett, is_dj=True):
-    sessions = types.SimpleNamespace(settings=lambda guild: sett)
-
-    async def allowed(ctx):
-        return True
-
-    async def is_owner(user):
-        return False
-
-    bot = types.SimpleNamespace(
-        sessions=sessions,
-        DbSession=RecordingDbSession,
-        emojis=[],
-        can_run=allowed,
-        is_owner=is_owner,
-        _before_invoke=None,
-        _after_invoke=None,
-    )
+    bot = fake_bot(sett)
     guild = types.SimpleNamespace(
         emojis=[],
         name="Guild",
@@ -83,7 +54,7 @@ def build_ctx(text, sett, is_dj=True):
                 administrator=is_dj
             )
         ),
-        author=types.SimpleNamespace(id=1, roles=[]),
+        author=fake_author(),
     )
     ctx = RecordingContext(
         message=message, bot=bot, view=StringView(text), prefix="d!"
@@ -106,7 +77,6 @@ def invoke(text, is_dj=True, sett=None):
     ctx.invoked_with = "setting"
     ctx.command = group
     ctx.invoked_parents = []
-    ctx.prefix = "d!"
     error = None
     try:
         asyncio.run(group.invoke(ctx))
@@ -117,7 +87,7 @@ def invoke(text, is_dj=True, sett=None):
 
 @pytest.fixture(autouse=True)
 def fresh_db():
-    RecordingDbSession.commits = 0
+    FakeDbSession.commits = 0
 
 
 def test_a_dj_setting_a_value_gets_only_the_confirmation():
@@ -137,7 +107,7 @@ def test_a_non_dj_is_refused_without_the_embed_or_a_change():
     assert str(error) == config.NOT_A_DJ
     assert sent == []
     assert stored_values(sett) == before
-    assert RecordingDbSession.commits == 0
+    assert FakeDbSession.commits == 0
 
 
 def test_a_bad_value_gives_only_the_conversion_error():
@@ -157,7 +127,7 @@ def test_an_unknown_word_is_an_error_with_no_embed_and_no_change():
     assert str(error) == "Unknown setting `typo`"
     assert sent == []
     assert stored_values(sett) == before
-    assert RecordingDbSession.commits == 0
+    assert FakeDbSession.commits == 0
 
 
 @pytest.mark.parametrize("text", ["", "show"])
