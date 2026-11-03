@@ -19,7 +19,7 @@ class Button(commands.Cog):
         return [
             link
             for link in linkutils.get_urls(text)
-            if linkutils.identify_url(link) in SUPPORTED_SITES
+            if linkutils.get_site_type(link) in SUPPORTED_SITES
         ]
 
     @commands.Cog.listener()
