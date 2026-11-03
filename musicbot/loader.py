@@ -415,14 +415,13 @@ async def _run_sync(f, *args):
     # run_in_executor(None, ...) would pick asyncio's default thread pool
     # and run extraction in this process, with no worker state set up
     loop = asyncio.get_running_loop()
-    executor = _require_running()
-    try:
-        return await loop.run_in_executor(executor, f, *args)
-    except BrokenProcessPool:
-        _replace_broken(executor)
-    executor = _require_running()
-    try:
-        return await loop.run_in_executor(executor, f, *args)
-    except BrokenProcessPool:
-        _replace_broken(executor)
-        raise SongError(config.LOADER_CRASHED) from None
+    for _ in (1, 2):
+        executor = _require_running()
+        try:
+            return await loop.run_in_executor(executor, f, *args)
+        except BrokenProcessPool:
+            _replace_broken(executor)
+    # the retry broke too; if shutdown() ran meanwhile, this raises
+    # LoaderNotRunning instead
+    _require_running()
+    raise SongError(config.LOADER_CRASHED) from None

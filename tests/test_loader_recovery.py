@@ -73,20 +73,6 @@ def test_a_rebuild_prints_one_stderr_line(pools, capsys):
     assert len(capsys.readouterr().err.strip().splitlines()) == 1
 
 
-def test_a_break_on_the_retry_raises_loader_crashed(pools):
-    _use(FakePool(["break"]))
-    pools_outcomes = FakePool(["break"])
-
-    def build(*a, **k):
-        pools.append(pools_outcomes)
-        return pools_outcomes
-
-    loader.ProcessPoolExecutor = build  # undone by monkeypatch below
-    with pytest.raises(loader.SongError) as e:
-        asyncio.run(loader.load_song(URL))
-    assert str(e.value) == config.LOADER_CRASHED
-
-
 def test_a_double_break_leaves_a_fresh_pool(pools, monkeypatch):
     _use(FakePool(["break"]))
     made = []
@@ -97,8 +83,9 @@ def test_a_double_break_leaves_a_fresh_pool(pools, monkeypatch):
         return pool
 
     monkeypatch.setattr(loader, "ProcessPoolExecutor", build)
-    with pytest.raises(loader.SongError):
+    with pytest.raises(loader.SongError) as e:
         asyncio.run(loader.load_song(URL))
+    assert str(e.value) == config.LOADER_CRASHED
     assert len(made) == 2
     assert loader._executor is made[1]
     assert made[0].shutdown_calls == [False]
@@ -126,3 +113,22 @@ def test_a_break_after_shutdown_raises_not_running_and_builds_nothing(
     with pytest.raises(loader.LoaderNotRunning):
         asyncio.run(loader.load_song(URL))
     assert pools == []
+
+
+def test_a_break_on_the_retry_after_shutdown_raises_not_running(
+    pools, monkeypatch
+):
+    class ShutdownDuringRetry(FakePool):
+        def submit(self, fn, *args):
+            loader.shutdown()
+            return super().submit(fn, *args)
+
+    monkeypatch.setattr(
+        loader,
+        "ProcessPoolExecutor",
+        lambda *a, **k: ShutdownDuringRetry(["break"]),
+    )
+    _use(FakePool(["break"]))
+    with pytest.raises(loader.LoaderNotRunning):
+        asyncio.run(loader.load_song(URL))
+    assert loader._executor is None
