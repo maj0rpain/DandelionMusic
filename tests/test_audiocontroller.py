@@ -1032,23 +1032,34 @@ def test_disconnecting_a_new_idle_controller_keeps_an_existing_backup(
     controller, monkeypatch, tmp_path
 ):
     _quiet_disconnect(monkeypatch)
+    _fake_ffmpeg(monkeypatch)
     _queue(controller, "kept", "also kept")
-    controller._pickle_playlist()
-    restarted = type(controller)(controller.bot, controller.guild)
 
-    asyncio.run(restarted.udisconnect("shutdown"))
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        controller.stop()
+        restarted = type(controller)(controller.bot, controller.guild)
+        await restarted.udisconnect("shutdown")
+
+    asyncio.run(run())
 
     assert _backup(tmp_path) == ["kept", "also kept"]
 
 
 @pytest.mark.parametrize("intent", ["pause", "clear"])
 def test_pause_and_clear_on_an_idle_empty_queue_keep_the_backup(
-    controller, tmp_path, intent
+    controller, monkeypatch, tmp_path, intent
 ):
+    _fake_ffmpeg(monkeypatch)
     _queue(controller, "kept")
-    controller._pickle_playlist()
-    controller.playlist.clear()
-    controller.playlist.next()
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        controller.stop()
+
+    asyncio.run(run())
     assert _titles(controller) == []
 
     getattr(controller, intent)()
