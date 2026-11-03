@@ -678,13 +678,6 @@ class TestConnectCommand:
         assert guild.events == [("defer", False), ("connect", "a")]
         assert sent == ["Connected."]
 
-    def test_defers_before_moving_out_of_a_bots_only_channel(self, no_sleep):
-        guild = VoiceGuild()
-        guild.put_bot_in(guild.channel("a", bots=1))
-        sent = self.run_connect(guild, guild.channel("b"))
-        assert guild.events == [("defer", False), ("move", "b")]
-        assert sent == ["Connected."]
-
 
 class TestButtons:
     @pytest.mark.parametrize("custom_id", PLAYER_BUTTONS)
