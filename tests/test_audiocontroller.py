@@ -64,6 +64,7 @@ def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
 
     with controller_seam(work) as (built, _):
         assert isinstance(sys.modules["musicbot.loader"], StubLoader)
+        _queue(built, "probe")
         built._pickle_playlist()
 
     after = sys.modules.get("musicbot.loader")
@@ -978,3 +979,112 @@ def test_a_failing_title_refresh_still_counts_as_a_successful_preload(
     entries, titles = _queue_saved_playlist_song(controller)
     assert entries == [_entry(controller, "stale title")]
     assert titles == ["playing", "fresh title"]
+
+
+# An idle controller with an empty queue must leave the last real backup
+# alone: it is what d!restore reloads.
+
+
+def _quiet_disconnect(monkeypatch):
+    from config import config
+
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
+
+
+def test_a_second_disconnect_leaves_the_backup_holding_the_queue(
+    controller, monkeypatch, tmp_path
+):
+    _quiet_disconnect(monkeypatch)
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await controller.udisconnect("d!disconnect")
+        controller.guild.voice_client = None
+        await controller.udisconnect("voice state")
+
+    asyncio.run(run())
+
+    assert _backup(tmp_path) == ["first", "second"]
+
+
+def test_a_disconnect_after_a_stop_leaves_the_stop_backup(
+    controller, monkeypatch, tmp_path
+):
+    _quiet_disconnect(monkeypatch)
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        controller.stop()
+        await controller.udisconnect("inactivity timeout")
+
+    asyncio.run(run())
+
+    assert _backup(tmp_path) == ["first", "second"]
+
+
+def test_disconnecting_a_new_idle_controller_keeps_an_existing_backup(
+    controller, monkeypatch, tmp_path
+):
+    _quiet_disconnect(monkeypatch)
+    _queue(controller, "kept", "also kept")
+    controller._pickle_playlist()
+    restarted = type(controller)(controller.bot, controller.guild)
+
+    asyncio.run(restarted.udisconnect("shutdown"))
+
+    assert _backup(tmp_path) == ["kept", "also kept"]
+
+
+@pytest.mark.parametrize("intent", ["pause", "clear"])
+def test_pause_and_clear_on_an_idle_empty_queue_keep_the_backup(
+    controller, tmp_path, intent
+):
+    _queue(controller, "kept")
+    controller._pickle_playlist()
+    controller.playlist.clear()
+    controller.playlist.next()
+    assert _titles(controller) == []
+
+    getattr(controller, intent)()
+
+    assert _backup(tmp_path) == ["kept"]
+
+
+def test_a_queue_that_plays_to_its_end_leaves_an_empty_backup(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "only")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        after = await _start_and_end_first_track(controller)
+        after(None)
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _backup(tmp_path) == []
+
+
+def test_disconnecting_while_playing_leaves_the_backup_holding_the_queue(
+    controller, monkeypatch, tmp_path
+):
+    _quiet_disconnect(monkeypatch)
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await controller.udisconnect("d!disconnect")
+
+    asyncio.run(run())
+
+    assert _backup(tmp_path) == ["first", "second"]
