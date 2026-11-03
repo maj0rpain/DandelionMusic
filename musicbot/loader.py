@@ -118,7 +118,7 @@ def init():
         return
     wrap_stdio()
     _context.Process = LoaderProcess
-    _executor = ProcessPoolExecutor(1, _context, initializer=_init_worker)
+    _executor = _new_pool()
     # wake it up to spawn the process immediately
     _executor.submit(_noop).result()
 
@@ -385,6 +385,10 @@ async def preload(song: Song) -> Preload:
     return Preload.EXTRACTED if success else Preload.FAILED
 
 
+def _new_pool() -> ProcessPoolExecutor:
+    return ProcessPoolExecutor(1, _context, initializer=_init_worker)
+
+
 def _replace_broken(broken: ProcessPoolExecutor) -> None:
     """Swaps in a fresh pool for `broken`, unless another call already
     did (one crash fails every call queued in the single-worker pool,
@@ -398,7 +402,7 @@ def _replace_broken(broken: ProcessPoolExecutor) -> None:
         "loader: the extraction worker died, starting a new one",
         file=sys.stderr,
     )
-    _executor = ProcessPoolExecutor(1, _context, initializer=_init_worker)
+    _executor = _new_pool()
     broken.shutdown(wait=False)
 
 
