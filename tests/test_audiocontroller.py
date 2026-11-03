@@ -1139,7 +1139,7 @@ def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
     later = asyncio.run(run())
 
     assert _played(controller) == ["next"]
-    assert "slow" not in later
+    assert later == []
     assert controller.guild.voice_client.disconnected is False
     assert _titles(controller) == ["next", "third"]
     assert controller.command_channel.sent == []

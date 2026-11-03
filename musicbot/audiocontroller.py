@@ -391,7 +391,7 @@ class AudioController(object):
 
     def _invalidate_start(self):
         """Drops a pending start, if any, so that it plays nothing
-        once its preload returns."""
+        once its preload returns. Loop only."""
         if self._pending is not None:
             self._generation += 1
             self._pending = None
