@@ -1204,6 +1204,9 @@ def test_losing_the_voice_client_during_a_pending_start_plays_nothing(
     assert voice_client.played == []
     assert later == 0
     assert controller.command_channel.sent == []
+    # the abandoned start no longer holds the bot busy
+    controller.guild.voice_client = voice_client
+    assert controller.is_idle()
 
 
 def test_a_stale_failed_preload_skips_nothing_and_moves_nothing(

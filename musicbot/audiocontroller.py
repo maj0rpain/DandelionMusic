@@ -655,9 +655,15 @@ class AudioController(object):
         self._preload_queue()
 
     def _overtaken(self, generation: int) -> bool:
-        return (
-            generation != self._generation or self.guild.voice_client is None
-        )
+        if generation != self._generation:
+            # a newer start owns the pending mark
+            return True
+        if self.guild.voice_client is None:
+            # abandoned while still the current start: release its mark
+            # so the bot is not left busy
+            self._pending = None
+            return True
+        return False
 
     async def ensure_playing(self):
         """Starts the head of the queue if nothing is playing and the
