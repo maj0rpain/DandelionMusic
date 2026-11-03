@@ -102,6 +102,15 @@ class _FakeFFmpeg:
         return b""
 
 
+@pytest.fixture
+def no_disconnect_sound(monkeypatch):
+    """Stops a disconnect from announcing itself to a channel the
+    fakes do not have."""
+    from config import config
+
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
+
+
 async def _settle():
     # lets the preload task the controller scheduled run to the end
     for _ in range(10):
@@ -332,11 +341,6 @@ def test_restore_with_no_backup_and_an_empty_queue_plays_nothing(
 
 
 def _restore_while_active(controller, monkeypatch, tmp_path, pause):
-    from config import config
-
-    # were restore() to disconnect, it must not announce it to a
-    # channel the fakes do not have
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
     backup = tmp_path / "backup" / "playlist_1234.pickle"
@@ -357,7 +361,7 @@ def _restore_while_active(controller, monkeypatch, tmp_path, pause):
 
 @pytest.mark.parametrize("pause", [False, True])
 def test_restore_while_active_is_refused_and_changes_nothing(
-    controller, monkeypatch, tmp_path, pause
+    controller, no_disconnect_sound, monkeypatch, tmp_path, pause
 ):
     ac = sys.modules[type(controller).__module__]
     (playlist, backup_bytes), result = _restore_while_active(
@@ -569,11 +573,8 @@ def test_attach_view_records_an_interactions_original_response(controller):
 
 
 def test_dispose_cancels_the_timer_and_every_pending_task(
-    controller, monkeypatch
+    controller, no_disconnect_sound, monkeypatch
 ):
-    from config import config
-
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
 
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
@@ -630,12 +631,17 @@ def _end_track(voice_client):
     return voice_client.detach_after()
 
 
-async def _start_and_end_first_track(controller):
-    """Starts the queue head on the running loop, then ends it as in
-    _end_track(), returning its `after` callback."""
+async def _start_playing(controller):
+    """Starts the queue head on the running loop and lets it settle."""
     controller.bot.loop = asyncio.get_running_loop()
     await controller.ensure_playing()
     await _settle()
+
+
+async def _start_and_end_first_track(controller):
+    """Starts the queue head on the running loop, then ends it as in
+    _end_track(), returning its `after` callback."""
+    await _start_playing(controller)
     return _end_track(controller.guild.voice_client)
 
 
@@ -992,9 +998,7 @@ def _run_playing(controller, scenario):
     started first and the loop given time to settle afterwards."""
 
     async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
+        await _start_playing(controller)
         await scenario(controller)
         await _settle()
 
@@ -1049,11 +1053,8 @@ def test_a_skip_with_loop_all_records_the_skipped_song(
 
 
 def test_two_skips_before_the_end_hops_back_record_each_started_song_once(
-    controller, monkeypatch
+    controller, no_disconnect_sound, monkeypatch
 ):
-    from config import config
-
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second", "third", "fourth")
 
@@ -1100,11 +1101,8 @@ def test_a_stop_while_playing_leaves_the_stopped_song_in_the_history(
 
 
 def test_a_disconnect_while_playing_leaves_the_song_in_the_history(
-    controller, monkeypatch
+    controller, no_disconnect_sound, monkeypatch
 ):
-    from config import config
-
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
@@ -1141,11 +1139,8 @@ def test_a_song_without_a_direct_url_is_not_recorded(controller, monkeypatch):
 
 
 def test_a_play_the_voice_client_refuses_is_not_recorded(
-    controller, monkeypatch
+    controller, no_disconnect_sound, monkeypatch
 ):
-    from config import config
-
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "refused")
     controller.guild.voice_client.playing = True
