@@ -296,7 +296,13 @@ class LibraryView(discord.ui.View):
         # Held by the first draw of a level, a page turn and a bulk
         # queue. Not by the enrichment edit, which runs unguarded so a
         # click made while its artwork uploads is accepted rather than
-        # dropped. Keeping the message edits in order is not this
+        # dropped. Such a click reaches
+        # the view at all only because LibraryBrowseView._draw() keeps
+        # the components the message still shows pointed at the view
+        # until the edit replacing them lands - discord.py discards a
+        # click on an item with no view, before any check runs.
+        #
+        # Keeping the message edits in order is not this
         # guard's job: the browser's render lock serialises them - see
         # LibraryBrowseView.render().
         #
@@ -332,6 +338,8 @@ class LibraryView(discord.ui.View):
             )
             return False
         if self._busy:
+            # (A click reaches this check during a redraw only because
+            # _draw() keeps the old components attached to the view.)
             # acknowledged silently rather than answered with an
             # ephemeral complaint. For navigation and paging the
             # guard's window is a level's first draw or a page turn -
@@ -624,12 +632,15 @@ class LibraryBrowseView(LibraryView):
         and returns False; any other exception puts them back and
         propagates. Putting them back is what keeps the message
         usable: build_items() detaches every old child before the
-        edit, discord.py only re-registers the view once the edit
-        returns, and its ViewStore drops any click on an item whose
-        .view is None - so without the restore every component still
-        showing on the message would be dead until the timeout. The
-        ViewStore still holds those old items, so giving them their
-        .view back is all it takes."""
+        edit, so _draw() points each of them back at this view with
+        Item._update_view() - discord.py drops a click on an item whose
+        .view is None, and keeps the old items registered until the
+        edit that replaces them lands. A click made during the edit
+        therefore reaches interaction_check(). If the edit fails the
+        old items are also put back as children, so the next edit
+        serialises them and they keep working; once it lands,
+        discord.py forgets their custom_ids and leaving their .view
+        set does no harm."""
         async with self._render_lock:
             return await self._draw(interaction, sync_attachments)
 
@@ -664,6 +675,12 @@ class LibraryBrowseView(LibraryView):
         lock - see render() for every rule it keeps."""
         previous = list(self.children)
         self.build_items()
+        # clear_items() detached them, but the message keeps showing
+        # them, and discord.py drops any click on an item with no view
+        # until this edit lands and it forgets their custom_ids. Point
+        # them back at this view so such a click reaches it.
+        for item in previous:
+            item._update_view(self)
         kwargs = {"embed": self.embed(), "view": self}
         attached = self._attached
         if sync_attachments:
@@ -744,17 +761,14 @@ class LibraryBrowseView(LibraryView):
             # stop - an unanswered one shows the user "This
             # interaction failed" three seconds later.
             #
-            # Defensive: no click reaches here. BackButton is only
-            # added below the root, and a stale one left on an
-            # already-drawn message cannot dispatch either way. After
-            # a render that landed, discord.py has popped its
-            # custom_id from the ViewStore; after one that raised,
-            # render() put the old children back and _enter_level()
-            # undid the level change, so a Back still showing acts on
-            # the level it was drawn for - which is not the root. It
-            # stays because back() returning False is part of the
-            # cursor's contract, and one defer costs less than being
-            # wrong about that.
+            # Defensive: BackButton is only added below the root, so a
+            # click normally never reaches here. A Back left over from
+            # a level already left is dispatchable until the edit
+            # replacing it lands (_draw() keeps its view set), but the
+            # guard turns such a click away while that edit is in
+            # flight. It stays because back() returning False is part
+            # of the cursor's contract, and one defer costs less than
+            # being wrong about that.
             await interaction.response.defer()
             return
         await self._enter_level(interaction, previous)
