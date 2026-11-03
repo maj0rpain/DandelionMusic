@@ -156,8 +156,16 @@ class General(commands.Cog):
         help=config.HELP_SETTINGS_SHORT,
         aliases=["settings", "set"],
         fallback="show",
+        invoke_without_command=True,
     )
     async def _settings(self, ctx: commands.Context):
+        # discord.py clears ctx.subcommand_passed before this callback
+        # runs, but leaves the view at the word after the command name
+        # (empty on a slash invocation): a prefix subcommand never
+        # reaches here, so that word matched none
+        words = ctx.view.buffer[ctx.view.index :].split(None, 1)
+        if words and words[0] != "show":
+            raise CheckError(config.UNKNOWN_SETTING.format(words[0]))
         sett = get_settings(ctx)
         await ctx.send(embed=sett.format(ctx))
 
