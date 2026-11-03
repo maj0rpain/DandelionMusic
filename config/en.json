@@ -10,6 +10,7 @@
   "NOT_CONNECTED_MESSAGE": "Error: Bot not connected to any voice channel",
   "ALREADY_CONNECTED_MESSAGE": "Error: Already connected to a voice channel",
   "NOT_A_DJ": "You are not a DJ",
+  "UNKNOWN_SETTING": "Unknown setting `{}`",
   "USER_MISSING_PERMISSIONS": "You don't have permissions for this",
   "CHANNEL_NOT_FOUND_MESSAGE": "Error: Could not find channel",
   "VOICE_PERMISSIONS_MISSING": "The bot needs VC permissions connect and speak",

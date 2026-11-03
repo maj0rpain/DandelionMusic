@@ -17,6 +17,10 @@ from musicbot.utils import (
     voice_check,
 )
 
+# the group's default subcommand, and the one word that is not an
+# unknown setting
+SHOW_SUBCOMMAND = "show"
+
 
 async def _update_or_report(ctx, sett, setting: str, value) -> bool:
     """Updates a guild setting, replying with an error if it failed"""
@@ -155,9 +159,17 @@ class General(commands.Cog):
         description=config.HELP_SETTINGS_LONG,
         help=config.HELP_SETTINGS_SHORT,
         aliases=["settings", "set"],
-        fallback="show",
+        fallback=SHOW_SUBCOMMAND,
+        invoke_without_command=True,
     )
     async def _settings(self, ctx: commands.Context):
+        # discord.py clears ctx.subcommand_passed before this callback
+        # runs, but leaves the view at the word after the command name
+        # (empty on a slash invocation): a prefix subcommand never
+        # reaches here, so that word matched none
+        words = ctx.view.buffer[ctx.view.index :].split(None, 1)
+        if words and words[0] != SHOW_SUBCOMMAND:
+            raise CheckError(config.UNKNOWN_SETTING.format(words[0]))
         sett = get_settings(ctx)
         await ctx.send(embed=sett.format(ctx))
 

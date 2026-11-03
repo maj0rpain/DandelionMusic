@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterable, List, Union, Literal
+from typing import Iterable, List, Optional, Union, Literal
 
 import discord
 from discord import Attachment, Embed, app_commands
@@ -21,6 +21,28 @@ from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
 from musicbot.playlists import PlaylistEntry
 from musicbot.linkutils import get_site_type, url_regex
+
+
+def _attachment_track(ctx, file) -> Optional[str]:
+    """The URL an attachment-based play passes on as its track, or None.
+
+    A slash command's ctx.message is synthetic: discord.py fills its
+    attachments from the command's options, and its jump URL points at
+    no real message. So a slash `file` is played from its own URL
+    before any message is looked at."""
+    if ctx.interaction and file:
+        return file.url
+    message = ctx.message
+    if message is None:
+        return None
+    if message.attachments:
+        return message.jump_url
+    reference = message.reference
+    resolved = reference.resolved if reference else None
+    # a deleted reference resolves to an object with no attachments
+    if resolved is not None and getattr(resolved, "attachments", None):
+        return resolved.jump_url
+    return None
 
 
 class AudioContext(Context):
@@ -172,17 +194,7 @@ class Music(commands.Cog):
     @joins_voice
     async def _play(self, ctx, *, track: str = None, file: Attachment = None):
         if track is None:
-            if ctx.message:
-                if ctx.message.attachments:
-                    track = ctx.message.jump_url
-                elif (
-                    ctx.message.reference
-                    and ctx.message.reference.resolved
-                    and ctx.message.reference.resolved.attachments
-                ):
-                    track = ctx.message.reference.resolved.jump_url
-            elif file:
-                track = file.url
+            track = _attachment_track(ctx, file)
         if track is None:
             await ctx.send(config.PLAY_ARGS_MISSING)
             return
@@ -238,15 +250,8 @@ class Music(commands.Cog):
     async def _play_next(
         self, ctx, *, track: str = None, file: Attachment = None
     ):
-        if track is None and ctx.message:
-            if ctx.message.attachments:
-                track = ctx.message.jump_url
-            elif (
-                ctx.message.reference
-                and ctx.message.reference.resolved
-                and ctx.message.reference.resolved.attachments
-            ):
-                track = ctx.message.reference.resolved.jump_url
+        if track is None:
+            track = _attachment_track(ctx, file)
         if track is None:
             await ctx.send(config.PLAY_ARGS_MISSING)
             return
