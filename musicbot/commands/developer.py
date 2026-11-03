@@ -50,6 +50,14 @@ OUTPUT_FORMAT = "```\n\u200b{}\n```"
 _paginate = Splitter(2002 - len(OUTPUT_FORMAT)).wrap
 
 
+def _pages(output: str) -> List[str]:
+    """Split output into code-block pages; [] for empty/blank output."""
+    if not output or output.isspace():
+        return []
+    pages = (page.rstrip() for page in _paginate(output))
+    return [OUTPUT_FORMAT.format(page) for page in pages if page]
+
+
 async def run_and_report(ctx, argv: List[str]) -> None:
     """Run a command without blocking the loop and reply with its output."""
     process = await asyncio.create_subprocess_exec(
@@ -62,10 +70,7 @@ async def run_and_report(ctx, argv: List[str]) -> None:
     raw, _ = await process.communicate()
     output = raw.decode("utf-8", errors="replace")
 
-    pages = []
-    if output and not output.isspace():
-        pages = (page.rstrip() for page in _paginate(output))
-        pages = [OUTPUT_FORMAT.format(page) for page in pages if page]
+    pages = _pages(output)
     if pages:
         for page in pages:
             await ctx.send(page)
@@ -128,14 +133,10 @@ class Developer(commands.Cog):
                 print_exc(file=output)
         output = output.getvalue()
 
-        if output and not output.isspace():
-            pages = (page.rstrip() for page in _paginate(output))
-            pages = [OUTPUT_FORMAT.format(page) for page in pages if page]
-            if len(pages) == 1:
-                await ctx.send(pages[0])
-            else:
-                for page in pages:
-                    await ctx.send(page)
+        pages = _pages(output)
+        if pages:
+            for page in pages:
+                await ctx.send(page)
         else:
             try:
                 suppress = ctx.channel.last_message.author == ctx.me

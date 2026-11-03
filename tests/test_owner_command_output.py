@@ -129,9 +129,7 @@ def test_event_loop_stays_free_while_the_child_runs():
                 ticks += 1
 
         task = asyncio.create_task(ticker())
-        await run_and_report(
-            FakeContext(), py("import time; time.sleep(1)")
-        )
+        await run_and_report(FakeContext(), py("import time; time.sleep(1)"))
         task.cancel()
         return ticks
 
