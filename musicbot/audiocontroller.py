@@ -614,10 +614,8 @@ class AudioController(object):
         # raises below disconnects, and stop() clears it there.
         was_idle = not self._playing
         self._playing = True
-        # a track end from an earlier track arriving after this one
-        # has started must not end it - see _on_track_end() - and a
-        # track a skip picked for an earlier track's end is not this
-        # one's next
+        # no longer pending once it reaches play(); the generation
+        # token that guards the start is _claim_start()'s
         self._pending = None
         try:
             self.guild.voice_client.play(

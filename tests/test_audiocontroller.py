@@ -1102,13 +1102,17 @@ def test_prev_during_a_pending_start_plays_the_previous_track_only(
         if release_first:
             release.set()
         assert controller.prev_song()
+        await _settle()
+        before = len(stub_loader.calls)
         release.set()
         await _finish(task)
         await _settle()
+        return [c[1][0].title for c in stub_loader.calls[before:]]
 
-    asyncio.run(run())
+    later = asyncio.run(run())
 
     assert _played(controller) == ["old"]
+    assert "slow" not in later
     assert controller.guild.voice_client.disconnected is False
     assert controller.command_channel.sent == []
 
@@ -1125,13 +1129,17 @@ def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
         if release_first:
             release.set()
         controller.next_song()
+        await _settle()
+        before = len(stub_loader.calls)
         release.set()
         await _finish(task)
         await _settle()
+        return [c[1][0].title for c in stub_loader.calls[before:]]
 
-    asyncio.run(run())
+    later = asyncio.run(run())
 
     assert _played(controller) == ["next"]
+    assert "slow" not in later
     assert controller.guild.voice_client.disconnected is False
     assert _titles(controller) == ["next", "third"]
     assert controller.command_channel.sent == []
@@ -1329,15 +1337,20 @@ def test_a_superseded_start_dropping_out_leaves_the_newer_one_pending(
         old = _old_track(controller)
         newer = stub_loader.hold(old)
         controller.prev_song()
+        await _settle()
+        before = len(stub_loader.calls)
         release.set()
         await _finish(task)
+        later = [c[1][0].title for c in stub_loader.calls[before:]]
         await controller.queue(_songs(controller, "added"))
         await _settle()
         assert _played(controller) == []
         newer.set()
         await _settle()
+        return later
 
-    asyncio.run(run())
+    later = asyncio.run(run())
 
     assert _played(controller) == ["old"]
+    assert "slow" not in later
     assert controller.guild.voice_client.disconnected is False
