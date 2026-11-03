@@ -66,9 +66,13 @@ def build_ctx(text, sett, is_dj=True):
         _after_invoke=None,
     )
     guild = types.SimpleNamespace(
-        emojis=[], name="Guild", icon=None, id=1, get_channel=lambda i: None,
+        emojis=[],
+        name="Guild",
+        icon=None,
+        id=1,
+        get_channel=lambda i: None,
         get_channel_or_thread=lambda i: None,
-        get_role=lambda i: None
+        get_role=lambda i: None,
     )
     message = types.SimpleNamespace(
         _state=None,
