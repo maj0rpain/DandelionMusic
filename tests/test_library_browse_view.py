@@ -535,7 +535,7 @@ def test_second_select_click_during_first_draw_is_turned_away():
         await entering.in_flight.wait()
         second = clicks.interaction()
         handler = clicks.click(LibrarySelect, second, label="The Beatles")
-        await settle()
+        await handler
         entering.release()
         await finish(entry, handler)
         return handler, second, view
@@ -560,7 +560,7 @@ def test_second_click_during_page_turn_is_turned_away():
         await turning.in_flight.wait()
         second = clicks.interaction()
         handler = clicks.click(PageButton, second)
-        await settle()
+        await handler
         turning.release()
         await finish(turn, handler)
         return handler, second, view
