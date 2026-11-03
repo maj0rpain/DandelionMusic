@@ -4,12 +4,12 @@ from musicbot import linkutils
 from musicbot.linkutils import SpotifyPlaylistTypes, fetch_playlist_with_api
 
 
-def track(n):
-    return {"external_urls": {"spotify": f"https://open.spotify.com/t/{n}"}}
-
-
 def url(n):
     return f"https://open.spotify.com/t/{n}"
+
+
+def track(n):
+    return {"external_urls": {"spotify": url(n)}}
 
 
 class FakeSpotify:
