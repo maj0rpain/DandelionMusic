@@ -106,6 +106,24 @@ def _fmt_years(stats: library.LevelStats) -> Optional[str]:
     return str(stats.year_min)
 
 
+def _scope(browse_view: "LibraryBrowseView"):
+    cursor = browse_view.cursor
+    return (cursor.artist, cursor.album)
+
+
+async def _is_stale(item, interaction: discord.Interaction) -> bool:
+    """A click on a component built for a scope the cursor has left is
+    acknowledged silently and must do nothing. Keyed on the scope, not
+    on level_revision, so components a failed draw restores still act.
+    Checked at the start of callback(), after the view's ownership and
+    double-click checks - never in a per-item interaction_check, which
+    discord.py runs before the view's."""
+    if item.scope == _scope(item.browse_view):
+        return False
+    await interaction.response.defer()
+    return True
+
+
 class LibrarySelect(discord.ui.Select):
     def __init__(
         self,
@@ -116,6 +134,7 @@ class LibrarySelect(discord.ui.Select):
     ):
         self._entries = entries
         self.browse_view = browse_view
+        self.scope = _scope(browse_view)
         super().__init__(
             placeholder="Choose...",
             options=[
@@ -129,6 +148,8 @@ class LibrarySelect(discord.ui.Select):
         )
 
     async def callback(self, interaction: discord.Interaction):
+        if await _is_stale(self, interaction):
+            return
         index = int(self.values[0])
         chosen = self._entries[index]
         # the option's own label, not the underlying entry (a raw
@@ -141,8 +162,11 @@ class BackButton(discord.ui.Button):
     def __init__(self, browse_view: "LibraryBrowseView"):
         super().__init__(label="Back", style=discord.ButtonStyle.grey, row=1)
         self.browse_view = browse_view
+        self.scope = _scope(browse_view)
 
     async def callback(self, interaction: discord.Interaction):
+        if await _is_stale(self, interaction):
+            return
         await self.browse_view.go_back(interaction)
 
 
@@ -153,8 +177,11 @@ class PageButton(discord.ui.Button):
         super().__init__(label=label, style=discord.ButtonStyle.blurple, row=2)
         self.browse_view = browse_view
         self.delta = delta
+        self.scope = _scope(browse_view)
 
     async def callback(self, interaction: discord.Interaction):
+        if await _is_stale(self, interaction):
+            return
         await self.browse_view.turn_page(interaction, self.delta)
 
 
@@ -167,8 +194,11 @@ class QueueLevelButton(discord.ui.Button):
         )
         super().__init__(label=label, style=discord.ButtonStyle.green, row=1)
         self.browse_view = browse_view
+        self.scope = _scope(browse_view)
 
     async def callback(self, interaction: discord.Interaction):
+        if await _is_stale(self, interaction):
+            return
         await self.browse_view.queue_current_level(interaction)
 
 

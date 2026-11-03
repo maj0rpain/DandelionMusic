@@ -682,3 +682,73 @@ def test_leaving_a_level_lets_its_enrichment_finish_undrawn():
 
     assert ("Radiohead", None) in finished
     assert len(entering.edits) == 1
+
+
+def _descend_past_kept_components():
+    """A view descended into Radiohead, with the root level's
+    components kept from before the descend landed."""
+
+    async def scenario():
+        view = make_view()
+        stub_enrichment_by_level(view, {})
+        clicks = Clicks(view)
+        kept = list(clicks.shown)
+        await finish(
+            clicks.click(
+                LibrarySelect, clicks.interaction(), label="Radiohead"
+            )
+        )
+        return view, clicks, kept
+
+    return scenario
+
+
+def test_component_from_an_earlier_scope_is_acknowledged_and_ignored():
+    async def scenario():
+        view, clicks, kept = await _descend_past_kept_components()()
+        select = next(i for i in kept if isinstance(i, LibrarySelect))
+        picking = clicks.interaction()
+        picking.data = {"values": ["1"]}
+        select._refresh_state(picking, picking.data)
+        await select.callback(picking)
+        return view, picking
+
+    view, picking = run(scenario)
+
+    assert picking.deferred == 1
+    assert (view.cursor.artist, view.cursor.album) == ("Radiohead", None)
+
+
+def test_stranger_on_a_stale_scope_component_is_told_it_is_not_theirs():
+    async def scenario():
+        view, clicks, kept = await _descend_past_kept_components()()
+        select = next(i for i in kept if isinstance(i, LibrarySelect))
+        replies = []
+
+        async def send_message(content, ephemeral):
+            replies.append(content)
+
+        stranger = clicks.interaction()
+        stranger.user = SimpleNamespace(id=AUTHOR_ID + 1)
+        stranger.response = SimpleNamespace(
+            send_message=send_message, defer=stranger.response.defer
+        )
+        stranger.data = {"values": ["1"]}
+        # discord.py drops a replaced component's custom_id once its
+        # edit lands; put it back to reach the guard through dispatch
+        clicks.store._views[MESSAGE_ID][
+            (select.type.value, select.custom_id)
+        ] = select
+        before = len(clicks.tasks)
+        clicks.store.dispatch_view(
+            select.type.value, select.custom_id, stranger
+        )
+        assert len(clicks.tasks) > before
+        await finish(clicks.tasks[-1])
+        return view, replies, stranger
+
+    view, replies, stranger = run(scenario)
+
+    assert replies == ["This belongs to someone else."]
+    assert stranger.deferred == 0
+    assert (view.cursor.artist, view.cursor.album) == ("Radiohead", None)
