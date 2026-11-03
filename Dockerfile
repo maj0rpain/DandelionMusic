@@ -9,7 +9,8 @@ COPY . .
 ARG HEROKU_DB
 ENV HEROKU_DB=$HEROKU_DB
 
-RUN uv sync --frozen --no-cache \
+RUN uv sync --frozen --no-cache --no-dev \
+        --extra postgres --extra mysql \
     && apt-get update \
     && apt-get install --no-install-recommends ffmpeg -y \
     && apt-get install -y curl \

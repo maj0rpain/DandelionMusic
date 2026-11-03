@@ -29,17 +29,43 @@ def get_env_var(key: str, default: T) -> T:
     return value
 
 
-def alchemize_url(url: str) -> str:
-    SCHEMES = (
-        ("sqlite", "sqlite+aiosqlite"),
-        ("postgres", "postgresql+asyncpg"),
-        ("mysql", "mysql+aiomysql"),
-    )
+_ACCEPTED_FORMS = (
+    "sqlite://, postgresql://, mysql://, or dialect+asyncdriver://"
+)
 
-    for name, scheme in SCHEMES:
-        if url.startswith(name + ":"):
-            return url.replace(name, scheme, 1)
-    return url
+_DEFAULT_DRIVERS = {
+    "sqlite": "sqlite+aiosqlite",
+    "postgres": "postgresql+asyncpg",
+    "postgresql": "postgresql+asyncpg",
+    "mysql": "mysql+aiomysql",
+}
+
+
+def alchemize_url(url: str) -> str:
+    """Give a DATABASE_URL an async driver.
+
+    A driverless sqlite/postgres/postgresql/mysql URL gets its dialect's
+    async default; a named driver is kept, with the `postgres` dialect
+    renamed to `postgresql`. Anything else raises ValueError, naming the
+    scheme but never the rest of the URL (it may hold a password).
+    """
+    scheme, sep, rest = url.partition("://")
+    if not sep:
+        raise ValueError(
+            "DATABASE_URL has no scheme:// "
+            f"(accepted forms: {_ACCEPTED_FORMS})"
+        )
+    dialect, plus, driver = scheme.partition("+")
+    if plus and driver:
+        if dialect == "postgres":
+            dialect = "postgresql"
+        return f"{dialect}+{driver}://{rest}"
+    if not plus and dialect in _DEFAULT_DRIVERS:
+        return f"{_DEFAULT_DRIVERS[dialect]}://{rest}"
+    raise ValueError(
+        f"DATABASE_URL scheme {scheme!r} names no async driver "
+        f"(accepted forms: {_ACCEPTED_FORMS})"
+    )
 
 
 def ensure_sqlite_parent(url: str) -> None:
