@@ -421,6 +421,7 @@ class Music(commands.Cog):
     @commands.check(dj_check)
     @joins_voice
     async def _restore(self, ctx):
+        await ctx.defer()  # restoring extracts the head of the backup
         result = await ctx.audiocontroller.restore()
         if result is RestoreResult.REFUSED_WHILE_ACTIVE:
             await ctx.send(config.RESTORE_WHILE_ACTIVE)

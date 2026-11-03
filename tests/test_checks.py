@@ -475,7 +475,7 @@ def test_commands_outside_the_music_cog_that_join_keep_joining(cog, name):
 def test_connect_moves_the_bot_out_of_a_bots_only_channel(no_sleep):
     guild = VoiceGuild()
     guild.put_bot_in(guild.channel("a", bots=1))
-    ctx = voice_ctx(guild, guild.channel("b", humans=1))
+    ctx = slash_ctx(guild, guild.channel("b", humans=1))
     ctx.command = command_of(General, "connect")
     sent = []
 
@@ -489,7 +489,7 @@ def test_connect_moves_the_bot_out_of_a_bots_only_channel(no_sleep):
         await General._connect.callback(General(None), ctx)
 
     asyncio.run(scenario())
-    assert guild.events == [("move", "b")]
+    assert guild.events == [("defer", False), ("move", "b")]
     assert sent == ["Connected."]
 
 
@@ -661,6 +661,29 @@ def recording_send(ctx):
 
     ctx.send = send
     return refused
+
+
+class TestConnectCommand:
+    """/connect defers publicly before the slow join."""
+
+    def run_connect(self, guild, author_in):
+        ctx = slash_ctx(guild, author_in)
+        sent = recording_send(ctx)
+        asyncio.run(General._connect.callback(General(None), ctx))
+        return sent
+
+    def test_defers_before_connecting_while_idle(self):
+        guild = VoiceGuild()
+        sent = self.run_connect(guild, guild.channel("a"))
+        assert guild.events == [("defer", False), ("connect", "a")]
+        assert sent == ["Connected."]
+
+    def test_defers_before_moving_out_of_a_bots_only_channel(self, no_sleep):
+        guild = VoiceGuild()
+        guild.put_bot_in(guild.channel("a", bots=1))
+        sent = self.run_connect(guild, guild.channel("b"))
+        assert guild.events == [("defer", False), ("move", "b")]
+        assert sent == ["Connected."]
 
 
 class TestButtons:

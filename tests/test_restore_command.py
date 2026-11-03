@@ -15,10 +15,12 @@ from musicbot.commands.music import Music
 
 
 class OutcomeController:
-    def __init__(self, outcome):
+    def __init__(self, outcome, events):
         self.outcome = outcome
+        self.events = events
 
     async def restore(self):
+        self.events.append("restore")
         return self.outcome
 
 
@@ -32,14 +34,21 @@ class OutcomeController:
 )
 def test_restore_command_replies_with_the_outcome(outcome, reply):
     sent = []
+    events = []
 
     async def send(message):
         sent.append(message)
 
+    async def defer(**kwargs):
+        events.append(("defer", kwargs.get("ephemeral", False)))
+
     ctx = types.SimpleNamespace(
-        audiocontroller=OutcomeController(outcome), send=send
+        audiocontroller=OutcomeController(outcome, events),
+        send=send,
+        defer=defer,
     )
 
     asyncio.run(Music._restore.callback(Music(None), ctx))
 
+    assert events == [("defer", False), "restore"]
     assert sent == [reply]
