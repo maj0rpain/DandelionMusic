@@ -1009,16 +1009,16 @@ async def _nothing(controller):
     pass
 
 
+async def _skip(controller):
+    controller.skip()
+
+
 def test_a_skip_in_the_middle_of_the_queue_records_the_skipped_song(
     controller, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second", "third")
-
-    async def scenario(c):
-        c.skip()
-
-    _run_playing(controller, scenario)
+    _run_playing(controller, _skip)
 
     assert _history(controller) == ["first", "second"]
 
@@ -1026,11 +1026,7 @@ def test_a_skip_in_the_middle_of_the_queue_records_the_skipped_song(
 def test_skipping_the_last_song_records_it(controller, monkeypatch):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "only")
-
-    async def scenario(c):
-        c.skip()
-
-    _run_playing(controller, scenario)
+    _run_playing(controller, _skip)
 
     assert _history(controller) == ["only"]
 
@@ -1043,11 +1039,7 @@ def test_a_skip_with_loop_all_records_the_skipped_song(
     controller.playlist.loop = sys.modules[
         type(controller).__module__
     ].LoopMode.ALL
-
-    async def scenario(c):
-        c.skip()
-
-    _run_playing(controller, scenario)
+    _run_playing(controller, _skip)
 
     assert _history(controller) == ["first", "second"]
 
@@ -1064,10 +1056,7 @@ def test_two_skips_before_the_end_hops_back_record_each_started_song_once(
 
     _run_playing(controller, scenario)
 
-    history = _history(controller)
-    assert history[0] == "first"
-    assert len(set(history)) == len(history)
-    assert "fourth" not in history
+    assert _history(controller) == ["first", "second"]
 
 
 def test_prev_while_playing_records_the_outgoing_song(
