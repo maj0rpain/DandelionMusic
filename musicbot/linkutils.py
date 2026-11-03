@@ -197,8 +197,12 @@ def fetch_playlist_with_api(
 
     links = []
     for track in tracks:
+        item = track.get("track", track)
+        if item is None:
+            # Spotify sends "track": null for removed/unavailable songs
+            continue
         try:
-            links.append(track.get("track", track)["external_urls"]["spotify"])
+            links.append(item["external_urls"]["spotify"])
         except KeyError as e:
             print(
                 f"Warning: Cannot extract URL from {track}:"
