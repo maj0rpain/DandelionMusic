@@ -246,14 +246,13 @@ def stub_enrichment(view, result=None):
     return resolved
 
 
-def test_failed_descend_is_undone():
-    # thirty artists: two pages of the root's Select
-    index = {
-        f"Artist {n:02}": {"Album": [make_song("Song")]} for n in range(30)
-    }
+# thirty artists: two pages of the root's Select
+PAGED = {f"Artist {n:02}": {"Album": [make_song("Song")]} for n in range(30)}
 
+
+def test_failed_descend_is_undone():
     async def scenario():
-        view = make_view(index)
+        view = make_view(PAGED)
         resolved = stub_enrichment(view, COVER)
         await view.turn_page(FakeInteraction(), 1)
         interaction = FakeInteraction()
@@ -545,9 +544,6 @@ def test_second_select_click_during_first_draw_is_turned_away():
     assert handler is not None
     assert second.deferred == 1
     assert (view.cursor.artist, view.cursor.album) == ("Radiohead", None)
-
-
-PAGED = {f"Artist {n:02}": {"Album": [make_song("Song")]} for n in range(30)}
 
 
 def test_second_click_during_page_turn_is_turned_away():
