@@ -33,6 +33,8 @@ def subcommand(cog, name):
 
 
 class FakeDbSession:
+    commits = 0  # across every session; a test that counts resets it
+
     async def __aenter__(self):
         return self
 
@@ -43,7 +45,7 @@ class FakeDbSession:
         pass
 
     async def commit(self):
-        pass
+        FakeDbSession.commits += 1
 
 
 class FakeMessage:
@@ -55,16 +57,38 @@ class FakeMessage:
             raise self.reaction_error
 
 
+async def _allowed(ctx):
+    return True
+
+
+async def _not_owner(user):
+    return False
+
+
+def fake_bot(sett):
+    "A bot whose checks pass and whose guild settings are `sett`"
+    return types.SimpleNamespace(
+        sessions=types.SimpleNamespace(settings=lambda guild: sett),
+        DbSession=FakeDbSession,
+        emojis=[],
+        can_run=_allowed,
+        is_owner=_not_owner,
+        _before_invoke=None,
+        _after_invoke=None,
+    )
+
+
+def fake_author():
+    return types.SimpleNamespace(id=1, roles=[])
+
+
 def fake_ctx(sent, sett, message=None):
     async def send(content=None, **kwargs):
         sent.append(content)
         return message or FakeMessage()
 
-    sessions = types.SimpleNamespace(settings=lambda guild: sett)
     return types.SimpleNamespace(
-        bot=types.SimpleNamespace(
-            sessions=sessions, DbSession=FakeDbSession, emojis=[]
-        ),
+        bot=fake_bot(sett),
         guild=types.SimpleNamespace(emojis=[]),
         send=send,
     )
@@ -291,21 +315,16 @@ def prefix_ctx(sent, sett, argument):
     }
     roles = {ROLE_ID: types.SimpleNamespace(id=ROLE_ID, name="DJ")}
 
-    async def allowed(ctx):
-        return True
-
     ctx.guild.get_channel = channels.get
     ctx.guild.get_thread = lambda thread_id: None
     ctx.guild.get_role = roles.get
     ctx.guild.voice_channels = [channels[VOICE_ID]]
-    ctx.bot.can_run = allowed
-    ctx.bot._before_invoke = ctx.bot._after_invoke = None
     ctx.channel = types.SimpleNamespace(
         permissions_for=lambda member: types.SimpleNamespace(
             administrator=True
         )
     )
-    ctx.author = types.SimpleNamespace(id=1, roles=[])
+    ctx.author = fake_author()
     ctx.message = types.SimpleNamespace(attachments=[])
     ctx.view = StringView(argument)
     ctx.command = None
