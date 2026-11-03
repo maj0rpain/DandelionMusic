@@ -38,7 +38,7 @@ def report(argv):
 
 def unwrap(page):
     assert page.startswith(PREFIX) and page.endswith(SUFFIX)
-    return page[len(PREFIX) : -len(SUFFIX)]  # noqa: E203
+    return page[len(PREFIX) : -len(SUFFIX)]
 
 
 def test_stderr_only_output_reaches_the_context():
