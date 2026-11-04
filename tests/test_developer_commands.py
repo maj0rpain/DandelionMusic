@@ -184,7 +184,6 @@ def test_execute_ignores_concurrent_prints(capsys):
         )
         await t
 
-
     asyncio.run(main())
     assert "mine" in ctx.sent[0] and "OTHER" not in ctx.sent[0]
     assert "OTHER" in capsys.readouterr().out
