@@ -97,17 +97,6 @@ def _init_worker():
 
 def _teardown_worker():
     _loop.run_until_complete(stop_session())
-    _loop.run_until_complete(_close_bot_session())
-
-
-async def _close_bot_session():
-    # close the session musicbot/yt_dlp_plugins/extractor/discord.py
-    # opens when it logs in - only if it ever ran in this process:
-    # importing musicbot.__main__ here would build a whole bot
-    main = sys.modules.get("musicbot.__main__")
-    bot = getattr(main, "bot", None)
-    if bot is not None:
-        await bot.http.close()
 
 
 def _noop():
