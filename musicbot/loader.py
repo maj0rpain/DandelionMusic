@@ -443,9 +443,7 @@ async def preload(song: Song) -> Preload:
         if success:
             song.update(preloaded)
     finally:
-        done = _preloading.pop(song)
-        if not done.done():
-            done.set_result(success)
+        _preloading.pop(song).set_result(success)
 
     return Preload.EXTRACTED if success else Preload.FAILED
 
