@@ -39,7 +39,7 @@ if TYPE_CHECKING:
 @dataclass
 class QueuedPlaylist:
     """process_song()'s result for a multi-song load. `truncation` is
-    set when the playlist was only partly loaded."""
+    set when the playlist was cut short."""
 
     queued: int
     truncation: Optional[Truncation] = None
