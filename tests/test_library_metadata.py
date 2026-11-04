@@ -3,8 +3,9 @@ public entry points over canned responses.
 
 No HTTP and no real spotipy: Last.fm's session is a fake that answers
 from canned response dicts, and `library_metadata._enrichment_client`
-is a fake enrichment Spotify client. The sample file does not exist, so the tag read falls
-back to the folder names and there is no embedded cover.
+is a fake enrichment Spotify client. The sample file does not exist,
+so the tag read falls back to the folder names and there is no
+embedded cover.
 
 Synchronous test functions running their coroutine through
 asyncio.run(): the dev group has no pytest-asyncio.
