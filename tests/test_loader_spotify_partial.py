@@ -1,0 +1,91 @@
+"""loader._load_song over a faked Spotify fetch: what comes back when
+the playlist was only partly fetched."""
+
+import asyncio
+import pickle
+
+import pytest
+
+from config import config
+from musicbot import loader
+from musicbot.linkutils import SpotifyTracks
+from musicbot.loader import PartialPlaylist, SongError
+
+URL = "https://open.spotify.com/playlist/p"
+
+
+@pytest.fixture
+def worker_loop(monkeypatch):
+    loop = asyncio.new_event_loop()
+    monkeypatch.setattr(loader, "_loop", loop)
+    yield loop
+    loop.close()
+
+
+def _fetch(monkeypatch, result):
+    async def fetch_spotify(url):
+        if isinstance(result, Exception):
+            raise result
+        return result
+
+    monkeypatch.setattr(loader, "fetch_spotify", fetch_spotify)
+    monkeypatch.setattr(loader, "extract_info", lambda *a, **k: None)
+    # tracks are plain, already resolved links
+    monkeypatch.setattr(loader.YT_IE, "suitable", lambda u: False)
+
+
+def _links(n):
+    return [f"https://open.spotify.com/track/{i}" for i in range(n)]
+
+
+def test_known_larger_total_gives_partial_playlist(monkeypatch, worker_loop):
+    _fetch(
+        monkeypatch, SpotifyTracks(_links(3), 5, "SPOTIFY_TRUNCATED_NO_API")
+    )
+
+    result = loader._load_song(URL)
+
+    assert isinstance(result, PartialPlaylist)
+    assert len(result) == 3
+    assert (result.total, result.reason) == (5, "SPOTIFY_TRUNCATED_NO_API")
+
+
+@pytest.mark.parametrize("total", [None, 3])
+def test_unknown_or_complete_total_gives_plain_list(
+    monkeypatch, worker_loop, total
+):
+    _fetch(monkeypatch, SpotifyTracks(_links(3), total, None))
+
+    result = loader._load_song(URL)
+
+    assert type(result) is list and len(result) == 3
+
+
+def test_no_links_is_could_not_load_whatever_the_total(
+    monkeypatch, worker_loop
+):
+    _fetch(monkeypatch, SpotifyTracks([], 50, "SPOTIFY_TRUNCATED_NO_API"))
+
+    with pytest.raises(SongError) as info:
+        loader._load_song(URL)
+
+    assert info.value.args[0] == config.SONGINFO_ERROR
+
+
+def test_any_fetch_exception_is_could_not_load(monkeypatch, worker_loop):
+    _fetch(monkeypatch, KeyError("odd"))
+
+    with pytest.raises(SongError) as info:
+        loader._load_song(URL)
+
+    assert info.value.args[0] == config.SONGINFO_ERROR
+
+
+def test_partial_playlist_survives_pickling():
+    partial = PartialPlaylist(["a", "b"], 9, "SPOTIFY_TRUNCATED_API_ERROR")
+
+    copy = pickle.loads(pickle.dumps(partial))
+
+    assert isinstance(copy, PartialPlaylist)
+    assert list(copy) == ["a", "b"]
+    assert (copy.total, copy.reason) == (9, "SPOTIFY_TRUNCATED_API_ERROR")

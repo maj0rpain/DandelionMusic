@@ -91,3 +91,17 @@ class Song:
         for k, v in data.items():
             if hasattr(self, k) and v:
                 setattr(self, k, v)
+
+
+class PartialPlaylist(list):
+    """Songs of a playlist that could only be partly fetched: `total`
+    tracks exist, `reason` is the config key of why fewer were loaded.
+    Module-level so it pickles across the worker process boundary."""
+
+    def __init__(self, songs=(), total=None, reason=None):
+        super().__init__(songs)
+        self.total = total
+        self.reason = reason
+
+    def __reduce__(self):
+        return (type(self), (list(self), self.total, self.reason))
