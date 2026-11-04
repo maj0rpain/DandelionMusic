@@ -345,10 +345,20 @@ class Context(commands.Context):
             return await self.interaction.original_response()
         return sent
 
-    async def response_send_message(self, *args, **kwargs):
+    async def _send_routed(
+        self, fallback, *args, original_response=False, **kwargs
+    ):
+        """The interaction-or-parent routing, written once: through
+        _send_to_interaction when self.interaction is set, else through
+        fallback."""
         if self.interaction:
-            return await self._send_to_interaction(*args, **kwargs)
-        return await self.send(*args, **kwargs)
+            return await self._send_to_interaction(
+                *args, original_response=original_response, **kwargs
+            )
+        return await fallback(*args, **kwargs)
+
+    async def response_send_message(self, *args, **kwargs):
+        return await self._send_routed(self.send, *args, **kwargs)
 
     async def send(self, *args, **kwargs):
         kwargs.pop("reference", None)  # not supported
@@ -376,18 +386,14 @@ class Context(commands.Context):
         ):
             # sending ephemeral message or using different channel
             # don't bother with views
-            if self.interaction:
-                return await self._send_to_interaction(*args, **kwargs)
-            return await super_send(*args, **kwargs)
+            return await self._send_routed(super_send, *args, **kwargs)
 
         async def send_with_view(view):
             if view:
                 kwargs["view"] = view
-            if self.interaction:
-                return await self._send_to_interaction(
-                    *args, original_response=True, **kwargs
-                )
-            return await super_send(*args, **kwargs)
+            return await self._send_routed(
+                super_send, *args, original_response=True, **kwargs
+            )
 
         return await audiocontroller.attach_view(send_with_view)
 
