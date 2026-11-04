@@ -295,6 +295,7 @@ def fetch_playlist_with_api(
 
 _spotify_uri_regex = re.compile(rf"(?i:spotify):({_SPOTIFY_TYPES}):(\w+)")
 _TRAILING_PUNCTUATION = ".,!?;:"
+_FILE_SCHEME = "file://"
 
 
 def _is_single_url(s: str) -> bool:
@@ -331,8 +332,9 @@ def normalize_track(text: str) -> str:
         text = bare
     if m := _spotify_uri_regex.fullmatch(text):
         return f"https://open.spotify.com/{m.group(1)}/{m.group(2)}"
-    if text[:7].lower() == "file://" and _is_single_url(text):
-        return "file://" + text[7:]
+    scheme_len = len(_FILE_SCHEME)
+    if text[:scheme_len].lower() == _FILE_SCHEME and _is_single_url(text):
+        return _FILE_SCHEME + text[scheme_len:]
     return text
 
 
@@ -354,7 +356,7 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     if spotify_regex.match(url):
         return SiteTypes.SPOTIFY
 
-    if url.startswith("file://"):
+    if url.startswith(_FILE_SCHEME):
         if not config.ENABLE_LOCAL_LIBRARY:
             return SiteTypes.UNKNOWN
         return SiteTypes.LOCAL_LIBRARY
