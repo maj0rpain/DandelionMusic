@@ -2,8 +2,6 @@
 
 import asyncio
 
-import pytest
-
 from config import config
 from musicbot.commands import music
 from musicbot.commands.music import Music
