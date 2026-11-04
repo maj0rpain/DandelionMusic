@@ -4,8 +4,10 @@ import heapq
 import re
 import sys
 from collections import Counter
+import os
 from pathlib import Path
 from typing import Dict, List, NamedTuple, Optional, Tuple
+from urllib.parse import unquote_to_bytes
 
 from config import config
 from musicbot.audiotags import nice_title, read_tags
@@ -371,8 +373,7 @@ async def search_async(
     )
 
 
-# A track sits at Artist/Album/file under the library root.
-LAYOUT_DEPTH = 3
+FILE_SCHEME = "file://"
 
 
 def library_root() -> Path:
@@ -390,6 +391,49 @@ def song_path(artist: str, album: str, filename: str) -> Path:
 
 def song_uri(artist: str, album: str, filename: str) -> str:
     return song_path(artist, album, filename).as_uri()
+
+
+def track_path_from_uri(uri: str) -> Optional[Path]:
+    """The playable path of a local-library URI, or None if refused.
+
+    Containment is lexical, on the path as written, not on its
+    resolved target. Symlinks under the library root are trusted as
+    the owner's own extension of the library (an artist folder linked
+    in from another disk), and the kernel follows them when the file is
+    opened; the indexer follows them the same way. To keep this a real
+    boundary - identify_url sends any user-typed file:// URI here - a
+    `.` or `..` segment is refused (`Artist/../../x` would otherwise
+    climb out through a symlinked folder), as is any depth other than
+    the index's own Artist/Album/file (the three parts song_path takes).
+
+    The URI is decoded exactly once, by hand, and both the `.` check and
+    the containment checks run on that value: building a Path silently
+    drops `.`, and urlparse would split a raw `?` or `#` off as
+    query/fragment. After the scheme only an empty or `localhost`
+    authority is accepted; any other authority is refused.
+    """
+    rest = uri[len(FILE_SCHEME) :]
+    if rest.startswith("localhost/"):
+        rest = rest[len("localhost") :]
+    elif not rest.startswith("/"):
+        return None
+    decoded = unquote_to_bytes(rest)
+    if any(seg in (b".", b"..") for seg in decoded.split(b"/")):
+        return None
+    path = Path(os.fsdecode(decoded))
+    root = library_root()
+    # Every accepted prefix leaves a leading "/", so no input reaches
+    # the is_absolute check today; kept as a defensive backstop on a
+    # path-containment boundary.
+    if not path.is_absolute() or not path.is_relative_to(root):
+        return None
+    try:
+        artist, album, filename = path.relative_to(root).parts
+    except ValueError:
+        return None
+    if song_path(artist, album, filename) != path or not path.is_file():
+        return None
+    return path
 
 
 def tracks_for(
