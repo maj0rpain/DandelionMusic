@@ -131,3 +131,15 @@ class TestHistoryBounds:
             len(playlist.trackname_history)
             == config.MAX_TRACKNAME_HISTORY_LENGTH
         )
+
+
+class TestInsertNext:
+    def test_goes_right_after_the_current_track(self):
+        playlist = filled("a", "b", "c")
+        playlist.insert_next(song("x"))
+        assert [s.title for s in playlist.playque] == ["a", "x", "b", "c"]
+
+    def test_becomes_the_head_of_an_empty_queue(self):
+        playlist = Playlist()
+        playlist.insert_next(song("x"))
+        assert [s.title for s in playlist.playque] == ["x"]
