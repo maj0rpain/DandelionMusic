@@ -27,11 +27,12 @@ from musicbot.commands.library import (
     BackButton,
     CheckError,
     LibraryBrowseView,
+    LibrarySearchView,
     LibrarySelect,
     PageButton,
     QueueLevelButton,
 )
-from musicbot.library import LibrarySong
+from musicbot.library import LibrarySong, SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 from discord_fakes import http_error
 from helpers import run
@@ -965,6 +966,12 @@ def has_lone_surrogate(text):
     return False
 
 
+def assert_cut(text, limit):
+    assert utf16_units(text) <= limit
+    assert not has_lone_surrogate(text)
+    assert text.endswith("…")
+
+
 @pytest.mark.parametrize("level", ["artist", "album"])
 @pytest.mark.parametrize("name", ["x" * 255, "x" + "\U0001f600" * 255])
 def test_long_name_title_fits_embed_title_limit(level, name):
@@ -979,9 +986,77 @@ def test_long_name_title_fits_embed_title_limit(level, name):
     title = view.embed().title
 
     assert len(title) <= 256
-    assert utf16_units(title) <= 256
-    assert title.endswith("…")
-    assert not has_lone_surrogate(title)
+    assert_cut(title, 256)
+
+
+EMOJI60 = "\U0001f600" * 60
+
+
+def select_labels(view, kind=LibrarySelect):
+    select = next(i for i in view.children if isinstance(i, kind))
+    return [o.label for o in select.options]
+
+
+def test_browse_select_cuts_a_non_bmp_artist_label_to_the_limit():
+    view = make_view({EMOJI60: {"Album": [make_song("S")]}})
+
+    (label,) = select_labels(view)
+
+    assert_cut(label, 100)
+
+
+def test_browse_select_keeps_99_units_and_cuts_100_with_an_ellipsis():
+    view = make_view(
+        {
+            "a" * 99: {"Album": [make_song("S")]},
+            "b" * 100: {"Album": [make_song("S")]},
+        }
+    )
+
+    assert sorted(select_labels(view)) == ["a" * 99, "b" * 99 + "…"]
+
+
+def test_clicking_a_cut_song_option_queues_that_track(monkeypatch):
+    queued = []
+
+    async def queue_songs(ctx, interaction, triples, source):
+        await interaction.response.defer()
+        queued.extend(triples)
+
+    monkeypatch.setattr(library_commands, "queue_songs", queue_songs)
+    index = {"Artist": {"Album": [make_song("Other"), make_song(EMOJI60)]}}
+
+    async def scenario():
+        view = make_view(index)
+        stub_enrichment(view)
+        clicks = Clicks(view)
+        for label in ("Artist", "Album"):
+            await finish(
+                clicks.click(LibrarySelect, clicks.interaction(), label=label)
+            )
+        (cut,) = [x for x in select_labels(view) if x != "Other"]
+        assert_cut(cut, 100)
+        await finish(
+            clicks.click(LibrarySelect, clicks.interaction(), label=cut)
+        )
+
+    run(scenario())
+
+    assert [f for _, _, f in queued] == [EMOJI60 + ".flac"]
+
+
+def test_search_select_cuts_labels_like_the_browse_select():
+    results = [
+        SearchResult("artist", EMOJI60, None, None, EMOJI60, 1.0),
+        SearchResult("artist", "Short", None, None, "Short", 0.5),
+    ]
+    ctx = SimpleNamespace(author=SimpleNamespace(id=AUTHOR_ID))
+    view = LibrarySearchView(ctx, {}, "q", results)
+
+    cut, short = select_labels(view, library_commands.SearchSelect)
+
+    assert_cut(cut, 100)
+    assert short == "Short"
 
 
 def test_trim_drops_whole_char_when_budget_ends_in_surrogate_pair():
