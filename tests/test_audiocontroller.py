@@ -7,6 +7,7 @@ directory set to tmp_path so the controller's backup/ lands there.
 """
 
 import asyncio
+import inspect
 import pickle
 import sys
 import threading
@@ -64,13 +65,17 @@ async def _start_playing(controller):
     await _settle()
 
 
-def _while_playing(controller, intent):
-    """Runs `intent` with a track already playing, then lets the
-    preload it scheduled finish."""
-    controller.guild.voice_client.playing = True
+def _while_playing(controller, intent, playing=True):
+    """Runs `intent` (a plain callable, or one returning a coroutine,
+    which is awaited) with a track already playing unless `playing` is
+    false, then lets the preload it scheduled finish."""
+    controller.guild.voice_client.playing = playing
 
     async def scenario():
-        return intent()
+        result = intent()
+        if inspect.isawaitable(result):
+            result = await result
+        return result
 
     return _run(controller, scenario)
 

@@ -139,6 +139,11 @@ class TestInsertNext:
         playlist.insert_next(song("x"))
         assert [s.title for s in playlist.playque] == ["a", "x", "b", "c"]
 
+    def test_goes_after_a_lone_current_track(self):
+        playlist = filled("current")
+        playlist.insert_next(song("x"))
+        assert [s.title for s in playlist.playque] == ["current", "x"]
+
     def test_becomes_the_head_of_an_empty_queue(self):
         playlist = Playlist()
         playlist.insert_next(song("x"))
