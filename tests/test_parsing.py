@@ -181,6 +181,12 @@ SPOTIFY_ID = "4cOdK2wGLETKBW3PvgPWqT"
         ("<https://youtu.be/xyz.>", "https://youtu.be/xyz"),
         ("<https://youtu.be/xyz.>!", "https://youtu.be/xyz"),
         ("<Re:Zero>!", "<Re:Zero>!"),
+        ("FILE:///lib/A/B/t.mp3", "file:///lib/A/B/t.mp3"),
+        ("File:///lib/A/B/T.MP3", "file:///lib/A/B/T.MP3"),
+        ("file:///lib/A/B/t.mp3", "file:///lib/A/B/t.mp3"),
+        ("<FILE:///lib/A/B/t.mp3>", "file:///lib/A/B/t.mp3"),
+        ("  File:///lib/A/B/t.mp3.", "file:///lib/A/B/t.mp3"),
+        ("<File:///lib/A/B/t.mp3>!", "file:///lib/A/B/t.mp3"),
     ],
 )
 def test_normalize_track(text, expected):

@@ -316,7 +316,8 @@ def normalize_track(text: str) -> str:
     """Cleans up user-typed track text before it is classified: strips
     whitespace, unwraps one <...> around a single URL (trailing
     punctuation may follow the wrapper or sit inside it), drops trailing
-    sentence punctuation after a single URL and rewrites spotify: URIs.
+    sentence punctuation after a single URL, rewrites spotify: URIs and
+    lower-cases a file: scheme written in any case.
     Anything else is returned unchanged apart from the strip."""
     text = text.strip()
     for candidate in (text, text.rstrip(_TRAILING_PUNCTUATION)):
@@ -328,6 +329,8 @@ def normalize_track(text: str) -> str:
         text = bare
     if m := _spotify_uri_regex.fullmatch(text):
         return f"https://open.spotify.com/{m.group(1)}/{m.group(2)}"
+    if text[:7].lower() == "file://" and _is_single_url(text):
+        return "file://" + text[7:]
     return text
 
 
