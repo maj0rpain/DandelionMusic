@@ -419,6 +419,17 @@ def _click_during_enrichment_edit(click, index=INDEX, artist="Radiohead"):
     return run(scenario)
 
 
+def _assert_clicked_after_edit(result):
+    """The in-flight enrichment edit finished (two edits) before the
+    click's own response was drawn."""
+    assert len(result.entering.edits) == 2
+    assert [who for who, _ in result.log[:3]] == [
+        result.entering,
+        result.entering,
+        result.clicking,
+    ]
+
+
 def test_back_click_during_enrichment_edit_is_accepted():
     result = _click_during_enrichment_edit(
         lambda clicks, i: clicks.click(BackButton, i)
@@ -427,12 +438,7 @@ def test_back_click_during_enrichment_edit_is_accepted():
     assert result.handler is not None
     assert result.moved_to == (None, None)
     assert result.clicking.deferred == 1
-    assert len(result.entering.edits) == 2
-    assert [who for who, _ in result.log[:3]] == [
-        result.entering,
-        result.entering,
-        result.clicking,
-    ]
+    _assert_clicked_after_edit(result)
     assert result.log[1][1]["attachments"][0].filename == "cover.png"
 
 
@@ -444,12 +450,7 @@ def test_select_click_during_enrichment_edit_is_accepted():
 
     assert result.handler is not None
     assert result.moved_to == ("Radiohead", "OK Computer")
-    assert len(result.entering.edits) == 2
-    assert [who for who, _ in log[:3]] == [
-        result.entering,
-        result.entering,
-        result.clicking,
-    ]
+    _assert_clicked_after_edit(result)
     assert log[2][1]["embed"].title != log[1][1]["embed"].title
 
 
