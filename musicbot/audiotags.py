@@ -53,9 +53,11 @@ def _parse_year(value: Optional[str]) -> Optional[int]:
     return int(match.group(1)) if match else None
 
 
-# mutagen's easy mode only wraps ID3-in-MP3, MP4 and TrueAudio. WAV and
-# AIFF come back with raw ID3 frames and WMA with ASF attributes, each
-# keyed differently, so every other format is read through its own map.
+# Field -> key maps, one per key scheme. read_tags() parses with
+# easy=True, which wraps MP3, MP4 and TrueAudio in mutagen's easy-mode
+# names; FLAC's Vorbis comments (and the fallback's) use the same names
+# natively, so they share _EASY_KEYS. WAV and AIFF come back with raw
+# ID3 frames and WMA with ASF attributes, so each has its own map.
 _EASY_KEYS = {
     "title": "title",
     "artist": "artist",

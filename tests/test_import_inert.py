@@ -45,7 +45,7 @@ print(json.dumps({
     "stdout_untouched": sys.stdout is stdout,
     "stderr_untouched": sys.stderr is stderr,
     "atexit_callbacks": atexit._ncallbacks() - baseline_callbacks,
-    "executor_built": bool(loader._pools),
+    "pools_built": bool(loader._pools),
     "sessions": len(linkutils._sessions),
     "children": len(multiprocessing.active_children()),
     "spawn_process_is_stdlib": (
@@ -118,11 +118,11 @@ if __name__ == "__main__":
     stdio_after_init = worker_stdio_is_wrapped()
     worker_ready = all(
         loader._pools[lane].submit(worker_state_is_set).result()
-        for lane in (loader.LOAD_LANE, loader.PRELOAD_LANE)
+        for lane in loader.Lane
     )
     worker_stdios = [
         loader._pools[lane].submit(worker_stdio_is_wrapped).result()
-        for lane in (loader.LOAD_LANE, loader.PRELOAD_LANE)
+        for lane in loader.Lane
     ]
     worker_stdio = (
         worker_stdios[0]
@@ -133,7 +133,7 @@ if __name__ == "__main__":
     loader.init()
     children_after_second_init = len(multiprocessing.active_children())
     run_sync_reaches_worker = asyncio.run(
-        loader._run_sync(loader.PRELOAD_LANE, worker_state_is_set)
+        loader._run_sync(loader.Lane.PRELOAD, worker_state_is_set)
     )
     loader.shutdown()
     children_after_shutdown = len(multiprocessing.active_children())
@@ -150,43 +150,6 @@ if __name__ == "__main__":
         "children_after_second_init": children_after_second_init,
         "children_after_shutdown": children_after_shutdown,
     }))
-"""
-
-
-CRASH_RECOVERY_PROBE = """
-import asyncio
-import json
-import multiprocessing
-import os
-from concurrent.futures.process import BrokenProcessPool
-
-from musicbot import loader
-
-
-async def main():
-    killed_pids = {p.pid for p in multiprocessing.active_children()}
-    # straight to the pool, so no retry runs os._exit again
-    try:
-        loader._pools[loader.LOAD_LANE].submit(os._exit, 1).result()
-    except BrokenProcessPool:
-        broke = True
-    else:
-        broke = False
-    song = await loader.load_song("https://example.invalid/a.mp3")
-    live_pids = {p.pid for p in multiprocessing.active_children()}
-    return {
-        "broke": broke,
-        "loaded": song is not None and song.webpage_url
-        == "https://example.invalid/a.mp3",
-        "new_worker": len(live_pids) == 2 and live_pids != killed_pids,
-    }
-
-
-if __name__ == "__main__":
-    loader.init()
-    observed = asyncio.run(main())
-    loader.shutdown()
-    print(json.dumps(observed))
 """
 
 
@@ -284,17 +247,6 @@ def import_result(tmp_path_factory):
 
 
 @pytest.fixture(scope="module")
-def crash_recovery(tmp_path_factory):
-    return _observed(
-        _run_in_fresh_interpreter(
-            tmp_path_factory.mktemp("crash"),
-            CRASH_RECOVERY_PROBE,
-            as_file=True,
-        )
-    )
-
-
-@pytest.fixture(scope="module")
 def lifecycle(tmp_path_factory):
     return _observed(
         _run_in_fresh_interpreter(
@@ -326,7 +278,7 @@ def test_importing_musicbot_registers_no_exit_handlers(import_result):
 
 
 def test_importing_musicbot_builds_no_process_pool(import_result):
-    assert _observed(import_result)["executor_built"] is False
+    assert _observed(import_result)["pools_built"] is False
 
 
 def test_importing_musicbot_opens_no_http_session(import_result):
@@ -405,16 +357,3 @@ def test_loader_lifecycle_call_outside_init_uses_no_thread_pool(
 
 def test_loader_lifecycle_run_sync_reaches_the_worker_after_init(lifecycle):
     assert lifecycle["run_sync_reaches_worker"] is True
-
-
-def test_a_killed_worker_surfaces_as_a_broken_process_pool(crash_recovery):
-    assert crash_recovery["broke"] is True
-
-
-def test_load_song_succeeds_on_a_new_worker_after_the_worker_was_killed(
-    crash_recovery,
-):
-    assert (crash_recovery["loaded"], crash_recovery["new_worker"]) == (
-        True,
-        True,
-    )

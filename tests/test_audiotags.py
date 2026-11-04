@@ -67,6 +67,12 @@ FULL = {
 FIELDS = list(FULL)
 
 
+def _copy_fixture(tmp_path: Path, ext: str) -> Path:
+    path = tmp_path / f"a.{ext}"
+    shutil.copy(FIXTURES / f"silent.{ext}", path)
+    return path
+
+
 def make_wav(tmp_path: Path) -> Path:
     path = tmp_path / "a.wav"
     with wave.open(str(path), "wb") as w:
@@ -78,15 +84,11 @@ def make_wav(tmp_path: Path) -> Path:
 
 
 def make_aiff(tmp_path: Path) -> Path:
-    path = tmp_path / "a.aiff"
-    shutil.copy(FIXTURES / "silent.aiff", path)
-    return path
+    return _copy_fixture(tmp_path, "aiff")
 
 
 def make_wma(tmp_path: Path) -> Path:
-    path = tmp_path / "a.wma"
-    shutil.copy(FIXTURES / "silent.wma", path)
-    return path
+    return _copy_fixture(tmp_path, "wma")
 
 
 def make_mp3(tmp_path: Path) -> Path:
@@ -97,56 +99,26 @@ def make_mp3(tmp_path: Path) -> Path:
 
 
 def make_flac(tmp_path: Path) -> Path:
-    path = tmp_path / "a.flac"
-    shutil.copy(FIXTURES / "silent.flac", path)
-    return path
+    return _copy_fixture(tmp_path, "flac")
 
 
 def make_mp4(tmp_path: Path) -> Path:
-    path = tmp_path / "a.m4a"
-    shutil.copy(FIXTURES / "silent.m4a", path)
-    return path
+    return _copy_fixture(tmp_path, "m4a")
 
 
 def _picture_data(ptype) -> bytes:
     return b"img" + bytes([int(ptype)])
 
 
-def tag(path: Path, values: dict, pictures=()) -> None:
-    if path.suffix == ".wma":
-        audio = ASF(path)
-        for field, value in values.items():
-            audio[ASF_KEYS[field]] = [value]
-        audio.save()
-        return
-    if path.suffix == ".flac":
-        audio = FLAC(path)
-        for field, value in values.items():
-            audio[EASY_KEYS[field]] = [value]
-        for ptype, mime in pictures:
-            picture = Picture()
-            picture.type = ptype
-            picture.mime = mime
-            picture.data = _picture_data(ptype)
-            audio.add_picture(picture)
-        audio.save()
-        return
-    if path.suffix == ".m4a":
-        audio = MP4(path)
-        audio.add_tags()
-        for field, value in values.items():
-            audio[MP4_KEYS[field]] = [value]
-        audio.save()
-        return
-    if path.suffix == ".mp3":
-        audio = ID3()
-    else:
-        audio = WAVE(path) if path.suffix == ".wav" else AIFF(path)
-        audio.add_tags()
-    tags = audio if path.suffix == ".mp3" else audio.tags
+MP4_FORMATS = {
+    "image/png": MP4Cover.FORMAT_PNG,
+    "image/jpeg": MP4Cover.FORMAT_JPEG,
+}
+
+
+def _add_id3(tags, values, pictures) -> None:
     for field, value in values.items():
-        frame = ID3_FRAMES[field]
-        tags.add(frame(encoding=3, text=[value]))
+        tags.add(ID3_FRAMES[field](encoding=3, text=[value]))
     for ptype, mime in pictures:
         tags.add(
             APIC(
@@ -157,26 +129,79 @@ def tag(path: Path, values: dict, pictures=()) -> None:
                 data=_picture_data(ptype),
             )
         )
-    if path.suffix == ".mp3":
-        audio.save(path)
-    else:
-        audio.save()
 
 
-def tag_mp4_covers(path: Path, covers) -> None:
-    audio = MP4(path)
-    audio.add_tags()
-    audio["covr"] = [MP4Cover(data, fmt) for data, fmt in covers]
+def _write_asf(path: Path, values: dict, pictures) -> None:
+    if pictures:
+        raise ValueError("the ASF writer does not write pictures")
+    audio = ASF(path)
+    for field, value in values.items():
+        audio[ASF_KEYS[field]] = [value]
     audio.save()
 
 
+def _write_flac(path: Path, values: dict, pictures) -> None:
+    audio = FLAC(path)
+    for field, value in values.items():
+        audio[EASY_KEYS[field]] = [value]
+    for ptype, mime in pictures:
+        picture = Picture()
+        picture.type = ptype
+        picture.mime = mime
+        picture.data = _picture_data(ptype)
+        audio.add_picture(picture)
+    audio.save()
+
+
+def _write_mp4(path: Path, values: dict, pictures) -> None:
+    audio = MP4(path)
+    audio.add_tags()
+    for field, value in values.items():
+        audio[MP4_KEYS[field]] = [value]
+    if pictures:
+        audio["covr"] = [
+            MP4Cover(_picture_data(ptype), MP4_FORMATS[mime])
+            for ptype, mime in pictures
+        ]
+    audio.save()
+
+
+def _write_id3(path: Path, values: dict, pictures) -> None:
+    tags = ID3()
+    _add_id3(tags, values, pictures)
+    tags.save(path)
+
+
+def _write_id3_in_file(path: Path, values: dict, pictures) -> None:
+    audio = (WAVE if path.suffix == ".wav" else AIFF)(path)
+    audio.add_tags()
+    _add_id3(audio.tags, values, pictures)
+    audio.save()
+
+
+WRITERS = {
+    ".wma": _write_asf,
+    ".flac": _write_flac,
+    ".m4a": _write_mp4,
+    ".mp3": _write_id3,
+    ".wav": _write_id3_in_file,
+    ".aiff": _write_id3_in_file,
+}
+
+
+def tag(path: Path, values: dict, pictures=()) -> None:
+    WRITERS[path.suffix](path, values, pictures)
+
+
+def _format_id(maker) -> str:
+    return maker.__name__.removeprefix("make_")
+
+
 MAKERS = [make_wav, make_aiff, make_wma, make_mp3, make_flac, make_mp4]
-FORMAT_IDS = ["wav", "aiff", "wma", "mp3", "flac", "mp4"]
-APIC_MAKERS = [make_wav, make_aiff, make_mp3, make_flac]
-APIC_IDS = ["wav", "aiff", "mp3", "flac"]
+TYPED_PICTURE_MAKERS = [make_wav, make_aiff, make_mp3, make_flac]
 
 
-@pytest.fixture(params=MAKERS, ids=FORMAT_IDS)
+@pytest.fixture(params=MAKERS, ids=_format_id)
 def audio_file(request, tmp_path):
     return request.param(tmp_path)
 
@@ -220,14 +245,7 @@ def test_values_are_str_or_none(audio_file):
         assert type(getattr(tags, field)) is str
 
 
-def test_mp3_is_still_read_through_easy_mode(tmp_path):
-    path = make_mp3(tmp_path)
-    tag(path, {"title": "Song", "artist": "Artist", "year": "2001"})
-    tags = read_tags(path)
-    assert (tags.title, tags.artist, tags.year) == ("Song", "Artist", 2001)
-
-
-@pytest.mark.parametrize("maker", APIC_MAKERS, ids=APIC_IDS)
+@pytest.mark.parametrize("maker", TYPED_PICTURE_MAKERS, ids=_format_id)
 def test_front_cover_picked_over_earlier_non_front(maker, tmp_path):
     path = maker(tmp_path)
     tag(
@@ -244,8 +262,8 @@ def test_front_cover_picked_over_earlier_non_front(maker, tmp_path):
     )
 
 
-@pytest.mark.parametrize("maker", APIC_MAKERS, ids=APIC_IDS)
-def test_unsupported_apic_mime_gives_no_cover(maker, tmp_path):
+@pytest.mark.parametrize("maker", TYPED_PICTURE_MAKERS, ids=_format_id)
+def test_unsupported_picture_mime_gives_no_cover(maker, tmp_path):
     path = maker(tmp_path)
     tag(path, {}, [(PictureType.COVER_FRONT, "-->")])
     assert read_artwork(path) is None
@@ -270,23 +288,14 @@ def test_no_cover_gives_none(audio_file):
 
 
 @pytest.mark.parametrize(
-    "fmt, data, ext",
-    [
-        (MP4Cover.FORMAT_PNG, b"pngdata", "png"),
-        (MP4Cover.FORMAT_JPEG, b"jpgdata", "jpg"),
-    ],
+    "mime, ext",
+    [("image/png", "png"), ("image/jpeg", "jpg")],
     ids=["png", "jpeg"],
 )
-def test_mp4_cover_format_maps_to_extension(fmt, data, ext, tmp_path):
+def test_mp4_cover_format_maps_to_extension(mime, ext, tmp_path):
     path = make_mp4(tmp_path)
-    tag_mp4_covers(path, [(data, fmt)])
-    assert read_artwork(path) == (data, ext)
-
-
-def test_wma_has_no_artwork(tmp_path):
-    path = make_wma(tmp_path)
-    tag(path, FULL)
-    assert read_artwork(path) is None
+    tag(path, {}, [(PictureType.COVER_FRONT, mime)])
+    assert read_artwork(path) == (_picture_data(PictureType.COVER_FRONT), ext)
 
 
 def test_cover_larger_than_max_bytes_gives_none(tmp_path):
