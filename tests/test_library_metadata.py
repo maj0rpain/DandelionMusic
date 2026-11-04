@@ -475,6 +475,7 @@ def test_clear_caches_clears_all_four_lookups(tmp_path, lastfm, spotify):
 
     lookups()
     lookups()
+    # one backend call per key, for album lookups as well as artist ones
     assert (len(session.queries), len(client.searches)) == (2, 2)
 
     library_metadata.clear_caches()
@@ -519,19 +520,6 @@ def test_an_album_timeout_is_logged_with_label_and_key(
         "library_metadata: Last.fm album.getInfo timed out for "
         "('Radiohead', 'OK Computer')" in capsys.readouterr().err
     )
-
-
-def test_the_same_album_twice_calls_each_backend_once(
-    tmp_path, lastfm, spotify
-):
-    session = lastfm({"album.getInfo": {"album": {"listeners": "5"}}})
-    client = spotify(FakeSpotify(albums=[{"images": []}]))
-
-    album(tmp_path)
-    album(tmp_path)
-
-    assert len(session.queries) == 1
-    assert len(client.searches) == 1
 
 
 def test_stalled_spotify_does_not_starve_file_reads(
