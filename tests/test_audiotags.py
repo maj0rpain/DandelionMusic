@@ -238,7 +238,10 @@ def test_front_cover_picked_over_earlier_non_front(maker, tmp_path):
             (PictureType.COVER_FRONT, "image/jpeg"),
         ],
     )
-    assert read_artwork(path) == (b"img" + bytes([3]), "jpg")
+    assert read_artwork(path) == (
+        _picture_data(PictureType.COVER_FRONT),
+        "jpg",
+    )
 
 
 @pytest.mark.parametrize("maker", APIC_MAKERS, ids=APIC_IDS)
@@ -258,7 +261,7 @@ def test_flac_without_front_marked_picture_gives_the_first(tmp_path):
             (PictureType.COVER_BACK, "image/jpeg"),
         ],
     )
-    assert read_artwork(path) == (b"img" + bytes([0]), "png")
+    assert read_artwork(path) == (_picture_data(PictureType.OTHER), "png")
 
 
 def test_no_cover_gives_none(audio_file):
@@ -266,16 +269,18 @@ def test_no_cover_gives_none(audio_file):
     assert read_artwork(audio_file) is None
 
 
-def test_mp4_png_cover_yields_png(tmp_path):
+@pytest.mark.parametrize(
+    "fmt, data, ext",
+    [
+        (MP4Cover.FORMAT_PNG, b"pngdata", "png"),
+        (MP4Cover.FORMAT_JPEG, b"jpgdata", "jpg"),
+    ],
+    ids=["png", "jpeg"],
+)
+def test_mp4_cover_format_maps_to_extension(fmt, data, ext, tmp_path):
     path = make_mp4(tmp_path)
-    tag_mp4_covers(path, [(b"pngdata", MP4Cover.FORMAT_PNG)])
-    assert read_artwork(path) == (b"pngdata", "png")
-
-
-def test_mp4_jpeg_cover_yields_jpg(tmp_path):
-    path = make_mp4(tmp_path)
-    tag_mp4_covers(path, [(b"jpgdata", MP4Cover.FORMAT_JPEG)])
-    assert read_artwork(path) == (b"jpgdata", "jpg")
+    tag_mp4_covers(path, [(data, fmt)])
+    assert read_artwork(path) == (data, ext)
 
 
 def test_wma_has_no_artwork(tmp_path):
