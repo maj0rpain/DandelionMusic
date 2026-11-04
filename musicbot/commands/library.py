@@ -1110,8 +1110,8 @@ class Library(commands.Cog):
         # a plain text message from a prefix command can't be ephemeral
         if ctx.interaction is not None:
             kwargs["ephemeral"] = True
-        # whatever this hands back, LibraryView.on_timeout() knows what
-        # to do with it - see the note on LibraryView.message
+        # whatever this hands back, OwnedView.refresh_message() knows
+        # what to do with it - see the note on OwnedView.message
         view.message = await ctx.send(**kwargs)
 
 

@@ -198,10 +198,12 @@ def run(coro_fn):
     return asyncio.run(coro_fn())
 
 
-async def click(view, index, user_id=OWNER):
+async def click(view, index, user_id=OWNER, inter=None):
     """What discord.py does with a click: the view's check, then the
-    item's callback only when the check admits it."""
-    inter = FakeInteraction(user_id)
+    item's callback only when the check admits it. Pass a prebuilt
+    interaction to click with one set up to fail."""
+    if inter is None:
+        inter = FakeInteraction(user_id)
     if await view.interaction_check(inter):
         await view.children[index].callback(inter)
     return inter
@@ -297,8 +299,7 @@ def test_a_pick_whose_join_fails_is_refused_and_can_be_retried():
         view, cog = make_view(message=FakeMessage())
         inter = FakeInteraction()
         inter.ctx.bot_out_of_voice(connect_error=asyncio.TimeoutError())
-        assert await view.interaction_check(inter)
-        await view.children[0].callback(inter)
+        await click(view, 0, inter=inter)
         state = (
             list(cog.played),
             inter.ctx.sent,
@@ -341,8 +342,7 @@ def test_a_failed_defer_uses_up_the_pick_and_is_reported_once():
         message = FakeMessage()
         view, cog = make_view(message=message)
         inter = FakeInteraction(OWNER, defer_fails=True)
-        assert await view.interaction_check(inter)
-        await view.children[0].callback(inter)
+        await click(view, 0, inter=inter)
         return view, cog, message, inter
 
     view, cog, message, inter = run(go)
@@ -443,8 +443,7 @@ def test_a_failing_followup_edit_still_queues_and_reports_no_error():
     async def go():
         view, cog = make_view(message=None)
         inter = FakeInteraction(OWNER, followup_fails=True)
-        assert await view.interaction_check(inter)
-        await view.children[0].callback(inter)
+        await click(view, 0, inter=inter)
         return cog, inter
 
     cog, inter = run(go)
