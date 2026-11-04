@@ -11,15 +11,11 @@ from musicbot.commands.music import Music
 
 
 class FakeCtx:
-    def __init__(self, attachments=()):
+    def __init__(self):
         self.sent = []
         self.deferred = False
         self.interaction = None
-        self.message = types.SimpleNamespace(
-            attachments=list(attachments),
-            reference=None,
-            jump_url="https://discord/msg",
-        )
+        self.message = types.SimpleNamespace(attachments=[], reference=None)
 
     async def defer(self):
         self.deferred = True
