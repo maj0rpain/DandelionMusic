@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+from typing import Optional
 
 import discord
 from discord.ext import commands
@@ -22,12 +23,21 @@ from musicbot.utils import (
 SHOW_SUBCOMMAND = "show"
 
 
-async def _update_or_report(ctx, sett, setting: str, value) -> bool:
-    """Updates a guild setting, replying with an error if it failed"""
-    if await sett.update_setting(setting, value, ctx):
-        return True
-    await ctx.send(f"`Error: Setting {setting} could not be updated.`")
-    return False
+def _unmatched_word(ctx) -> Optional[str]:
+    """The word after the command name that matched no subcommand, or
+    None when there is none (a slash invocation, or a bare command).
+    Leaves the view where it was."""
+    # discord.py clears ctx.subcommand_passed before the group callback
+    # runs, but leaves the view at the word after the command name
+    # (empty on a slash invocation): a prefix subcommand never reaches
+    # the callback, so that word matched none. skip_ws is needed as the
+    # view stops before the whitespace, and one undo() could not
+    # restore it, as get_word sets previous past the skipped whitespace
+    start = ctx.view.index
+    ctx.view.skip_ws()
+    word = ctx.view.get_word()
+    ctx.view.index = start
+    return word or None
 
 
 async def _apply_setting(ctx, descriptor: SettingDescriptor, value):
@@ -39,20 +49,25 @@ async def _apply_setting(ctx, descriptor: SettingDescriptor, value):
         return
     sett = get_settings(ctx)
     try:
-        updated = await _update_or_report(ctx, sett, descriptor.name, value)
+        updated = await sett.update_setting(descriptor.name, value, ctx)
     except ConversionError as e:
         await ctx.send(f"`Error: {e}`")
         return
-    if updated:
+    if not updated:
         await ctx.send(
-            f"Setting `{descriptor.name}` updated to"
-            f" {descriptor.confirm(value)}!"
+            f"`Error: Setting {descriptor.name} could not be updated.`"
         )
+        return
+    await ctx.send(
+        f"Setting `{descriptor.name}` updated to"
+        f" {descriptor.confirm(value)}!"
+    )
 
 
-def _setting_subcommand(descriptor: SettingDescriptor):
+def _setting_subcommand(descriptor: SettingDescriptor, owner: str):
     """The callback of the d!setting subcommand for one setting, taking
-    the descriptor's parameter name and type"""
+    the descriptor's parameter name and type; owner is the qualname of
+    the class the callback becomes a method of"""
 
     async def callback(self, ctx: commands.Context, value):
         await _apply_setting(ctx, descriptor, value)
@@ -72,7 +87,10 @@ def _setting_subcommand(descriptor: SettingDescriptor):
         descriptor.param_name: descriptor.param_type,
     }
     callback.__name__ = f"_set_{descriptor.name}"
-    callback.__qualname__ = f"General._set_{descriptor.name}"
+    # discord.py's is_inside_class reads the qualname to decide whether
+    # the callback takes self: without this override it would end in
+    # <locals>, self would not be skipped and every subcommand would break
+    callback.__qualname__ = f"{owner}._set_{descriptor.name}"
     return callback
 
 
@@ -164,20 +182,20 @@ class General(commands.Cog):
         invoke_without_command=True,
     )
     async def _settings(self, ctx: commands.Context):
-        # discord.py clears ctx.subcommand_passed before this callback
-        # runs, but leaves the view at the word after the command name
-        # (empty on a slash invocation): a prefix subcommand never
-        # reaches here, so that word matched none
-        words = ctx.view.buffer[ctx.view.index :].split(None, 1)
-        if words and words[0] != SHOW_SUBCOMMAND:
-            raise CheckError(config.UNKNOWN_SETTING.format(words[0]))
+        word = _unmatched_word(ctx)
+        if word is not None and word != SHOW_SUBCOMMAND:
+            raise CheckError(config.UNKNOWN_SETTING.format(word))
         sett = get_settings(ctx)
         await ctx.send(embed=sett.format(ctx))
 
     for _descriptor in SETTINGS.values():
         vars()[f"_set_{_descriptor.name}"] = _settings.command(
             name=_descriptor.name
-        )(commands.check(dj_check)(_setting_subcommand(_descriptor)))
+        )(
+            commands.check(dj_check)(
+                _setting_subcommand(_descriptor, __qualname__)
+            )
+        )
     del _descriptor
 
     @commands.hybrid_command(
