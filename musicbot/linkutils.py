@@ -97,9 +97,11 @@ url_regex = re.compile(
     r'"'
     r".,<>?«»“”‘’])))"
 )
+# the Spotify types the link and URI patterns accept, case-sensitive
+_SPOTIFY_TYPES = "track|playlist|album"
 spotify_regex = re.compile(
     r"^(?i:https?://open\.spotify\.com)/([^/]+/)?"
-    r"(?P<type>track|playlist|album)/(?P<code>\w+)"
+    rf"(?P<type>{_SPOTIFY_TYPES})/(?P<code>\w+)"
 )
 
 headers = {}
@@ -291,7 +293,7 @@ def fetch_playlist_with_api(
     return SpotifyTracks(links, total, reason)
 
 
-_spotify_uri_regex = re.compile(r"(?i:spotify):(track|album|playlist):(\w+)")
+_spotify_uri_regex = re.compile(rf"(?i:spotify):({_SPOTIFY_TYPES}):(\w+)")
 _TRAILING_PUNCTUATION = ".,!?;:"
 
 
