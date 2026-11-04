@@ -389,8 +389,8 @@ class EditClick(NamedTuple):
     log: list
 
     @property
-    def who(self):
-        return [who for who, _ in self.log]
+    def edit_order(self):
+        return [interaction for interaction, _ in self.log]
 
 
 def _click_during_enrichment_edit(click, index=INDEX, artist="Radiohead"):
@@ -429,7 +429,7 @@ def test_back_click_during_enrichment_edit_is_accepted():
     assert result.moved_to == (None, None)
     assert result.clicking.deferred == 1
     assert len(result.entering.edits) == 2
-    assert result.who[:3] == [
+    assert result.edit_order[:3] == [
         result.entering,
         result.entering,
         result.clicking,
@@ -445,7 +445,7 @@ def test_select_click_during_enrichment_edit_is_accepted():
     assert result.handler is not None
     assert result.moved_to == ("Radiohead", "OK Computer")
     assert len(result.entering.edits) == 2
-    assert result.who[:3] == [
+    assert result.edit_order[:3] == [
         result.entering,
         result.entering,
         result.clicking,
