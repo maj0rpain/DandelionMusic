@@ -61,15 +61,12 @@ class ProcessController:
 
 
 def test_truncated_playlist_reply_holds_numbers_and_reason_text():
-    result = QueuedPlaylist(30, Truncation(50, TruncationReason.NO_API))
-    ctx, sent = _ctx(ProcessController(result))
+    cut = Truncation(50, TruncationReason.NO_API)
+    ctx, sent = _ctx(ProcessController(QueuedPlaylist(30, cut)))
 
     asyncio.run(Music(None)._play_song(ctx, "t"))
 
-    [text] = sent
-    assert "30" in text and "50" in text
-    assert config.SPOTIFY_TRUNCATED_NO_API in text
-    assert "SPOTIFY_TRUNCATED_NO_API" not in text
+    assert sent == [cut.notice(30)]
 
 
 def test_untruncated_playlist_reply_is_queued_playlist():
@@ -139,8 +136,7 @@ def test_playlist_add_reports_truncation_and_update(monkeypatch):
     sent = _add(monkeypatch, _partial(), add_songs)
 
     assert len(sent) == 2
-    assert "1" in sent[0] and "50" in sent[0]
-    assert config.SPOTIFY_TRUNCATED_NO_API in sent[0]
+    assert sent[0] == _partial().truncation.notice(1)
     assert sent[1] == config.PLAYLIST_UPDATED
 
 

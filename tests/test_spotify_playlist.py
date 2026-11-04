@@ -78,15 +78,19 @@ def test_album_tracks_resolve_in_order(spotify):
 class PagedSpotify(FakeSpotify):
     """Two pages of two tracks; `next` raises, or ends the paging."""
 
-    def __init__(self, exc=None, first_raises=False):
+    def __init__(self, exc=None, first_raises=False, total=4):
         super().__init__([track(1), track(2)])
+        self.total = total
         self.exc = exc
         self.first_raises = first_raises
 
     def _page(self):
         if self.first_raises:
             raise self.exc
-        return {"items": self._items, "total": 4}
+        page = {"items": self._items}
+        if self.total is not None:
+            page["total"] = self.total
+        return page
 
     def next(self, results):
         if self.exc:
@@ -105,6 +109,19 @@ def test_paging_failure_after_page_one_returns_partial_with_reason(
 
     assert result.links == [url(1), url(2)]
     assert result.truncation == Truncation(4, TruncationReason.API_ERROR)
+
+
+def test_paging_failure_after_page_without_total_reports_none(monkeypatch):
+    monkeypatch.setattr(
+        linkutils,
+        "spotify_api",
+        PagedSpotify(RuntimeError("boom"), total=None),
+    )
+
+    result = fetch_playlist_with_api(SpotifyPlaylistTypes.PLAYLIST, "p")
+
+    assert result.links == [url(1), url(2)]
+    assert result.truncation is None
 
 
 def test_failure_before_any_page_propagates(monkeypatch):
