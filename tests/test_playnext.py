@@ -25,6 +25,7 @@ from controller_helpers import (
     _titles,
     _run_intent,
 )
+from helpers import run
 
 
 def _song(controller, title):
@@ -187,6 +188,6 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
 def test_play_replies_with_the_load_error():
     ctx, sent = play_ctx(ProcessController(SongError("nope")))
 
-    asyncio.run(Music(None)._play_song(ctx, "x"))
+    run(Music(None)._play_song(ctx, "x"))
 
     assert sent == ["nope"]

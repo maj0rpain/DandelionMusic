@@ -1,11 +1,10 @@
-import asyncio
-
 from bs4 import BeautifulSoup
 import pytest
 
 from musicbot import linkutils, loader
 from musicbot.linkutils import SpotifyPlaylistTypes, fetch_playlist_with_api
 from musicbot.truncation import Truncation, TruncationReason
+from helpers import run
 
 
 def url(n):
@@ -174,9 +173,7 @@ def test_scrape_reports_song_count_as_total(monkeypatch, count, expected):
 
     monkeypatch.setattr(linkutils, "get_soup", get_soup)
 
-    result = asyncio.run(
-        linkutils.fetch_spotify_playlist("u", "playlist", "p")
-    )
+    result = run(linkutils.fetch_spotify_playlist("u", "playlist", "p"))
 
     assert len(result.links) == 30
     assert result.truncation == expected
@@ -197,7 +194,5 @@ def test_fetch_spotify_with_credentials_looks_the_track_up_by_id(
         loader, "_search_youtube", lambda query: [{"url": "u"}]
     )
     track_id = "4cOdK2wGLETKBW3PvgPWqT"
-    asyncio.run(
-        linkutils.fetch_spotify(f"HTTPS://OPEN.SPOTIFY.COM/track/{track_id}")
-    )
+    run(linkutils.fetch_spotify(f"HTTPS://OPEN.SPOTIFY.COM/track/{track_id}"))
     assert calls == [track_id]
