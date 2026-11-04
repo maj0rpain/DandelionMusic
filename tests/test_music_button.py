@@ -130,7 +130,7 @@ def test_a_refused_dj_only_click_does_not_join_voice():
 
 
 class JoiningButton(MusicButton):
-    """A button that starts playback, as a search pick does: it
+    """A joining button, as a search pick is: it
     overrides the join hook to join voice."""
 
     async def join(self, ctx):
