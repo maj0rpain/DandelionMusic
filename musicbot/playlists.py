@@ -42,6 +42,15 @@ class PlaylistRef:
 
 
 @dataclass(frozen=True)
+class SavedEntry:
+    """Which saved playlist a queued song came from, and that entry's
+    URL exactly as stored (extraction never rewrites it)."""
+
+    ref: PlaylistRef
+    url: str
+
+
+@dataclass(frozen=True)
 class PlaylistContents:
     """A saved playlist as ``get`` loads it: its ref and its entries."""
 
@@ -49,25 +58,25 @@ class PlaylistContents:
     entries: List[PlaylistEntry]
 
 
-class PlaylistError(Exception):
+class SavedPlaylistError(Exception):
     pass
 
 
-class PlaylistNotFound(PlaylistError):
+class PlaylistNotFound(SavedPlaylistError):
     pass
 
 
-class PlaylistExists(PlaylistError):
+class PlaylistExists(SavedPlaylistError):
     pass
 
 
-class InvalidPosition(PlaylistError):
+class InvalidPosition(SavedPlaylistError):
     def __init__(self, size: int):
         super().__init__(f"position out of range 1..{size}")
         self.size = size
 
 
-class OnlySongInPlaylist(PlaylistError):
+class OnlySongInPlaylist(SavedPlaylistError):
     pass
 
 

@@ -25,7 +25,7 @@ from discord_fakes import FakeInteraction, VoiceGuild, make_bot, run
 DJ_ROLE = 99
 
 
-class FakeContext:
+class FakeContext(Context):
     """Enough of a component-click Context for the real
     Context.send and dj_check: no controller is registered, so a send
     goes to the interaction; the guild has a DJ role the author lacks
@@ -50,9 +50,6 @@ class FakeContext:
             }
         )
         self.interaction = None
-
-    async def send(self, *args, **kwargs):
-        return await Context.send(self, *args, **kwargs)
 
 
 def click(custom_id="x"):

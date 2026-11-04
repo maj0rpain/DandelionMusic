@@ -883,12 +883,14 @@ def _queue_saved_playlist_song(controller, from_saved_playlist=True):
                     ac.SiteTypes.YT_DLP,
                     SAVED_URL,
                     title="fresh title",
-                    saved_playlist=(
-                        ac.playlists.PlaylistRef("1234", "mix")
+                    saved_entry=(
+                        ac.playlists.SavedEntry(
+                            ac.playlists.PlaylistRef("1234", "mix"),
+                            SAVED_URL,
+                        )
                         if from_saved_playlist
                         else None
                     ),
-                    saved_url=SAVED_URL if from_saved_playlist else None,
                 )
             ]
         )
@@ -1321,14 +1323,16 @@ def _idle_timer_that_fires_at_once(controller, monkeypatch):
     return disconnects
 
 
-def _during_disconnect(controller, during):
-    """Makes the voice client's disconnect() run `during()` first."""
+def _during_disconnect(controller, during, yields=1):
+    """Makes the voice client's disconnect() run `during()` first, then
+    yield `yields` times before disconnecting."""
     voice_client = controller.guild.voice_client
     original = voice_client.disconnect
 
     async def disconnect(*, force=False):
         during()
-        await asyncio.sleep(0)
+        for _ in range(yields):
+            await asyncio.sleep(0)
         await original(force=force)
 
     voice_client.disconnect = disconnect
@@ -1345,7 +1349,9 @@ def test_a_track_end_hop_during_a_disconnect_starts_no_idle_timer(
         disconnects = _idle_timer_that_fires_at_once(controller, monkeypatch)
         generation = controller._generation
         _during_disconnect(
-            controller, lambda: controller._on_track_end(None, generation)
+            controller,
+            lambda: controller._on_track_end(None, generation),
+            yields=3,  # the hop and the task it schedules run first
         )
         await controller.udisconnect("test")
         await _settle()
@@ -1602,7 +1608,7 @@ def test_a_song_loaded_from_a_saved_playlist_keeps_its_title_refresh(
     ]
 
 
-def test_a_song_without_a_saved_url_refreshes_no_stored_title(
+def test_a_song_from_an_old_backup_refreshes_no_stored_title(
     controller, stub_loader
 ):
     _rewriting_preload(stub_loader, SAVED_URL)
@@ -1611,10 +1617,11 @@ def test_a_song_without_a_saved_url_refreshes_no_stored_title(
         song = ac.Song(
             ac.SiteTypes.YT_DLP,
             SAVED_URL,
-            saved_playlist=ac.playlists.PlaylistRef("1234", "mix"),
         )
-        # as unpickled from a backup written before saved_url existed
-        song.__dict__.pop("saved_url", None)
+        # as unpickled from a backup written before saved_entry existed
+        del song.__dict__["saved_entry"]
+        song.saved_playlist = ac.playlists.PlaylistRef("1234", "mix")
+        song.saved_url = SAVED_URL
         return song
 
     async def preload_once(ac, factory):
@@ -2118,3 +2125,55 @@ def test_the_player_view_buttons_are_the_player_buttons_in_order(controller):
     ids = [c.custom_id for c in controller.make_view().children]
 
     assert ids == PLAYER_BUTTONS
+
+
+def test_start_idle_timer_starts_the_timer(controller):
+    async def run():
+        await controller.start_idle_timer(True)
+        return controller.timer._task
+
+    assert asyncio.run(run()) is not None
+
+
+def test_start_idle_timer_starts_none_while_disconnecting(controller):
+    async def run():
+        controller._disconnecting = True
+        await controller.start_idle_timer(True)
+        return controller.timer._task
+
+    assert asyncio.run(run()) is None
+
+
+def test_pause_while_disconnecting_starts_no_timer(controller):
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        controller.guild.voice_client.playing = True
+        controller._disconnecting = True
+        controller.pause()
+        await _settle()
+        return controller.timer._task
+
+    assert asyncio.run(run()) is None
+
+
+def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        controller.guild.voice_client.playing = True
+        reached = asyncio.Event()
+        release = asyncio.Event()
+
+        async def update_view(view=None):
+            reached.set()
+            await release.wait()
+
+        controller.update_view = update_view
+        disconnect = asyncio.create_task(controller.udisconnect("test"))
+        await reached.wait()
+        controller.pause()
+        release.set()
+        await disconnect
+        await _settle()
+        return controller.timer._task
+
+    assert asyncio.run(run()) is None
