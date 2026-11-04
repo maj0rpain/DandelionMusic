@@ -1,8 +1,8 @@
 """The guild settings descriptor table in musicbot.settings.
 
 Every guild setting is described once, in SETTINGS; its defaults and
-the d!setting show embed are driven by it. Nothing here needs Discord
-or a database.
+the d!setting show embed are driven by it. Nothing here needs Discord;
+the server-default test builds an in-memory SQLite database.
 """
 
 import types
@@ -168,11 +168,10 @@ def test_every_server_default_column_stores_its_descriptors_default():
     ]
     engine = sqlalchemy.create_engine("sqlite://")
     GuildSettings.metadata.create_all(engine)
-    left_out = set(server_defaulted)
-    values = {
-        c.name: SETTINGS[c.name].default if c.name != "guild_id" else "1"
-        for c in GuildSettings.__table__.columns
-        if c.name not in left_out
+    values = {"guild_id": "1"} | {
+        name: value
+        for name, value in default_settings().items()
+        if name not in server_defaulted
     }
     with sqlalchemy.orm.Session(engine) as session:
         session.execute(
