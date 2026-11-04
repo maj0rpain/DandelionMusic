@@ -3,7 +3,6 @@ from typing import Iterable, List, Optional, Union, Literal
 
 import discord
 from discord import Attachment, Embed, app_commands
-from discord.ui import View
 from discord.ext import commands
 
 from config import config
@@ -21,6 +20,7 @@ from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
 from musicbot.playlists import PlaylistEntry
 from musicbot.linkutils import get_site_type, url_regex
+from musicbot.views import OwnedView
 
 
 def _attachment_track(ctx, file) -> Optional[str]:
@@ -49,70 +49,44 @@ class AudioContext(Context):
     audiocontroller: AudioController
 
 
-class SearchView(View):
-    """The d!search results: one pick, by the user who ran the search.
-
-    discord.py's View has no `message` attribute (py-cord's had one),
-    so it is kept here, set by the search command to whatever its
-    reply send returned."""
+class SearchView(OwnedView):
+    """The d!search results: one pick, by the user who ran the search."""
 
     def __init__(self, ctx):
-        super().__init__()
-        self.ctx = ctx
-        self.message = None
+        super().__init__(ctx)
         # the single-pick claim. discord.py dispatches every click in
         # its own task, and a button's checks and voice join run
         # before the pick stops the view, so stop() alone
         # would let two quick clicks both queue. Taken in
-        # interaction_check, before the first await of the click.
-        self.picked = False
+        # accepts_click, before the first await of the click.
+        self._picked = False
 
-    async def interaction_check(
-        self, interaction: discord.Interaction
-    ) -> bool:
-        if interaction.user.id != self.ctx.author.id:
-            await interaction.response.send_message(
-                "This belongs to someone else.", ephemeral=True
-            )
-            return False
-        if self.picked:
+    def accepts_click(self) -> bool:
+        if self._picked:
             # the second half of a double-click: acknowledged silently
-            await interaction.response.defer()
             return False
-        self.picked = True
+        self._picked = True
         return True
 
-    def disable(self):
-        for item in self.children:
-            if isinstance(item, discord.ui.Button):
-                item.disabled = True
+    def release_pick(self) -> None:
+        """Gives the claim back, so the owner can pick again."""
+        self._picked = False
 
-    async def show(self):
-        """Edits the message to the view's current state. A failed
-        edit is swallowed: it must never cost the pick."""
-        try:
-            if self.message is not None and not isinstance(
-                self.message, discord.InteractionCallbackResponse
-            ):
-                await self.message.edit(view=self)
-            elif self.ctx.interaction is not None:
-                await self.ctx.interaction.edit_original_response(view=self)
-        except discord.HTTPException:
-            pass
-
-    async def on_timeout(self):
+    async def use_up_pick(self) -> None:
+        """Finishes the view: stopped, disabled, its message
+        refreshed. Does nothing once finished."""
+        if self.is_finished():
+            return
+        self.stop()
         self.disable()
-        await self.show()
+        await self.refresh_message()
 
 
 class SongButton(MusicButton):
     def __init__(self, cog: "Music", num: int, song: str):
         async def play(ctx):
-            view = self.view
-            view.stop()
-            view.disable()
             async with ctx.channel.typing():
-                await view.show()
+                await self.view.use_up_pick()
                 await cog._play_song(ctx, song)
 
         super().__init__(
@@ -128,24 +102,16 @@ class SongButton(MusicButton):
     def on_refused(self):
         # the pick was refused (not in voice, a failed join): release
         # the claim so the owner can fix it and pick again
-        self.view.picked = False
+        self.view.release_pick()
 
-    async def callback(self, inter: discord.Interaction):
-        try:
-            await super().callback(inter)
-        except Exception as e:
-            # anything but a refusal (a failed defer, a failed
-            # action) uses up the pick: the stale message must
-            # not invite clicks that are silently refused
-            view = self.view
-            if not view.is_finished():
-                view.stop()
-                view.disable()
-                await view.show()
-            # reported as d!play's failures are, which also logs it;
-            # not re-raised, so View.on_error does not log it again
-            ctx = await inter.client.get_context(inter)
-            await inter.client.on_command_error(ctx, e)
+    async def on_failure(self, ctx, error):
+        # anything but a refusal (a failed defer, a failed action)
+        # uses up the pick: the stale message must not invite clicks
+        # that are silently refused
+        await self.view.use_up_pick()
+        # reported as d!play's failures are, which also logs it; not
+        # re-raised, so View.on_error does not log it again
+        await ctx.bot.on_command_error(ctx, error)
 
 
 @commands.check
