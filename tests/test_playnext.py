@@ -11,6 +11,7 @@ import types
 import pytest
 
 from musicbot.commands.music import Music
+from musicbot.loader import SongError
 from test_audiocontroller import (
     _backup,
     _fake_ffmpeg,
@@ -143,26 +144,19 @@ def test_playnext_multi_track_playlist_is_appended(controller, stub_loader):
     )
 
 
-@pytest.mark.parametrize("failure", ["none", "error"])
-def test_unsupported_or_unloadable_playnext_leaves_everything_alone(
-    controller, stub_loader, tmp_path, failure
+def test_unloadable_playnext_leaves_everything_alone(
+    controller, stub_loader, tmp_path
 ):
     _queue(controller, "current", "a")
-    if failure == "none":
-        stub_loader.results["load_song"] = None
-    else:
 
-        async def load_song(track):
-            raise stub_loader.SongError("nope")
+    async def load_song(track):
+        raise stub_loader.SongError("nope")
 
-        stub_loader.load_song = load_song
+    stub_loader.load_song = load_song
 
     async def go():
-        if failure == "error":
-            with pytest.raises(stub_loader.SongError):
-                await controller.process_song("x", playnext=True)
-        else:
-            assert await controller.process_song("x", playnext=True) is None
+        with pytest.raises(stub_loader.SongError):
+            await controller.process_song("x", playnext=True)
 
     _run(controller, go)
 
@@ -224,3 +218,37 @@ def test_queue_with_playnext_keeps_the_order_of_several_songs(controller):
     _run(controller, lambda: controller.queue(songs, playnext=True))
 
     assert _titles(controller) == ["current", "x", "y", "a"]
+
+
+def test_play_replies_with_the_load_error_and_leaves_the_queue_alone(
+    controller, stub_loader, tmp_path, monkeypatch
+):
+    _queue(controller, "current", "a")
+
+    async def load_song(track):
+        raise SongError("nope")
+
+    stub_loader.load_song = load_song
+
+    class Timer:
+        async def start(self, *_):
+            pass
+
+    controller.timer = Timer()
+    sent = []
+
+    async def send(message=None, **kwargs):
+        sent.append(str(message))
+
+    ctx = types.SimpleNamespace(
+        audiocontroller=controller,
+        send=send,
+        author=None,
+        guild=controller.guild,
+    )
+
+    _run(controller, lambda: Music(None)._play_song(ctx, "x"))
+
+    assert sent == ["nope"]
+    assert _titles(controller) == ["current", "a"]
+    assert not (tmp_path / "backup" / "playlist_1234.pickle").exists()

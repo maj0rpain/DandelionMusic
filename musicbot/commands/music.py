@@ -242,9 +242,6 @@ class Music(commands.Cog):
         except SongError as e:
             await ctx.send(e)
             return
-        if song is None:
-            await ctx.send(config.SONGINFO_UNSUPPORTED)
-            return
 
         if isinstance(song, QueuedPlaylist):
             if song.truncated:
@@ -699,9 +696,6 @@ class Music(commands.Cog):
             song = await loader.load_song(track)
         except SongError as e:
             await ctx.send(e)
-            return
-        if song is None:
-            await ctx.send(config.SONGINFO_ERROR)
             return
         songs = [song] if isinstance(song, Song) else song
         try:
