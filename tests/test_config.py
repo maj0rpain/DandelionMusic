@@ -51,10 +51,74 @@ class TestGetEnvVar:
         ("postgres://h/d", "postgresql+asyncpg://h/d"),
         ("mysql://h/d", "mysql+aiomysql://h/d"),
         ("weird+driver://h/d", "weird+driver://h/d"),
+        ("postgresql://h/d", "postgresql+asyncpg://h/d"),
+        ("postgres+asyncpg://h/d", "postgresql+asyncpg://h/d"),
+        ("mysql+aiomysql://h/d", "mysql+aiomysql://h/d"),
     ],
 )
 def test_alchemize_url(url, expected):
     assert alchemize_url(url) == expected
+
+
+@pytest.mark.parametrize(
+    "url, scheme",
+    [
+        ("mariadb://u:secret@h/d", "mariadb"),
+        ("postgresql+://u:secret@h/d", "postgresql+"),
+        ("postgres", None),
+        ("postgres:/u:secret@h", None),
+    ],
+)
+def test_alchemize_url_rejects_unmappable_urls(url, scheme):
+    with pytest.raises(ValueError) as exc:
+        alchemize_url(url)
+    msg = str(exc.value)
+    assert "DATABASE_URL" in msg
+    for form in ("sqlite://", "postgresql://", "mysql://"):
+        assert form in msg
+    assert "dialect+asyncdriver://" in msg
+    if scheme:
+        assert scheme in msg
+    assert "secret" not in msg
+    assert "postgres:/" not in msg
+
+
+def test_config_normalises_a_postgresql_url(config_factory):
+    config = config_factory(
+        SECRETS_ENV + "DATABASE_URL=postgresql://u:p@h/db\n"
+    )
+    assert config.DATABASE == "postgresql+asyncpg://u:p@h/db"
+    assert config.DATABASE_LIBRARY_NAME == "asyncpg"
+
+
+def test_config_keeps_the_rest_of_the_url_when_naming_the_driver(
+    config_factory,
+):
+    config = config_factory(
+        SECRETS_ENV + "DATABASE_URL=postgres+asyncpg://asyncpg:asyncpg@h/db\n"
+    )
+    assert config.DATABASE == "postgresql+asyncpg://asyncpg:asyncpg@h/db"
+
+
+def test_config_load_rejects_an_unmappable_url(config_factory):
+    with pytest.raises(ValueError):
+        config_factory(SECRETS_ENV + "DATABASE_URL=mariadb://u:p@h/db\n")
+
+
+def test_dockerfile_installs_db_drivers_without_dev():
+    from pathlib import Path
+
+    text = (Path(__file__).parent.parent / "Dockerfile").read_text()
+    commands = text.replace("\\\n", " ").splitlines()
+    (run,) = [c for c in commands if c.startswith("RUN") and "uv sync" in c]
+    for flag in (
+        "--frozen",
+        "--no-cache",
+        "--no-dev",
+        "--extra postgres",
+        "--extra mysql",
+    ):
+        assert flag in run
 
 
 def test_extra_owners_defaults_to_empty(config_factory):

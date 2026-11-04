@@ -127,6 +127,43 @@ if __name__ == "__main__":
 """
 
 
+CRASH_RECOVERY_PROBE = """
+import asyncio
+import json
+import multiprocessing
+import os
+from concurrent.futures.process import BrokenProcessPool
+
+from musicbot import loader
+
+
+async def main():
+    killed_pid = multiprocessing.active_children()[0].pid
+    # straight to the pool, so no retry runs os._exit again
+    try:
+        loader._executor.submit(os._exit, 1).result()
+    except BrokenProcessPool:
+        broke = True
+    else:
+        broke = False
+    song = await loader.load_song("https://example.invalid/a.mp3")
+    live_pid = multiprocessing.active_children()[0].pid
+    return {
+        "broke": broke,
+        "loaded": song is not None and song.webpage_url
+        == "https://example.invalid/a.mp3",
+        "new_worker": live_pid != killed_pid,
+    }
+
+
+if __name__ == "__main__":
+    loader.init()
+    observed = asyncio.run(main())
+    loader.shutdown()
+    print(json.dumps(observed))
+"""
+
+
 ENTRYPOINT_PROBE = """
 import json
 import runpy
@@ -217,6 +254,17 @@ def _observed(result) -> dict:
 def import_result(tmp_path_factory):
     return _run_in_fresh_interpreter(
         tmp_path_factory.mktemp("import"), IMPORT_PROBE
+    )
+
+
+@pytest.fixture(scope="module")
+def crash_recovery(tmp_path_factory):
+    return _observed(
+        _run_in_fresh_interpreter(
+            tmp_path_factory.mktemp("crash"),
+            CRASH_RECOVERY_PROBE,
+            as_file=True,
+        )
     )
 
 
@@ -323,3 +371,16 @@ def test_loader_lifecycle_call_outside_init_uses_no_thread_pool(
 
 def test_loader_lifecycle_run_sync_reaches_the_worker_after_init(lifecycle):
     assert lifecycle["run_sync_reaches_worker"] is True
+
+
+def test_a_killed_worker_surfaces_as_a_broken_process_pool(crash_recovery):
+    assert crash_recovery["broke"] is True
+
+
+def test_load_song_succeeds_on_a_new_worker_after_the_worker_was_killed(
+    crash_recovery,
+):
+    assert (crash_recovery["loaded"], crash_recovery["new_worker"]) == (
+        True,
+        True,
+    )
