@@ -308,7 +308,7 @@ class Gate:
         return _PausedSession(session, self.paused, self.release)
 
 
-WAIT = 0.3
+WAIT = 1.0
 
 
 async def overlap(factory, first, second):
@@ -342,25 +342,20 @@ def test_set_title_overlapping_add_songs_keeps_both_changes():
     assert run(test) == [PlaylistEntry(A.url, "New"), B]
 
 
-def test_delete_overlapping_set_title_leaves_it_deleted():
+@pytest.mark.parametrize(
+    "first_operation",
+    [
+        lambda f: playlists.set_title(f, MIX, A.url, "New"),
+        lambda f: playlists.add_songs(f, MIX, [B]),
+    ],
+    ids=["set_title", "add_songs"],
+)
+def test_delete_overlapping_edit_leaves_it_deleted(first_operation):
     async def test(factory):
         await playlists.save(factory, MIX, [A])
         _, first, second = await overlap(
             factory,
-            lambda f: playlists.set_title(f, MIX, A.url, "New"),
-            lambda f: playlists.delete(f, MIX),
-        )
-        return first, second, await playlists.get(factory, MIX)
-
-    assert run(test) == (None, None, None)
-
-
-def test_delete_overlapping_add_songs_leaves_it_deleted():
-    async def test(factory):
-        await playlists.save(factory, MIX, [A])
-        _, first, second = await overlap(
-            factory,
-            lambda f: playlists.add_songs(f, MIX, [B]),
+            first_operation,
             lambda f: playlists.delete(f, MIX),
         )
         return first, second, await playlists.get(factory, MIX)
