@@ -299,19 +299,26 @@ def _is_single_url(s: str) -> bool:
     )
 
 
+def _unwrapped_url(s: str) -> Optional[str]:
+    """The single URL inside a <...> wrapper, or None."""
+    if len(s) > 2 and s[0] == "<" and s[-1] == ">":
+        inner = s[1:-1]
+        if _is_single_url(inner.rstrip(_TRAILING_PUNCTUATION)):
+            return inner
+    return None
+
+
 def normalize_track(text: str) -> str:
     """Cleans up user-typed track text before it is classified: strips
-    whitespace, unwraps one <...> around a single URL, drops trailing
+    whitespace, unwraps one <...> around a single URL (trailing
+    punctuation may follow the wrapper or sit inside it), drops trailing
     sentence punctuation after a single URL and rewrites spotify: URIs.
     Anything else is returned unchanged apart from the strip."""
     text = text.strip()
-    if (
-        len(text) > 2
-        and text[0] == "<"
-        and text[-1] == ">"
-        and _is_single_url(text[1:-1])
-    ):
-        text = text[1:-1]
+    for candidate in (text, text.rstrip(_TRAILING_PUNCTUATION)):
+        if (inner := _unwrapped_url(candidate)) is not None:
+            text = inner
+            break
     bare = text.rstrip(_TRAILING_PUNCTUATION)
     if bare != text and _is_single_url(bare):
         text = bare

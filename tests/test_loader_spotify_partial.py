@@ -1,7 +1,6 @@
 """loader._load_song over a faked Spotify fetch: what comes back when
 the playlist was only partly fetched."""
 
-import asyncio
 import pickle
 
 import pytest
