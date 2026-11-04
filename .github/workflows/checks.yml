@@ -29,11 +29,16 @@ jobs:
       - name: Check out the repo
         uses: actions/checkout@v4
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build Docker image
         uses: docker/build-push-action@v6
         with:
           context: .
           push: false
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   docker-publish:
     name: Push Docker image to Docker Hub
@@ -56,6 +61,9 @@ jobs:
         with:
           images: ${{ secrets.DOCKERHUB_USERNAME }}/dandelion-music
 
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
       - name: Build and push Docker image
         uses: docker/build-push-action@v6
         with:
@@ -63,6 +71,8 @@ jobs:
           push: true
           tags: ${{ steps.meta.outputs.tags }}
           labels: ${{ steps.meta.outputs.labels }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
       - name: Update container description
         uses: christian-korneck/update-container-description-action@v1
