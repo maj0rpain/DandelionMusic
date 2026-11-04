@@ -17,7 +17,7 @@ from discord import AppCommandOptionType, ChannelType
 from discord.ext.commands.view import StringView
 
 from config import config
-from musicbot.commands.general import General, _setting_subcommand
+from musicbot.commands.general import General
 from musicbot.settings import SETTINGS
 from setting_fakes import (
     FakeMessage,
@@ -314,15 +314,10 @@ def test_a_prefix_subcommand_converts_its_argument(
     assert getattr(sett, name) == stored
 
 
-def test_every_generated_subcommand_is_qualified_by_the_cog_class():
-    commands_ = setting_group(General(None)).commands
-
-    assert {c.callback.__qualname__ for c in commands_} == {
-        f"{General.__qualname__}._set_{name}" for name in SETTINGS
-    }
-
-
-def test_the_subcommand_qualname_follows_the_owner_argument():
-    callback = _setting_subcommand(SETTINGS["vc_timeout"], "Renamed")
-
-    assert callback.__qualname__ == "Renamed._set_vc_timeout"
+def test_every_generated_subcommand_takes_only_its_value_parameter():
+    """discord.py skips `self` only when it reads the callback as a
+    method, so a subcommand left unqualified would also take `self`"""
+    for command in setting_group(General(None)).commands:
+        assert list(command.clean_params) == [
+            SETTINGS[command.name].param_name
+        ]
