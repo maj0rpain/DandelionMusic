@@ -165,6 +165,30 @@ def test_unloadable_playnext_leaves_everything_alone(
     assert _preloaded(stub_loader) == []
 
 
+def play_ctx(controller, on_send=None):
+    """A fake context for Music._play_song and the list of its replies."""
+
+    class Timer:
+        async def start(self, *_):
+            pass
+
+    controller.timer = Timer()
+    sent = []
+
+    async def send(message=None, **kwargs):
+        sent.append(str(message))
+        if on_send is not None:
+            await on_send(sent)
+
+    ctx = types.SimpleNamespace(
+        audiocontroller=controller,
+        send=send,
+        author=None,
+        guild=controller.guild,
+    )
+    return ctx, sent
+
+
 def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
     controller, stub_loader, monkeypatch
 ):
@@ -179,24 +203,11 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
 
     stub_loader.load_song = load_song
 
-    class Timer:
-        async def start(self, *_):
-            pass
-
-    controller.timer = Timer()
-    sent = []
-
-    async def send(message=None, **kwargs):
-        sent.append(message)
+    async def on_send(sent):
         if len(sent) == 1:
             await controller.process_song("plain")
 
-    ctx = types.SimpleNamespace(
-        audiocontroller=controller,
-        send=send,
-        author=None,
-        guild=controller.guild,
-    )
+    ctx, _ = play_ctx(controller, on_send)
     music = Music(None)
     monkeypatch.setattr(
         "musicbot.commands.music.utils.get_settings",
@@ -221,7 +232,7 @@ def test_queue_with_playnext_keeps_the_order_of_several_songs(controller):
 
 
 def test_play_replies_with_the_load_error_and_leaves_the_queue_alone(
-    controller, stub_loader, tmp_path, monkeypatch
+    controller, stub_loader, tmp_path
 ):
     _queue(controller, "current", "a")
 
@@ -230,22 +241,7 @@ def test_play_replies_with_the_load_error_and_leaves_the_queue_alone(
 
     stub_loader.load_song = load_song
 
-    class Timer:
-        async def start(self, *_):
-            pass
-
-    controller.timer = Timer()
-    sent = []
-
-    async def send(message=None, **kwargs):
-        sent.append(str(message))
-
-    ctx = types.SimpleNamespace(
-        audiocontroller=controller,
-        send=send,
-        author=None,
-        guild=controller.guild,
-    )
+    ctx, sent = play_ctx(controller)
 
     _run(controller, lambda: Music(None)._play_song(ctx, "x"))
 
