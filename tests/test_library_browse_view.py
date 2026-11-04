@@ -965,6 +965,12 @@ def has_lone_surrogate(text):
     return False
 
 
+def assert_cut(text, limit):
+    assert utf16_units(text) <= limit
+    assert not has_lone_surrogate(text)
+    assert text.endswith("…")
+
+
 @pytest.mark.parametrize("level", ["artist", "album"])
 @pytest.mark.parametrize("name", ["x" * 255, "x" + "\U0001f600" * 255])
 def test_long_name_title_fits_embed_title_limit(level, name):
@@ -979,9 +985,7 @@ def test_long_name_title_fits_embed_title_limit(level, name):
     title = view.embed().title
 
     assert len(title) <= 256
-    assert utf16_units(title) <= 256
-    assert title.endswith("…")
-    assert not has_lone_surrogate(title)
+    assert_cut(title, 256)
 
 
 EMOJI60 = "\U0001f600" * 60
@@ -992,18 +996,12 @@ def select_labels(view, kind=LibrarySelect):
     return [o.label for o in select.options]
 
 
-def assert_cut_label(label):
-    assert utf16_units(label) <= 100
-    assert not has_lone_surrogate(label)
-    assert label.endswith("…")
-
-
 def test_browse_select_cuts_a_non_bmp_artist_label_to_the_limit():
     view = make_view({EMOJI60: {"Album": [make_song("S")]}})
 
     (label,) = select_labels(view)
 
-    assert_cut_label(label)
+    assert_cut(label, 100)
 
 
 def test_browse_select_keeps_99_units_and_cuts_100_with_an_ellipsis():
@@ -1036,7 +1034,7 @@ def test_clicking_a_cut_song_option_queues_that_track(monkeypatch):
                 clicks.click(LibrarySelect, clicks.interaction(), label=label)
             )
         (cut,) = [x for x in select_labels(view) if x != "Other"]
-        assert_cut_label(cut)
+        assert_cut(cut, 100)
         await finish(
             clicks.click(LibrarySelect, clicks.interaction(), label=cut)
         )
@@ -1056,7 +1054,7 @@ def test_search_select_cuts_labels_like_the_browse_select():
 
     cut, short = select_labels(view, library_commands.SearchSelect)
 
-    assert_cut_label(cut)
+    assert_cut(cut, 100)
     assert short == "Short"
 
 
