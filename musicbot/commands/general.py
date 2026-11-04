@@ -95,6 +95,7 @@ class General(commands.Cog):
     @commands.check(voice_check)
     @joins_voice
     async def _connect(self, ctx):
+        await ctx.defer()  # a connect or move can outlast the deadline
         # connects, or moves the bot out of a channel with only bots
         # in it; otherwise the bot stays where it is
         get_audiocontroller(ctx)  # CheckError while the bot is starting
