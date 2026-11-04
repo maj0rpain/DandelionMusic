@@ -17,6 +17,7 @@ from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
+from developer_fakes import FakeBot, FakeCtx
 from config import config
 from musicbot.commands import developer
 from musicbot.commands.developer import Developer
@@ -184,30 +185,6 @@ class FakeGuild:
         self.left = True
 
 
-class FakeBot:
-    def __init__(self, guilds, owner_id=1):
-        self.guilds = guilds
-        self.owner_id = owner_id
-
-    def get_guild(self, id_):
-        return next((g for g in self.guilds if g.id == id_), None)
-
-    async def is_owner(self, user):
-        return user.id == self.owner_id
-
-
-class FakeCtx:
-    def __init__(self, bot, author_id=1):
-        self.bot = bot
-        self.author = types.SimpleNamespace(id=author_id)
-        self.sent = []
-        self.channel = types.SimpleNamespace(last_message=None)
-        self.me = object()
-
-    async def send(self, text):
-        self.sent.append(text)
-
-
 @pytest.fixture
 def whitelist(monkeypatch):
     ids = set()
@@ -289,7 +266,9 @@ def test_remove_absent_and_add_present_replies(whitelist):
 
 
 @pytest.mark.parametrize("name", [None, "show", "add", "remove"])
-def test_whitelist_commands_admit_extra_owners_only(monkeypatch, name):
+def test_whitelist_commands_admit_every_owner_and_refuse_others(
+    monkeypatch, name
+):
     monkeypatch.setattr(config, "EXTRA_OWNERS", [5])
     cog, grp = group()
     cmd = grp if name is None else grp.get_command(name)
