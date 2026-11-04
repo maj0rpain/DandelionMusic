@@ -43,6 +43,19 @@ def _queue(controller, *titles):
         controller.playlist.add(song)
 
 
+def _run(controller, scenario):
+    """Runs `scenario()` on a fresh event loop the controller's bot
+    uses, lets the loop settle afterwards, and returns its result."""
+
+    async def main():
+        controller.bot.loop = asyncio.get_running_loop()
+        result = await scenario()
+        await _settle()
+        return result
+
+    return asyncio.run(main())
+
+
 async def _start_playing(controller):
     """Starts the queue head on the running loop and lets it settle."""
     controller.bot.loop = asyncio.get_running_loop()
@@ -55,25 +68,21 @@ def _while_playing(controller, intent):
     preload it scheduled finish."""
     controller.guild.voice_client.playing = True
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        result = intent()
-        await _settle()
-        return result
+    async def scenario():
+        return intent()
 
-    return asyncio.run(run())
+    return _run(controller, scenario)
 
 
 def _run_playing(controller, scenario):
     """Runs `scenario(controller)` on a loop, with the queue head
     started first and the loop given time to settle afterwards."""
 
-    async def run():
+    async def main():
         await _start_playing(controller)
         await scenario(controller)
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, main)
 
 
 class _FakeFFmpeg:
@@ -183,12 +192,10 @@ def test_ensure_playing_starts_the_head_of_the_queue_when_idle(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first track", "second track")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
+    async def scenario():
+        await _start_playing(controller)
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     played = controller.guild.voice_client.played
     assert [source.original.url for source in played] == [
@@ -207,12 +214,10 @@ def test_ensure_playing_only_preloads_while_something_is_playing(
     controller.guild.voice_client.playing = True
     _queue(controller, "current track", "next track")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
+    async def scenario():
+        await _start_playing(controller)
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert controller.guild.voice_client.played == []
     assert _titles(controller) == ["current track", "next track"]
@@ -226,13 +231,11 @@ def test_skip_moves_on_to_the_next_track(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second", "third")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.ensure_playing()
         controller.skip()
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["first", "second"]
     assert _titles(controller) == ["second", "third"]
@@ -249,13 +252,11 @@ def test_stop_ends_playback_and_empties_the_queue_but_keeps_the_backup(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second", "third")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.ensure_playing()
         controller.stop()
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert controller.guild.voice_client.stopped == 1
     assert _played(controller) == ["first"]
@@ -274,16 +275,14 @@ def test_after_a_stop_track_changes_refresh_the_backup_again(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.ensure_playing()
         controller.stop()
         _queue(controller, "second", "third")
         await controller.ensure_playing()
         controller.skip()
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["first", "second", "third"]
     assert _backup(controller, tmp_path) == ["third"]
@@ -294,15 +293,13 @@ def test_a_stop_while_idle_does_not_hold_back_the_next_backup(
 ):
     _fake_ffmpeg(monkeypatch)
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         controller.stop()
         _queue(controller, "first", "second")
         await controller.ensure_playing()
         controller.skip()
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["first", "second"]
     assert _backup(controller, tmp_path) == ["second"]
@@ -317,8 +314,7 @@ def test_a_late_teardown_callback_does_not_overwrite_the_stop_backup(
     _queue(controller, "first", "second")
     voice_client = controller.guild.voice_client
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.ensure_playing()
         stale_after = voice_client.detach_after()
         controller.stop()
@@ -331,7 +327,7 @@ def test_a_late_teardown_callback_does_not_overwrite_the_stop_backup(
         await _settle()
         return frozen
 
-    assert asyncio.run(run()) == ["first", "second"]
+    assert _run(controller, scenario) == ["first", "second"]
     # the stale callback neither ended "third" nor used up the latch,
     # so the skip after it - a genuine advance - snapshots
     assert _played(controller) == ["first", "third", "fourth"]
@@ -344,8 +340,7 @@ def test_restore_brings_back_the_queue_a_stop_cleared(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.ensure_playing()
         controller.stop()
         restored = await controller.restore()
@@ -353,7 +348,7 @@ def test_restore_brings_back_the_queue_a_stop_cleared(
         return restored
 
     ac = sys.modules[type(controller).__module__]
-    assert asyncio.run(run()) is ac.RestoreResult.RESTORED
+    assert _run(controller, scenario) is ac.RestoreResult.RESTORED
     assert _played(controller) == ["first", "first"]
     assert _titles(controller) == ["first", "second"]
     assert _backup(controller, tmp_path) == ["first", "second"]
@@ -365,12 +360,11 @@ def test_restore_brings_back_the_queue_a_stop_cleared(
 def test_restore_with_no_backup_and_an_empty_queue_plays_nothing(
     controller,
 ):
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         return await controller.restore()
 
     ac = sys.modules[type(controller).__module__]
-    assert asyncio.run(run()) is ac.RestoreResult.NOTHING_TO_RESTORE
+    assert _run(controller, scenario) is ac.RestoreResult.NOTHING_TO_RESTORE
     assert controller.guild.voice_client.played == []
 
 
@@ -379,8 +373,7 @@ def _restore_while_active(controller, monkeypatch, tmp_path, pause):
     _queue(controller, "first", "second")
     backup = _backup_path(controller, tmp_path)
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.ensure_playing()
         controller._pickle_playlist()
         if pause:
@@ -390,7 +383,7 @@ def _restore_while_active(controller, monkeypatch, tmp_path, pause):
         await _settle()
         return before, result
 
-    return asyncio.run(run())
+    return _run(controller, scenario)
 
 
 @pytest.mark.parametrize("pause", [False, True])
@@ -469,13 +462,11 @@ def test_queue_appends_while_playing_and_refreshes_backup_and_preload(
     _queue(controller, "current")
     songs = _songs(controller, "a", "b")
 
-    async def run():
+    async def scenario():
         controller.guild.voice_client.playing = True
-        controller.bot.loop = asyncio.get_running_loop()
         await controller.queue(songs)
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert controller.guild.voice_client.played == []
     assert _titles(controller) == ["current", "a", "b"]
@@ -489,12 +480,10 @@ def test_queue_starts_the_first_track_when_idle(
     _fake_ffmpeg(monkeypatch)
     songs = _songs(controller, "a", "b")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.queue(songs)
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["a"]
     assert _titles(controller) == ["a", "b"]
@@ -529,13 +518,13 @@ def test_attach_view_moves_the_buttons_onto_the_new_message(controller):
         sent.append(view)
         return new_message
 
-    async def run():
+    async def scenario():
         old_message = _FakeMessage()
         await controller.attach_view(lambda view: _resolved(old_message))
         result = await controller.attach_view(send)
         return old_message, result
 
-    old_message, result = asyncio.run(run())
+    old_message, result = _run(controller, scenario)
 
     assert old_message.edits == [None]
     assert len(sent) == 1 and isinstance(sent[0], discord.ui.View)
@@ -580,8 +569,7 @@ def test_dispose_cancels_the_timer_and_every_pending_task(
     controller, monkeypatch
 ):
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.timer.start()
         timer_task = controller.timer._task
         controller.add_task(asyncio.sleep(3600))
@@ -591,7 +579,7 @@ def test_dispose_cancels_the_timer_and_every_pending_task(
         await _settle()
         return timer_task, pending_task
 
-    timer_task, pending_task = asyncio.run(run())
+    timer_task, pending_task = _run(controller, scenario)
 
     assert timer_task.cancelled()
     assert pending_task.cancelled()
@@ -707,11 +695,11 @@ def test_a_track_end_writes_the_queue_and_backup_only_on_the_loop(
     _queue(controller, "first", "second")
     seen = _record_threads(controller, monkeypatch)
 
-    async def run():
+    async def scenario():
         await _end_first_track_on_audio_thread(controller)
         return threading.get_ident()
 
-    loop_thread = asyncio.run(run())
+    loop_thread = _run(controller, scenario)
 
     assert _played(controller) == ["first", "second"]
     assert {name for name, _ in seen} == {"pickle", "next", "add_name"}
@@ -763,16 +751,14 @@ def test_a_track_end_from_a_replaced_track_changes_nothing(
     _queue(controller, "first", "second")
     voice_client = controller.guild.voice_client
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
+    async def scenario():
+        await _start_playing(controller)
         seen = _record_threads(controller, monkeypatch)
         controller._on_track_end(None, controller._generation - 1)
         await _settle()
         return seen
 
-    seen = asyncio.run(run())
+    seen = _run(controller, scenario)
 
     assert seen == []
     assert _titles(controller) == ["first", "second"]
@@ -788,10 +774,8 @@ def test_a_track_end_from_a_replaced_track_drops_its_pending_pick(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second", "third")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
+    async def scenario():
+        await _start_playing(controller)
         # a skip picks "second" and stops "first"; before its hop
         # runs, the queue head - "second" - is started anew
         controller._next_song = controller.playlist.next(True)
@@ -801,9 +785,8 @@ def test_a_track_end_from_a_replaced_track_drops_its_pending_pick(
         await _settle()
         after = _end_track(controller.guild.voice_client)
         _in_thread(after, None)
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["first", "second", "third"]
 
@@ -812,8 +795,7 @@ def test_a_stop_skips_the_backup_after_the_hop(controller, monkeypatch):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.ensure_playing()
         controller.stop()
         # stop() snapshots the queue itself; what follows is the hop
@@ -821,7 +803,7 @@ def test_a_stop_skips_the_backup_after_the_hop(controller, monkeypatch):
         await _settle()
         return seen
 
-    seen = asyncio.run(run())
+    seen = _run(controller, scenario)
 
     # the hop ran - it consumed stop()'s flag and advanced the
     # emptied queue - and wrote no backup
@@ -836,14 +818,14 @@ def test_the_idle_timer_starts_after_the_last_track_ends(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "only")
 
-    async def run():
+    async def scenario():
         after = await _start_and_end_first_track(controller)
         assert controller.timer._task is None
         _in_thread(after, None)
         await _settle()
         return controller.timer._task
 
-    timer_task = asyncio.run(run())
+    timer_task = _run(controller, scenario)
 
     assert timer_task is not None
     assert _titles(controller) == []
@@ -1128,12 +1110,10 @@ def test_a_play_the_voice_client_refuses_is_not_recorded(
     _queue(controller, "refused")
     controller.guild.voice_client.playing = True
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.play_song(controller.playlist[0])
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
     assert _history(controller) == []
 
 
@@ -1181,7 +1161,7 @@ def test_restore_after_an_external_disconnect_starts_the_cut_off_song(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first")
 
-    async def run():
+    async def scenario():
         await _start_then_disconnect(controller)
         assert _titles(controller) == ["first"]
         assert _backup(controller, tmp_path) == ["first"]
@@ -1192,7 +1172,7 @@ def test_restore_after_an_external_disconnect_starts_the_cut_off_song(
         return restored
 
     ac = sys.modules[type(controller).__module__]
-    assert asyncio.run(run()) is ac.RestoreResult.RESTORED
+    assert _run(controller, scenario) is ac.RestoreResult.RESTORED
     assert _played(controller) == ["first"]
 
 
@@ -1202,13 +1182,12 @@ def test_rejoining_before_the_timeout_plays_the_cut_off_song_again(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
-    async def run():
+    async def scenario():
         await _start_then_disconnect(controller)
         _fresh_voice_client(controller)
         await controller.ensure_playing()
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["first"]
     assert _titles(controller) == ["first", "second"]
@@ -1220,16 +1199,13 @@ def test_a_track_end_while_reconnecting_still_advances(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
+    async def scenario():
+        await _start_playing(controller)
         voice_client = controller.guild.voice_client
         voice_client.connected = False
         _in_thread(_end_track(voice_client), None)
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["first", "second"]
     assert _titles(controller) == ["second"]
@@ -1242,13 +1218,13 @@ def test_the_teardown_hop_after_a_disconnect_keeps_the_backup(
     _queue(controller, "first", "second")
     old = controller.guild.voice_client
 
-    async def run():
+    async def scenario():
         after = await _start_and_end_first_track(controller)
         await controller.udisconnect("test")
         controller.guild.voice_client = None
         await _fire_without_raising(after)
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _backup(controller, tmp_path) == ["first", "second"]
     assert len(old.played) == 1
@@ -1278,11 +1254,9 @@ def test_a_background_preload_failing_after_the_song_became_head_skips_only_it(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "a", "b", "c")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         futures = _gated_preload(stub_loader, "b")
-        await controller.ensure_playing()
-        await _settle()
+        await _start_playing(controller)
         # the queue preload of "b" is pending; skipping makes "b" the
         # head, and the player's own preload of it pends too
         controller.skip()
@@ -1291,9 +1265,8 @@ def test_a_background_preload_failing_after_the_song_became_head_skips_only_it(
         futures[0].set_result(stub_loader.Preload.FAILED)
         await _settle()
         futures[1].set_result(stub_loader.Preload.FAILED)
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["a", "c"]
 
@@ -1304,15 +1277,12 @@ def test_a_failed_non_head_preload_still_removes_the_song(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "a", "b", "c")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         futures = _gated_preload(stub_loader, "b")
-        await controller.ensure_playing()
-        await _settle()
+        await _start_playing(controller)
         futures[0].set_result(stub_loader.Preload.FAILED)
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _titles(controller) == ["a", "c"]
 
@@ -1355,10 +1325,8 @@ def test_a_track_end_hop_during_a_disconnect_starts_no_idle_timer(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "only")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
+    async def scenario():
+        await _start_playing(controller)
         disconnects = _idle_timer_that_fires_at_once(controller, monkeypatch)
         generation = controller._generation
         _during_disconnect(
@@ -1369,14 +1337,13 @@ def test_a_track_end_hop_during_a_disconnect_starts_no_idle_timer(
         return disconnects
 
     # a timer started by the hop would disconnect a second time
-    assert len(asyncio.run(run())) == 1
+    assert len(_run(controller, scenario)) == 1
 
 
 def test_a_disposed_controller_leaves_no_timer_running(
     controller, monkeypatch
 ):
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         disconnects = _idle_timer_that_fires_at_once(controller, monkeypatch)
         _during_disconnect(
             controller, lambda: controller.add_task(controller.timer.start())
@@ -1385,7 +1352,7 @@ def test_a_disposed_controller_leaves_no_timer_running(
         await _settle()
         return disconnects
 
-    assert len(asyncio.run(run())) == 1
+    assert len(_run(controller, scenario)) == 1
 
 
 def test_a_track_end_after_a_plain_stop_starts_the_idle_timer(
@@ -1394,16 +1361,14 @@ def test_a_track_end_after_a_plain_stop_starts_the_idle_timer(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "only")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
+    async def scenario():
+        await _start_playing(controller)
         _idle_timer_that_fires_at_once(controller, monkeypatch)
         controller.stop()
         await _settle()
         return controller.guild.voice_client.disconnected
 
-    assert asyncio.run(run())
+    assert _run(controller, scenario)
 
 
 def test_a_track_end_after_the_idle_timer_expired_starts_it_again(
@@ -1412,10 +1377,8 @@ def test_a_track_end_after_the_idle_timer_expired_starts_it_again(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "only")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
+    async def scenario():
+        await _start_playing(controller)
         disconnects = _idle_timer_that_fires_at_once(controller, monkeypatch)
         controller.guild.voice_client.playing = False
         await controller.timer.start()
@@ -1425,7 +1388,7 @@ def test_a_track_end_after_the_idle_timer_expired_starts_it_again(
         await _settle()
         return disconnects
 
-    assert len(asyncio.run(run())) == 2
+    assert len(_run(controller, scenario)) == 2
 
 
 def _button(view, custom_id):
@@ -1523,12 +1486,12 @@ def test_the_retry_after_an_expired_token_edit_applies_the_view(controller):
     controller.guild.voice_client.playing = True
     message = _FlakyMessage(_http_exception(401, 50027))
 
-    async def run():
+    async def scenario():
         await controller.attach_view(lambda view: _resolved(message))
         controller.set_volume(0)  # the buttons now differ
         await controller.update_view()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert len(message.edits) == 1 and message.edits[0] is not None
 
@@ -1538,13 +1501,13 @@ def test_a_refresh_after_a_failed_edit_applies_the_view_again(controller):
     voice = controller.guild.voice_client
     message = _FlakyMessage(_http_exception(500, 0))
 
-    async def run():
+    async def scenario():
         await controller.attach_view(lambda view: _resolved(message))
         voice.playing = True
         await controller.update_view()
         await controller.update_view()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert len(message.edits) == 1 and message.edits[0] is not None
 
@@ -1567,8 +1530,7 @@ def _with_saved_playlist_db(controller, run_in_db):
     ac = sys.modules[type(controller).__module__]
     _queue(controller, "playing")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         async with in_memory_db(sys.modules["musicbot.settings"]) as factory:
             await ac.playlists.save(
                 factory,
@@ -1579,7 +1541,7 @@ def _with_saved_playlist_db(controller, run_in_db):
             controller.guild.voice_client.playing = True
             return await run_in_db(ac, factory)
 
-    return asyncio.run(run())
+    return _run(controller, scenario)
 
 
 def _stored_titles(ac, factory):
@@ -1692,7 +1654,7 @@ async def _finish(task):
 def test_queueing_during_a_pending_start_starts_nothing_new(
     controller, stub_loader, monkeypatch
 ):
-    async def run():
+    async def scenario():
         release, task, _ = _pending_start(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
@@ -1701,7 +1663,7 @@ def test_queueing_during_a_pending_start_starts_nothing_new(
         release.set()
         await _finish(task)
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["slow"]
     assert controller.guild.voice_client.disconnected is False
@@ -1719,7 +1681,7 @@ def test_the_inactivity_timeout_during_a_pending_start_does_not_disconnect(
         types.SimpleNamespace(bot=False)
     ]
 
-    async def run():
+    async def scenario():
         release, task, _ = _pending_start(
             controller, stub_loader, monkeypatch, "slow"
         )
@@ -1728,7 +1690,7 @@ def test_the_inactivity_timeout_during_a_pending_start_does_not_disconnect(
         release.set()
         await _finish(task)
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert controller.guild.voice_client.disconnected is False
     assert _played(controller) == ["slow"]
@@ -1744,7 +1706,7 @@ def test_a_local_batch_during_a_pending_start_starts_nothing_new(
 
     monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
 
-    async def run():
+    async def scenario():
         release, task, _ = _pending_start(
             controller, stub_loader, monkeypatch, "slow"
         )
@@ -1753,7 +1715,7 @@ def test_a_local_batch_during_a_pending_start_starts_nothing_new(
         release.set()
         await _finish(task)
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["slow"]
     assert controller.guild.voice_client.disconnected is False
@@ -1765,7 +1727,7 @@ def test_restore_during_a_pending_start_is_refused(
 ):
     ac = sys.modules[type(controller).__module__]
 
-    async def run():
+    async def scenario():
         release, task, _ = _pending_start(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
@@ -1775,7 +1737,7 @@ def test_restore_during_a_pending_start_is_refused(
         await _finish(task)
         return result
 
-    result = asyncio.run(run())
+    result = _run(controller, scenario)
 
     assert result is ac.RestoreResult.REFUSED_WHILE_ACTIVE
     assert _played(controller) == ["slow"]
@@ -1786,7 +1748,7 @@ def test_restore_during_a_pending_start_is_refused(
 def test_prev_during_a_pending_start_plays_the_previous_track_only(
     controller, stub_loader, monkeypatch, release_first
 ):
-    async def run():
+    async def scenario():
         release, task, _ = _pending_start(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
@@ -1802,7 +1764,7 @@ def test_prev_during_a_pending_start_plays_the_previous_track_only(
         await _settle()
         return [c[1][0].title for c in stub_loader.calls[before:]]
 
-    later = asyncio.run(run())
+    later = _run(controller, scenario)
 
     assert _played(controller) == ["old"]
     assert "slow" not in later
@@ -1814,7 +1776,7 @@ def test_prev_during_a_pending_start_plays_the_previous_track_only(
 def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
     controller, stub_loader, monkeypatch, release_first
 ):
-    async def run():
+    async def scenario():
         release, task, _ = _pending_start(
             controller, stub_loader, monkeypatch, "slow", "next", "third"
         )
@@ -1829,7 +1791,7 @@ def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
         await _settle()
         return [c[1][0].title for c in stub_loader.calls[before:]]
 
-    later = asyncio.run(run())
+    later = _run(controller, scenario)
 
     assert _played(controller) == ["next"]
     assert later == []
@@ -1842,7 +1804,7 @@ def _dropped(controller, stub_loader, monkeypatch, act):
     """Holds a start's preload, runs `act`, releases the preload and
     returns how many preloads were asked for after the release."""
 
-    async def run():
+    async def scenario():
         release, task, _ = _pending_start(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
@@ -1853,7 +1815,7 @@ def _dropped(controller, stub_loader, monkeypatch, act):
         await _finish(task)
         return len(stub_loader.calls) - before
 
-    return asyncio.run(run())
+    return _run(controller, scenario)
 
 
 def test_a_stop_during_a_pending_start_leaves_nothing_playing(
@@ -1905,7 +1867,7 @@ def test_losing_the_voice_client_during_a_pending_start_plays_nothing(
 def test_a_stale_failed_preload_skips_nothing_and_moves_nothing(
     controller, stub_loader, monkeypatch
 ):
-    async def run():
+    async def scenario():
         release, task, _ = _pending_start(
             controller,
             stub_loader,
@@ -1919,9 +1881,8 @@ def test_a_stale_failed_preload_skips_nothing_and_moves_nothing(
         controller.prev_song()
         release.set()
         await _finish(task)
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
     assert _played(controller) == ["old"]
     assert controller.command_channel.sent == []
     # "slow" is gone because the queue preload behind "old" met its
@@ -1932,7 +1893,7 @@ def test_a_stale_failed_preload_skips_nothing_and_moves_nothing(
 def test_a_current_failed_preload_skips_to_the_next_track(
     controller, stub_loader, monkeypatch
 ):
-    async def run():
+    async def scenario():
         release, task, _ = _pending_start(
             controller,
             stub_loader,
@@ -1944,9 +1905,8 @@ def test_a_current_failed_preload_skips_to_the_next_track(
         await _settle()
         release.set()
         await _finish(task)
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert len(controller.command_channel.sent) == 1
     assert _played(controller) == ["next"]
@@ -1955,7 +1915,7 @@ def test_a_current_failed_preload_skips_to_the_next_track(
 def test_a_current_failed_preload_with_nothing_after_it_ends_the_start(
     controller, stub_loader, monkeypatch
 ):
-    async def run():
+    async def scenario():
         release, task, _ = _pending_start(
             controller,
             stub_loader,
@@ -1967,9 +1927,8 @@ def test_a_current_failed_preload_with_nothing_after_it_ends_the_start(
         release.set()
         await _finish(task)
         await controller.queue(_songs(controller, "later"))
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["later"]
 
@@ -1984,10 +1943,9 @@ def _without_url(controller, title):
 def test_a_stale_start_without_a_url_moves_nothing(
     controller, stub_loader, monkeypatch
 ):
-    async def run():
+    async def scenario():
         controller.playlist.add(_without_url(controller, "slow"))
         _queue(controller, "next")
-        controller.bot.loop = asyncio.get_running_loop()
         controller.command_channel = _Channel()
         _fake_ffmpeg(monkeypatch)
         release = stub_loader.hold(controller.playlist[0])
@@ -1997,9 +1955,8 @@ def test_a_stale_start_without_a_url_moves_nothing(
         controller.prev_song()
         release.set()
         await _finish(task)
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["old"]
     assert _titles(controller) == ["old", "slow", "next"]
@@ -2008,15 +1965,13 @@ def test_a_stale_start_without_a_url_moves_nothing(
 def test_a_current_start_without_a_url_ends_the_start(
     controller, stub_loader, monkeypatch
 ):
-    async def run():
+    async def scenario():
         controller.playlist.add(_without_url(controller, "slow"))
-        controller.bot.loop = asyncio.get_running_loop()
         _fake_ffmpeg(monkeypatch)
         await controller.ensure_playing()
         await controller.queue(_songs(controller, "later"))
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _played(controller) == ["later"]
 
@@ -2024,7 +1979,7 @@ def test_a_current_start_without_a_url_ends_the_start(
 def test_a_superseded_start_dropping_out_leaves_the_newer_one_pending(
     controller, stub_loader, monkeypatch
 ):
-    async def run():
+    async def scenario():
         release, task, _ = _pending_start(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
@@ -2044,7 +1999,7 @@ def test_a_superseded_start_dropping_out_leaves_the_newer_one_pending(
         await _settle()
         return later
 
-    later = asyncio.run(run())
+    later = _run(controller, scenario)
 
     assert _played(controller) == ["old"]
     assert "slow" not in later
@@ -2061,14 +2016,13 @@ def test_a_second_disconnect_leaves_the_backup_holding_the_queue(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.ensure_playing()
         await controller.udisconnect("d!disconnect")
         controller.guild.voice_client = None
         await controller.udisconnect("voice state")
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _backup(controller, tmp_path) == ["first", "second"]
 
@@ -2079,13 +2033,12 @@ def test_a_disconnect_after_a_stop_leaves_the_stop_backup(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.ensure_playing()
         controller.stop()
         await controller.udisconnect("inactivity timeout")
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _backup(controller, tmp_path) == ["first", "second"]
 
@@ -2096,14 +2049,13 @@ def test_disconnecting_a_new_idle_controller_keeps_an_existing_backup(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "kept", "also kept")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.ensure_playing()
         controller.stop()
         restarted = type(controller)(controller.bot, controller.guild)
         await restarted.udisconnect("shutdown")
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _backup(controller, tmp_path) == ["kept", "also kept"]
 
@@ -2115,12 +2067,11 @@ def test_pause_and_clear_on_an_idle_empty_queue_keep_the_backup(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "kept")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         await controller.ensure_playing()
         controller.stop()
 
-    asyncio.run(run())
+    _run(controller, scenario)
     assert _titles(controller) == []
 
     getattr(controller, intent)()
@@ -2134,12 +2085,10 @@ def test_a_queue_that_plays_to_its_end_leaves_an_empty_backup(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "only")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
+    async def scenario():
         after = await _start_and_end_first_track(controller)
         after(None)
-        await _settle()
 
-    asyncio.run(run())
+    _run(controller, scenario)
 
     assert _backup(controller, tmp_path) == []
