@@ -133,7 +133,6 @@ def independence(tmp_path_factory):
 @pytest.fixture(
     scope="module",
     params=list(loader.Lane),
-    ids=[lane.value for lane in loader.Lane],
 )
 def crash(request, tmp_path_factory):
     script = CRASH_PROBE.replace(

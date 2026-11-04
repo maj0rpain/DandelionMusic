@@ -100,9 +100,7 @@ def test_a_rebuild_prints_one_stderr_line(pools, capsys):
     assert len(capsys.readouterr().err.strip().splitlines()) == 1
 
 
-@pytest.mark.parametrize(
-    "lane", list(loader.Lane), ids=[lane.value for lane in loader.Lane]
-)
+@pytest.mark.parametrize("lane", list(loader.Lane))
 def test_a_rebuild_names_the_lane_by_its_plain_value(pools, capsys, lane):
     _use(FakePool(["break"]), lane)
     asyncio.run(loader._load(lane, URL))
@@ -246,7 +244,7 @@ class _Logged:
 @pytest.fixture
 def warm_pools(monkeypatch):
     log, built = [], []
-    names = iter([loader.Lane.LOAD, loader.Lane.PRELOAD])
+    names = iter(loader.Lane)
     failing = set()
 
     def new_pool():
