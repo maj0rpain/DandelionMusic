@@ -11,7 +11,6 @@ discord.ui.Button item needs no loop, but the callbacks are async and
 the dev group has no pytest-asyncio.
 """
 
-import asyncio
 from types import SimpleNamespace
 
 import discord
@@ -20,26 +19,9 @@ from config import config
 from musicbot.audiocontroller import MusicButton
 from musicbot.bot import Context
 from musicbot.utils import CheckError, join_voice
+from discord_fakes import FakeInteraction, VoiceGuild, make_bot, run
 
 DJ_ROLE = 99
-
-
-class VoiceChannel:
-    """The clicking user's voice channel. A connect is logged in the
-    guild's event log, or raises the guild's `fail`."""
-
-    def __init__(self, guild):
-        self.guild = guild
-        self.members = []
-
-    def permissions_for(self, member):
-        return SimpleNamespace(connect=True, speak=True)
-
-    async def connect(self, **kwargs):
-        if self.guild.fail is not None:
-            raise self.guild.fail
-        self.guild.events.append("connect")
-        self.guild.voice_client = SimpleNamespace(channel=self)
 
 
 class FakeContext:
@@ -49,77 +31,35 @@ class FakeContext:
     and the author is neither an administrator nor the bot owner.
     The bot is out of voice and the author is in a voice channel."""
 
-    def __init__(self, interaction):
-        self.interaction = interaction
-        self.guild = interaction.guild
+    def __init__(self):
+        self.guild = VoiceGuild()
         self.author = SimpleNamespace(
             id=1,
             roles=[],
-            voice=SimpleNamespace(channel=VoiceChannel(self.guild)),
+            voice=SimpleNamespace(channel=self.guild.channel("lobby")),
         )
         self.channel = SimpleNamespace(
             permissions_for=lambda member: SimpleNamespace(administrator=False)
         )
-
-        async def is_owner(user):
-            return False
-
-        self.bot = SimpleNamespace(
-            is_owner=is_owner,
-            sessions=SimpleNamespace(
-                controller=lambda guild: None,
-                settings=lambda guild: SimpleNamespace(
+        self.bot = make_bot(
+            settings={
+                self.guild: SimpleNamespace(
                     dj_role=DJ_ROLE, user_must_be_in_vc=True
-                ),
-            ),
+                )
+            }
         )
+        self.interaction = None
 
     async def send(self, *args, **kwargs):
         return await Context.send(self, *args, **kwargs)
 
 
-class FakeInteraction:
-    """Records the direct response and every followup."""
-
-    def __init__(self, custom_id="x"):
-        self.guild = SimpleNamespace(
-            id=1, voice_client=None, me=None, events=[], fail=None
-        )
-        self.user = SimpleNamespace(id=1)
-        self.data = {"custom_id": custom_id}
-        self.deferred = False
-        self.messages = []
-        self.followups = []
-        self.ctx = FakeContext(self)
-
-        async def send_message(*args, **kwargs):
-            self.messages.append((args, kwargs))
-
-        async def defer(**kwargs):
-            self.deferred = True
-
-        self.response = SimpleNamespace(
-            send_message=send_message,
-            defer=defer,
-            is_done=lambda: self.deferred or bool(self.messages),
-        )
-
-        async def followup_send(*args, **kwargs):
-            self.followups.append((args, kwargs))
-
-        self.followup = SimpleNamespace(send=followup_send)
-
-        async def get_context(inter):
-            return self.ctx
-
-        self.client = SimpleNamespace(
-            get_context=get_context,
-            sessions=self.ctx.bot.sessions,
-        )
-
-
-def run(coro):
-    return asyncio.run(coro)
+def click(custom_id="x"):
+    """A click's interaction, and its context."""
+    ctx = FakeContext()
+    inter = FakeInteraction(ctx, custom_id)
+    ctx.interaction = inter
+    return inter, ctx
 
 
 async def admit(ctx):
@@ -130,12 +70,12 @@ async def refuse(ctx):
     raise CheckError("Join a voice channel first.")
 
 
-def as_text(sent):
+def sent_texts_and_kwargs(sent):
     return [(str(a[0]), k) for a, k in sent]
 
 
 def test_the_click_is_deferred_before_the_check_runs():
-    inter = FakeInteraction()
+    inter, ctx = click()
     deferred_at_check = []
 
     async def check(ctx):
@@ -150,11 +90,11 @@ def test_the_click_is_deferred_before_the_check_runs():
 
 
 def test_a_refused_check_is_an_ephemeral_followup():
-    inter = FakeInteraction()
+    inter, ctx = click()
     ran = []
 
     run(MusicButton(ran.append, check=refuse).callback(inter))
-    assert as_text(inter.followups) == [
+    assert sent_texts_and_kwargs(inter.followups) == [
         ("Join a voice channel first.", {"ephemeral": True})
     ]
     assert inter.messages == []
@@ -162,7 +102,7 @@ def test_a_refused_check_is_an_ephemeral_followup():
 
 
 def test_a_refused_dj_check_on_a_controller_button_is_an_ephemeral_followup():
-    inter = FakeInteraction(custom_id="next")
+    inter, ctx = click(custom_id="next")
     ran = []
 
     run(MusicButton(ran.append, check=admit).callback(inter))
@@ -172,19 +112,21 @@ def test_a_refused_dj_check_on_a_controller_button_is_an_ephemeral_followup():
 
 
 def test_an_admitted_click_runs_the_buttons_action():
-    inter = FakeInteraction()
+    inter, ctx = click()
     ran = []
 
     run(MusicButton(ran.append, check=admit).callback(inter))
-    assert ran == [inter.ctx]
+    assert ran == [ctx]
 
 
 def test_a_refused_dj_only_click_does_not_join_voice():
-    inter = FakeInteraction(custom_id="next")
+    inter, ctx = click(custom_id="next")
 
     run(MusicButton(lambda ctx: None, check=admit).callback(inter))
-    assert as_text(inter.followups) == [(config.NOT_A_DJ, {"ephemeral": True})]
-    assert inter.guild.events == []
+    assert sent_texts_and_kwargs(inter.followups) == [
+        (config.NOT_A_DJ, {"ephemeral": True})
+    ]
+    assert ctx.guild.events == []
 
 
 class JoiningButton(MusicButton):
@@ -196,24 +138,24 @@ class JoiningButton(MusicButton):
 
 
 def test_an_admitted_click_on_a_joining_button_joins_before_its_action():
-    inter = FakeInteraction()
+    inter, ctx = click()
 
     def action(ctx):
-        inter.guild.events.append("action")
+        ctx.guild.events.append("action")
 
     run(JoiningButton(action, check=admit).callback(inter))
-    assert inter.guild.events == ["connect", "action"]
+    assert ctx.guild.events == [("connect", "lobby"), "action"]
 
 
 def test_a_failed_join_is_an_ephemeral_followup_and_skips_the_action(
     capsys,
 ):
-    inter = FakeInteraction()
-    inter.guild.fail = discord.ClientException("x")
+    inter, ctx = click()
+    ctx.guild.fail = discord.ClientException("x")
     ran = []
 
     run(JoiningButton(ran.append, check=admit).callback(inter))
-    assert as_text(inter.followups) == [
+    assert sent_texts_and_kwargs(inter.followups) == [
         (config.VOICE_CONNECT_FAILED, {"ephemeral": True})
     ]
     assert ran == []
