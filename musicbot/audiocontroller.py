@@ -144,6 +144,11 @@ class AudioController(object):
         # nothing was playing at all.
         self._playing = False
 
+        # True for the whole of udisconnect(): a track-end hop that
+        # lands meanwhile must not start the idle timer - see
+        # _advance().
+        self._disconnecting = False
+
         sett = bot.sessions.settings(guild)
         self._volume: int = sett.default_volume
 
@@ -513,7 +518,11 @@ class AudioController(object):
             self._playing = False
             # if self.pickle_file.exists():
             #     self.pickle_file.unlink()
-            if not self.timer.triggered and self.guild.voice_client:
+            if (
+                not self._disconnecting
+                and not self.timer.triggered
+                and self.guild.voice_client
+            ):
                 self.add_task(
                     self.timer.start(
                         not all(
@@ -778,6 +787,8 @@ class AudioController(object):
         await self.udisconnect(reason)
         for task in list(self._tasks):
             task.cancel()
+        # after the tasks: one of them may have started it
+        self.timer.cancel()
 
     async def _preload(self, song: Song) -> bool:
         """Preloads `song`; when that ran a fresh extraction, refreshes
@@ -808,8 +819,16 @@ class AudioController(object):
             islice(self.playlist.playque, 1, config.MAX_SONG_PRELOAD)
         ):
             if not await self._preload(song):
+                # Not the head: while this preload ran, the song may
+                # have become the current one, and play_song()'s own
+                # failed-preload skip is the only owner of the head.
+                # Removing it here too would make that skip drop the
+                # song behind it.
+                queue = self.playlist.playque
+                if queue and queue[0] is song:
+                    continue
                 try:
-                    self.playlist.playque.remove(song)
+                    queue.remove(song)
                     rerun_needed = True
                 except ValueError:
                     # already removed
@@ -867,6 +886,13 @@ class AudioController(object):
             await self.udisconnect("inactivity timeout")
 
     async def udisconnect(self, reason: str):
+        self._disconnecting = True
+        try:
+            return await self._udisconnect(reason)
+        finally:
+            self._disconnecting = False
+
+    async def _udisconnect(self, reason: str):
         # sampled before the teardown below wipes both - see the
         # no-connection branch
         had_session = self._playing or bool(self.playlist)

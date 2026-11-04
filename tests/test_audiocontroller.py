@@ -978,3 +978,166 @@ def test_a_failing_title_refresh_still_counts_as_a_successful_preload(
     entries, titles = _queue_saved_playlist_song(controller)
     assert entries == [_entry(controller, "stale title")]
     assert titles == ["playing", "fresh title"]
+
+
+def _gated_preload(stub_loader, title, outcomes):
+    """Makes preload() of `title` wait on one future per call, in call
+    order; returns those futures. Other titles succeed at once."""
+    futures = []
+    original = stub_loader.preload
+
+    async def preload(song):
+        if song.title != title:
+            return await original(song)
+        stub_loader.calls.append(("preload", (song,)))
+        future = asyncio.get_running_loop().create_future()
+        futures.append(future)
+        return await future
+
+    stub_loader.preload = preload
+    return futures
+
+
+def test_a_background_preload_failing_after_the_song_became_head_skips_only_it(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "a", "b", "c")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        futures = _gated_preload(stub_loader, "b", None)
+        await controller.ensure_playing()
+        await _settle()
+        # the queue preload of "b" is pending; skipping makes "b" the
+        # head, and the player's own preload of it pends too
+        controller.skip()
+        await _settle()
+        assert len(futures) == 2
+        futures[0].set_result(stub_loader.Preload.FAILED)
+        await _settle()
+        futures[1].set_result(stub_loader.Preload.FAILED)
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _played(controller) == ["a", "c"]
+
+
+def test_a_failed_non_head_preload_still_removes_the_song(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "a", "b", "c")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        futures = _gated_preload(stub_loader, "b", None)
+        await controller.ensure_playing()
+        await _settle()
+        futures[0].set_result(stub_loader.Preload.FAILED)
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _titles(controller) == ["a", "c"]
+
+
+def _announce_disconnect_with(controller, monkeypatch, during):
+    """Makes the voice client's disconnect() run `during()` first."""
+    from config import config
+
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
+    voice_client = controller.guild.voice_client
+    original = voice_client.disconnect
+
+    async def disconnect(*, force=False):
+        during()
+        await asyncio.sleep(0)
+        await original(force=force)
+
+    voice_client.disconnect = disconnect
+
+
+def test_a_track_end_hop_during_a_disconnect_starts_no_idle_timer(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "only")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        generation = controller._generation
+        _announce_disconnect_with(
+            controller,
+            monkeypatch,
+            lambda: controller._on_track_end(None, generation),
+        )
+        await controller.udisconnect("test")
+        await _settle()
+        return controller.timer._task
+
+    assert asyncio.run(run()) is None
+
+
+def test_a_disposed_controller_leaves_no_timer_running(
+    controller, monkeypatch
+):
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        _announce_disconnect_with(
+            controller,
+            monkeypatch,
+            lambda: controller.add_task(controller.timer.start()),
+        )
+        await controller.dispose()
+        await _settle()
+        return controller.timer._task
+
+    assert asyncio.run(run()) is None
+
+
+def test_a_track_end_after_a_plain_stop_starts_the_idle_timer(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "only")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        controller.stop()
+        await _settle()
+        return controller.timer._task
+
+    assert asyncio.run(run()) is not None
+
+
+def test_a_track_end_after_the_idle_timer_expired_starts_it_again(
+    controller, monkeypatch
+):
+    from config import config
+
+    _fake_ffmpeg(monkeypatch)
+    monkeypatch.setattr(config, "VC_TIMEOUT", 0)
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
+    controller.bot.sessions.settings(controller.guild).vc_timeout = True
+    _queue(controller, "only")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        controller.guild.voice_client.playing = False
+        await controller.timer.start()
+        await _settle()
+        assert controller.guild.voice_client.disconnected
+        assert controller.timer._task is None
+        controller._on_track_end(None, controller._generation)
+        await asyncio.sleep(0)
+        return controller.timer._task
+
+    assert asyncio.run(run()) is not None
