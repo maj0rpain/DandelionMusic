@@ -549,7 +549,7 @@ def test_stalled_spotify_does_not_starve_file_reads(
         return names, art, elapsed
 
     try:
-        names, art, elapsed = asyncio.run(scenario())
+        names, art, elapsed = run(scenario())
     finally:
         release.set()
 
