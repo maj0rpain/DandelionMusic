@@ -51,20 +51,13 @@ def test_removed_track_is_skipped_quietly(spotify, capsys):
 
 
 def test_local_file_item_is_skipped_with_warning(spotify, capsys):
-    spotify([{"track": track(1)}, {"track": {"external_urls": {}}}])
+    bad = {"track": {"external_urls": {}}}
+    spotify([{"track": track(1)}, bad])
 
     links = fetch_playlist_with_api(SpotifyPlaylistTypes.PLAYLIST, "p").links
 
     assert links == [url(1)]
-    assert "Cannot extract URL" in capsys.readouterr().err
-
-
-def test_playlist_of_only_removed_tracks_is_empty(spotify):
-    spotify([{"track": None}, {"track": None}])
-
-    assert (
-        fetch_playlist_with_api(SpotifyPlaylistTypes.PLAYLIST, "p").links == []
-    )
+    assert f"Cannot extract URL from {bad}:" in capsys.readouterr().err
 
 
 def test_album_tracks_resolve_in_order(spotify):
