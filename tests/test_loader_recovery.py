@@ -41,18 +41,38 @@ class FakePool:
         self.shutdown_calls.append(wait)
 
 
-@pytest.fixture
-def pools(monkeypatch):
-    built = []
+class ShutdownOnSubmit(FakePool):
+    """A pool that shuts the loader down when work is submitted."""
 
-    def build(*args, **kwargs):
-        pool = FakePool()
-        built.append(pool)
+    def submit(self, fn, *args):
+        loader.shutdown()
+        return super().submit(fn, *args)
+
+
+class PoolFactory:
+    """The patched process-pool constructor.
+
+    `built` holds every pool handed out, in order. A test sets `upcoming`
+    to the pools the next builds return; once it is empty, each build
+    returns a fresh healthy FakePool.
+    """
+
+    def __init__(self):
+        self.built = []
+        self.upcoming = []
+
+    def __call__(self, *args, **kwargs):
+        pool = self.upcoming.pop(0) if self.upcoming else FakePool()
+        self.built.append(pool)
         return pool
 
-    monkeypatch.setattr(loader, "ProcessPoolExecutor", build)
+
+@pytest.fixture
+def pools(monkeypatch):
+    factory = PoolFactory()
+    monkeypatch.setattr(loader, "ProcessPoolExecutor", factory)
     monkeypatch.setattr(loader, "_pools", {})
-    return built
+    return factory
 
 
 def _use(pool, lane=loader.LOAD_LANE):
@@ -63,8 +83,8 @@ def test_a_break_then_a_good_retry_returns_the_retried_result(pools):
     broken = FakePool(["break"])
     _use(broken)
     assert asyncio.run(loader.load_song(URL)).title == "ok"
-    in_load_lane = loader._pools[loader.LOAD_LANE] is pools[0]
-    assert (len(pools), in_load_lane) == (1, True)
+    in_load_lane = loader._pools[loader.LOAD_LANE] is pools.built[0]
+    assert (len(pools.built), in_load_lane) == (1, True)
 
 
 def test_the_broken_pool_is_shut_down_without_waiting(pools):
@@ -80,22 +100,15 @@ def test_a_rebuild_prints_one_stderr_line(pools, capsys):
     assert len(capsys.readouterr().err.strip().splitlines()) == 1
 
 
-def test_a_double_break_leaves_a_fresh_pool(pools, monkeypatch):
+def test_a_double_break_leaves_a_fresh_pool(pools):
     _use(FakePool(["break"]))
-    made = []
-
-    def build(*a, **k):
-        pool = FakePool(["break"] if not made else [])
-        made.append(pool)
-        return pool
-
-    monkeypatch.setattr(loader, "ProcessPoolExecutor", build)
+    pools.upcoming = [FakePool(["break"])]
     with pytest.raises(loader.SongError) as e:
         asyncio.run(loader.load_song(URL))
     assert str(e.value) == config.LOADER_CRASHED
-    assert len(made) == 2
-    assert loader._pools[loader.LOAD_LANE] is made[1]
-    assert made[0].shutdown_calls == [False]
+    assert len(pools.built) == 2
+    assert loader._pools[loader.LOAD_LANE] is pools.built[1]
+    assert pools.built[0].shutdown_calls == [False]
 
 
 def test_concurrent_calls_on_one_broken_pool_rebuild_once(pools):
@@ -105,40 +118,25 @@ def test_concurrent_calls_on_one_broken_pool_rebuild_once(pools):
         return await asyncio.gather(*[loader.load_song(URL) for _ in range(4)])
 
     assert [s.title for s in asyncio.run(many())] == ["ok"] * 4
-    assert len(pools) == 1
+    assert len(pools.built) == 1
 
 
 def test_a_break_after_shutdown_raises_not_running_and_builds_nothing(
     pools,
 ):
-    class ShutdownDuringCall(FakePool):
-        def submit(self, fn, *args):
-            loader.shutdown()
-            return super().submit(fn, *args)
-
-    _use(ShutdownDuringCall(["break"]))
+    _use(ShutdownOnSubmit(["break"]))
     with pytest.raises(loader.LoaderNotRunning):
         asyncio.run(loader.load_song(URL))
-    assert pools == []
+    assert pools.built == []
 
 
-def test_a_break_on_the_retry_after_shutdown_raises_not_running(
-    pools, monkeypatch
-):
-    class ShutdownDuringRetry(FakePool):
-        def submit(self, fn, *args):
-            loader.shutdown()
-            return super().submit(fn, *args)
-
-    monkeypatch.setattr(
-        loader,
-        "ProcessPoolExecutor",
-        lambda *a, **k: ShutdownDuringRetry(["break"]),
-    )
+def test_a_break_on_the_retry_after_shutdown_raises_not_running(pools):
+    pools.upcoming = [ShutdownOnSubmit(["break"])]
     _use(FakePool(["break"]))
     with pytest.raises(loader.LoaderNotRunning):
         asyncio.run(loader.load_song(URL))
     assert loader._pools == {}
+    assert len(pools.built) == 1
 
 
 def test_a_break_in_the_preload_lane_rebuilds_only_that_lane(pools):
@@ -148,8 +146,8 @@ def test_a_break_in_the_preload_lane_rebuilds_only_that_lane(pools):
     song = asyncio.run(loader._load(loader.PRELOAD_LANE, URL))
     assert (
         song.title,
-        len(pools),
-        loader._pools[loader.PRELOAD_LANE] is pools[0],
+        len(pools.built),
+        loader._pools[loader.PRELOAD_LANE] is pools.built[0],
         loader._pools[loader.LOAD_LANE] is load_pool,
         load_pool.shutdown_calls,
     ) == ("ok", 1, True, True, [])
@@ -161,21 +159,17 @@ def test_a_break_in_the_load_lane_leaves_the_preload_lane_alone(pools):
     _use(preload_pool, loader.PRELOAD_LANE)
     asyncio.run(loader.load_song(URL))
     assert (
-        len(pools),
+        len(pools.built),
         loader._pools[loader.PRELOAD_LANE] is preload_pool,
         preload_pool.shutdown_calls,
     ) == (1, True, [])
 
 
-def test_a_double_break_in_one_lane_fails_without_touching_the_other(
-    pools, monkeypatch
-):
+def test_a_double_break_in_one_lane_fails_without_touching_the_other(pools):
     other = FakePool()
     _use(FakePool(["break"]), loader.PRELOAD_LANE)
     _use(other, loader.LOAD_LANE)
-    monkeypatch.setattr(
-        loader, "ProcessPoolExecutor", lambda *a, **k: FakePool(["break"])
-    )
+    pools.upcoming = [FakePool(["break"])]
     with pytest.raises(loader.SongError) as e:
         asyncio.run(loader._load(loader.PRELOAD_LANE, URL))
     assert (str(e.value), loader._pools[loader.LOAD_LANE] is other) == (
@@ -197,20 +191,15 @@ def test_concurrent_breaks_in_two_lanes_rebuild_each_once(pools):
         )
 
     asyncio.run(many())
-    assert len(pools) == 2
+    assert len(pools.built) == 2
 
 
 def test_a_break_in_the_preload_lane_after_shutdown_builds_nothing(pools):
-    class ShutdownDuringCall(FakePool):
-        def submit(self, fn, *args):
-            loader.shutdown()
-            return super().submit(fn, *args)
-
     _use(FakePool(), loader.LOAD_LANE)
-    _use(ShutdownDuringCall(["break"]), loader.PRELOAD_LANE)
+    _use(ShutdownOnSubmit(["break"]), loader.PRELOAD_LANE)
     with pytest.raises(loader.LoaderNotRunning):
         asyncio.run(loader._load(loader.PRELOAD_LANE, URL))
-    assert pools == []
+    assert pools.built == []
 
 
 class WarmPool:
