@@ -221,6 +221,6 @@ def test_queue_with_playnext_keeps_the_order_of_several_songs(controller):
     _queue(controller, "current", "a")
     songs = [_song(controller, "x"), _song(controller, "y")]
 
-    _run(controller, lambda: controller.queue(songs, playnext=True))
+    _run(controller, lambda: controller.enqueue(songs, playnext=True))
 
     assert _titles(controller) == ["current", "x", "y", "a"]

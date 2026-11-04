@@ -468,26 +468,29 @@ class AudioController(object):
             return LoopState.DISABLED
         return LoopState.ENABLED
 
+    def _queue_changed(self):
+        """Refreshes the backup and the preload after the queue was
+        edited in place."""
+        self._pickle_playlist()
+        self._schedule_preload()
+
     def shuffle(self):
         self.playlist.shuffle()
-        self._pickle_playlist()
-        self._preload_queue()
+        self._queue_changed()
 
     def move(self, src: int, dest: int):
         """Moves the queued track at index `src` to index `dest`
         (0 is the current track, which cannot be moved). Raises
         PlaylistError for an index that cannot be moved."""
         self.playlist.move(src, dest)
-        self._pickle_playlist()
-        self._preload_queue()
+        self._queue_changed()
 
     def remove(self, index: int) -> Song:
         """Removes and returns the queued track at `index` (0 is the
         current track, which cannot be removed). Raises PlaylistError
         for an index that cannot be removed."""
         song = self.playlist.remove(index)
-        self._pickle_playlist()
-        self._preload_queue()
+        self._queue_changed()
         return song
 
     def clear(self):
@@ -699,7 +702,7 @@ class AudioController(object):
                 embed=song.format_output(config.SONGINFO_NOW_PLAYING)
             )
 
-        self._preload_queue()
+        self._schedule_preload()
 
     def _overtaken(self, generation: int) -> bool:
         if generation != self._generation:
@@ -719,9 +722,9 @@ class AudioController(object):
         if self.is_idle() and len(self.playlist) > 0:
             await self.play_song(self.playlist[0])
         else:
-            self._preload_queue()
+            self._schedule_preload()
 
-    async def queue(self, songs: Iterable[Song], playnext=False):
+    async def enqueue(self, songs: Iterable[Song], playnext=False):
         """Appends `songs` to the queue (with `playnext`, puts them
         directly after the current track instead, in their order),
         refreshes the backup
@@ -824,7 +827,7 @@ class AudioController(object):
                     getattr(loaded_song, "reason", None),
                 )
 
-        await self.queue(added, playnext=playnext and len(added) == 1)
+        await self.enqueue(added, playnext=playnext and len(added) == 1)
 
         return loaded_song
 
@@ -861,9 +864,11 @@ class AudioController(object):
         songs: List[Optional[Song]] = []
         tail = tracks
 
-        # With nothing playing, the first track is loaded and started
-        # on its own before the rest. Batching means the whole batch
-        # has to finish before any of it is queued, where the per-track
+        # With nothing playing, the first track is loaded and enqueued
+        # on its own before the rest (this only splits the batch; the
+        # start still goes through enqueue -> ensure_playing()).
+        # Batching means the whole batch has to finish before any of
+        # it is queued, where the per-track
         # path this replaced began on track one - a few hundred
         # milliseconds of silence for a discography on local disk, and
         # seconds of it on a network-mounted library. One extra round
@@ -873,7 +878,7 @@ class AudioController(object):
             songs += await loader.load_local_songs(tracks[:1])
             tail = tracks[1:]
             if songs[0] is not None:
-                await self.queue(songs[:1])
+                await self.enqueue(songs[:1])
 
         loaded_tail = await loader.load_local_songs(tail)
         songs += loaded_tail
@@ -882,7 +887,7 @@ class AudioController(object):
         if not added:
             return songs
 
-        await self.queue(added)
+        await self.enqueue(added)
 
         return songs
 
@@ -950,7 +955,7 @@ class AudioController(object):
         if rerun_needed:
             self.add_task(self._preload_songs())
 
-    def _preload_queue(self):
+    def _schedule_preload(self):
         """Preloads the first MAX_SONG_PRELOAD songs asynchronously"""
         self.add_task(self._preload_songs())
 

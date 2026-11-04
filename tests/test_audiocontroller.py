@@ -138,7 +138,7 @@ def test_ensure_playing_starts_the_head_of_the_queue_when_idle(
         "https://stream.invalid/first track"
     ]
     assert _titles(controller) == ["first track", "second track"]
-    # ensure_playing() writes no backup: that is queue()'s job
+    # ensure_playing() writes no backup: that is enqueue()'s job
     assert not (tmp_path / "backup" / "playlist_1234.pickle").exists()
     # play_song preloads the track it starts, then the queue behind it
     assert _preloaded(stub_loader) == ["first track", "second track"]
@@ -413,6 +413,19 @@ def _while_playing(controller, intent):
     return asyncio.run(run())
 
 
+def test_shuffle_refreshes_backup_and_preload(
+    controller, stub_loader, tmp_path
+):
+    _queue(controller, "current", "a", "b", "c", "d", "e")
+
+    _while_playing(controller, controller.shuffle)
+
+    titles = _titles(controller)
+    assert sorted(titles) == ["a", "b", "c", "current", "d", "e"]
+    assert _backup(tmp_path) == titles
+    assert _preloaded(stub_loader) == titles[1:]
+
+
 def test_move_reorders_the_queue_and_refreshes_backup_and_preload(
     controller, stub_loader, tmp_path
 ):
@@ -472,7 +485,7 @@ def test_queue_appends_while_playing_and_refreshes_backup_and_preload(
     async def run():
         controller.guild.voice_client.playing = True
         controller.bot.loop = asyncio.get_running_loop()
-        await controller.queue(songs)
+        await controller.enqueue(songs)
         await _settle()
 
     asyncio.run(run())
@@ -491,7 +504,7 @@ def test_queue_starts_the_first_track_when_idle(
 
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
-        await controller.queue(songs)
+        await controller.enqueue(songs)
         await _settle()
 
     asyncio.run(run())
@@ -906,7 +919,7 @@ def _queue_saved_playlist_song(controller, from_saved_playlist=True):
     run, and returns the saved playlist's entries and the queue."""
 
     async def queue_and_preload(ac, factory):
-        await controller.queue(
+        await controller.enqueue(
             [
                 ac.Song(
                     ac.SiteTypes.YT_DLP,
@@ -1750,7 +1763,7 @@ def test_queueing_during_a_pending_start_starts_nothing_new(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
         await _settle()
-        await controller.queue(_songs(controller, "added"))
+        await controller.enqueue(_songs(controller, "added"))
         release.set()
         await _finish(task)
 
@@ -2019,7 +2032,7 @@ def test_a_current_failed_preload_with_nothing_after_it_ends_the_start(
         await _settle()
         release.set()
         await _finish(task)
-        await controller.queue(_songs(controller, "later"))
+        await controller.enqueue(_songs(controller, "later"))
         await _settle()
 
     asyncio.run(run())
@@ -2066,7 +2079,7 @@ def test_a_current_start_without_a_url_ends_the_start(
         controller.bot.loop = asyncio.get_running_loop()
         _fake_ffmpeg(monkeypatch)
         await controller.ensure_playing()
-        await controller.queue(_songs(controller, "later"))
+        await controller.enqueue(_songs(controller, "later"))
         await _settle()
 
     asyncio.run(run())
@@ -2090,7 +2103,7 @@ def test_a_superseded_start_dropping_out_leaves_the_newer_one_pending(
         release.set()
         await _finish(task)
         later = [c[1][0].title for c in stub_loader.calls[before:]]
-        await controller.queue(_songs(controller, "added"))
+        await controller.enqueue(_songs(controller, "added"))
         await _settle()
         assert _played(controller) == []
         newer.set()

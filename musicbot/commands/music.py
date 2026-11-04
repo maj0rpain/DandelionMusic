@@ -591,7 +591,7 @@ class Music(commands.Cog):
         if contents is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
-        await ctx.audiocontroller.queue(
+        await ctx.audiocontroller.enqueue(
             Song(
                 get_site_type(entry.url),
                 entry.url,
