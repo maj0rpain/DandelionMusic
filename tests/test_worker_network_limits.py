@@ -1,5 +1,5 @@
-"""No single guild's Spotify or aiohttp request can hold the shared
-extraction worker for long.
+"""No single guild's Spotify or aiohttp request can hold its extraction
+lane's worker for long.
 
 Song loading is called directly with Spotify failures faked; the
 Spotify session is driven against a local server that always answers

@@ -29,7 +29,7 @@ def test_close_keeps_the_loop_running_while_the_loader_shuts_down(
         pass
 
     async def discord_close(self):
-        # the Discord client closes only once the worker has exited
+        # the Discord client closes only once both lanes' workers have exited
         closed.append(release.is_set())
 
     monkeypatch.setattr(bot_module.loader, "shutdown", blocking_shutdown)
