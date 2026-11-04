@@ -1733,7 +1733,7 @@ def test_prev_during_a_pending_start_plays_the_previous_track_only(
         release.set()
         await _finish(task)
         await _settle()
-        return _preloaded(stub_loader)[before:]
+        return _preloaded(stub_loader, since=before)
 
     later = _run(controller, scenario)
 
@@ -1757,7 +1757,7 @@ def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
         release.set()
         await _finish(task)
         await _settle()
-        return _preloaded(stub_loader)[before:]
+        return _preloaded(stub_loader, since=before)
 
     later = _run(controller, scenario)
 
