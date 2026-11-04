@@ -39,7 +39,9 @@ def columns(engine, table):
 
 def make_old_probe(engine):
     with engine.begin() as conn:
-        conn.exec_driver_sql("CREATE TABLE probe (id INTEGER NOT NULL, PRIMARY KEY (id))")
+        conn.exec_driver_sql(
+            "CREATE TABLE probe (id INTEGER NOT NULL, PRIMARY KEY (id))"
+        )
 
 
 def test_foreign_table_survives_migration(engine):

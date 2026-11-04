@@ -218,9 +218,7 @@ def test_heroku_db_is_not_reported_as_unknown(config_factory):
 
 
 def test_unknown_var_warning_names_it_without_its_value(config_factory):
-    config = config_factory(
-        SECRETS_ENV + "MY_API_TOKEN=zq81xk-middle-v7mw\n"
-    )
+    config = config_factory(SECRETS_ENV + "MY_API_TOKEN=zq81xk-middle-v7mw\n")
     with pytest.warns(UserWarning) as record:
         config.warn_unknown_vars()
     text = " ".join(str(w.message) for w in record)
