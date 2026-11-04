@@ -2,8 +2,8 @@
 
 import asyncio
 
-from helpers import FakeClock, run
 from musicbot.cached_lookup import CachedLookup
+from helpers import FakeClock, run
 
 
 class FakeBackend:

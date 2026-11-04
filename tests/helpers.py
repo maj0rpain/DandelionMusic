@@ -1,4 +1,5 @@
-"""Helpers shared by the CachedLookup and library enrichment tests."""
+"""The suite's generic shared helpers: the bounded `run(coro)` and
+`FakeClock`."""
 
 import asyncio
 

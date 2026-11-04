@@ -12,15 +12,12 @@ import pytest
 
 from config import config
 from musicbot.utils import Timer
+from helpers import run
 
 
 @pytest.fixture(autouse=True)
 def instant_timeout(monkeypatch):
     monkeypatch.setattr(config, "VC_TIMEOUT", 0)
-
-
-def run(coro):
-    return asyncio.run(coro)
 
 
 def test_callback_runs_to_completion_when_it_cancels_its_own_timer():

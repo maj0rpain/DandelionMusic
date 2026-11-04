@@ -3,8 +3,8 @@ contexts."""
 
 import asyncio
 
-from developer_fakes import FakeBot, FakeCtx
 from musicbot.commands.developer import Developer
+from developer_fakes import FakeBot, FakeCtx
 
 
 def execute(code):

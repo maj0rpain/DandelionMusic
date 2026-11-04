@@ -34,7 +34,8 @@ from musicbot.commands.library import (
 )
 from musicbot.library import LibrarySong, SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
-from discord_fakes import http_error, run
+from discord_fakes import http_error
+from helpers import run
 
 
 def make_song(title):
@@ -68,7 +69,7 @@ AUTHOR_ID = 1
 MESSAGE_ID = 4242
 
 
-class FakeInteraction:
+class EditingInteraction:
     """Records every edit; raises from it while `fail` is set.
 
     `hold(n)` holds this interaction's n-th edit (0-based) in flight
@@ -145,7 +146,7 @@ def make_view(index=INDEX):
 class Clicks:
     """Dispatches clicks the way discord.py does: through a real
     ViewStore, with the view registered under one message id as the
-    first send would, and re-added when an edit lands (FakeInteraction
+    first send would, and re-added when an edit lands (EditingInteraction
     calls landed()). A click targets the components the message is
     showing, never the view's not-yet-landed children, and is dropped
     - click() returns None - when discord.py would drop it."""
@@ -162,7 +163,7 @@ class Clicks:
         self.store.add_view(view, MESSAGE_ID)
 
     def interaction(self, log=None, **kwargs):
-        return FakeInteraction(log, clicks=self, **kwargs)
+        return EditingInteraction(log, clicks=self, **kwargs)
 
     def click(self, kind, interaction, label=None):
         """Clicks the shown `kind` component; for a Select, the
@@ -202,7 +203,7 @@ def test_failed_render_keeps_previous_components_live(capsys):
         view = make_view()
         before = list(view.children)
         attached = view._attached
-        interaction = FakeInteraction(fail=True)
+        interaction = EditingInteraction(fail=True)
         view.cursor.descend("Radiohead")
         result = await view.render(interaction, sync_attachments=True)
         return view, before, attached, result
@@ -222,7 +223,7 @@ def test_render_syncs_a_changed_attachment():
         view = make_view()
         view.cursor.descend("Radiohead")
         view._enrichment = COVER
-        interaction = FakeInteraction()
+        interaction = EditingInteraction()
         result = await view.render(interaction, sync_attachments=True)
         return view, interaction, result
 
@@ -244,7 +245,7 @@ def test_render_without_sync_leaves_attachments_alone():
         view = make_view()
         view.cursor.descend("Radiohead")
         view._enrichment = COVER
-        interaction = FakeInteraction()
+        interaction = EditingInteraction()
         result = await view.render(interaction)
         return view, interaction, result
 
@@ -264,8 +265,8 @@ def test_failed_descend_is_undone():
     async def scenario():
         view = make_view(PAGED)
         resolved = stub_enrichment(view, default=COVER)
-        await view.turn_page(FakeInteraction(), 1)
-        interaction = FakeInteraction(fail=True)
+        await view.turn_page(EditingInteraction(), 1)
+        interaction = EditingInteraction(fail=True)
         await view.descend(interaction, "Artist 27")
         return view, resolved
 
@@ -280,10 +281,10 @@ def test_failed_back_is_undone():
     async def scenario():
         view = make_view()
         resolved = stub_enrichment(view)
-        await view.descend(FakeInteraction(), "Radiohead")
-        await view.descend(FakeInteraction(), "OK Computer")
+        await view.descend(EditingInteraction(), "Radiohead")
+        await view.descend(EditingInteraction(), "OK Computer")
         resolved.clear()
-        interaction = FakeInteraction(fail=True)
+        interaction = EditingInteraction(fail=True)
         await view.go_back(interaction)
         return view, resolved
 
@@ -297,7 +298,7 @@ def test_failed_enrichment_edit_is_healed_by_next_page_turn():
     async def scenario():
         view = make_view()
         stub_enrichment(view, default=COVER)
-        interaction = FakeInteraction()
+        interaction = EditingInteraction()
 
         async def edit(**kwargs):
             # the first draw lands; the enrichment edit fails
@@ -308,7 +309,7 @@ def test_failed_enrichment_edit_is_healed_by_next_page_turn():
         interaction.edit_original_response = edit
         await view.descend(interaction, "Radiohead")
         enrichment = view._enrichment
-        page_turn = FakeInteraction()
+        page_turn = EditingInteraction()
         await view.turn_page(page_turn, 0)
         return enrichment, page_turn
 
@@ -383,8 +384,8 @@ class EditClick(NamedTuple):
     moved_to: tuple
     page: int
     handler: Optional[asyncio.Task]
-    entering: FakeInteraction
-    clicking: FakeInteraction
+    entering: EditingInteraction
+    clicking: EditingInteraction
     log: list
 
     @property
@@ -499,19 +500,19 @@ def test_enrichment_resolving_after_moving_on_is_not_drawn():
         finished = stub_enrichment(
             view, {("Radiohead", None): Gated(gate, STALE)}
         )
-        entering = FakeInteraction()
+        entering = EditingInteraction()
         entry = asyncio.create_task(view.descend(entering, "Radiohead"))
         await settle()
         # move on to the album, and hold its own enrichment edit in
         # flight so the render lock stays taken
-        clicking = FakeInteraction()
+        clicking = EditingInteraction()
         clicking.hold(1)
         accepted = await view.interaction_check(clicking)
         handler = asyncio.create_task(view.descend(clicking, "OK Computer"))
         await clicking.in_flight.wait()
         # a redraw of the album that queues behind that edit, so it is
         # built only after the stale enrichment below has resolved
-        paging = FakeInteraction()
+        paging = EditingInteraction()
         page_accepted = await view.interaction_check(paging)
         page_turn = asyncio.create_task(view.turn_page(paging, 0))
         await settle()
@@ -675,10 +676,10 @@ def test_leaving_a_level_lets_its_enrichment_finish_undrawn():
         finished = stub_enrichment(
             view, {("Radiohead", None): Gated(gate, STALE)}
         )
-        entering = FakeInteraction()
+        entering = EditingInteraction()
         entry = asyncio.create_task(view.descend(entering, "Radiohead"))
         await settle()
-        await view.go_back(FakeInteraction())
+        await view.go_back(EditingInteraction())
         gate.set()
         await entry
         return finished, entering
@@ -820,10 +821,10 @@ def test_descend_edit_reset_is_undone_and_next_pick_opens_it():
     async def scenario():
         view = make_view()
         resolved = stub_enrichment(view)
-        interaction = FakeInteraction(fail=True, edit_error=reset_error())
+        interaction = EditingInteraction(fail=True, edit_error=reset_error())
         raised = await attempt(view.descend(interaction, "Radiohead"))
         cursor = level_of(view)
-        await view.descend(FakeInteraction(), "The Beatles")
+        await view.descend(EditingInteraction(), "The Beatles")
         return view, resolved, raised, cursor
 
     view, resolved, raised, cursor = run(scenario())
@@ -838,10 +839,10 @@ def test_back_edit_reset_is_undone():
     async def scenario():
         view = make_view()
         resolved = stub_enrichment(view)
-        await view.descend(FakeInteraction(), "Radiohead")
-        await view.descend(FakeInteraction(), "OK Computer")
+        await view.descend(EditingInteraction(), "Radiohead")
+        await view.descend(EditingInteraction(), "OK Computer")
         resolved.clear()
-        interaction = FakeInteraction(fail=True, edit_error=reset_error())
+        interaction = EditingInteraction(fail=True, edit_error=reset_error())
         raised = await attempt(view.go_back(interaction))
         return view, resolved, raised
 
@@ -855,10 +856,10 @@ def test_back_edit_reset_is_undone():
 def test_page_turn_edit_reset_is_undone():
     async def scenario():
         view = make_view(PAGED)
-        interaction = FakeInteraction(fail=True, edit_error=reset_error())
+        interaction = EditingInteraction(fail=True, edit_error=reset_error())
         raised = await attempt(view.turn_page(interaction, 1))
         page = view.cursor.page
-        await view.turn_page(FakeInteraction(), 1)
+        await view.turn_page(EditingInteraction(), 1)
         return view, raised, page
 
     view, raised, page = run(scenario())
@@ -872,7 +873,7 @@ def test_descend_cancelled_edit_is_undone():
     async def scenario():
         view = make_view()
         resolved = stub_enrichment(view)
-        interaction = FakeInteraction(
+        interaction = EditingInteraction(
             fail=True, edit_error=asyncio.CancelledError()
         )
         raised = await attempt(view.descend(interaction, "Radiohead"))
@@ -888,9 +889,9 @@ def test_descend_cancelled_edit_is_undone():
 def test_failed_clamped_page_turn_is_undone():
     async def scenario():
         view = make_view(PAGED)
-        await view.turn_page(FakeInteraction(), 1)
+        await view.turn_page(EditingInteraction(), 1)
         last = view.cursor.page
-        failing = FakeInteraction(fail=True)
+        failing = EditingInteraction(fail=True)
         await view.turn_page(failing, 5)
         return last, view.cursor.page
 
@@ -905,10 +906,10 @@ def test_enrichment_in_flight_still_lands_after_failed_page_turn():
         view = make_view()
         gate = asyncio.Event()
         stub_enrichment(view, {("Radiohead", None): Gated(gate, COVER)})
-        entering = FakeInteraction()
+        entering = EditingInteraction()
         entry = asyncio.create_task(view.descend(entering, "Radiohead"))
         await settle()
-        failing = FakeInteraction(fail=True)
+        failing = EditingInteraction(fail=True)
         await view.turn_page(failing, 1)
         gate.set()
         await entry
@@ -932,10 +933,10 @@ def test_failed_defer_leaves_cursor_unchanged(click, error):
         view = make_view(PAGED if click == "page" else INDEX)
         resolved = stub_enrichment(view)
         if click == "back":
-            await view.descend(FakeInteraction(), "Radiohead")
+            await view.descend(EditingInteraction(), "Radiohead")
             resolved.clear()
         before = (*level_of(view), view.cursor.page)
-        interaction = FakeInteraction(defer_error=error())
+        interaction = EditingInteraction(defer_error=error())
         if click == "descend":
             coro = view.descend(interaction, "Radiohead")
         elif click == "back":
