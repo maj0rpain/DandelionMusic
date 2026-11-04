@@ -1,10 +1,14 @@
-"""d!search tells a failed search apart from one that found nothing."""
+"""d!search lets the search's SongError propagate, message intact, and
+sends nothing itself (on_command_error does the replying)."""
 
 import asyncio
+
+import pytest
 
 from config import config
 from musicbot.commands import music
 from musicbot.commands.music import Music
+from musicbot.loader import SongError
 
 
 class RecordingCtx:
@@ -18,19 +22,16 @@ class RecordingCtx:
         self.sent.append(message)
 
 
-def run_search(results, monkeypatch):
+@pytest.mark.parametrize(
+    "message", [config.SONGINFO_ERROR, config.SEARCH_NO_RESULTS]
+)
+def test_a_search_error_propagates_and_nothing_is_sent(monkeypatch, message):
     async def search_youtube(query, count):
-        return results
+        raise SongError(message)
 
     monkeypatch.setattr(music, "search_youtube", search_youtube)
     ctx = RecordingCtx()
-    asyncio.run(Music._search.callback(Music(None), ctx, query="q"))
-    return ctx.sent
-
-
-def test_a_failed_search_replies_songinfo_error(monkeypatch):
-    assert run_search(None, monkeypatch) == [config.SONGINFO_ERROR]
-
-
-def test_an_empty_search_replies_no_results(monkeypatch):
-    assert run_search([], monkeypatch) == [config.SEARCH_NO_RESULTS]
+    with pytest.raises(SongError) as info:
+        asyncio.run(Music._search.callback(Music(None), ctx, query="q"))
+    assert info.value.args[0] == message
+    assert ctx.sent == []

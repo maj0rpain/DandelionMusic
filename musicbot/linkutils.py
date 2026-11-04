@@ -230,8 +230,7 @@ async def fetch_spotify(
         query = f'{title} "Topic"'
 
     # use sync function because we're already in executor
-    results = loader._search_youtube(query)
-    return results[0] if results else None
+    return loader._search_youtube(query)[0]
 
 
 async def fetch_spotify_playlist(
