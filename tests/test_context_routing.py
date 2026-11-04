@@ -4,9 +4,16 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import AsyncMock
 
+import pytest
 from discord.ext import commands
 
 from musicbot.bot import Context
+
+VIEW_SKIP_TRIGGERS = [
+    ({"view": "V"}, None),
+    ({"ephemeral": True}, None),
+    ({}, object()),
+]
 
 
 def make_interaction(response_done):
@@ -27,6 +34,39 @@ def make_ctx(response_done):
     return ctx, interaction
 
 
+def make_send_ctx(
+    monkeypatch, interaction, controller_channel=None, registered=True
+):
+    """A Context, its patched parent send, and its controller.
+
+    registered=False: no controller is registered for the guild
+    (bot.sessions returns None) and None is returned in the controller
+    position. registered=True: a controller is registered.
+    controller_channel=None: that registered controller has no command
+    channel.
+    """
+    ctx = object.__new__(Context)
+    ctx.interaction = interaction
+    ctx.guild = object()
+    ctx.channel = object()
+    parent = AsyncMock(return_value="sent")
+    monkeypatch.setattr(commands.Context, "send", parent)
+
+    async def attach_view(send):
+        return await send("VIEW")
+
+    controller = None
+    if registered:
+        controller = SimpleNamespace(
+            command_channel=controller_channel,
+            attach_view=AsyncMock(side_effect=attach_view),
+        )
+    ctx.bot = SimpleNamespace(
+        sessions=SimpleNamespace(controller=lambda guild: controller)
+    )
+    return ctx, parent, controller
+
+
 def test_response_done_sends_followup():
     ctx, interaction = make_ctx(True)
     result = asyncio.run(
@@ -35,6 +75,7 @@ def test_response_done_sends_followup():
     assert result == "followup"
     interaction.followup.send.assert_awaited_once_with("hi")
     interaction.response.send_message.assert_not_awaited()
+    interaction.original_response.assert_not_awaited()
 
 
 def test_response_not_done_sends_message():
@@ -64,87 +105,49 @@ def test_no_interaction_view_path_uses_parent_send(monkeypatch):
     parent.assert_awaited_once_with("x", view="VIEW")
 
 
-def make_send_ctx(monkeypatch, interaction, controller_channel=None):
-    """A Context with a registered controller (None: no controller)."""
-    ctx = object.__new__(Context)
-    ctx.interaction = interaction
-    ctx.guild = object()
-    ctx.channel = object()
-    parent = AsyncMock(return_value="sent")
-    monkeypatch.setattr(commands.Context, "send", parent)
-
-    async def attach_view(send):
-        return await send("VIEW")
-
-    controller = SimpleNamespace(
-        command_channel=controller_channel,
-        attach_view=AsyncMock(side_effect=attach_view),
-    )
-    ctx.bot = SimpleNamespace(
-        sessions=SimpleNamespace(controller=lambda guild: controller)
-    )
-    return ctx, parent, controller
-
-
-def make_no_controller_ctx(monkeypatch, interaction):
-    ctx, parent, _ = make_send_ctx(monkeypatch, interaction)
-    ctx.bot = SimpleNamespace(
-        sessions=SimpleNamespace(controller=lambda guild: None)
-    )
-    return ctx, parent
-
-
 def test_no_controller_with_interaction_sends_message(monkeypatch):
     interaction = make_interaction(False)
-    ctx, parent = make_no_controller_ctx(monkeypatch, interaction)
+    ctx, parent, _ = make_send_ctx(monkeypatch, interaction, registered=False)
     assert asyncio.run(ctx.send("x")) == "first"
     interaction.response.send_message.assert_awaited_once_with("x")
     interaction.original_response.assert_not_awaited()
     parent.assert_not_awaited()
 
 
-def test_no_controller_with_done_interaction_sends_followup(monkeypatch):
-    interaction = make_interaction(True)
-    ctx, parent = make_no_controller_ctx(monkeypatch, interaction)
-    assert asyncio.run(ctx.send("x")) == "followup"
-    interaction.followup.send.assert_awaited_once_with("x")
-    parent.assert_not_awaited()
-
-
 def test_no_controller_without_interaction_uses_parent_send(monkeypatch):
-    ctx, parent = make_no_controller_ctx(monkeypatch, None)
+    ctx, parent, _ = make_send_ctx(monkeypatch, None, registered=False)
     assert asyncio.run(ctx.send("x", tts=True)) == "sent"
     parent.assert_awaited_once_with("x", tts=True)
 
 
-def test_other_triggers_skip_the_view_without_interaction(monkeypatch):
-    for kwargs, channel in (
-        ({"view": "V"}, None),
-        ({"ephemeral": True}, None),
-        ({}, object()),
-    ):
-        ctx, parent, controller = make_send_ctx(monkeypatch, None, channel)
-        assert asyncio.run(ctx.send("x", **kwargs)) == "sent"
-        parent.assert_awaited_once_with("x", **kwargs)
-        controller.attach_view.assert_not_awaited()
+@pytest.mark.parametrize(
+    "kwargs, channel",
+    VIEW_SKIP_TRIGGERS,
+    ids=["view", "ephemeral", "other-channel"],
+)
+def test_other_triggers_skip_the_view_without_interaction(
+    monkeypatch, kwargs, channel
+):
+    ctx, parent, controller = make_send_ctx(monkeypatch, None, channel)
+    assert asyncio.run(ctx.send("x", **kwargs)) == "sent"
+    parent.assert_awaited_once_with("x", **kwargs)
+    controller.attach_view.assert_not_awaited()
 
 
-def test_other_triggers_skip_the_view_with_interaction(monkeypatch):
-    for kwargs, channel in (
-        ({"view": "V"}, None),
-        ({"ephemeral": True}, None),
-        ({}, object()),
-    ):
-        interaction = make_interaction(False)
-        ctx, parent, controller = make_send_ctx(
-            monkeypatch, interaction, channel
-        )
-        assert asyncio.run(ctx.send("x", **kwargs)) == "first"
-        interaction.response.send_message.assert_awaited_once_with(
-            "x", **kwargs
-        )
-        parent.assert_not_awaited()
-        controller.attach_view.assert_not_awaited()
+@pytest.mark.parametrize(
+    "kwargs, channel",
+    VIEW_SKIP_TRIGGERS,
+    ids=["view", "ephemeral", "other-channel"],
+)
+def test_other_triggers_skip_the_view_with_interaction(
+    monkeypatch, kwargs, channel
+):
+    interaction = make_interaction(False)
+    ctx, parent, controller = make_send_ctx(monkeypatch, interaction, channel)
+    assert asyncio.run(ctx.send("x", **kwargs)) == "first"
+    interaction.response.send_message.assert_awaited_once_with("x", **kwargs)
+    parent.assert_not_awaited()
+    controller.attach_view.assert_not_awaited()
 
 
 def test_reference_is_stripped_for_the_parent_send(monkeypatch):
@@ -167,14 +170,6 @@ def test_view_path_not_done_returns_original_response(monkeypatch):
     interaction.response.send_message.assert_awaited_once_with(
         "x", view="VIEW"
     )
-
-
-def test_view_path_done_returns_followup_result(monkeypatch):
-    interaction = make_interaction(True)
-    ctx, _, _ = make_send_ctx(monkeypatch, interaction)
-    assert asyncio.run(ctx.send("x")) == "followup"
-    interaction.followup.send.assert_awaited_once_with("x", view="VIEW")
-    interaction.original_response.assert_not_awaited()
 
 
 def test_response_send_message_with_interaction(monkeypatch):
