@@ -6,6 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config.config import ENV_ALIASES  # noqa: E402
 from config.config import Config as ConfigClass  # noqa: E402
 
 
@@ -37,9 +38,7 @@ def config_factory(tmp_path, monkeypatch):
     monkeypatch.setenv("HEROKU_DB", "")
     for key in (
         *ConfigClass.as_dict(),
-        "SPOTIPY_CLIENT_ID",
-        "SPOTIPY_CLIENT_SECRET",
-        "HEROKU_DB",
+        *ENV_ALIASES,
         "VC_TIMOUT_DEFAULT",
     ):
         monkeypatch.delenv(key, raising=False)

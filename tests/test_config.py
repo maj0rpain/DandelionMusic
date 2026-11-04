@@ -322,6 +322,14 @@ def test_spotipy_aliases_are_not_reported_as_unknown(config_factory):
     assert set(config.unknown_vars) == {"MY_TYPO"}
 
 
+def test_spotipy_alias_applies_when_canonical_is_unset(config_factory):
+    config = config_factory(
+        "BOT_TOKEN=t\nLASTFM_API_KEY=k\nGUILD_WHITELIST=[111]\n"
+        "SPOTIPY_CLIENT_ID=cid\nSPOTIPY_CLIENT_SECRET=csecret\n"
+    )
+    assert (config.SPOTIFY_ID, config.SPOTIFY_SECRET) == ("cid", "csecret")
+
+
 def test_heroku_db_applies_when_database_url_is_empty(config_factory):
     config = config_factory(
         SECRETS_ENV + "DATABASE_URL=\nHEROKU_DB=postgresql://u:p@h/db\n"

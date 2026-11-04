@@ -15,7 +15,7 @@ from pathlib import Path
 
 import pytest
 
-from config.config import Config
+from config.config import ENV_ALIASES, Config
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 
@@ -224,7 +224,7 @@ def _run_in_fresh_interpreter(cwd: Path, script: str, as_file=False):
     # without the settings an earlier test's load_dotenv() may have left
     # in os.environ - a half-set Spotify credential, say, makes the
     # import print a traceback
-    leaked = {*Config.as_dict(), "SPOTIPY_CLIENT_ID", "SPOTIPY_CLIENT_SECRET"}
+    leaked = {*Config.as_dict(), *ENV_ALIASES}
     env = {k: v for k, v in os.environ.items() if k not in leaked}
     env["PYTHONPATH"] = os.pathsep.join(
         filter(None, [str(REPO_ROOT), env.get("PYTHONPATH")])
