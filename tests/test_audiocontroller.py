@@ -2223,3 +2223,63 @@ def test_disconnecting_while_playing_leaves_the_backup_holding_the_queue(
     asyncio.run(run())
 
     assert _backup(tmp_path) == ["first", "second"]
+
+
+def _title_less_song(controller):
+    ac = sys.modules[type(controller).__module__]
+    song = ac.Song(
+        ac.SiteTypes.YT_DLP,
+        "https://example.invalid/untitled",
+        url="https://stream.invalid/untitled",
+    )
+    controller.playlist.add(song)
+    return song
+
+
+def test_a_title_less_song_is_in_the_history_by_its_webpage_url(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    song = _title_less_song(controller)
+
+    _run_playing(controller, _nothing)
+
+    assert song.webpage_url in controller.track_history()
+
+
+def test_a_title_less_song_whose_preload_fails_is_skipped_by_its_url(
+    controller, stub_loader, monkeypatch
+):
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        controller.command_channel = _Channel()
+        song = _title_less_song(controller)
+        stub_loader.results["preload"] = stub_loader.Preload.FAILED
+        await controller.play_song(song)
+        await _settle()
+        return song
+
+    song = asyncio.run(run())
+
+    ((args, _),) = controller.command_channel.sent
+    assert f"(Skipped: {song.webpage_url})" in args[0]
+
+
+def test_remove_names_a_title_less_song_by_its_webpage_url(controller):
+    _queue(controller, "current")
+    song = _title_less_song(controller)
+    sent = []
+
+    async def send(text):
+        sent.append(text)
+
+    ctx = types.SimpleNamespace(audiocontroller=controller, send=send)
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await Music._remove.callback(Music(None), ctx, 2)
+        await _settle()
+
+    asyncio.run(run())
+
+    assert sent == [f"Removed #2: {song.webpage_url}"]

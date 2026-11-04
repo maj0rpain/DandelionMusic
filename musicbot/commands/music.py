@@ -415,8 +415,7 @@ class Music(commands.Cog):
             queue_number = len(ctx.audiocontroller.playlist)
         try:
             song = ctx.audiocontroller.remove(queue_number - 1)
-            title = song.title or song.webpage_url
-            await ctx.send(f"Removed #{queue_number}: {title}")
+            await ctx.send(f"Removed #{queue_number}: {song.display_name}")
         except PlaylistError as e:
             await ctx.send(e)
 

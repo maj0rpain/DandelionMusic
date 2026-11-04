@@ -57,3 +57,16 @@ def test_update_copies_the_extraction_stamp_from_a_fresh_song():
     fresh.extracted_at = datetime(2030, 1, 1, tzinfo=timezone.utc)
     song.update(fresh)
     assert song.extracted_at == fresh.extracted_at
+
+
+def test_display_name_is_the_title_else_the_webpage_url():
+    assert Song(SiteTypes.YT_DLP, URL, title="named").display_name == "named"
+    assert Song(SiteTypes.YT_DLP, URL).display_name == URL
+
+
+def test_format_output_of_a_title_less_song_shows_its_webpage_url():
+    for host in (SiteTypes.YT_DLP, SiteTypes.LOCAL_LIBRARY):
+        embed = Song(host, URL).format_output("Now playing")
+
+        assert "None" not in embed.description
+        assert URL in embed.description

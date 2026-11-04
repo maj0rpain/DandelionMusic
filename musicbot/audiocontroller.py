@@ -622,7 +622,7 @@ class AudioController(object):
             if self.command_channel:
                 await self.command_channel.send(
                     f"{config.SONGINFO_ERROR}\n"
-                    f"(Skipped: {song.title or song.webpage_url})"
+                    f"(Skipped: {song.display_name})"
                 )
                 if self._drop_if_overtaken(generation):
                     return
@@ -678,7 +678,7 @@ class AudioController(object):
         # voice client has accepted it, however it later ends. Reading
         # the queue head when a track ends names the wrong song once
         # next_song()/prev_song()/stop() have moved the queue.
-        self.playlist.add_name(song.title)
+        self.playlist.add_name(song.display_name)
 
         if was_idle:
             # only the transition into playing, so advancing through a
@@ -686,7 +686,7 @@ class AudioController(object):
             # returns above without claiming the flag, so whichever
             # track actually starts is the one that gets announced.
             print(
-                f"Started playing {(song.title or song.webpage_url)!r}"
+                f"Started playing {song.display_name!r}"
                 f" in guild {self.guild.name!r}"
             )
 
