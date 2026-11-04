@@ -118,14 +118,9 @@ def test_load_settings_fills_the_settings_half_only(sessions):
     assert list(sessions) == []
 
 
-def test_discard_disposes_the_controller_and_drops_both_halves(
-    controller, monkeypatch
-):
+def test_discard_disposes_the_controller_and_drops_both_halves(controller):
     # a real AudioController (tests/controller_seam.py), so dispose()
     # is the real one: its timer and pending tasks must not survive
-    from config import config
-
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
     guild = controller.guild
     sessions = GuildSessions(lambda g: controller, load_settings)
 
