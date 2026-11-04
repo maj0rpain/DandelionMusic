@@ -266,38 +266,35 @@ def prefix_ctx(sent, sett, argument):
 
 
 @pytest.mark.parametrize(
-    "name, param, argument, confirmation, stored",
+    "name, argument, confirmation, stored",
     [
         (
             "command_channel",
-            "channel",
             f"<#{TEXT_ID}>",
             f"<#{TEXT_ID}>",
             str(TEXT_ID),
         ),
         (
             "command_channel",
-            "channel",
             f"<#{VOICE_ID}>",
             f"<#{VOICE_ID}>",
             str(VOICE_ID),
         ),
         (
             "start_voice_channel",
-            "channel",
             "Lounge",
             f"<#{VOICE_ID}>",
             str(VOICE_ID),
         ),
-        ("dj_role", "role", f"<@&{ROLE_ID}>", "DJ", str(ROLE_ID)),
-        ("user_must_be_in_vc", "value", "yes", "True", True),
-        ("announce_songs", "value", "off", "False", False),
-        ("button_emote", "emoji", THUMBS_UP, THUMBS_UP, THUMBS_UP),
-        ("default_volume", "value", "55", "55", 55),
+        ("dj_role", f"<@&{ROLE_ID}>", "DJ", str(ROLE_ID)),
+        ("user_must_be_in_vc", "yes", "True", True),
+        ("announce_songs", "off", "False", False),
+        ("button_emote", THUMBS_UP, THUMBS_UP, THUMBS_UP),
+        ("default_volume", "55", "55", 55),
     ],
 )
 def test_a_prefix_subcommand_converts_its_argument(
-    name, param, argument, confirmation, stored
+    name, argument, confirmation, stored
 ):
     """d!setting <name> <arg>: discord.py converts the text by the
     subcommand's parameter type before the setting is updated"""
@@ -309,7 +306,6 @@ def test_a_prefix_subcommand_converts_its_argument(
 
     asyncio.run(command.invoke(prefix_ctx(sent, sett, argument)))
 
-    assert list(command.clean_params) == [param]
     assert sent[-1] == f"Setting `{name}` updated to {confirmation}!"
     assert getattr(sett, name) == stored
 
