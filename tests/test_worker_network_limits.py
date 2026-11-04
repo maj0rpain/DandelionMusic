@@ -99,7 +99,10 @@ def api():
 def test_build_spotify_api_gives_both_clients_the_capped_session(api):
     for session in (api._session, api.auth_manager._session):
         retry = session.get_adapter("https://api.spotify.com").max_retries
+        assert retry.total == Spotify.max_retries
+        assert retry.status == Spotify.max_retries
         assert retry.retry_after_max == linkutils.RETRY_AFTER_MAX
+        assert 429 in retry.status_forcelist
 
 
 def test_build_spotify_api_bounds_the_token_request(api):
