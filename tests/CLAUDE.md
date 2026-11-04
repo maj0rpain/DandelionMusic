@@ -10,6 +10,8 @@ Only the parts that need no Discord connection: config loading, `Playlist`, save
 
 `tests/controller_seam.py` builds an `AudioController` over a stub `musicbot.loader`, a fake bot/guild/voice client and a `tmp_path` cwd. Use it through the `controller` and `stub_loader` fixtures rather than building a controller by hand.
 
+`tests/controller_helpers.py` holds the controller helpers the controller test modules share (`_settle`, `_songs`, `_queue`, `_run`, `_run_intent`, `_backup`, `_fake_ffmpeg`, `_preloaded`, ...); import them from there, never from `test_audiocontroller`.
+
 `tests/db_seam.py` holds `in_memory_db(settings)`, an async context manager yielding a sessionmaker over a fresh in-memory sqlite database migrated by `settings.run_migrations`; the saved-playlists and AudioController tests share it.
 
 `tests/setting_fakes.py` holds the fakes the setting test modules share (`fake_bot`, `FakeDbSession`, `fake_channel`, ...); import them from there, never from another test module.

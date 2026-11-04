@@ -18,7 +18,7 @@ from musicbot.commands.music import Music
 from musicbot.linkutils import SiteTypes
 from musicbot.song import PartialPlaylist, Song
 from musicbot.truncation import Truncation, TruncationReason
-from test_audiocontroller import _songs
+from controller_helpers import _songs
 
 
 def _queued_playlist_class(controller):
