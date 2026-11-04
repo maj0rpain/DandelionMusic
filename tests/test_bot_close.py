@@ -120,10 +120,9 @@ def test_failing_disconnect_does_not_stop_close_and_names_the_guild(
     err = capsys.readouterr().err
     assert (
         calls,
-        "Broken Guild" in err,
         "boom" in err,
         "Disconnect failed for guild Broken Guild:" in err,
-    ) == (["stop", "shutdown", "discord"], True, True, True)
+    ) == (["stop", "shutdown", "discord"], True, True)
 
 
 def test_failing_link_stop_runs_the_rest_then_raises(monkeypatch):

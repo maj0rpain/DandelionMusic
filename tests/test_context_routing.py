@@ -9,9 +9,8 @@ from discord.ext import commands
 from musicbot.bot import Context
 
 
-def make_ctx(response_done):
-    ctx = object.__new__(Context)
-    interaction = SimpleNamespace(
+def make_interaction(response_done):
+    return SimpleNamespace(
         response=SimpleNamespace(
             is_done=lambda: response_done,
             send_message=AsyncMock(return_value="first"),
@@ -19,6 +18,11 @@ def make_ctx(response_done):
         followup=SimpleNamespace(send=AsyncMock(return_value="followup")),
         original_response=AsyncMock(return_value="original"),
     )
+
+
+def make_ctx(response_done):
+    ctx = object.__new__(Context)
+    interaction = make_interaction(response_done)
     ctx.interaction = interaction
     return ctx, interaction
 
@@ -104,7 +108,7 @@ def make_no_controller_ctx(monkeypatch, interaction):
 
 
 def test_no_controller_with_interaction_sends_message(monkeypatch):
-    _, interaction = make_ctx(False)
+    interaction = make_interaction(False)
     ctx, parent = make_no_controller_ctx(monkeypatch, interaction)
     assert asyncio.run(ctx.send("x")) == "first"
     interaction.response.send_message.assert_awaited_once_with("x")
@@ -113,7 +117,7 @@ def test_no_controller_with_interaction_sends_message(monkeypatch):
 
 
 def test_no_controller_with_done_interaction_sends_followup(monkeypatch):
-    _, interaction = make_ctx(True)
+    interaction = make_interaction(True)
     ctx, parent = make_no_controller_ctx(monkeypatch, interaction)
     assert asyncio.run(ctx.send("x")) == "followup"
     interaction.followup.send.assert_awaited_once_with("x")
@@ -144,7 +148,7 @@ def test_other_triggers_skip_the_view_with_interaction(monkeypatch):
         ({"ephemeral": True}, None),
         ({}, object()),
     ):
-        _, interaction = make_ctx(False)
+        interaction = make_interaction(False)
         ctx, parent, controller = make_send_ctx(
             monkeypatch, interaction, channel
         )
@@ -163,14 +167,14 @@ def test_reference_is_stripped_for_the_parent_send(monkeypatch):
 
 
 def test_reference_is_stripped_for_the_interaction(monkeypatch):
-    _, interaction = make_ctx(False)
+    interaction = make_interaction(False)
     ctx, _, _ = make_send_ctx(monkeypatch, interaction)
     asyncio.run(ctx.send("x", view="V", reference="R"))
     interaction.response.send_message.assert_awaited_once_with("x", view="V")
 
 
 def test_view_path_not_done_returns_original_response(monkeypatch):
-    _, interaction = make_ctx(False)
+    interaction = make_interaction(False)
     ctx, _, _ = make_send_ctx(monkeypatch, interaction)
     assert asyncio.run(ctx.send("x")) == "original"
     interaction.response.send_message.assert_awaited_once_with(
@@ -179,7 +183,7 @@ def test_view_path_not_done_returns_original_response(monkeypatch):
 
 
 def test_view_path_done_returns_followup_result(monkeypatch):
-    _, interaction = make_ctx(True)
+    interaction = make_interaction(True)
     ctx, _, _ = make_send_ctx(monkeypatch, interaction)
     assert asyncio.run(ctx.send("x")) == "followup"
     interaction.followup.send.assert_awaited_once_with("x", view="VIEW")
@@ -187,7 +191,7 @@ def test_view_path_done_returns_followup_result(monkeypatch):
 
 
 def test_response_send_message_with_interaction(monkeypatch):
-    _, interaction = make_ctx(False)
+    interaction = make_interaction(False)
     ctx, parent, _ = make_send_ctx(monkeypatch, interaction)
     assert asyncio.run(ctx.response_send_message("x")) == "first"
     interaction.response.send_message.assert_awaited_once_with("x")
