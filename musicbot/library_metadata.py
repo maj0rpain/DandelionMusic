@@ -474,15 +474,13 @@ async def _embedded_art(sample_file: Path) -> Optional[ArtInfo]:
         )
     except asyncio.TimeoutError:
         print(
-            f"{_LOG_PREFIX}reading artwork from {sample_file}"
-            " timed out",
+            f"{_LOG_PREFIX}reading artwork from {sample_file} timed out",
             file=sys.stderr,
         )
         return None
     except Exception as e:
         print(
-            f"{_LOG_PREFIX}reading artwork from {sample_file}"
-            f" failed: {e}",
+            f"{_LOG_PREFIX}reading artwork from {sample_file} failed: {e}",
             file=sys.stderr,
         )
         return None
