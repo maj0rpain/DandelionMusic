@@ -44,7 +44,7 @@ def test_song_path_makes_no_resolve_call_after_build(root, monkeypatch):
 
 
 @pytest.mark.parametrize("value", ["", "missing"])
-def test_unset_or_not_a_directory_matches_today(
+def test_unset_or_not_a_directory_falls_back_to_resolving_the_config_path(
     root, monkeypatch, tmp_path, value
 ):
     library.build_index()
@@ -56,7 +56,9 @@ def test_unset_or_not_a_directory_matches_today(
     )
 
 
-def test_resolve_oserror_during_build_matches_today(root, monkeypatch):
+def test_resolve_oserror_during_build_falls_back_to_resolving_the_config_path(
+    root, monkeypatch
+):
     original = Path.resolve
 
     def boom(self, *a, **kw):
