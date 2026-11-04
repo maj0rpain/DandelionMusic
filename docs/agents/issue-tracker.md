@@ -1,8 +1,6 @@
 # Issue tracker: GitHub
 
-Issues and specs for this repo live as GitHub issues on **`maj0rpain/DandelionMusic`** (the fork this checkout's `origin` points at). Use the `gh` CLI for all operations.
-
-**Always pass `--repo maj0rpain/DandelionMusic` explicitly.** This clone also has a remote for the original project (`solaluset/DandelionMusic`), and `gh`'s default repo resolution picks *that* one — a bare `gh issue create` would file against the upstream project. The same rule applies to `gh pr create` (see `CLAUDE.md`).
+Issues and specs for this repo live as GitHub issues on **`maj0rpain/DandelionMusic`**. Use the `gh` CLI for all operations.
 
 ## Conventions
 
