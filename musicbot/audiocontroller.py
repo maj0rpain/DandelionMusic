@@ -199,19 +199,18 @@ class AudioController(object):
         self.set_volume(min(self.volume + 10, 100))
 
     def volume_down(self):
-        self.set_volume(max(self.volume - 10, 10))
+        self.set_volume(max(self.volume - 10, 0))
 
     async def register_voice_channel(self, channel: discord.VoiceChannel):
         await utils.connect_to(self.guild, channel)
 
     def make_view(self):
         if not self.is_active():
-            self._last_view = None
             return None
 
         is_empty = len(self.playlist) == 0
 
-        view = self._last_view = discord.ui.View(timeout=None)
+        view = discord.ui.View(timeout=None)
         view.add_item(
             MusicButton(
                 lambda _: self.prev_song(),
@@ -285,7 +284,7 @@ class AudioController(object):
                 lambda _: self.volume_down(),
                 custom_id="volume_down",
                 row=2,
-                disabled=self.volume == 10,
+                disabled=self.volume == 0,
                 emoji="🔉",
             )
         )
@@ -299,9 +298,12 @@ class AudioController(object):
             )
         )
 
-        return self._last_view
+        return view
 
     async def current_song_callback(self, ctx):
+        if self.current_song is None:
+            await ctx.send(config.QUEUE_EMPTY)
+            return
         await ctx.send(
             embed=self.current_song.format_output(config.SONGINFO_SONGINFO),
         )
@@ -322,7 +324,9 @@ class AudioController(object):
         """
         async with self.message_lock:
             await self.update_view(None)
-            res = await send(self.make_view())
+            view = self.make_view()
+            res = await send(view)
+            self._last_view = view
             if isinstance(res, discord.Interaction):
                 self._last_message = await res.original_response()
             else:
@@ -348,6 +352,7 @@ class AudioController(object):
             return
         try:
             await msg.edit(view=view)
+            self._last_view = view
         except discord.HTTPException as e:
             if e.code == 50027:  # Invalid Webhook Token
                 try:

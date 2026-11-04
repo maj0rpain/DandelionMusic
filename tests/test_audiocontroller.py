@@ -1141,3 +1141,130 @@ def test_a_track_end_after_the_idle_timer_expired_starts_it_again(
         return controller.timer._task
 
     assert asyncio.run(run()) is not None
+
+
+def _button(view, custom_id):
+    return next(c for c in view.children if c.custom_id == custom_id)
+
+
+def test_volume_down_lowers_the_volume_to_zero_from_five(controller):
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
+    controller.set_volume(5)
+
+    controller.volume_down()
+
+    assert controller.volume == 0
+
+
+def test_the_volume_down_button_is_disabled_at_zero_only(controller):
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
+
+    controller.set_volume(10)
+    assert not _button(controller.make_view(), "volume_down").disabled
+    controller.set_volume(0)
+    view = controller.make_view()
+    assert _button(view, "volume_down").disabled
+    assert not _button(view, "volume_up").disabled
+    controller.set_volume(100)
+    assert _button(controller.make_view(), "volume_up").disabled
+
+
+class _FakeCtx:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, *args, **kwargs):
+        self.sent.append((args, kwargs))
+
+
+def test_a_current_song_click_with_no_current_song_replies_queue_empty(
+    controller,
+):
+    from config import config
+
+    ctx = _FakeCtx()
+
+    asyncio.run(controller.current_song_callback(ctx))
+
+    assert ctx.sent == [((config.QUEUE_EMPTY,), {})]
+
+
+def test_a_current_song_click_while_a_track_plays_shows_the_song_info(
+    controller,
+):
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
+    ctx = _FakeCtx()
+
+    asyncio.run(controller.current_song_callback(ctx))
+
+    assert len(ctx.sent) == 1 and "embed" in ctx.sent[0][1]
+
+
+def _http_exception(status, code):
+    import discord
+
+    class _Response:
+        def __init__(self):
+            self.status = status
+            self.reason = "x"
+
+    return discord.HTTPException(_Response(), {"code": code, "message": "x"})
+
+
+class _FlakyMessage(_FakeMessage):
+    """Fails its first edit with `error`, then edits normally."""
+
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+        self.id = 1
+        self.channel = self
+
+    async def edit(self, *, view):
+        if self.error:
+            error, self.error = self.error, None
+            raise error
+        self.edits.append(view)
+
+    async def fetch_message(self, _id):
+        return self
+
+
+async def _ret(value):
+    return value
+
+
+def test_the_retry_after_an_expired_token_edit_applies_the_view(controller):
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
+    message = _FlakyMessage(_http_exception(401, 50027))
+
+    async def run():
+        await controller.attach_view(lambda view: _ret(message))
+        controller.set_volume(0)  # the buttons now differ
+        await controller.update_view()
+
+    asyncio.run(run())
+
+    assert len(message.edits) == 1 and message.edits[0] is not None
+
+
+def test_a_refresh_after_a_failed_edit_applies_the_view_again(
+    controller, capsys
+):
+    _queue(controller, "current")
+    voice = controller.guild.voice_client
+    message = _FlakyMessage(_http_exception(500, 0))
+
+    async def run():
+        await controller.attach_view(lambda view: _ret(message))
+        voice.playing = True
+        await controller.update_view()
+        await controller.update_view()
+
+    asyncio.run(run())
+
+    assert len(message.edits) == 1 and message.edits[0] is not None
