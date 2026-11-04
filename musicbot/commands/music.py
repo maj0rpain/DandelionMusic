@@ -487,7 +487,7 @@ class Music(commands.Cog):
             return
 
         if value > 100 or value < 0:
-            await ctx.send("Error: Volume must be a number 1-100")
+            await ctx.send("Error: Volume must be a number 0-100")
             return
 
         if ctx.audiocontroller.volume >= value:
