@@ -733,15 +733,12 @@ def test_component_from_an_earlier_scope_is_acknowledged_and_ignored(
         view, clicks = await _view_at_paged_artist()
         kept = next(i for i in clicks.shown if isinstance(i, kind))
         await finish(
-            clicks.click(
-                LibrarySelect, clicks.interaction(), label="Album 00"
-            )
+            clicks.click(LibrarySelect, clicks.interaction(), label="Album 00")
         )
         where = (view.cursor.artist, view.cursor.album, view.cursor.page)
         picking = clicks.interaction()
-        picking.data = {"values": ["1"]}
         if kind is LibrarySelect:
-            kept._refresh_state(picking, picking.data)
+            pick(kept, picking, "Album 01")
         await kept.callback(picking)
         return view, where, picking
 
