@@ -264,14 +264,14 @@ def joining_command(func):
 
 def join_needed(ctx: Context) -> bool:
     """Whether the bot has to join the user's voice channel before a
-    music command or a search pick runs: it has no voice client (a
-    connect), or user_must_be_in_vc is on, its channel has only bots
-    and the user is in another one (a move). Only a joining command
-    ever needs to: when ctx.command is set but not marked with
-    @joining_command, this is False and the command answers without
-    touching voice. A button's context has no command, so this reads
-    only the voice state; a button decides in its own code whether to
-    ask at all."""
+    joining command, or a pick acting in its name, runs: it has no
+    voice client (a connect), or user_must_be_in_vc is on, its channel
+    has only bots and the user is in another one (a move). Only a
+    joining command ever needs to: when ctx.command is set but not
+    marked with @joining_command, this is False and the command
+    answers without touching voice. A button's context has no command,
+    so this reads only the voice state; a button decides in its own
+    code whether to ask at all."""
     command = getattr(ctx, "command", None)
     if command is not None and not getattr(
         command.callback, "_joining_command", False
