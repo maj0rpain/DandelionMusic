@@ -532,6 +532,8 @@ def test_the_same_album_twice_calls_each_backend_once(
 
     assert len(session.queries) == 1
     assert len(client.searches) == 1
+
+
 def test_stalled_spotify_does_not_starve_file_reads(
     tmp_path, spotify, no_lastfm
 ):
@@ -594,10 +596,6 @@ def assert_default_limits(client):
 
 
 def test_low_limit_client_shares_the_auth_manager_with_low_limits():
-    import inspect
-
-    from spotipy import Spotify
-
     auth = object()
     source = Spotify(auth_manager=auth)
 
@@ -608,9 +606,7 @@ def test_low_limit_client_shares_the_auth_manager_with_low_limits():
     assert client.requests_timeout == 3
     assert client.retries == 0
     assert client.status_retries == 0
-    params = inspect.signature(Spotify.__init__).parameters
-    for name in ("requests_timeout", "retries", "status_retries"):
-        assert getattr(source, name) == params[name].default, name
+    assert_default_limits(source)
 
 
 def test_low_limit_client_of_none_is_none():
