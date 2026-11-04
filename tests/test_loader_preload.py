@@ -103,6 +103,35 @@ def test_a_caller_awaiting_an_inflight_extraction_is_told_its_outcome(
     assert asyncio.run(run()) == (first, second)
 
 
+def test_cancelling_one_waiter_leaves_the_owner_and_other_waiters_alone(
+    monkeypatch,
+):
+    async def run():
+        release = asyncio.Event()
+
+        async def load_song(track):
+            await release.wait()
+            return Song(SiteTypes.YT_DLP, track, url="https://s.invalid")
+
+        monkeypatch.setattr(loader, "load_song", load_song)
+        song = _song()
+        owner = asyncio.create_task(loader.preload(song))
+        await asyncio.sleep(0)
+        cancelled = asyncio.create_task(loader.preload(song))
+        other = asyncio.create_task(loader.preload(song))
+        await asyncio.sleep(0)
+        cancelled.cancel()
+        await asyncio.sleep(0)
+        release.set()
+        return await asyncio.gather(
+            owner, cancelled, other, return_exceptions=True
+        )
+
+    owner, cancelled, other = asyncio.run(run())
+    assert isinstance(cancelled, asyncio.CancelledError)
+    assert (owner, other) == (Preload.EXTRACTED, Preload.CURRENT)
+
+
 def test_the_controller_seams_stub_preload_matches_the_real_one():
     from controller_seam import StubLoader
 
