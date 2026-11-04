@@ -24,6 +24,7 @@ from musicbot.sessions import GuildSessions
 from musicbot.utils import (
     CheckError,
     chunks,
+    dj_check,
     get_audiocontroller,
     get_settings,
     owner_check,
@@ -323,6 +324,22 @@ class TestPlayCheck:
         ctx = voice_ctx(guild, guild.channel("b", humans=1))
         assert asyncio.run(play_check(ctx)) is True
         assert guild.events == []
+
+
+class TestDjCheck:
+    def ctx(self, **kwargs):
+        return voice_ctx(VoiceGuild(), **kwargs)
+
+    def test_admits_when_no_dj_role_is_set(self):
+        assert asyncio.run(dj_check(self.ctx())) is True
+
+    def test_admits_a_dj_role_holder(self):
+        ctx = self.ctx(dj_role=99, roles=[99])
+        assert asyncio.run(dj_check(ctx)) is True
+
+    def test_refuses_a_member_without_the_set_dj_role(self):
+        ctx = self.ctx(dj_role=99, roles=[5])
+        assert refusal(dj_check(ctx)) == config.NOT_A_DJ
 
 
 class TestVoiceCheckBypass:
