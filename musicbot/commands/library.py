@@ -87,6 +87,19 @@ def _trim(text: str, limit: int) -> str:
     return text
 
 
+def _select_options(pairs) -> List[discord.SelectOption]:
+    """Select options from `(label, kind)` pairs: the trimmed label,
+    the pair's position as the value, the kind's emoji."""
+    return [
+        discord.SelectOption(
+            label=_trim(label, SELECT_LABEL_LIMIT),
+            value=str(i),
+            emoji=KIND_EMOJI[kind],
+        )
+        for i, (label, kind) in enumerate(pairs)
+    ]
+
+
 def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
     """Renders as "42:39" under an hour and "11h 23m" above it - an
     album runtime and a whole discography's runtime want different
@@ -168,14 +181,7 @@ class LibrarySelect(_BrowseItem, discord.ui.Select):
         super().__init__(
             browse_view,
             placeholder="Choose...",
-            options=[
-                discord.SelectOption(
-                    label=_trim(label, SELECT_LABEL_LIMIT),
-                    value=str(i),
-                    emoji=KIND_EMOJI[kind],
-                )
-                for i, label in enumerate(labels)
-            ],
+            options=_select_options((label, kind) for label in labels),
         )
 
     async def on_click(self, interaction: discord.Interaction):
@@ -368,6 +374,8 @@ class LibraryView(OwnedView):
             self._busy -= 1
 
     def claim_click(self) -> bool:
+        # Records no claim: a pure read of _busy, which busy() takes
+        # and releases around the work, not per click.
         # (Why a click reaches this check during a redraw: see
         # _busy.) Acknowledged silently rather than answered with an
         # ephemeral complaint. The clicks the guard catches are the
@@ -921,14 +929,7 @@ class SearchSelect(discord.ui.Select):
         self.search_view = search_view
         super().__init__(
             placeholder="Choose...",
-            options=[
-                discord.SelectOption(
-                    label=_trim(result.label, SELECT_LABEL_LIMIT),
-                    value=str(i),
-                    emoji=KIND_EMOJI[result.kind],
-                )
-                for i, result in enumerate(results)
-            ],
+            options=_select_options((r.label, r.kind) for r in results),
         )
 
     async def callback(self, interaction: discord.Interaction):
