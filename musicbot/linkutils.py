@@ -287,7 +287,7 @@ def fetch_playlist_with_api(
     return SpotifyTracks(links, total, reason)
 
 
-_spotify_uri_regex = re.compile(r"spotify:(track|album|playlist):(\w+)")
+_spotify_uri_regex = re.compile(r"(?i:spotify):(track|album|playlist):(\w+)")
 _TRAILING_PUNCTUATION = ".,!?;:"
 
 

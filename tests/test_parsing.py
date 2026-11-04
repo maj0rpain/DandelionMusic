@@ -160,6 +160,14 @@ SPOTIFY_ID = "4cOdK2wGLETKBW3PvgPWqT"
             f"spotify:track:{SPOTIFY_ID}.",
             f"https://open.spotify.com/track/{SPOTIFY_ID}",
         ),
+        (
+            f"SPOTIFY:track:{SPOTIFY_ID}",
+            f"https://open.spotify.com/track/{SPOTIFY_ID}",
+        ),
+        (
+            f"Spotify:album:{SPOTIFY_ID}.",
+            f"https://open.spotify.com/album/{SPOTIFY_ID}",
+        ),
         ("never gonna give you up.", "never gonna give you up."),
         ("  never gonna give you up  ", "never gonna give you up"),
         ("hello.", "hello."),
