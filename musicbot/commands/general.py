@@ -1,5 +1,6 @@
 from __future__ import annotations
 import asyncio
+from typing import Optional
 
 import discord
 from discord.ext import commands
@@ -20,6 +21,23 @@ from musicbot.utils import (
 # the group's default subcommand, and the one word that is not an
 # unknown setting
 SHOW_SUBCOMMAND = "show"
+
+
+def _unmatched_word(ctx) -> Optional[str]:
+    """The word after the command name that matched no subcommand, or
+    None when there is none (a slash invocation, or a bare command).
+    Leaves the view where it was."""
+    # discord.py clears ctx.subcommand_passed before the group callback
+    # runs, but leaves the view at the word after the command name
+    # (empty on a slash invocation): a prefix subcommand never reaches
+    # the callback, so that word matched none. skip_ws is needed as the
+    # view stops before the whitespace, and one undo() could not
+    # restore it, as get_word sets previous past the skipped whitespace
+    start = ctx.view.index
+    ctx.view.skip_ws()
+    word = ctx.view.get_word()
+    ctx.view.index = start
+    return word or None
 
 
 async def _apply_setting(ctx, descriptor: SettingDescriptor, value):
@@ -164,13 +182,9 @@ class General(commands.Cog):
         invoke_without_command=True,
     )
     async def _settings(self, ctx: commands.Context):
-        # discord.py clears ctx.subcommand_passed before this callback
-        # runs, but leaves the view at the word after the command name
-        # (empty on a slash invocation): a prefix subcommand never
-        # reaches here, so that word matched none
-        words = ctx.view.buffer[ctx.view.index :].split(None, 1)
-        if words and words[0] != SHOW_SUBCOMMAND:
-            raise CheckError(config.UNKNOWN_SETTING.format(words[0]))
+        word = _unmatched_word(ctx)
+        if word is not None and word != SHOW_SUBCOMMAND:
+            raise CheckError(config.UNKNOWN_SETTING.format(word))
         sett = get_settings(ctx)
         await ctx.send(embed=sett.format(ctx))
 

@@ -15,7 +15,7 @@ from discord.ext import commands
 from discord.ext.commands.view import StringView
 
 from config import config
-from musicbot.commands.general import General
+from musicbot.commands.general import General, _unmatched_word
 from musicbot.utils import CheckError
 from test_settings_update_failure import (
     FakeDbSession,
@@ -154,3 +154,34 @@ def test_the_slash_show_fallback_has_no_parameters():
     app_group = setting_group(General(None)).app_command
 
     assert app_group.get_command("show").parameters == []
+
+
+def test_the_group_on_an_empty_view_sends_exactly_the_settings_embed():
+    cog = General(None)
+    sett = stored_settings()
+    sett.guild_id = "1"
+    ctx = build_ctx("", sett)
+
+    asyncio.run(setting_group(cog).callback(cog, ctx))
+
+    [(content, embed)] = ctx.sent
+    assert content is None
+    assert isinstance(embed, discord.Embed)
+
+
+def test_extra_whitespace_before_an_unknown_word_is_still_unknown():
+    sent, error, sett = invoke("  foo")
+
+    assert isinstance(error, CheckError)
+    assert str(error) == "Unknown setting `foo`"
+    assert sent == []
+
+
+@pytest.mark.parametrize("text", ["", "  ", "foo", "  foo bar", " show"])
+def test_the_unmatched_word_leaves_the_view_index_unchanged(text):
+    ctx = types.SimpleNamespace(view=StringView(text))
+
+    word = _unmatched_word(ctx)
+
+    assert ctx.view.index == 0
+    assert word == (text.split(None, 1) or [None])[0]
