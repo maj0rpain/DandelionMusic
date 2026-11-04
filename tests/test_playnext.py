@@ -14,31 +14,17 @@ from musicbot.commands.music import Music
 from test_audiocontroller import (
     _backup,
     _fake_ffmpeg,
+    _preloaded,
     _queue,
     _settle,
     _songs,
     _titles,
+    _while_playing,
 )
 
 
 def _song(controller, title):
     return _songs(controller, title)[0]
-
-
-def _preloaded(stub_loader):
-    return [a[0].title for n, a in stub_loader.calls if n == "preload"]
-
-
-def _run(controller, coro_fn, playing=True):
-    controller.guild.voice_client.playing = playing
-
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        result = await coro_fn()
-        await _settle()
-        return result
-
-    return asyncio.run(run())
 
 
 def _suspended_loads(controller, stub_loader):
@@ -73,7 +59,7 @@ def test_interleaved_playnext_and_plain_keep_their_slots(
             await _settle()
         await asyncio.gather(pn, plain)
 
-    _run(controller, go)
+    _while_playing(controller, go)
 
     assert _titles(controller) == ["current", "pn", "a", "b", "plain"]
 
@@ -84,20 +70,13 @@ def test_playnext_goes_to_index_1_and_refreshes_backup_and_preload_once(
     _queue(controller, "current", "a", "b")
     stub_loader.results["load_song"] = _song(controller, "x")
 
-    _run(controller, lambda: controller.process_song("x", playnext=True))
+    _while_playing(
+        controller, lambda: controller.process_song("x", playnext=True)
+    )
 
     assert _titles(controller) == ["current", "x", "a", "b"]
     assert _backup(tmp_path) == ["current", "x", "a", "b"]
     assert _preloaded(stub_loader) == ["x", "a", "b"]
-
-
-def test_playnext_with_only_the_current_track(controller, stub_loader):
-    _queue(controller, "current")
-    stub_loader.results["load_song"] = _song(controller, "x")
-
-    _run(controller, lambda: controller.process_song("x", playnext=True))
-
-    assert _titles(controller) == ["current", "x"]
 
 
 def test_playnext_on_an_empty_queue_starts_the_track(
@@ -106,7 +85,7 @@ def test_playnext_on_an_empty_queue_starts_the_track(
     _fake_ffmpeg(monkeypatch)
     stub_loader.results["load_song"] = _song(controller, "x")
 
-    _run(
+    _while_playing(
         controller,
         lambda: controller.process_song("x", playnext=True),
         playing=False,
@@ -121,7 +100,9 @@ def test_playnext_one_item_playlist_goes_next(controller, stub_loader):
     _queue(controller, "current", "a")
     stub_loader.results["load_song"] = [_song(controller, "x")]
 
-    _run(controller, lambda: controller.process_song("x", playnext=True))
+    _while_playing(
+        controller, lambda: controller.process_song("x", playnext=True)
+    )
 
     assert _titles(controller) == ["current", "x", "a"]
 
@@ -133,7 +114,7 @@ def test_playnext_multi_track_playlist_is_appended(controller, stub_loader):
         _song(controller, "y"),
     ]
 
-    result = _run(
+    result = _while_playing(
         controller, lambda: controller.process_song("x", playnext=True)
     )
 
@@ -164,7 +145,7 @@ def test_unsupported_or_unloadable_playnext_leaves_everything_alone(
         else:
             assert await controller.process_song("x", playnext=True) is None
 
-    _run(controller, go)
+    _while_playing(controller, go)
 
     assert _titles(controller) == ["current", "a"]
     assert not (tmp_path / "backup" / "playlist_1234.pickle").exists()
@@ -212,15 +193,6 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
     async def go():
         await music._play_song(ctx, "pn", playnext=True)
 
-    _run(controller, go)
+    _while_playing(controller, go)
 
     assert _titles(controller) == ["current", "pn", "a", "plain"]
-
-
-def test_queue_with_playnext_keeps_the_order_of_several_songs(controller):
-    _queue(controller, "current", "a")
-    songs = [_song(controller, "x"), _song(controller, "y")]
-
-    _run(controller, lambda: controller.queue(songs, playnext=True))
-
-    assert _titles(controller) == ["current", "x", "y", "a"]

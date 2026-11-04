@@ -722,16 +722,19 @@ class AudioController(object):
             self._preload_queue()
 
     async def queue(self, songs: Iterable[Song], playnext=False):
-        """Appends `songs` to the queue (with `playnext`, puts them
-        directly after the current track instead, in their order),
-        refreshes the backup
-        and starts playing if nothing is (see ensure_playing()).
+        """Appends `songs` to the queue (with `playnext`, puts
+        them directly after the current track instead), refreshes the
+        backup and starts playing if nothing is (see ensure_playing()).
+
+        `playnext` is meant for a single song, the only use
+        process_song makes of it; several songs passed with it are not
+        kept in order.
 
         Placement happens before the first await, so no other command
         can slip between a playnext track and its slot."""
-        for offset, song in enumerate(songs):
+        for song in songs:
             if playnext:
-                self.playlist.insert_next(song, offset)
+                self.playlist.insert_next(song)
             else:
                 self.playlist.add(song)
         self._pickle_playlist()

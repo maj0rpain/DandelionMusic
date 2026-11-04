@@ -52,12 +52,11 @@ class Playlist:
     def add(self, track: Song):
         self.playque.append(track)
 
-    def insert_next(self, track: Song, offset=0):
-        """Puts `track` directly after the current track (`offset`
-        tracks further, to keep several inserted ones in order); on an
-        empty queue it becomes the head."""
+    def insert_next(self, track: Song):
+        """Puts `track` directly after the current track; on an empty
+        queue it becomes the head."""
         if self.playque:
-            self.playque.insert(1 + offset, track)
+            self.playque.insert(1, track)
         else:
             self.playque.append(track)
 
