@@ -174,22 +174,22 @@ def _front_cover(pictures):
     """Picks the front cover out of a file's embedded pictures. Taking
     the first one blindly shows a 32x32 "file icon" (picture type 1) or
     a back cover as the album art in files that store one of those
-    first; falls back to the first picture when none is marked."""
+    first; falls back to the first picture when none is marked.
+    Returns (data, mime), or None when there are no pictures."""
     for picture in pictures:
         if picture.type == PictureType.COVER_FRONT:
-            return picture
-    return pictures[0] if pictures else None
+            return picture.data, picture.mime
+    if pictures:
+        return pictures[0].data, pictures[0].mime
+    return None
 
 
 def _id3_cover(audio):
-    apics = audio.tags.getall("APIC") if audio.tags else []
-    picture = _front_cover(apics)
-    return (picture.data, picture.mime) if picture is not None else None
+    return _front_cover(audio.tags.getall("APIC") if audio.tags else [])
 
 
 def _flac_cover(audio):
-    picture = _front_cover(audio.pictures)
-    return (picture.data, picture.mime) if picture is not None else None
+    return _front_cover(audio.pictures)
 
 
 def _mp4_cover(audio):
