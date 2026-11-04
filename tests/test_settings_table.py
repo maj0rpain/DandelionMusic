@@ -10,13 +10,11 @@ import types
 import sqlalchemy
 
 from config import config
-from musicbot.settings import SETTINGS, GuildSettings
+from musicbot.settings import SETTINGS, GuildSettings, default_settings
 
 
 def test_each_setting_defaults_to_its_documented_value():
-    defaults = {name: d.default for name, d in SETTINGS.items()}
-
-    assert defaults == {
+    assert default_settings() == {
         "command_channel": None,
         "start_voice_channel": None,
         "dj_role": None,
@@ -160,3 +158,28 @@ def test_settings_embed_flags_ids_that_no_longer_resolve():
         "dj_role": "Invalid Role",
         "button_emote": "Invalid Emoji",
     }
+
+
+def test_every_server_default_column_stores_its_descriptors_default():
+    server_defaulted = [
+        c.name
+        for c in GuildSettings.__table__.columns
+        if c.server_default is not None
+    ]
+    engine = sqlalchemy.create_engine("sqlite://")
+    GuildSettings.metadata.create_all(engine)
+    left_out = set(server_defaulted)
+    values = {
+        c.name: SETTINGS[c.name].default if c.name != "guild_id" else "1"
+        for c in GuildSettings.__table__.columns
+        if c.name not in left_out
+    }
+    with sqlalchemy.orm.Session(engine) as session:
+        session.execute(
+            sqlalchemy.insert(GuildSettings.__table__).values(values)
+        )
+        row = session.get(GuildSettings, "1")
+        stored = {name: getattr(row, name) for name in server_defaulted}
+
+    assert server_defaulted
+    assert stored == {n: SETTINGS[n].default for n in server_defaulted}

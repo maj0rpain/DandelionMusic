@@ -252,9 +252,9 @@ def test_log_lines_carry_the_label_and_key(capsys):
 
     run(scenario())
     assert capsys.readouterr().err.splitlines() == [
-        "library_metadata: Fake artist timed out for a",
-        "library_metadata: Fake artist failed for b: boom",
-        "library_metadata: Fake artist found no match for c",
+        "Fake artist timed out for a",
+        "Fake artist failed for b: boom",
+        "Fake artist found no match for c",
     ]
 
 
