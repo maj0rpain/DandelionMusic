@@ -3,11 +3,11 @@ import os
 import sys
 import shlex
 import asyncio
+import builtins
 from io import StringIO
 from typing import List
 from textwrap import TextWrapper
 from traceback import print_exc
-from contextlib import redirect_stdout
 
 import discord
 from discord.ext import commands
@@ -126,11 +126,17 @@ class Developer(commands.Cog):
         }
 
         output = StringIO()
-        with redirect_stdout(output):
-            try:
-                await aexec(code, namespace)
-            except Exception:
-                print_exc(file=output)
+
+        def captured_print(*args, **kwargs):
+            if kwargs.get("file") is None:
+                kwargs["file"] = output
+            builtins.print(*args, **kwargs)
+
+        namespace["print"] = captured_print
+        try:
+            await aexec(code, namespace)
+        except Exception:
+            print_exc(file=output)
         output = output.getvalue()
 
         if output and not output.isspace():
@@ -155,7 +161,7 @@ class Developer(commands.Cog):
         usage="[action [guild id]]",
         invoke_without_command=True,
     )
-    @commands.is_owner()
+    @commands.check(owner_check)
     async def _guild_whitelist(self, ctx, *, inexistent_subcommand=None):
         if inexistent_subcommand is not None:
             await ctx.send("`Error: Unknown subcommand`")
@@ -177,14 +183,26 @@ class Developer(commands.Cog):
         await ctx.send("```\n" + "\n".join(lines) + "```")
 
     _show_guild_whitelist = _guild_whitelist.command(name="show")(
-        commands.is_owner()(_show_guild_whitelist_callback)
+        commands.check(owner_check)(_show_guild_whitelist_callback)
     )
 
     @_guild_whitelist.command(name="add")
-    @commands.is_owner()
+    @commands.check(owner_check)
     async def _guild_whitelist_add(self, ctx, *, id: str):
-        if await add_to_guild_whitelist(ctx.bot, int(id)):
-            await ctx.send("Whitelist updated.")
+        id = int(id)
+        if await add_to_guild_whitelist(ctx.bot, id):
+            if len(await get_guild_whitelist(ctx.bot)) == 1:
+                doomed = [g for g in ctx.bot.guilds if g.id != id]
+                message = "Whitelist updated, the whitelist is now enabled."
+                if doomed:
+                    message += (
+                        " The bot will leave these guilds at the next"
+                        " restart:\n"
+                        + "\n".join(f"{g.id} {g.name}" for g in doomed)
+                    )
+                await ctx.send(message)
+            else:
+                await ctx.send("Whitelist updated.")
         else:
             await ctx.send("That guild is already whitelisted.")
 
@@ -199,7 +217,7 @@ class Developer(commands.Cog):
         return all_guilds[:25]
 
     @_guild_whitelist.command(name="remove")
-    @commands.is_owner()
+    @commands.check(owner_check)
     @app_commands.autocomplete(id=_guild_whitelist_remove_autocomplete)
     async def _guild_whitelist_remove(
         self,
@@ -210,6 +228,13 @@ class Developer(commands.Cog):
         id = int(id.split()[-1])
         if not await remove_from_guild_whitelist(ctx.bot, id):
             await ctx.send("That guild is not whitelisted.")
+            return
+
+        if not await get_guild_whitelist(ctx.bot):
+            await ctx.send(
+                "Whitelist updated. The whitelist is now empty and"
+                " therefore disabled."
+            )
             return
 
         guild = ctx.bot.get_guild(id)

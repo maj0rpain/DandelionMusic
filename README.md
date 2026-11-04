@@ -65,6 +65,8 @@ Custom Cookies:
 
 You can find pre-built Docker image at https://hub.docker.com/repository/docker/solaluset/dandelion-music/
 
+The container runs as UID 1000 (user `app`). When upgrading an existing deployment, run `sudo chown -R 1000:1000 data/` once; without it the bot cannot write its database. Also either remove the `backup` volume or chown it the same way. If your host user is not UID 1000, you can instead set `user:` on the bot (`doybot`) service in the compose file and chown `data/` and the `backup` volume to that UID, accepting that the fallback `log.txt` and the yt-dlp/deno caches may then not be writable.
+
 See https://github.com/solaluset/DandelionMusic/wiki/Configuration for description of environment variables.
 
 ## Commands:

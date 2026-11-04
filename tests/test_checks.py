@@ -7,6 +7,7 @@ finished registering its guilds.
 
 import asyncio
 import contextlib
+import inspect
 import types
 
 import discord
@@ -218,6 +219,8 @@ def voice_ctx(
     command_channel=None,
     dj_role=None,
     admin=False,
+    owner=False,
+    roles=(),
 ):
     sett = types.SimpleNamespace(
         command_channel=command_channel,
@@ -225,10 +228,12 @@ def voice_ctx(
         dj_role=dj_role,
         vc_timeout=True,  # get_or_create() does not autojoin
     )
-    bot = make_bot({guild: "controller"}, settings={guild: sett})
+    bot = make_bot(
+        {guild: "controller"}, is_owner=owner, settings={guild: sett}
+    )
     author = types.SimpleNamespace(
         id=1,
-        roles=[],
+        roles=[types.SimpleNamespace(id=r) for r in roles],
         voice=(
             types.SimpleNamespace(channel=author_in) if author_in else None
         ),
@@ -318,6 +323,37 @@ class TestPlayCheck:
         ctx = voice_ctx(guild, guild.channel("b", humans=1))
         assert asyncio.run(play_check(ctx)) is True
         assert guild.events == []
+
+
+class TestVoiceCheckBypass:
+    def ctx(self, **kwargs):
+        guild = VoiceGuild()
+        guild.put_bot_in(guild.channel("a", humans=1))
+        return voice_ctx(guild, guild.channel("b", humans=1), **kwargs)
+
+    def test_refuses_a_member_when_no_dj_role_is_set(self):
+        ctx = self.ctx()
+        assert refusal(voice_check(ctx)) == config.USER_NOT_IN_VC_MESSAGE
+
+    def test_admits_an_admin(self):
+        assert asyncio.run(voice_check(self.ctx(admin=True))) is True
+
+    def test_admits_the_bot_owner(self):
+        assert asyncio.run(voice_check(self.ctx(owner=True))) is True
+
+    def test_admits_a_dj_role_holder(self):
+        ctx = self.ctx(dj_role=99, roles=[99])
+        assert asyncio.run(voice_check(ctx)) is True
+
+    def test_refuses_a_member_without_the_set_dj_role(self):
+        ctx = self.ctx(dj_role=99, roles=[5])
+        assert refusal(voice_check(ctx)) == config.USER_NOT_IN_VC_MESSAGE
+
+    def test_extra_owners_get_no_bypass(self, monkeypatch):
+        monkeypatch.setattr(config, "EXTRA_OWNERS", [1])
+        assert refusal(voice_check(self.ctx())) == (
+            config.USER_NOT_IN_VC_MESSAGE
+        )
 
 
 class TestJoinVoice:
@@ -796,3 +832,69 @@ class TestButtons:
         click(view.children[0], ctx, "pick")
         assert guild.events == [("connect", "a")]
         assert played == ["https://example.com/a"]
+
+
+SUBCOMMANDS = [
+    "load",
+    "remove",
+    "add_song",
+    "remove_song",
+    "move_song",
+    "show",
+    "list",
+    "save",
+]
+
+
+def commands_under_gate():
+    group = Music._playlist
+    subs = {c.name: c for c in group.commands}
+    assert set(SUBCOMMANDS) <= set(subs)
+    return [group] + [subs[n] for n in SUBCOMMANDS]
+
+
+async def run_checks(cmd, ctx):
+    for check in cmd.checks:
+        result = check(ctx)
+        if inspect.isawaitable(result):
+            await result
+
+
+@pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
+def test_refuses_while_disabled(cmd, monkeypatch):
+    monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
+    ctx = types.SimpleNamespace()
+    with pytest.raises(CheckError) as exc:
+        asyncio.run(run_checks(cmd, ctx))
+    assert str(exc.value) == config.PLAYLISTS_ARE_DISABLED
+
+
+@pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
+def test_gate_admits_while_enabled(cmd, monkeypatch):
+    monkeypatch.setattr(config, "ENABLE_PLAYLISTS", True)
+    gate = next(c for c in cmd.checks if c.__name__ == "playlists_enabled")
+    assert cmd.checks[0] is gate
+    assert gate(types.SimpleNamespace()) is True
+
+
+def test_autocomplete_offers_nothing_while_disabled(monkeypatch):
+    monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
+    cog = types.SimpleNamespace(bot=None)
+    interaction = types.SimpleNamespace(guild=None)
+    result = asyncio.run(Music._playlist_autocomplete(cog, interaction, ""))
+    assert result == []
+
+
+@pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
+def test_cog_check_gates_before_other_refusals(cmd, monkeypatch):
+    monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
+    # the registered cog holds per-instance copies of its commands
+    cog = Music(None)
+    group = cog._playlist
+    subs = {c.name: c for c in group.commands}
+    cmd = group if cmd.name == group.name else subs[cmd.name]
+    # no guild, channel or author: any other refusal would break differently
+    ctx = types.SimpleNamespace(command=cmd)
+    with pytest.raises(CheckError) as exc:
+        asyncio.run(cog.cog_check(ctx))
+    assert str(exc.value) == config.PLAYLISTS_ARE_DISABLED

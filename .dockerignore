@@ -2,7 +2,8 @@
 #
 # The Dockerfile does `COPY . .`, so anything left here is baked into
 # an image layer and ships with it - including to Docker Hub, which
-# .github/workflows/dockerhub.yml pushes to on every push to master.
+# the docker-publish job in .github/workflows/checks.yml pushes to on
+# every push to master (after lint, test and docker-build pass).
 # Secrets and local state must not be in that layer.
 #
 # The project is `virtual` in uv.lock, so `uv sync --frozen` never
