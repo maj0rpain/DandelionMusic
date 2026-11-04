@@ -11,13 +11,11 @@ import json
 import typing
 
 import pytest
-from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-from sqlalchemy.orm import sessionmaker
-from sqlalchemy.pool import StaticPool
+from db_seam import in_memory_db
 
-from musicbot import playlists
+from musicbot import playlists, settings
 from musicbot.playlists import PlaylistEntry, PlaylistRef
-from musicbot.settings import SavedPlaylist, run_migrations
+from musicbot.settings import SavedPlaylist
 
 GUILD = "123"
 MIX = PlaylistRef(GUILD, "mix")
@@ -26,22 +24,11 @@ GONE = PlaylistRef(GUILD, "gone")
 
 def run(test):
     """Runs ``test(session_factory)`` in one event loop against a fresh
-    in-memory database. StaticPool keeps the single connection the
-    in-memory database lives in alive across sessions."""
+    in-memory database."""
 
     async def main():
-        engine = create_async_engine(
-            "sqlite+aiosqlite://", poolclass=StaticPool
-        )
-        async with engine.connect() as conn:
-            await conn.run_sync(run_migrations)
-        factory = sessionmaker(
-            engine, expire_on_commit=False, class_=AsyncSession
-        )
-        try:
+        async with in_memory_db(settings) as factory:
             return await test(factory)
-        finally:
-            await engine.dispose()
 
     return asyncio.run(main())
 

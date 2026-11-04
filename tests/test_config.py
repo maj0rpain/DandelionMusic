@@ -51,13 +51,16 @@ class TestGetEnvVar:
 @pytest.mark.parametrize(
     "url, expected",
     [
-        ("sqlite:///settings.db", "sqlite+aiosqlite:///settings.db"),
-        ("postgres://h/d", "postgresql+asyncpg://h/d"),
-        ("mysql://h/d", "mysql+aiomysql://h/d"),
-        ("weird+driver://h/d", "weird+driver://h/d"),
-        ("postgresql://h/d", "postgresql+asyncpg://h/d"),
-        ("postgres+asyncpg://h/d", "postgresql+asyncpg://h/d"),
-        ("mysql+aiomysql://h/d", "mysql+aiomysql://h/d"),
+        (
+            "sqlite:///settings.db",
+            ("sqlite+aiosqlite:///settings.db", "aiosqlite"),
+        ),
+        ("postgres://h/d", ("postgresql+asyncpg://h/d", "asyncpg")),
+        ("mysql://h/d", ("mysql+aiomysql://h/d", "aiomysql")),
+        ("weird+driver://h/d", ("weird+driver://h/d", "driver")),
+        ("postgresql://h/d", ("postgresql+asyncpg://h/d", "asyncpg")),
+        ("postgres+asyncpg://h/d", ("postgresql+asyncpg://h/d", "asyncpg")),
+        ("mysql+aiomysql://h/d", ("mysql+aiomysql://h/d", "aiomysql")),
     ],
 )
 def test_alchemize_url(url, expected):
@@ -109,6 +112,25 @@ def test_config_load_rejects_an_unmappable_url(config_factory):
         config_factory(SECRETS_ENV + "DATABASE_URL=mariadb://u:p@h/db\n")
 
 
+def test_config_rejects_a_driver_requirement_rejects(config_factory):
+    with pytest.raises(ValueError):
+        config_factory(
+            SECRETS_ENV + "DATABASE_URL=postgresql+bad name://h/d\n"
+        )
+
+
+def test_config_rejects_a_non_bare_driver_naming_only_the_driver(
+    config_factory,
+):
+    with pytest.raises(ValueError) as exc:
+        config_factory(
+            SECRETS_ENV + "DATABASE_URL=postgresql+asyncpg>=1://u:secret@h/d\n"
+        )
+    msg = str(exc.value)
+    assert "asyncpg>=1" in msg
+    assert "secret" not in msg
+
+
 def _dockerfile_commands():
     text = (REPO_ROOT / "Dockerfile").read_text()
     return [
@@ -134,7 +156,7 @@ def test_dockerfile_installs_db_drivers_without_dev():
         assert flag in run
 
 
-def _index(commands, predicate):
+def _indices_where(commands, predicate):
     return [i for i, c in enumerate(commands) if predicate(c)]
 
 
@@ -147,11 +169,9 @@ def test_dockerfile_runs_as_a_non_root_user():
 
 def test_dockerfile_copies_source_only_after_dependencies():
     commands = _dockerfile_commands()
-    (sync,) = _index(commands, lambda c: "uv sync" in c)
-    (copy_all,) = _index(commands, lambda c: c.startswith("COPY . ."))
+    (sync,) = _indices_where(commands, lambda c: "uv sync" in c)
+    (copy_all,) = _indices_where(commands, lambda c: c.startswith("COPY . ."))
     assert copy_all > sync
-    for i in _index(commands, lambda c: "apt-get" in c):
-        assert commands[i].startswith("RUN") and i < sync
     early_copies = [
         c.split()[1:-1]
         for c in commands[:sync]
@@ -180,19 +200,64 @@ def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
 
 
 def test_dockerfile_apt_installs_are_minimal_and_clean():
-    for c in _dockerfile_commands():
+    commands = _dockerfile_commands()
+    (sync,) = _indices_where(commands, lambda c: "uv sync" in c)
+    for i in _indices_where(commands, lambda c: "apt-get" in c):
+        assert commands[i].startswith("RUN") and i < sync
+    for c in commands:
         if "apt-get install" not in c:
             continue
         assert "curl" not in c.split() and "unzip" not in c.split()
         assert "rm -rf /var/lib/apt/lists/*" in c
 
 
-def test_compose_bgutil_provider_publishes_no_host_port():
+def _compose_services():
     import yaml
 
     text = (REPO_ROOT / "docker-compose.yaml").read_text()
-    services = yaml.safe_load(text)["services"]
-    assert "ports" not in services["bgutil-provider"]
+    return yaml.safe_load(text)["services"]
+
+
+def test_compose_bgutil_provider_publishes_no_host_port():
+    assert "ports" not in _compose_services()["bgutil-provider"]
+
+
+def _image_tag(image):
+    """The tag of an image reference; a digest counts as pinned."""
+    if "@" in image:
+        return image.split("@", 1)[1]
+    last = image.rsplit("/", 1)[-1]
+    return last.split(":", 1)[1] if ":" in last else None
+
+
+def test_compose_pulled_images_are_pinned():
+    for name, service in _compose_services().items():
+        if "image" not in service or "build" in service:
+            continue
+        tag = _image_tag(service["image"])
+        assert (
+            tag and tag != "latest"
+        ), f"{name}: image {service['image']!r} is not pinned"
+
+
+def test_compose_bgutil_provider_tag_matches_the_pinned_plugin():
+    import tomllib
+
+    meta = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    deps = meta["project"]["dependencies"]
+    found = [
+        d
+        for d in deps
+        if d.replace("_", "-").lower().startswith("bgutil-ytdlp-pot-provider")
+    ]
+    assert (
+        len(found) == 1 and "==" in found[0]
+    ), f"expected bgutil-ytdlp-pot-provider==X, found {found!r}"
+    version = found[0].split("==", 1)[1].split(";")[0].strip()
+    image = _compose_services()["bgutil-provider"]["image"]
+    assert (
+        _image_tag(image) == version
+    ), f"{image!r} does not match the plugin pin {version!r}"
 
 
 def test_extra_owners_defaults_to_empty(config_factory):
@@ -289,6 +354,60 @@ def test_database_url_wins_over_heroku_db(config_factory):
 def test_heroku_db_is_not_reported_as_unknown(config_factory):
     config = config_factory(SECRETS_ENV + "HEROKU_DB=sqlite:///x.db\n")
     assert "HEROKU_DB" not in config.unknown_vars
+
+
+def test_spotipy_aliases_are_not_reported_as_unknown(config_factory):
+    config = config_factory(
+        SECRETS_ENV
+        + "SPOTIPY_CLIENT_ID=cid\nSPOTIPY_CLIENT_SECRET=csecret\n"
+        + "MY_TYPO=1\n"
+    )
+    assert set(config.unknown_vars) == {"MY_TYPO"}
+
+
+def test_spotipy_alias_applies_when_canonical_is_unset(config_factory):
+    config = config_factory(
+        "BOT_TOKEN=t\nLASTFM_API_KEY=k\nGUILD_WHITELIST=[111]\n"
+        "SPOTIPY_CLIENT_ID=cid\nSPOTIPY_CLIENT_SECRET=csecret\n"
+    )
+    assert (config.SPOTIFY_ID, config.SPOTIFY_SECRET) == ("cid", "csecret")
+
+
+def test_heroku_db_applies_when_database_url_is_empty(config_factory):
+    config = config_factory(
+        SECRETS_ENV + "DATABASE_URL=\nHEROKU_DB=postgresql://u:p@h/db\n"
+    )
+    assert config.DATABASE == "postgresql+asyncpg://u:p@h/db"
+
+
+def test_spotipy_alias_applies_when_canonical_is_empty(config_factory):
+    config = config_factory(
+        "BOT_TOKEN=t\nLASTFM_API_KEY=k\nGUILD_WHITELIST=[111]\n"
+        "SPOTIFY_ID=\nSPOTIPY_CLIENT_ID=cid\n"
+        "SPOTIPY_CLIENT_SECRET=csecret\n"
+    )
+    assert (config.SPOTIFY_ID, config.SPOTIFY_SECRET) == ("cid", "csecret")
+
+
+def test_canonical_spotify_variable_wins_over_alias(config_factory):
+    config = config_factory(
+        SECRETS_ENV + "SPOTIFY_ID=real\nSPOTIPY_CLIENT_ID=alias\n"
+    )
+    assert config.SPOTIFY_ID == "real"
+
+
+def test_empty_heroku_db_changes_nothing(config_factory):
+    config = config_factory(SECRETS_ENV + "HEROKU_DB=\n")
+    assert config.DATABASE.startswith("sqlite+aiosqlite:")
+    with pytest.raises(ValueError):
+        config_factory(SECRETS_ENV + "DATABASE_URL=\nHEROKU_DB=\n")
+
+
+def test_aliases_do_not_write_the_environment(config_factory):
+    import os
+
+    config_factory(SECRETS_ENV + "HEROKU_DB=sqlite:///x.db\n")
+    assert os.environ.get("DATABASE_URL", "") == ""
 
 
 def test_unknown_var_warning_names_it_without_its_value(config_factory):

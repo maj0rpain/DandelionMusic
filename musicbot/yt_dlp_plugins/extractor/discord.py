@@ -1,9 +1,34 @@
 import re
+import atexit
 
+from discord.http import HTTPClient
 from yt_dlp.utils import DownloadError
 from yt_dlp.extractor.common import InfoExtractor
 
 from config import config
+
+
+# The extractor's own discord.py client, created lazily on the loader's
+# worker loop and logged in once; None until a login has succeeded.
+_client = None
+
+
+def _get_client(loop):
+    global _client
+    if _client is not None:
+        return _client
+    client = HTTPClient(loop)
+    try:
+        loop.run_until_complete(client.static_login(config.BOT_TOKEN))
+    except Exception as e:
+        try:
+            loop.run_until_complete(client.close())
+        except Exception:
+            pass
+        raise DownloadError(str(e)) from e
+    _client = client
+    atexit.register(lambda: loop.run_until_complete(client.close()))
+    return client
 
 
 class DiscordAttachmentsIE(InfoExtractor):
@@ -13,16 +38,14 @@ class DiscordAttachmentsIE(InfoExtractor):
     )
 
     def _real_extract(self, url):
-        from musicbot.__main__ import bot
         from musicbot.loader import _loop
 
-        if bot.http.token is None:
-            _loop.run_until_complete(bot.http.static_login(config.BOT_TOKEN))
+        client = _get_client(_loop)
 
         match = re.match(self._VALID_URL, url)
         try:
             resp = _loop.run_until_complete(
-                bot.http.get_message(
+                client.get_message(
                     int(match.group("channel_id")),
                     int(match.group("message_id")),
                 )
