@@ -1,5 +1,5 @@
-"""No single guild's Spotify or aiohttp request can hold the shared
-extraction worker for long.
+"""No single guild's Spotify or aiohttp request can hold its extraction
+lane's worker for long.
 
 Song loading is called directly with Spotify failures faked; the
 Spotify session is driven against a local server that always answers
@@ -114,6 +114,15 @@ def test_build_spotify_api_bounds_the_token_request():
     api = linkutils.build_spotify_api("id", "secret")
     assert api.auth_manager.requests_timeout == 5
     assert api.requests_timeout == 5
+
+
+def test_build_spotify_api_writes_no_token_cache_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    api = linkutils.build_spotify_api("id", "secret")
+    token = {"access_token": "t", "expires_at": 9999999999}
+    api.auth_manager.cache_handler.save_token_to_cache(token)
+    assert api.auth_manager.cache_handler.get_cached_token() == token
+    assert list(tmp_path.iterdir()) == []
 
 
 def test_build_spotify_api_without_credentials_is_none():
