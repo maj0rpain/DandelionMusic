@@ -44,8 +44,6 @@ class _Http:
 async def _pause(delay):
     if delay is None:
         await asyncio.Event().wait()
-    elif delay:
-        await asyncio.sleep(delay)
 
 
 @pytest.fixture

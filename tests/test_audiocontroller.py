@@ -32,6 +32,7 @@ from controller_seam import FakeVoiceClient, StubLoader, controller_seam
 from db_seam import in_memory_db
 from discord_fakes import PLAYER_BUTTONS
 
+
 MIX = playlists.PlaylistRef("1234", "mix")
 
 
