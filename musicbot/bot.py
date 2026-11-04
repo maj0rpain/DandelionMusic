@@ -328,13 +328,22 @@ class Context(commands.Context):
         if self.interaction and not self.interaction.response.is_done():
             await self.interaction.response.defer(ephemeral=ephemeral)
 
+    async def _send_to_interaction(
+        self, *args, original_response=False, **kwargs
+    ):
+        """The interaction routing, written once: a followup when the
+        response is done, else the first response (returning the
+        original response message when original_response is true).
+        Call only when self.interaction is set."""
+        if self.interaction.response.is_done():
+            return await self.interaction.followup.send(*args, **kwargs)
+        await self.interaction.response.send_message(*args, **kwargs)
+        if original_response:
+            return await self.interaction.original_response()
+
     async def response_send_message(self, *args, **kwargs):
         if self.interaction:
-            if self.interaction.response.is_done():
-                return await self.interaction.followup.send(*args, **kwargs)
-            return await self.interaction.response.send_message(
-                *args, **kwargs
-            )
+            return await self._send_to_interaction(*args, **kwargs)
         return await self.send(*args, **kwargs)
 
     async def send(self, *args, **kwargs):
@@ -348,6 +357,9 @@ class Context(commands.Context):
         # view, so fall through to the plain send below.
         audiocontroller = self.bot.sessions.controller(self.guild)
         channel = audiocontroller.command_channel if audiocontroller else None
+        # bound here: a zero-argument super() inside the closure below
+        # would bind to its `view` parameter and raise TypeError
+        super_send = super().send
         if (
             audiocontroller is None
             or "view" in kwargs
@@ -361,28 +373,19 @@ class Context(commands.Context):
             # sending ephemeral message or using different channel
             # don't bother with views
             if self.interaction:
-                if self.interaction.response.is_done():
-                    return await self.interaction.followup.send(
-                        *args, **kwargs
-                    )
-                return await self.interaction.response.send_message(
-                    *args, **kwargs
-                )
-            return await super().send(*args, **kwargs)
+                return await self._send_to_interaction(*args, **kwargs)
+            return await super_send(*args, **kwargs)
 
-        async def send(view):
+        async def send_with_view(view):
             if view:
                 kwargs["view"] = view
             if self.interaction:
-                if self.interaction.response.is_done():
-                    return await self.interaction.followup.send(
-                        *args, **kwargs
-                    )
-                await self.interaction.response.send_message(*args, **kwargs)
-                return await self.interaction.original_response()
-            return await super(Context, self).send(*args, **kwargs)
+                return await self._send_to_interaction(
+                    *args, original_response=True, **kwargs
+                )
+            return await super_send(*args, **kwargs)
 
-        return await audiocontroller.attach_view(send)
+        return await audiocontroller.attach_view(send_with_view)
 
 
 class UniversalHelpCommand(DefaultHelpCommand):

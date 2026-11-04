@@ -42,7 +42,7 @@ class VoiceChannel:
         self.guild.voice_client = SimpleNamespace(channel=self)
 
 
-class FakeContext:
+class FakeContext(Context):
     """Enough of a component-click Context for the real
     Context.send and dj_check: no controller is registered, so a send
     goes to the interaction; the guild has a DJ role the author lacks
@@ -73,9 +73,6 @@ class FakeContext:
                 ),
             ),
         )
-
-    async def send(self, *args, **kwargs):
-        return await Context.send(self, *args, **kwargs)
 
 
 class FakeInteraction:
