@@ -4,6 +4,7 @@ from typing import Optional
 
 import discord
 from discord.ext import commands
+from discord.ext.commands.view import StringView
 
 from config import config
 from musicbot.bot import MusicBot
@@ -23,7 +24,7 @@ from musicbot.utils import (
 SHOW_SUBCOMMAND = "show"
 
 
-def _unmatched_word(ctx) -> Optional[str]:
+def _unmatched_word(view: StringView) -> Optional[str]:
     """The word after the command name that matched no subcommand, or
     None when there is none (a slash invocation, or a bare command).
     Leaves the view where it was."""
@@ -33,10 +34,10 @@ def _unmatched_word(ctx) -> Optional[str]:
     # the callback, so that word matched none. skip_ws is needed as the
     # view stops before the whitespace, and one undo() could not
     # restore it, as get_word sets previous past the skipped whitespace
-    start = ctx.view.index
-    ctx.view.skip_ws()
-    word = ctx.view.get_word()
-    ctx.view.index = start
+    start = view.index
+    view.skip_ws()
+    word = view.get_word()
+    view.index = start
     return word or None
 
 
@@ -182,7 +183,7 @@ class General(commands.Cog):
         invoke_without_command=True,
     )
     async def _settings(self, ctx: commands.Context):
-        word = _unmatched_word(ctx)
+        word = _unmatched_word(ctx.view)
         if word is not None and word != SHOW_SUBCOMMAND:
             raise CheckError(config.UNKNOWN_SETTING.format(word))
         sett = get_settings(ctx)

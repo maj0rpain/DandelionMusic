@@ -2,8 +2,11 @@
 
 The prefix form replies only with the subcommand's own result; a bare
 d!setting and d!setting show give the settings embed; any other word is
-an unknown setting. Sent messages and raised errors are all that is
-checked.
+an unknown setting. Through the group, sent messages and raised errors are all
+that is checked.
+
+`_unmatched_word` is also tested on its own, against a `StringView`,
+for leaving the view where it was.
 """
 
 import asyncio
@@ -162,9 +165,9 @@ def test_extra_whitespace_before_an_unknown_word_is_still_unknown():
 
 @pytest.mark.parametrize("text", ["", "  ", "foo", "  foo bar", " show"])
 def test_the_unmatched_word_leaves_the_view_index_unchanged(text):
-    ctx = types.SimpleNamespace(view=StringView(text))
+    view = StringView(text)
 
-    word = _unmatched_word(ctx)
+    word = _unmatched_word(view)
 
-    assert ctx.view.index == 0
+    assert view.index == 0
     assert word == (text.split(None, 1) or [None])[0]
