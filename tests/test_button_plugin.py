@@ -5,7 +5,6 @@ from types import SimpleNamespace
 
 import pytest
 
-from config import config
 from musicbot import loader, utils
 from musicbot.audiocontroller import QueuedPlaylist
 from musicbot.plugins.button import Button
@@ -134,12 +133,6 @@ def test_failing_link_replies_and_next_link_is_processed(monkeypatch):
     )
     assert processed == [A, B]
     assert sent == ["bad link"]
-
-
-def test_link_loading_nothing_gets_songinfo_error(monkeypatch):
-    processed, sent = react(monkeypatch, {A: None, B: object()})
-    assert processed == [A, B]
-    assert sent == [config.SONGINFO_ERROR]
 
 
 def test_reaction_in_a_thread_is_processed(monkeypatch):

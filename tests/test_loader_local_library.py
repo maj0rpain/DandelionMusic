@@ -212,7 +212,9 @@ def test_an_upper_case_scheme_is_unknown_with_the_library_disabled(
 ):
     _file(lib / "A" / "B" / "t.mp3")
     monkeypatch.setattr(config, "ENABLE_LOCAL_LIBRARY", False)
-    assert loader._load_song("FILE" + _uri(lib, "A/B/t.mp3")[4:]) is None
+    with pytest.raises(loader.SongError) as e:
+        loader._load_song("FILE" + _uri(lib, "A/B/t.mp3")[4:])
+    assert str(e.value) == config.SONGINFO_UNSUPPORTED
 
 
 def test_an_upper_case_scheme_outside_the_root_is_refused(lib):

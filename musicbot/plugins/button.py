@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-from config import config
 from musicbot import linkutils, loader, utils
 from musicbot.bot import MusicBot
 from musicbot.audiocontroller import QueuedPlaylist
@@ -112,9 +111,7 @@ class Button(commands.Cog):
                 except loader.SongError as e:
                     await ctx.send(str(e))
                     continue
-                if song is None:
-                    await ctx.send(config.SONGINFO_ERROR)
-                elif isinstance(song, QueuedPlaylist) and song.truncated:
+                if isinstance(song, QueuedPlaylist) and song.truncated:
                     await ctx.send(song.truncation.notice(song.queued))
 
 

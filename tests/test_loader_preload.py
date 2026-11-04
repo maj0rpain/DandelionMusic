@@ -59,13 +59,11 @@ def test_a_fresh_extraction_updates_the_song_and_reports_it(monkeypatch):
 
 
 @pytest.mark.parametrize(
-    "outcome", [loader.SongError("gone"), RuntimeError("boom"), None]
+    "outcome", [loader.SongError("gone"), RuntimeError("boom")]
 )
 def test_a_failed_extraction_reports_failure(monkeypatch, outcome):
     async def load_song(lane, track):
-        if isinstance(outcome, Exception):
-            raise outcome
-        return outcome
+        raise outcome
 
     monkeypatch.setattr(loader, "_load", load_song)
     song = _song(title="stale title")
@@ -90,7 +88,7 @@ def test_a_caller_awaiting_an_inflight_extraction_is_told_its_outcome(
             await release.wait()
             if extracted:
                 return Song(SiteTypes.YT_DLP, track, url="https://s.invalid")
-            return None
+            raise loader.SongError("gone")
 
         monkeypatch.setattr(loader, "_load", load_song)
         song = _song()

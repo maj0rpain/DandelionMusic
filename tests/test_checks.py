@@ -7,7 +7,6 @@ finished registering its guilds.
 
 import asyncio
 import contextlib
-import inspect
 import types
 
 import discord
@@ -20,6 +19,7 @@ from musicbot.commands.general import General
 from musicbot.commands.library import Library, queue_songs
 from musicbot.audiocontroller import MusicButton
 from musicbot.commands.music import Music, SearchView, SongButton
+from musicbot import utils
 from discord_fakes import (
     PLAYER_BUTTONS,
     FakeInteraction,
@@ -30,6 +30,7 @@ from discord_fakes import (
 from musicbot.utils import (
     CheckError,
     chunks,
+    dj_check,
     get_audiocontroller,
     get_settings,
     owner_check,
@@ -252,6 +253,22 @@ class TestPlayCheck:
         ctx = voice_ctx(guild, guild.channel("b", humans=1))
         assert asyncio.run(play_check(ctx)) is True
         assert guild.events == []
+
+
+class TestDjCheck:
+    def ctx(self, **kwargs):
+        return voice_ctx(VoiceGuild(), **kwargs)
+
+    def test_admits_when_no_dj_role_is_set(self):
+        assert asyncio.run(dj_check(self.ctx())) is True
+
+    def test_admits_a_dj_role_holder(self):
+        ctx = self.ctx(dj_role=99, roles=[99])
+        assert asyncio.run(dj_check(ctx)) is True
+
+    def test_refuses_a_member_without_the_set_dj_role(self):
+        ctx = self.ctx(dj_role=99, roles=[5])
+        assert refusal(dj_check(ctx)) == config.NOT_A_DJ
 
 
 class TestVoiceCheckBypass:
@@ -736,28 +753,57 @@ def commands_under_gate():
     return [group] + [subs[n] for n in SUBCOMMANDS]
 
 
-async def run_checks(cmd, ctx):
-    for check in cmd.checks:
-        result = check(ctx)
-        if inspect.isawaitable(result):
-            await result
+def registered(cmd):
+    # the registered cog holds per-instance copies of its commands
+    cog = Music(None)
+    group = cog._playlist
+    subs = {c.name: c for c in group.commands}
+    return cog, (group if cmd.name == group.name else subs[cmd.name])
+
+
+@pytest.fixture
+def admitting_play_check(monkeypatch):
+    # every check behind the playlist gate admits
+    async def passing(ctx):
+        return True
+
+    monkeypatch.setattr(utils, "get_audiocontroller", lambda ctx: None)
+    monkeypatch.setattr(utils, "play_check", passing)
 
 
 @pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
-def test_refuses_while_disabled(cmd, monkeypatch):
+def test_cog_check_gates_before_other_refusals(cmd, monkeypatch):
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
-    ctx = types.SimpleNamespace()
+    cog, cmd = registered(cmd)
+    # no guild, channel or author: any other refusal would break differently
+    ctx = types.SimpleNamespace(command=cmd)
     with pytest.raises(CheckError) as exc:
-        asyncio.run(run_checks(cmd, ctx))
+        asyncio.run(cog.cog_check(ctx))
     assert str(exc.value) == config.PLAYLISTS_ARE_DISABLED
 
 
 @pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
-def test_gate_admits_while_enabled(cmd, monkeypatch):
+def test_refuses_while_disabled(cmd, monkeypatch, admitting_play_check):
+    monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
+    cog, cmd = registered(cmd)
+    # a context that would otherwise pass: only the gate refuses
+    ctx = types.SimpleNamespace(command=cmd)
+    with pytest.raises(CheckError) as exc:
+        asyncio.run(cog.cog_check(ctx))
+    assert str(exc.value) == config.PLAYLISTS_ARE_DISABLED
+
+
+@pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
+def test_gate_admits_while_enabled(cmd, monkeypatch, admitting_play_check):
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", True)
-    gate = next(c for c in cmd.checks if c.__name__ == "playlists_enabled")
-    assert cmd.checks[0] is gate
-    assert gate(types.SimpleNamespace()) is True
+    cog, cmd = registered(cmd)
+    ctx = types.SimpleNamespace(command=cmd)
+    assert asyncio.run(cog.cog_check(ctx)) is True
+
+
+@pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
+def test_no_playlist_command_carries_the_gate_decorator(cmd):
+    assert all(c.__name__ != "playlists_enabled" for c in cmd.checks)
 
 
 def test_autocomplete_offers_nothing_while_disabled(monkeypatch):
@@ -768,16 +814,10 @@ def test_autocomplete_offers_nothing_while_disabled(monkeypatch):
     assert result == []
 
 
-@pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
-def test_cog_check_gates_before_other_refusals(cmd, monkeypatch):
+def test_cog_check_admits_a_button_context_with_no_command(
+    monkeypatch, admitting_play_check
+):
+    # a component interaction's context carries no command
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
-    # the registered cog holds per-instance copies of its commands
-    cog = Music(None)
-    group = cog._playlist
-    subs = {c.name: c for c in group.commands}
-    cmd = group if cmd.name == group.name else subs[cmd.name]
-    # no guild, channel or author: any other refusal would break differently
-    ctx = types.SimpleNamespace(command=cmd)
-    with pytest.raises(CheckError) as exc:
-        asyncio.run(cog.cog_check(ctx))
-    assert str(exc.value) == config.PLAYLISTS_ARE_DISABLED
+    ctx = types.SimpleNamespace(command=None)
+    assert asyncio.run(Music(None).cog_check(ctx)) is True
