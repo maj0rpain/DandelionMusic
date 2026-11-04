@@ -1,5 +1,7 @@
 from __future__ import annotations
+import os
 import sys
+import shlex
 import asyncio
 import builtins
 from io import StringIO
@@ -48,6 +50,38 @@ OUTPUT_FORMAT = "```\n\u200b{}\n```"
 _paginate = Splitter(2002 - len(OUTPUT_FORMAT)).wrap
 
 
+def _pages(output: str) -> List[str]:
+    """Split output into code-block pages; [] for empty/blank output."""
+    if not output or output.isspace():
+        return []
+    pages = (page.rstrip() for page in _paginate(output))
+    return [OUTPUT_FORMAT.format(page) for page in pages if page]
+
+
+async def run_and_report(ctx, argv: List[str]) -> None:
+    """Run a command without blocking the loop and reply with its output."""
+    process = await asyncio.create_subprocess_exec(
+        *argv,
+        stdin=asyncio.subprocess.DEVNULL,
+        stdout=asyncio.subprocess.PIPE,
+        stderr=asyncio.subprocess.STDOUT,
+        env={**os.environ, "GIT_TERMINAL_PROMPT": "0"},
+    )
+    raw, _ = await process.communicate()
+    output = raw.decode("utf-8", errors="replace")
+
+    pages = _pages(output)
+    if pages:
+        for page in pages:
+            await ctx.send(page)
+    else:
+        await ctx.send("No output.")
+    if process.returncode:
+        await ctx.send(
+            f"`{shlex.join(argv)}` exited with code {process.returncode}"
+        )
+
+
 class Developer(commands.Cog):
     def __init__(self, bot: MusicBot):
         self.bot = bot
@@ -70,27 +104,7 @@ class Developer(commands.Cog):
     @commands.check(owner_check)
     async def _update(self, ctx):
         await ctx.send("Updating...")
-        import subprocess
-
-        process = subprocess.Popen(["git", "pull"], stdout=subprocess.PIPE)
-        output = process.communicate()[0]
-        await ctx.send(output.decode("utf-8"))
-
-    @commands.command(
-        name="ytdlp",
-        hidden=True,
-    )
-    @commands.check(owner_check)
-    async def _ytdlp(self, ctx):
-        await ctx.send("Updating yt-dlp...")
-        import subprocess
-
-        process = subprocess.Popen(
-            ["uv", "pip", "install", "--upgrade", "yt-dlp[default]"],
-            stdout=subprocess.PIPE,
-        )
-        output = process.communicate()[0]
-        await ctx.send(output.decode("utf-8"))
+        await run_and_report(ctx, ["git", "pull"])
 
     @commands.command(
         name="execute",
