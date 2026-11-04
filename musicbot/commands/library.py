@@ -319,9 +319,9 @@ class LevelSnapshot(NamedTuple):
 
 
 class LibraryView(OwnedView):
-    """Ownership and lifetime handling shared by the browser and the
-    search results - both are single-user views on a message that
-    outlives their 5-minute timeout."""
+    """An OwnedView over one library index snapshot, with a
+    double-click guard (`_busy`) for the browser's slow redraws.
+    Ownership, timeout and message refresh come from OwnedView."""
 
     def __init__(self, ctx, index: library.LibraryIndex):
         super().__init__(ctx, timeout=300)

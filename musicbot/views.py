@@ -43,7 +43,7 @@ class OwnedView(discord.ui.View):
         return True
 
     async def on_timeout(self):
-        # Without this, a click after the 5-minute timeout just fails
+        # Without this, a click after the view's timeout just fails
         # silently client-side (discord.py stops dispatching to a
         # timed-out view's items) and the message's Select/Buttons
         # stay visibly enabled forever.

@@ -70,11 +70,15 @@ class MusicButton(discord.ui.Button):
         click like a failed check."""
 
     async def callback(self, inter: discord.Interaction):
-        # Acknowledge first: a join can be slow, and it must not push
-        # the response past Discord's 3-second deadline. Refusals
-        # then go out as ephemeral followups. join() runs only once
-        # every check has passed, so a refused click never makes the
-        # bot join.
+        # Build ctx first, then acknowledge: get_context makes no HTTP
+        # call for an interaction (Context.from_interaction awaits
+        # nothing), so awaiting it ahead of the defer cannot delay the
+        # response, and a failure at any later step still has a ctx to
+        # report through. Acknowledge before the checks and the join:
+        # a join can be slow, and it must not push the response past
+        # Discord's 3-second deadline. Refusals then go out as
+        # ephemeral followups. join() runs only once every check has
+        # passed, so a refused click never makes the bot join.
         ctx = await inter.client.get_context(inter)
         try:
             await inter.response.defer()

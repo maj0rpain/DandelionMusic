@@ -409,9 +409,6 @@ def test_timeout_with_no_message_and_no_interaction_edits_nothing():
     assert buttons_disabled(run(go))
 
 
-# --- Claim ---
-
-
 # --- Refresh through the pick's click followup ---
 
 
