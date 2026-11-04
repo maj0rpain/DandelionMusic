@@ -559,8 +559,8 @@ def test_a_failed_join_from_the_library_says_so():
 # --- joining commands ------------------------------------------------
 #
 # Only a joining command (GLOSSARY.md) brings the bot into voice: one
-# that starts playback carries the opt-in marker; every other music
-# command answers without connecting or moving the bot.
+# carrying the opt-in marker; every other music command answers
+# without connecting or moving the bot.
 
 
 def music_command(name):
@@ -570,7 +570,7 @@ def music_command(name):
 JOINING = {"play", "playnext", "search", "playlist load", "restore", "prev"}
 
 
-def test_the_joining_music_commands_are_exactly_those_starting_playback():
+def test_the_joining_music_commands_are_exactly_the_marked_ones():
     joining = set()
     for cmd in Music(None).walk_commands():
         guild = VoiceGuild()
