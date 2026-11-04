@@ -400,7 +400,7 @@ def test_a_failed_move_does_not_block_the_next_edit():
         await playlists.save(factory, MIX, [A])
         with pytest.raises(playlists.InvalidPosition):
             await playlists.move_song(factory, MIX, 1, 5)
-        await asyncio.wait_for(playlists.add_songs(factory, MIX, [B]), 1)
+        await asyncio.wait_for(playlists.add_songs(factory, MIX, [B]), WAIT)
         return await load(factory)
 
     assert run(test) == [A, B]
