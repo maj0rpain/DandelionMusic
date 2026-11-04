@@ -165,11 +165,29 @@ def test_one_bad_track_leaves_the_rest_of_the_batch(lib, monkeypatch):
         return real(path)
 
     monkeypatch.setattr(loader, "read_tags", read_tags)
+
+    # A URI whose parsing raises a non-SongError exception.
+    unparsable = _uri(lib, "A/B/unparsable.mp3")
+
+    class RaisingPath(type(Path())):
+        @classmethod
+        def from_uri(cls, uri):
+            if uri == unparsable:
+                raise ValueError("cannot parse (test)")
+            return super().from_uri(uri)
+
+    monkeypatch.setattr(loader, "Path", RaisingPath)
     good = _uri(lib, "A/B/t.mp3")
     songs = loader._load_local_songs(
-        [_uri(lib, "A/B/gone.mp3"), good, _uri(lib, "A/B/bad.mp3"), good]
+        [
+            _uri(lib, "A/B/gone.mp3"),
+            good,
+            unparsable,
+            _uri(lib, "A/B/bad.mp3"),
+            good,
+        ]
     )
-    assert [s is None for s in songs] == [True, False, True, False]
+    assert [s is None for s in songs] == [True, False, True, True, False]
 
 
 def test_the_index_and_the_loader_agree_on_a_symlinked_artist(lib, outside):
