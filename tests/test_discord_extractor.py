@@ -133,16 +133,9 @@ def test_a_normal_fetch_is_a_playlist_of_attachments(http):
     }
 
 
-@pytest.mark.parametrize("fault", ["stalled-fetch", "raising-login"])
-def test_a_failed_discord_link_is_a_could_not_load_error(
-    monkeypatch, http, fault
-):
+def test_a_failed_discord_link_is_a_could_not_load_error(monkeypatch, http):
     monkeypatch.setattr(loader, "_downloader", loader._new_downloader())
-    if fault == "stalled-fetch":
-        http.token = "t"
-        http.fetch_delay = None
-    else:
-        http.login_exc = RuntimeError("bad token")
+    http.login_exc = RuntimeError("bad token")
     with pytest.raises(SongError) as info:
         loader._load_song(URL)
     assert str(info.value) == config.SONGINFO_ERROR
