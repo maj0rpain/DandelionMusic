@@ -732,22 +732,24 @@ class AudioController(object):
         else:
             self._schedule_preload()
 
-    async def enqueue(self, songs: Iterable[Song], playnext=False):
-        """Appends `songs` to the queue (with `playnext`, puts
-        them directly after the current track instead), refreshes the
+    async def enqueue_next(self, song: Song):
+        """Puts `song` directly after the current track, refreshes the
         backup and starts playing if nothing is (see ensure_playing()).
 
-        `playnext` is meant for a single song, the only use
-        process_song makes of it; several songs passed with it are not
-        kept in order.
-
         Placement happens before the first await, so no other command
-        can slip between a playnext track and its slot."""
+        can slip between the song and its slot."""
+        self.playlist.insert_next(song)
+        self._pickle_playlist()
+        await self.ensure_playing()
+
+    async def enqueue(self, songs: Iterable[Song]):
+        """Appends `songs` to the queue, refreshes the backup once and
+        starts playing if nothing is (see ensure_playing()).
+
+        Placement happens before the first await, so the appended songs
+        land together and in order."""
         for song in songs:
-            if playnext:
-                self.playlist.insert_next(song)
-            else:
-                self.playlist.add(song)
+            self.playlist.add(song)
         self._pickle_playlist()
         await self.ensure_playing()
 
@@ -834,7 +836,10 @@ class AudioController(object):
                     ),
                 )
 
-        await self.enqueue(added, playnext=playnext and len(added) == 1)
+        if playnext and len(added) == 1:
+            await self.enqueue_next(added[0])
+        else:
+            await self.enqueue(added)
 
         return loaded_song
 
