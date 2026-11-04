@@ -2,23 +2,30 @@ FROM python:3.13-slim
 
 WORKDIR /app
 
-COPY --from=ghcr.io/astral-sh/uv:latest /uv /uvx /usr/local/bin/
+RUN apt-get update \
+    && apt-get install --no-install-recommends -y ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
 
-COPY . .
+COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /usr/local/bin/
+COPY --from=denoland/deno:bin-2.9.8 /deno /usr/local/bin/deno
+
+COPY pyproject.toml uv.lock ./
+
+RUN uv sync --frozen --no-cache --no-dev \
+        --extra postgres --extra mysql
 
 ARG HEROKU_DB
 ENV HEROKU_DB=$HEROKU_DB
 
-RUN uv sync --frozen --no-cache --no-dev \
-        --extra postgres --extra mysql \
-    && apt-get update \
-    && apt-get install --no-install-recommends ffmpeg -y \
-    && apt-get install -y curl \
-    && apt-get install -y unzip
+COPY . .
 
-ENV DENO_INSTALL="/usr/local"
-RUN  curl -fsSL https://deno.land/install.sh | sh
+ENV PATH="/app/.venv/bin:${PATH}"
 
-ENV PATH="/app/.venv/bin:${DENO_INSTALL}/bin:${PATH}"
+RUN groupadd --gid 1000 app \
+    && useradd --uid 1000 --gid 1000 --create-home --home-dir /home/app app \
+    && mkdir -p /app/backup \
+    && chown app:app /app /app/backup
+
+USER app
 
 CMD ["python", "run.py"]

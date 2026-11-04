@@ -553,6 +553,7 @@ build = [
 dev = [
     { name = "pre-commit" },
     { name = "pytest" },
+    { name = "pyyaml" },
 ]
 
 [package.metadata]
@@ -587,6 +588,7 @@ build = [{ name = "pyinstaller", specifier = "==6.14.2" }]
 dev = [
     { name = "pre-commit", specifier = "==4.6.2" },
     { name = "pytest", specifier = "==8.4.2" },
+    { name = "pyyaml", specifier = "==6.0.3" },
 ]
 
 [[package]]

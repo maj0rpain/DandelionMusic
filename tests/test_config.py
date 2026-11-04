@@ -5,9 +5,13 @@ Config is read-only now: the .env write-back that used to live here
 whitelist, which the database owns instead.
 """
 
+from pathlib import Path
+
 import pytest
 
 from config.utils import alchemize_url, ensure_sqlite_parent, get_env_var
+
+REPO_ROOT = Path(__file__).parent.parent
 
 SECRETS_ENV = (
     "BOT_TOKEN=real-token-abc123\n"
@@ -105,12 +109,21 @@ def test_config_load_rejects_an_unmappable_url(config_factory):
         config_factory(SECRETS_ENV + "DATABASE_URL=mariadb://u:p@h/db\n")
 
 
-def test_dockerfile_installs_db_drivers_without_dev():
-    from pathlib import Path
+def _dockerfile_commands():
+    text = (REPO_ROOT / "Dockerfile").read_text()
+    return [
+        c.strip()
+        for c in text.replace("\\\n", " ").splitlines()
+        if c.strip() and not c.strip().startswith("#")
+    ]
 
-    text = (Path(__file__).parent.parent / "Dockerfile").read_text()
-    commands = text.replace("\\\n", " ").splitlines()
-    (run,) = [c for c in commands if c.startswith("RUN") and "uv sync" in c]
+
+def test_dockerfile_installs_db_drivers_without_dev():
+    (run,) = [
+        c
+        for c in _dockerfile_commands()
+        if c.startswith("RUN") and "uv sync" in c
+    ]
     for flag in (
         "--frozen",
         "--no-cache",
@@ -119,6 +132,67 @@ def test_dockerfile_installs_db_drivers_without_dev():
         "--extra mysql",
     ):
         assert flag in run
+
+
+def _index(commands, predicate):
+    return [i for i, c in enumerate(commands) if predicate(c)]
+
+
+def test_dockerfile_runs_as_a_non_root_user():
+    users = [
+        c.split()[1] for c in _dockerfile_commands() if c.split()[0] == "USER"
+    ]
+    assert users and users[-1].split(":")[0] not in ("root", "0")
+
+
+def test_dockerfile_copies_source_only_after_dependencies():
+    commands = _dockerfile_commands()
+    (sync,) = _index(commands, lambda c: "uv sync" in c)
+    (copy_all,) = _index(commands, lambda c: c.startswith("COPY . ."))
+    assert copy_all > sync
+    for i in _index(commands, lambda c: "apt-get" in c):
+        assert commands[i].startswith("RUN") and i < sync
+    early_copies = [
+        c.split()[1:-1]
+        for c in commands[:sync]
+        if c.startswith("COPY") and "--from=" not in c
+    ]
+    assert early_copies == [["pyproject.toml", "uv.lock"]]
+
+
+def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
+    import re
+
+    commands = _dockerfile_commands()
+    images = [c.split()[1] for c in commands if c.startswith("FROM")]
+    copied = []
+    for c in commands:
+        m = re.match(r"COPY .*--from=(\S+)", c)
+        if m:
+            copied.append(m.group(1))
+    for image in images + copied:
+        # A tag is a ":" after the last "/"; a registry port does not count.
+        assert ":" in image.rsplit("/", 1)[-1]
+        assert not image.endswith(":latest")
+    for image in copied:
+        assert re.search(r":(?:\w+-)?v?\d+\.\d+\.\d+$", image)
+    assert not any(re.search(r"curl.*\|\s*(ba)?sh", c) for c in commands)
+
+
+def test_dockerfile_apt_installs_are_minimal_and_clean():
+    for c in _dockerfile_commands():
+        if "apt-get install" not in c:
+            continue
+        assert "curl" not in c.split() and "unzip" not in c.split()
+        assert "rm -rf /var/lib/apt/lists/*" in c
+
+
+def test_compose_bgutil_provider_publishes_no_host_port():
+    import yaml
+
+    text = (REPO_ROOT / "docker-compose.yaml").read_text()
+    services = yaml.safe_load(text)["services"]
+    assert "ports" not in services["bgutil-provider"]
 
 
 def test_extra_owners_defaults_to_empty(config_factory):
