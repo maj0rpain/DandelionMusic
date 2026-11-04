@@ -981,3 +981,195 @@ def test_footer_breadcrumb_is_not_trimmed():
 )
 def test_fmt_count_rounds_before_choosing_unit(value, expected):
     assert library_commands._fmt_count(value) == expected
+
+
+# --- Timeout ---
+
+
+class Followup:
+    """A click's followup webhook: records edit_message(id, ...)."""
+
+    def __init__(self, fail=False):
+        self.edits = []
+        self.fail = fail
+
+    async def edit_message(self, message_id, **kwargs):
+        if self.fail:
+            raise http_error()
+        self.edits.append((message_id, kwargs))
+
+
+class ClickInteraction:
+    def __init__(self, user_id=AUTHOR_ID, message_id=MESSAGE_ID, fail=False):
+        self.user = SimpleNamespace(id=user_id)
+        self.message = SimpleNamespace(id=message_id)
+        self.followup = Followup(fail=fail)
+        self.original_edits = []
+        self.sent = []
+        self.deferred = 0
+
+        async def send_message(*args, **kwargs):
+            self.sent.append(args)
+
+        async def defer():
+            self.deferred += 1
+
+        self.response = SimpleNamespace(
+            send_message=send_message, defer=defer
+        )
+
+    async def edit_original_response(self, **kwargs):
+        self.original_edits.append(kwargs)
+
+
+def timeout_message(cls, fail=False):
+    """A `cls` (Message / WebhookMessage) that records its edits."""
+
+    class Recording(cls):
+        def __init__(self):
+            self.edits = []
+
+        async def edit(self, **kwargs):
+            if fail:
+                raise http_error()
+            self.edits.append(kwargs)
+
+    return Recording()
+
+
+def timeout_view(message=None, command_interaction=None):
+    view = make_view()
+    view.ctx.interaction = command_interaction
+    view.message = message
+    return view
+
+
+def test_timeout_after_a_click_edits_by_id_through_its_followup():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        click = ClickInteraction()
+        assert await view.interaction_check(click)
+        await view.on_timeout()
+        return view, click
+
+    view, click = run(go)
+    assert click.followup.edits == [(MESSAGE_ID, {"view": view})]
+    assert click.original_edits == []
+    assert all(item.disabled for item in view.children)
+
+
+def test_timeout_after_a_bulk_queue_click_edits_the_view_not_the_placeholder():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        click = ClickInteraction()
+        assert await view.interaction_check(click)
+        # the click's original response is now "Queueing..."
+        await view.on_timeout()
+        return view, click
+
+    view, click = run(go)
+    assert [m for m, _ in click.followup.edits] == [MESSAGE_ID]
+    assert click.original_edits == []
+
+
+def test_timeout_uses_the_later_of_two_accepted_clicks():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        first, second = ClickInteraction(), ClickInteraction()
+        assert await view.interaction_check(first)
+        assert await view.interaction_check(second)
+        await view.on_timeout()
+        return first, second
+
+    first, second = run(go)
+    assert first.followup.edits == []
+    assert len(second.followup.edits) == 1
+
+
+def test_timeout_never_uses_a_non_owner_click():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        owner, stranger = ClickInteraction(), ClickInteraction(user_id=99)
+        assert await view.interaction_check(owner)
+        assert not await view.interaction_check(stranger)
+        await view.on_timeout()
+        return owner, stranger
+
+    owner, stranger = run(go)
+    assert stranger.followup.edits == []
+    assert len(owner.followup.edits) == 1
+
+
+def test_timeout_never_uses_a_click_turned_away_as_busy():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        owner, busy = ClickInteraction(), ClickInteraction()
+        assert await view.interaction_check(owner)
+        with view.busy():
+            assert not await view.interaction_check(busy)
+        await view.on_timeout()
+        return owner, busy
+
+    owner, busy = run(go)
+    assert busy.followup.edits == []
+    assert len(owner.followup.edits) == 1
+
+
+def test_timeout_edits_a_webhook_message_view_through_the_click_followup():
+    async def go():
+        message = timeout_message(discord.WebhookMessage)
+        view = timeout_view(message)
+        click = ClickInteraction()
+        assert await view.interaction_check(click)
+        await view.on_timeout()
+        return message, click
+
+    message, click = run(go)
+    assert message.edits == []
+    assert len(click.followup.edits) == 1
+
+
+def test_timeout_without_a_click_edits_a_webhook_message_directly():
+    async def go():
+        message = timeout_message(discord.WebhookMessage)
+        view = timeout_view(message)
+        await view.on_timeout()
+        return message, view
+
+    message, view = run(go)
+    assert message.edits == [{"view": view}]
+
+
+def test_timeout_without_a_click_edits_the_original_response():
+    async def go():
+        command = ClickInteraction()
+        view = timeout_view(SimpleNamespace(), command)
+        await view.on_timeout()
+        return command, view
+
+    command, view = run(go)
+    assert command.original_edits == [{"view": view}]
+
+
+def test_timeout_after_a_click_still_edits_a_prefix_message_directly():
+    async def go():
+        message = timeout_message(discord.Message)
+        view = timeout_view(message)
+        click = ClickInteraction()
+        assert await view.interaction_check(click)
+        await view.on_timeout()
+        return message, click, view
+
+    message, click, view = run(go)
+    assert message.edits == [{"view": view}]
+    assert click.followup.edits == []
+
+
+def test_timeout_swallows_a_failed_followup_edit():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        assert await view.interaction_check(ClickInteraction(fail=True))
+        await view.on_timeout()
+        return view
+
+    assert all(item.disabled for item in run(go).children)

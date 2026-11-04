@@ -363,6 +363,10 @@ class LibraryView(discord.ui.View):
         # >= 2.5) that has no edit(). on_timeout() below discriminates
         # on the type rather than on which path ran.
         self.message = None
+        # the latest accepted interaction: exactly the clicks that
+        # restart discord.py's view timeout, so at on_timeout() it is
+        # under 5 minutes old and its followup token still valid
+        self._last_click: Optional[discord.Interaction] = None
 
     @contextmanager
     def busy(self):
@@ -399,6 +403,7 @@ class LibraryView(discord.ui.View):
             # user can already see why nothing else is responding.
             await interaction.response.defer()
             return False
+        self._last_click = interaction
         return True
 
     async def queue(
@@ -430,7 +435,25 @@ class LibraryView(discord.ui.View):
             # InteractionCallbackResponse rather than the message, so
             # that case has to go through the interaction. Testing what
             # we actually hold keeps this right whichever path ran.
-            if isinstance(self.message, discord.Message):
+            #
+            # A bot-sent channel message (the prefix paths) is edited
+            # directly: its bot token never expires. Anything else
+            # goes through the last accepted click's followup when
+            # there is one, because the command's interaction token
+            # dies 15 minutes after the command while each click
+            # restarts the 5-minute timeout. Edited by id, never via
+            # edit_original_response: after a bulk queue that click's
+            # original response is the "Queueing..." placeholder.
+            click = self._last_click
+            if isinstance(self.message, discord.Message) and not isinstance(
+                self.message, discord.WebhookMessage
+            ):
+                await self.message.edit(view=self)
+            elif click is not None:
+                await click.followup.edit_message(
+                    click.message.id, view=self
+                )
+            elif isinstance(self.message, discord.Message):
                 await self.message.edit(view=self)
             elif self.ctx.interaction is not None:
                 await self.ctx.interaction.edit_original_response(view=self)
