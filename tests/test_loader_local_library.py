@@ -74,7 +74,7 @@ def test_a_symlinked_album_folder_loads(lib, outside):
     _file(outside / "t.mp3")
     (lib / "A").mkdir()
     _link(lib / "A" / "B", outside)
-    _loads(_uri(lib, "A/B/t.mp3"), lib / "A" / "B" / "t.mp3", False)
+    _loads(_uri(lib, "A/B/t.mp3"), lib / "A" / "B" / "t.mp3", create=False)
 
 
 def test_a_symlinked_track_file_loads_titled_by_the_link(lib, outside):
@@ -82,7 +82,7 @@ def test_a_symlinked_track_file_loads_titled_by_the_link(lib, outside):
     (lib / "A" / "B").mkdir(parents=True)
     _link(lib / "A" / "B" / "link-name.mp3", target)
     uri = _uri(lib, "A/B/link-name.mp3")
-    song = _loads(uri, lib / "A" / "B" / "link-name.mp3", False)
+    song = _loads(uri, lib / "A" / "B" / "link-name.mp3", create=False)
     assert song.title == "link-name"
     assert song.webpage_url == uri
 
@@ -166,7 +166,7 @@ def test_a_symlinked_library_root_loads_generated_uris_only(
     _loads(
         library.song_uri("A", "B", "t.mp3"),
         lib / "A" / "B" / "t.mp3",
-        False,
+        create=False,
     )
     _refused(f"file://{alias}/A/B/t.mp3")
 
@@ -203,7 +203,7 @@ def test_the_index_and_the_loader_agree_on_a_symlinked_artist(lib, outside):
     _loads(
         library.song_uri("A", "B", "t.mp3"),
         lib / "A" / "B" / "t.mp3",
-        False,
+        create=False,
     )
 
 
