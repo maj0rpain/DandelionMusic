@@ -5,16 +5,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Set up Python
-        uses: actions/setup-python@v5
+      - uses: astral-sh/setup-uv@v10.0.1
         with:
-          python-version: "3.11"
-
-      - name: Install pre-commit
-        run: pip install pre-commit
+          python-version: "3.13"
 
       - name: Run checks
-        run: pre-commit run --all
+        run: uv run --group dev pre-commit run --all
 
   run-tests:
     runs-on: ubuntu-latest
