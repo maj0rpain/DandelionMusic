@@ -105,6 +105,15 @@ class _FakeFFmpeg:
         return b""
 
 
+@pytest.fixture
+def no_disconnect_sound(monkeypatch):
+    """Stops a disconnect from announcing itself to a channel the
+    fakes do not have."""
+    from config import config
+
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
+
+
 async def _settle():
     # lets the preload task the controller scheduled run to the end
     for _ in range(10):
@@ -335,11 +344,6 @@ def test_restore_with_no_backup_and_an_empty_queue_plays_nothing(
 
 
 def _restore_while_active(controller, monkeypatch, tmp_path, pause):
-    from config import config
-
-    # were restore() to disconnect, it must not announce it to a
-    # channel the fakes do not have
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
     backup = tmp_path / "backup" / "playlist_1234.pickle"
@@ -360,7 +364,7 @@ def _restore_while_active(controller, monkeypatch, tmp_path, pause):
 
 @pytest.mark.parametrize("pause", [False, True])
 def test_restore_while_active_is_refused_and_changes_nothing(
-    controller, monkeypatch, tmp_path, pause
+    controller, no_disconnect_sound, monkeypatch, tmp_path, pause
 ):
     ac = sys.modules[type(controller).__module__]
     (playlist, backup_bytes), result = _restore_while_active(
@@ -573,11 +577,8 @@ def test_attach_view_records_an_interactions_original_response(controller):
 
 
 def test_dispose_cancels_the_timer_and_every_pending_task(
-    controller, monkeypatch
+    controller, no_disconnect_sound, monkeypatch
 ):
-    from config import config
-
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
 
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
@@ -634,12 +635,17 @@ def _end_track(voice_client):
     return voice_client.detach_after()
 
 
-async def _start_and_end_first_track(controller):
-    """Starts the queue head on the running loop, then ends it as in
-    _end_track(), returning its `after` callback."""
+async def _start_playing(controller):
+    """Starts the queue head on the running loop and lets it settle."""
     controller.bot.loop = asyncio.get_running_loop()
     await controller.ensure_playing()
     await _settle()
+
+
+async def _start_and_end_first_track(controller):
+    """Starts the queue head on the running loop, then ends it as in
+    _end_track(), returning its `after` callback."""
+    await _start_playing(controller)
     return _end_track(controller.guild.voice_client)
 
 
@@ -1011,9 +1017,203 @@ def test_an_external_disconnect_leaves_the_queue_history_and_backup(
     asyncio.run(_start_then_disconnect(controller))
 
     assert _titles(controller) == ["first", "second"]
-    assert list(controller.playlist.trackname_history) == []
+    assert _history(controller) == ["first"]
     assert _backup(tmp_path) == ["first", "second"]
     assert len(old.played) == 1
+
+
+# --- d!history: a song is recorded when it starts ---------------------
+
+
+def _history(controller):
+    return list(controller.playlist.trackname_history)
+
+
+def _run_playing(controller, scenario):
+    """Runs `scenario(controller)` on a loop, with the queue head
+    started first and the loop given time to settle afterwards."""
+
+    async def run():
+        await _start_playing(controller)
+        await scenario(controller)
+        await _settle()
+
+    asyncio.run(run())
+
+
+async def _nothing(controller):
+    pass
+
+
+async def _skip(controller):
+    controller.skip()
+
+
+def test_a_skip_in_the_middle_of_the_queue_records_the_skipped_song(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second", "third")
+    _run_playing(controller, _skip)
+
+    assert _history(controller) == ["first", "second"]
+
+
+def test_skipping_the_last_song_records_it(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "only")
+    _run_playing(controller, _skip)
+
+    assert _history(controller) == ["only"]
+
+
+def test_a_skip_with_loop_all_records_the_skipped_song(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second", "third")
+    controller.playlist.loop = sys.modules[
+        type(controller).__module__
+    ].LoopMode.ALL
+    _run_playing(controller, _skip)
+
+    assert _history(controller) == ["first", "second"]
+
+
+def test_two_skips_before_the_end_hops_back_record_each_started_song_once(
+    controller, no_disconnect_sound, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second", "third", "fourth")
+
+    async def scenario(c):
+        c.skip()
+        c.skip()
+
+    _run_playing(controller, scenario)
+
+    assert _history(controller) == ["first", "second"]
+
+
+def test_prev_while_playing_records_the_outgoing_song(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def scenario(c):
+        c.skip()
+        await _settle()
+        c.prev_song()
+
+    _run_playing(controller, scenario)
+
+    assert _history(controller) == ["first", "second", "first"]
+
+
+def test_a_stop_while_playing_leaves_the_stopped_song_in_the_history(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def scenario(c):
+        c.stop()
+
+    _run_playing(controller, scenario)
+
+    assert _history(controller) == ["first"]
+
+
+def test_a_disconnect_while_playing_leaves_the_song_in_the_history(
+    controller, no_disconnect_sound, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def scenario(c):
+        await c.udisconnect("test")
+
+    _run_playing(controller, scenario)
+
+    assert _history(controller) == ["first"]
+
+
+def test_a_song_that_fails_to_preload_is_not_recorded(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "broken")
+    stub_loader.results["preload"] = stub_loader.Preload.FAILED
+
+    _run_playing(controller, _nothing)
+
+    assert _history(controller) == []
+    assert _played(controller) == []
+
+
+def test_a_song_without_a_direct_url_is_not_recorded(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "no url")
+    controller.playlist[0].url = None
+
+    _run_playing(controller, _nothing)
+
+    assert _history(controller) == []
+    assert _played(controller) == []
+
+
+def test_a_play_the_voice_client_refuses_is_not_recorded(
+    controller, no_disconnect_sound, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "refused")
+    controller.guild.voice_client.playing = True
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.play_song(controller.playlist[0])
+        await _settle()
+
+    asyncio.run(run())
+    assert _history(controller) == []
+
+
+def test_a_song_that_finishes_on_its_own_is_recorded_once(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first")
+
+    asyncio.run(_end_first_track_on_audio_thread(controller))
+
+    assert _history(controller) == ["first"]
+
+
+def test_the_song_playing_now_is_in_the_history(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    _run_playing(controller, _nothing)
+
+    assert controller.track_history().splitlines()[-1] == "first"
+
+
+def test_each_repeat_of_a_single_track_loop_is_recorded(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first")
+    controller.playlist.loop = sys.modules[
+        type(controller).__module__
+    ].LoopMode.SINGLE
+
+    async def scenario(c):
+        for _ in range(2):
+            _in_thread(_end_track(c.guild.voice_client), None)
+            await _settle()
+
+    _run_playing(controller, scenario)
+
+    assert _history(controller) == ["first", "first", "first"]
 
 
 def test_restore_after_an_external_disconnect_starts_the_cut_off_song(
@@ -1775,7 +1975,6 @@ def test_a_stale_failed_preload_skips_nothing_and_moves_nothing(
         await _settle()
 
     asyncio.run(run())
-
     assert _played(controller) == ["old"]
     assert controller.command_channel.sent == []
     # "slow" is gone because the queue preload behind "old" met its
@@ -1909,16 +2108,9 @@ def test_a_superseded_start_dropping_out_leaves_the_newer_one_pending(
 # alone: it is what d!restore reloads.
 
 
-def _quiet_disconnect(monkeypatch):
-    from config import config
-
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
-
-
 def test_a_second_disconnect_leaves_the_backup_holding_the_queue(
-    controller, monkeypatch, tmp_path
+    controller, no_disconnect_sound, monkeypatch, tmp_path
 ):
-    _quiet_disconnect(monkeypatch)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
@@ -1935,9 +2127,8 @@ def test_a_second_disconnect_leaves_the_backup_holding_the_queue(
 
 
 def test_a_disconnect_after_a_stop_leaves_the_stop_backup(
-    controller, monkeypatch, tmp_path
+    controller, no_disconnect_sound, monkeypatch, tmp_path
 ):
-    _quiet_disconnect(monkeypatch)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
@@ -1953,9 +2144,8 @@ def test_a_disconnect_after_a_stop_leaves_the_stop_backup(
 
 
 def test_disconnecting_a_new_idle_controller_keeps_an_existing_backup(
-    controller, monkeypatch, tmp_path
+    controller, no_disconnect_sound, monkeypatch, tmp_path
 ):
-    _quiet_disconnect(monkeypatch)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "kept", "also kept")
 
@@ -2009,9 +2199,8 @@ def test_a_queue_that_plays_to_its_end_leaves_an_empty_backup(
 
 
 def test_disconnecting_while_playing_leaves_the_backup_holding_the_queue(
-    controller, monkeypatch, tmp_path
+    controller, no_disconnect_sound, monkeypatch, tmp_path
 ):
-    _quiet_disconnect(monkeypatch)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 

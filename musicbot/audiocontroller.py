@@ -549,13 +549,6 @@ class AudioController(object):
     def _advance(self, forced=False, *, teardown=False):
         """Moves the queue on past the finished track and starts the
         next one, or the idle timer when there is none. Loop only."""
-        if self.playlist:
-            # current_song is unusable here: is_active() is always
-            # False at this point, so it would always return None.
-            # playlist[0] still holds the just-finished song, since
-            # playlist.next() hasn't advanced the queue yet.
-            self.playlist.add_name(self.playlist[0].title)
-
         if self._next_song:
             next_song = self._next_song
             self._next_song = None
@@ -662,6 +655,12 @@ class AudioController(object):
         except discord.ClientException:
             await self.udisconnect("playback error")
             return
+
+        # The history's one write site: a song is recorded once the
+        # voice client has accepted it, however it later ends. Reading
+        # the queue head when a track ends names the wrong song once
+        # next_song()/prev_song()/stop() have moved the queue.
+        self.playlist.add_name(song.title)
 
         if was_idle:
             # only the transition into playing, so advancing through a
