@@ -17,8 +17,6 @@ uv run --group dev pre-commit run --all  # black -l 79, flake8 --ignore E203,W50
 
 Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 
-Always pass `--repo maj0rpain/DandelionMusic` to `gh pr create`: bare `gh` resolves to `upstream` (`solaluset`).
-
 ## Module map
 
 - `musicbot/__main__.py` / `run.py` - entrypoint; `run.py` is a thin forwarder (PyInstaller entry).
@@ -49,7 +47,7 @@ Always pass `--repo maj0rpain/DandelionMusic` to `gh pr create`: bare `gh` resol
 
 ### Issue tracker
 
-GitHub Issues on `maj0rpain/DandelionMusic`, via `gh` with `--repo maj0rpain/DandelionMusic` pinned explicitly on every call (bare `gh` resolves to the original `solaluset` repo). See `docs/agents/issue-tracker.md`.
+GitHub Issues on `maj0rpain/DandelionMusic`, via `gh`. See `docs/agents/issue-tracker.md`.
 
 ### Triage labels
 
