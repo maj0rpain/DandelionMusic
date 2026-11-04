@@ -936,3 +936,48 @@ def test_failed_defer_leaves_cursor_unchanged(click, error):
     assert isinstance(raised, (aiohttp.ClientOSError, discord.NotFound))
     assert after == before
     assert resolved == []
+
+
+def utf16_units(text):
+    return len(text.encode("utf-16-le")) // 2
+
+
+@pytest.mark.parametrize("level", ["artist", "album"])
+def test_long_name_title_fits_embed_title_limit(level):
+    name = "x" * 255
+    index = {name: {"Album": [make_song("S")]}}
+    if level == "album":
+        index = {"Artist": {name: [make_song("S")]}}
+    view = make_view(index)
+    view.cursor.descend(name if level == "artist" else "Artist")
+    if level == "album":
+        view.cursor.descend(name)
+
+    title = view.embed().title
+
+    assert len(title) <= 256
+    assert utf16_units(title) <= 256
+    assert title.endswith("…")
+
+
+def test_footer_breadcrumb_is_not_trimmed():
+    name = "x" * 255
+    view = make_view({name: {"Album": [make_song("S")]}})
+    view.cursor.descend(name)
+
+    assert name in view.footer()
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (999, "999"),
+        (1_500, "1.5K"),
+        (999_949, "999.9K"),
+        (999_950, "1M"),
+        (1_204_338_291, "1.2B"),
+        (999_999_999, "1B"),
+    ],
+)
+def test_fmt_count_rounds_before_choosing_unit(value, expected):
+    assert library_commands._fmt_count(value) == expected

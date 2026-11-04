@@ -63,6 +63,11 @@ KIND_EMOJI = {
 QUERY_ECHO_LIMIT = 100
 
 
+# An embed title holds 256 UTF-16 code units: the icon is two of them,
+# the space one and the "\u2026" one, leaving 252 for the name.
+NAME_TITLE_LIMIT = 252
+
+
 def _trim(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
@@ -88,14 +93,20 @@ def _fmt_count(value: Optional[int]) -> Optional[str]:
     doesn't."""
     if not value:
         return None
-    for limit, suffix in (
-        (1_000_000_000, "B"),
-        (1_000_000, "M"),
-        (1_000, "K"),
-    ):
+    units = ((1_000, "K"), (1_000_000, "M"), (1_000_000_000, "B"))
+    chosen = None
+    for index, (limit, suffix) in enumerate(units):
         if value >= limit:
-            return f"{value / limit:.1f}".rstrip("0").rstrip(".") + suffix
-    return str(value)
+            chosen = index
+    if chosen is None:
+        return str(value)
+    # rounded to one decimal *before* the unit is settled, so 999,950
+    # reads "1M" rather than "1000K"
+    limit, suffix = units[chosen]
+    if round(value / limit, 1) >= 1000 and chosen + 1 < len(units):
+        limit, suffix = units[chosen + 1]
+    text = f"{value / limit:.1f}".rstrip("0").rstrip(".")
+    return text + suffix
 
 
 def _fmt_years(stats: library.LevelStats) -> Optional[str]:
@@ -472,8 +483,14 @@ class LibraryBrowseView(LibraryView):
         if self.cursor.artist is None:
             return f"{KIND_EMOJI['artist']} Artists"
         if self.cursor.album is None:
-            return f"{KIND_EMOJI['artist']} {self.cursor.artist}"
-        return f"{KIND_EMOJI['album']} {self.cursor.album}"
+            return (
+                f"{KIND_EMOJI['artist']} "
+                f"{_trim(self.cursor.artist, NAME_TITLE_LIMIT)}"
+            )
+        return (
+            f"{KIND_EMOJI['album']} "
+            f"{_trim(self.cursor.album, NAME_TITLE_LIMIT)}"
+        )
 
     def footer(self) -> Optional[str]:
         """In the breadcrumb the icons mark entities only - the
