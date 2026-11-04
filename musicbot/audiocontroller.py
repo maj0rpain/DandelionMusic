@@ -39,14 +39,17 @@ if TYPE_CHECKING:
 @dataclass
 class QueuedPlaylist:
     """process_song()'s result for a multi-song load. `truncation` is
-    set when the playlist was only partly loaded."""
+    set when the playlist was cut short."""
 
     queued: int
     truncation: Optional[Truncation] = None
 
-    @property
-    def truncated(self) -> bool:
-        return self.truncation is not None
+    def notice(self) -> Optional[str]:
+        """The truncation notice for the queued tracks, or `None` when
+        nothing was cut."""
+        if self.truncation is None:
+            return None
+        return self.truncation.notice(self.queued)
 
 
 _not_provided = object()

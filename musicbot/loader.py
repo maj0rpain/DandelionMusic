@@ -340,7 +340,7 @@ def _load_song(track: str) -> Union[Song, List[Song]]:
             )
             song.update(entry)
             results.append(song)
-        if truncation is not None and truncation.cuts(len(results)):
+        if truncation is not None:
             return PartialPlaylist(results, truncation)
         return results
 

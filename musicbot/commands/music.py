@@ -209,8 +209,9 @@ class Music(commands.Cog):
             return
 
         if isinstance(song, QueuedPlaylist):
-            if song.truncated:
-                await ctx.send(song.truncation.notice(song.queued))
+            notice = song.notice()
+            if notice is not None:
+                await ctx.send(notice)
             else:
                 await ctx.send(config.SONGINFO_PLAYLIST_QUEUED)
         else:
@@ -667,7 +668,7 @@ class Music(commands.Cog):
             await ctx.send(_saved_playlist_error_reply(e))
             return
         if isinstance(song, PartialPlaylist):
-            await ctx.send(song.truncation.notice(len(song)))
+            await ctx.send(song.notice())
         await ctx.send(config.PLAYLIST_UPDATED)
 
     @_playlist.command(

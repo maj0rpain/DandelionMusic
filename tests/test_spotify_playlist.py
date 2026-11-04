@@ -117,6 +117,19 @@ def test_paging_failure_after_page_without_total_reports_none(monkeypatch):
     assert result.truncation is None
 
 
+def test_paging_failure_with_every_reported_track_fetched_reports_none(
+    monkeypatch,
+):
+    monkeypatch.setattr(
+        linkutils, "spotify_api", PagedSpotify(RuntimeError("boom"), total=2)
+    )
+
+    result = fetch_playlist_with_api(SpotifyPlaylistTypes.PLAYLIST, "p")
+
+    assert result.links == [url(1), url(2)]
+    assert result.truncation is None
+
+
 def test_failure_before_any_page_propagates(monkeypatch):
     monkeypatch.setattr(
         linkutils,
@@ -147,7 +160,11 @@ def _page(count, song_count):
 
 @pytest.mark.parametrize(
     "count, expected",
-    [(50, Truncation(50, TruncationReason.NO_API)), (None, None)],
+    [
+        (50, Truncation(50, TruncationReason.NO_API)),
+        (30, None),
+        (None, None),
+    ],
 )
 def test_scrape_reports_song_count_as_total(monkeypatch, count, expected):
     monkeypatch.setattr(linkutils, "spotify_api", None)
