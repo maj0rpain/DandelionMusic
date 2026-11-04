@@ -1272,6 +1272,7 @@ def test_a_refresh_after_a_failed_edit_applies_the_view_again(
 
     assert len(message.edits) == 1 and message.edits[0] is not None
 
+
 def _rewriting_preload(stub_loader, normalised):
     """Makes every extraction rewrite the song's web page URL, as
     yt-dlp does when it normalises it or resolves a Spotify entry."""
