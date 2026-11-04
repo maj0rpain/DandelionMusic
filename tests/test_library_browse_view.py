@@ -25,12 +25,14 @@ import pytest
 from musicbot.commands import library as library_commands
 from musicbot.commands.library import (
     BackButton,
+    CheckError,
     LibraryBrowseView,
+    LibrarySearchView,
     LibrarySelect,
     PageButton,
     QueueLevelButton,
 )
-from musicbot.library import LibrarySong
+from musicbot.library import LibrarySong, SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 
 
@@ -936,3 +938,270 @@ def test_failed_defer_leaves_cursor_unchanged(click, error):
     assert isinstance(raised, (aiohttp.ClientOSError, discord.NotFound))
     assert after == before
     assert resolved == []
+
+
+def utf16_units(text):
+    return len(text.encode("utf-16-le")) // 2
+
+
+@pytest.mark.parametrize("level", ["artist", "album"])
+def test_long_name_title_fits_embed_title_limit(level):
+    name = "x" * 255
+    index = {name: {"Album": [make_song("S")]}}
+    if level == "album":
+        index = {"Artist": {name: [make_song("S")]}}
+    view = make_view(index)
+    view.cursor.descend(name if level == "artist" else "Artist")
+    if level == "album":
+        view.cursor.descend(name)
+
+    title = view.embed().title
+
+    assert len(title) <= 256
+    assert utf16_units(title) <= 256
+    assert title.endswith("…")
+
+
+def test_footer_breadcrumb_is_not_trimmed():
+    name = "x" * 255
+    view = make_view({name: {"Album": [make_song("S")]}})
+    view.cursor.descend(name)
+
+    assert name in view.footer()
+
+
+@pytest.mark.parametrize(
+    "value, expected",
+    [
+        (999, "999"),
+        (1_500, "1.5K"),
+        (999_949, "999.9K"),
+        (999_950, "1M"),
+        (1_204_338_291, "1.2B"),
+        (999_999_999, "1B"),
+    ],
+)
+def test_fmt_count_rounds_before_choosing_unit(value, expected):
+    assert library_commands._fmt_count(value) == expected
+
+
+# --- Timeout ---
+
+
+class Followup:
+    """A click's followup webhook: records edit_message(id, ...)."""
+
+    def __init__(self, fail=False):
+        self.edits = []
+        self.fail = fail
+
+    async def edit_message(self, message_id, **kwargs):
+        if self.fail:
+            raise http_error()
+        self.edits.append((message_id, kwargs))
+
+
+class ClickInteraction:
+    def __init__(self, user_id=AUTHOR_ID, message_id=MESSAGE_ID, fail=False):
+        self.user = SimpleNamespace(id=user_id)
+        self.message = SimpleNamespace(id=message_id)
+        self.followup = Followup(fail=fail)
+        self.original_edits = []
+        self.sent = []
+        self.deferred = 0
+
+        async def send_message(*args, **kwargs):
+            self.sent.append(args)
+
+        async def defer():
+            self.deferred += 1
+
+        self.response = SimpleNamespace(
+            send_message=send_message,
+            defer=defer,
+            is_done=lambda: bool(self.sent) or bool(self.deferred),
+        )
+
+    async def edit_original_response(self, **kwargs):
+        self.original_edits.append(kwargs)
+
+
+def timeout_message(cls, fail=False):
+    """A `cls` (Message / WebhookMessage) that records its edits."""
+
+    class Recording(cls):
+        def __init__(self):
+            self.edits = []
+
+        async def edit(self, **kwargs):
+            if fail:
+                raise http_error()
+            self.edits.append(kwargs)
+
+    return Recording()
+
+
+def timeout_view(message=None, command_interaction=None):
+    view = make_view()
+    view.ctx.interaction = command_interaction
+    view.message = message
+    return view
+
+
+def test_timeout_after_a_click_edits_by_id_through_its_followup():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        click = ClickInteraction()
+        assert await view.interaction_check(click)
+        await view.on_timeout()
+        return view, click
+
+    view, click = run(go)
+    assert click.followup.edits == [(MESSAGE_ID, {"view": view})]
+    assert click.original_edits == []
+    assert all(item.disabled for item in view.children)
+
+
+def test_timeout_after_a_bulk_queue_click_edits_the_view_not_the_placeholder(
+    monkeypatch,
+):
+    async def refuse(ctx):
+        raise CheckError("nope")
+
+    monkeypatch.setattr(library_commands, "play_check", refuse)
+
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        click = ClickInteraction()
+        assert await view.interaction_check(click)
+        await view.queue(click, [("A", "B", "c.mp3")], "test")
+        # the click's original response is now the "Queueing..." message
+        assert click.sent == [("Queueing...",)]
+        await view.on_timeout()
+        return view, click
+
+    view, click = run(go)
+    assert click.followup.edits == [(MESSAGE_ID, {"view": view})]
+    assert all("view" not in edit for edit in click.original_edits)
+
+
+def test_search_view_timeout_edits_a_webhook_message_through_the_followup():
+    async def go():
+        message = timeout_message(discord.WebhookMessage)
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=AUTHOR_ID), interaction=None
+        )
+        results = [SearchResult("artist", "A", None, None, "A", 1.0)]
+        view = LibrarySearchView(ctx, INDEX, "a", results)
+        view.message = message
+        click = ClickInteraction()
+        assert await view.interaction_check(click)
+        await view.on_timeout()
+        return message, click, view
+
+    message, click, view = run(go)
+    assert message.edits == []
+    assert click.followup.edits == [(MESSAGE_ID, {"view": view})]
+
+
+def test_timeout_uses_the_later_of_two_accepted_clicks():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        first, second = ClickInteraction(), ClickInteraction()
+        assert await view.interaction_check(first)
+        assert await view.interaction_check(second)
+        await view.on_timeout()
+        return first, second
+
+    first, second = run(go)
+    assert first.followup.edits == []
+    assert len(second.followup.edits) == 1
+
+
+def test_timeout_never_uses_a_non_owner_click():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        owner, stranger = ClickInteraction(), ClickInteraction(user_id=99)
+        assert await view.interaction_check(owner)
+        assert not await view.interaction_check(stranger)
+        await view.on_timeout()
+        return owner, stranger
+
+    owner, stranger = run(go)
+    assert stranger.followup.edits == []
+    assert len(owner.followup.edits) == 1
+
+
+def test_timeout_never_uses_a_click_turned_away_as_busy():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        owner, busy = ClickInteraction(), ClickInteraction()
+        assert await view.interaction_check(owner)
+        with view.busy():
+            assert not await view.interaction_check(busy)
+        await view.on_timeout()
+        return owner, busy
+
+    owner, busy = run(go)
+    assert busy.followup.edits == []
+    assert len(owner.followup.edits) == 1
+
+
+def test_timeout_edits_a_webhook_message_view_through_the_click_followup():
+    async def go():
+        message = timeout_message(discord.WebhookMessage)
+        view = timeout_view(message)
+        click = ClickInteraction()
+        assert await view.interaction_check(click)
+        await view.on_timeout()
+        return message, click
+
+    message, click = run(go)
+    assert message.edits == []
+    assert len(click.followup.edits) == 1
+
+
+def test_timeout_without_a_click_edits_a_webhook_message_directly():
+    async def go():
+        message = timeout_message(discord.WebhookMessage)
+        view = timeout_view(message)
+        await view.on_timeout()
+        return message, view
+
+    message, view = run(go)
+    assert message.edits == [{"view": view}]
+
+
+def test_timeout_without_a_click_edits_the_original_response():
+    async def go():
+        command = ClickInteraction()
+        view = timeout_view(SimpleNamespace(), command)
+        await view.on_timeout()
+        return command, view
+
+    command, view = run(go)
+    assert command.original_edits == [{"view": view}]
+
+
+def test_timeout_after_a_click_still_edits_a_prefix_message_directly():
+    async def go():
+        message = timeout_message(discord.Message)
+        view = timeout_view(message)
+        click = ClickInteraction()
+        assert await view.interaction_check(click)
+        await view.on_timeout()
+        return message, click, view
+
+    message, click, view = run(go)
+    assert message.edits == [{"view": view}]
+    assert click.followup.edits == []
+
+
+def test_timeout_swallows_a_failed_followup_edit():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        assert await view.interaction_check(ClickInteraction(fail=True))
+        await view.on_timeout()
+        return view
+
+    assert all(item.disabled for item in run(go).children)

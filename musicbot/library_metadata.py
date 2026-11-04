@@ -189,6 +189,10 @@ async def _fetch_lastfm(method: str, params: Dict[str, str]) -> dict:
     # rate limiting - the failure only shows up as an "error" field
     # in the body, which would otherwise silently look like "no match"
     if "error" in data:
+        # error 6 is "not found": a definite answer, returned as an
+        # empty body so the parser maps it to a (cacheable) no-match
+        if data.get("error") == 6:
+            return {}
         raise RuntimeError(f"{data.get('message')} (code {data.get('error')})")
     return data
 
@@ -288,19 +292,13 @@ def _spotify_album_sync(
     images = item.get("images", [])
     # a search only yields simplified album objects, which carry no
     # popularity - that lives on the full object and needs its own
-    # fetch. Losing that extra call must not cost us the rest of the
-    # match, so it degrades to no popularity rather than failing.
+    # fetch. A failed fetch propagates: the whole album lookup is then
+    # a transient failure, retried after the cooldown, rather than a
+    # popularity-less success cached until restart.
     popularity = None
     album_id = item.get("id")
     if album_id:
-        try:
-            popularity = _spotify_client().album(album_id).get("popularity")
-        except Exception as e:
-            print(
-                f"library_metadata: Spotify album detail failed"
-                f" for {album_name}: {e}",
-                file=sys.stderr,
-            )
+        popularity = _spotify_client().album(album_id).get("popularity")
     return _SpotifyInfo(
         image_url=images[0]["url"] if images else None,
         popularity=popularity,

@@ -63,6 +63,11 @@ KIND_EMOJI = {
 QUERY_ECHO_LIMIT = 100
 
 
+# An embed title holds 256 UTF-16 code units: the icon is two of them,
+# the space one and the "\u2026" one, leaving 252 for the name.
+NAME_TITLE_LIMIT = 252
+
+
 def _trim(text: str, limit: int) -> str:
     if len(text) <= limit:
         return text
@@ -88,14 +93,20 @@ def _fmt_count(value: Optional[int]) -> Optional[str]:
     doesn't."""
     if not value:
         return None
-    for limit, suffix in (
-        (1_000_000_000, "B"),
-        (1_000_000, "M"),
-        (1_000, "K"),
-    ):
+    units = ((1_000, "K"), (1_000_000, "M"), (1_000_000_000, "B"))
+    chosen = None
+    for index, (limit, suffix) in enumerate(units):
         if value >= limit:
-            return f"{value / limit:.1f}".rstrip("0").rstrip(".") + suffix
-    return str(value)
+            chosen = index
+    if chosen is None:
+        return str(value)
+    # rounded to one decimal *before* the unit is settled, so 999,950
+    # reads "1M" rather than "1000K"
+    limit, suffix = units[chosen]
+    if round(value / limit, 1) >= 1000 and chosen + 1 < len(units):
+        limit, suffix = units[chosen + 1]
+    text = f"{value / limit:.1f}".rstrip("0").rstrip(".")
+    return text + suffix
 
 
 def _fmt_years(stats: library.LevelStats) -> Optional[str]:
@@ -352,6 +363,10 @@ class LibraryView(discord.ui.View):
         # >= 2.5) that has no edit(). on_timeout() below discriminates
         # on the type rather than on which path ran.
         self.message = None
+        # the latest accepted interaction: exactly the clicks that
+        # restart discord.py's view timeout, so at on_timeout() it is
+        # under 5 minutes old and its followup token still valid
+        self._last_click: Optional[discord.Interaction] = None
 
     @contextmanager
     def busy(self):
@@ -388,6 +403,7 @@ class LibraryView(discord.ui.View):
             # user can already see why nothing else is responding.
             await interaction.response.defer()
             return False
+        self._last_click = interaction
         return True
 
     async def queue(
@@ -419,7 +435,23 @@ class LibraryView(discord.ui.View):
             # InteractionCallbackResponse rather than the message, so
             # that case has to go through the interaction. Testing what
             # we actually hold keeps this right whichever path ran.
-            if isinstance(self.message, discord.Message):
+            #
+            # A bot-sent channel message (the prefix paths) is edited
+            # directly: its bot token never expires. Anything else
+            # goes through the last accepted click's followup when
+            # there is one, because the command's interaction token
+            # dies 15 minutes after the command while each click
+            # restarts the 5-minute timeout. Edited by id, never via
+            # edit_original_response: after a bulk queue that click's
+            # original response is the "Queueing..." placeholder.
+            click = self._last_click
+            if isinstance(self.message, discord.Message) and not isinstance(
+                self.message, discord.WebhookMessage
+            ):
+                await self.message.edit(view=self)
+            elif click is not None:
+                await click.followup.edit_message(click.message.id, view=self)
+            elif isinstance(self.message, discord.Message):
                 await self.message.edit(view=self)
             elif self.ctx.interaction is not None:
                 await self.ctx.interaction.edit_original_response(view=self)
@@ -472,8 +504,14 @@ class LibraryBrowseView(LibraryView):
         if self.cursor.artist is None:
             return f"{KIND_EMOJI['artist']} Artists"
         if self.cursor.album is None:
-            return f"{KIND_EMOJI['artist']} {self.cursor.artist}"
-        return f"{KIND_EMOJI['album']} {self.cursor.album}"
+            return (
+                f"{KIND_EMOJI['artist']} "
+                f"{_trim(self.cursor.artist, NAME_TITLE_LIMIT)}"
+            )
+        return (
+            f"{KIND_EMOJI['album']} "
+            f"{_trim(self.cursor.album, NAME_TITLE_LIMIT)}"
+        )
 
     def footer(self) -> Optional[str]:
         """In the breadcrumb the icons mark entities only - the

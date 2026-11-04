@@ -363,3 +363,26 @@ class TestTheSeam:
             "musicbot",
             "musicbot.library",
         }
+
+
+def test_artists_and_albums_sort_case_insensitively():
+    index = {
+        "beta": {"b": [make_song("1")], "A": [make_song("2")]},
+        "Alpha": {},
+        "Zed": {},
+    }
+    cursor = library_browse.BrowseCursor(index, 25)
+    assert cursor.screen().entries == ["Alpha", "beta", "Zed"]
+    cursor.descend("beta")
+    assert cursor.screen().entries == ["A", "b"]
+
+
+def test_song_order_stays_filename_order():
+    songs = [
+        make_song("Zoo", filename="01 - Zoo.flac"),
+        make_song("Apple", filename="02 - Apple.flac"),
+    ]
+    cursor = library_browse.BrowseCursor({"A": {"B": songs}}, 25)
+    cursor.descend("A")
+    cursor.descend("B")
+    assert cursor.screen().entries == ["01 - Zoo.flac", "02 - Apple.flac"]

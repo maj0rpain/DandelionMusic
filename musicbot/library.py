@@ -26,6 +26,9 @@ class LibrarySong(NamedTuple):
 LibraryIndex = Dict[str, Dict[str, List[LibrarySong]]]
 
 _index: LibraryIndex = {}
+# The configured library root, resolved once per index build (off the
+# event loop); None when there is no usable library.
+_root: Optional[Path] = None
 
 
 def _safe_iterdir(path: Path) -> List[Path]:
@@ -76,13 +79,14 @@ def build_index() -> LibraryIndex:
     config.MUSIC_LIBRARY_PATH (expected layout:
     Artist/Album/song.ext) and rebuilds the in-memory index.
     Returns the new index."""
-    global _index
+    global _index, _root
     new_index: LibraryIndex = {}
     root = (
         Path(config.MUSIC_LIBRARY_PATH) if config.MUSIC_LIBRARY_PATH else None
     )
+    root_is_dir = root is not None and root.is_dir()
 
-    if root is not None and root.is_dir():
+    if root is not None and root_is_dir:
         for artist_dir in _safe_iterdir(root):
             if not artist_dir.is_dir():
                 continue
@@ -105,7 +109,15 @@ def build_index() -> LibraryIndex:
             if albums:
                 new_index[artist_dir.name] = albums
 
+    new_root: Optional[Path] = None
+    if root is not None and root_is_dir:
+        try:
+            new_root = root.resolve()
+        except OSError:
+            new_root = None
+
     _index = new_index
+    _root = new_root
     return _index
 
 
@@ -362,9 +374,10 @@ async def search_async(
 
 
 def song_path(artist: str, album: str, filename: str) -> Path:
-    return (
-        Path(config.MUSIC_LIBRARY_PATH).resolve() / artist / album / filename
-    )
+    root = _root
+    if root is None:
+        root = Path(config.MUSIC_LIBRARY_PATH).resolve()
+    return root / artist / album / filename
 
 
 def song_uri(artist: str, album: str, filename: str) -> str:

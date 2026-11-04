@@ -1,13 +1,16 @@
 import re
 import sys
 from pathlib import Path
-from typing import NamedTuple, Optional, Tuple
+from typing import Dict, NamedTuple, Optional, Tuple
 
 from mutagen import File as MutagenFile
+from mutagen.aiff import AIFF
+from mutagen.asf import ASF
 from mutagen.flac import FLAC
 from mutagen.id3 import PictureType
 from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
+from mutagen.wave import WAVE
 
 
 class AudioTags(NamedTuple):
@@ -50,6 +53,56 @@ def _parse_year(value: Optional[str]) -> Optional[int]:
     return int(match.group(1)) if match else None
 
 
+# mutagen's easy mode only wraps ID3-in-MP3, MP4 and TrueAudio. WAV and
+# AIFF come back with raw ID3 frames and WMA with ASF attributes, each
+# keyed differently, so every other format is read through its own map.
+_EASY_KEYS = {
+    "title": "title",
+    "artist": "artist",
+    "album": "album",
+    "album_artist": "albumartist",
+    "genre": "genre",
+    "year": "date",
+}
+_ID3_KEYS = {
+    "title": "TIT2",
+    "artist": "TPE1",
+    "album": "TALB",
+    "album_artist": "TPE2",
+    "genre": "TCON",
+    "year": "TDRC",
+}
+_ASF_KEYS = {
+    "title": "Title",
+    "artist": "Author",
+    "album": "WM/AlbumTitle",
+    "album_artist": "WM/AlbumArtist",
+    "genre": "WM/Genre",
+    "year": "WM/Year",
+}
+
+
+def _key_map(audio) -> Dict[str, str]:
+    if isinstance(audio, (WAVE, AIFF)):
+        return _ID3_KEYS
+    if isinstance(audio, ASF):
+        return _ASF_KEYS
+    return _EASY_KEYS
+
+
+def _first_str(audio, key: str) -> Optional[str]:
+    """The first value under `key` as a str, or None. ID3 frames and
+    ASF attributes are objects, not strs, so they are converted."""
+    values = audio.get(key) if audio.tags is not None else None
+    if not values:
+        return None
+    first = values[0]
+    if first is None:
+        return None
+    text = str(first)
+    return text or None
+
+
 def read_tags(path: Path) -> AudioTags:
     """Best-effort tag read for a local library file. Never raises -
     an unreadable/corrupt file or a format mutagen can't parse just
@@ -64,12 +117,13 @@ def read_tags(path: Path) -> AudioTags:
         return _EMPTY_TAGS
 
     try:
-        title = (audio.get("title") or [None])[0]
-        artist = (audio.get("artist") or [None])[0]
-        album = (audio.get("album") or [None])[0]
-        album_artist = (audio.get("albumartist") or [None])[0]
-        genre = (audio.get("genre") or [None])[0]
-        year = _parse_year((audio.get("date") or [None])[0])
+        keys = _key_map(audio)
+        title = _first_str(audio, keys["title"])
+        artist = _first_str(audio, keys["artist"])
+        album = _first_str(audio, keys["album"])
+        album_artist = _first_str(audio, keys["album_artist"])
+        genre = _first_str(audio, keys["genre"])
+        year = _parse_year(_first_str(audio, keys["year"]))
         info = audio.info
         duration = (
             round(info.length) if info is not None and info.length else None
@@ -156,7 +210,7 @@ def read_artwork(
     mime: Optional[str] = None
 
     try:
-        if isinstance(audio, MP3):
+        if isinstance(audio, (MP3, WAVE, AIFF)):
             apics = audio.tags.getall("APIC") if audio.tags else []
             picture = _front_cover(apics)
             if picture is not None:
