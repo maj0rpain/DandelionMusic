@@ -101,6 +101,27 @@ def lastfm(monkeypatch):
     return install
 
 
+class Clock:
+    now = 1000.0
+
+    def __call__(self):
+        return self.now
+
+
+@pytest.fixture
+def clock(monkeypatch):
+    """A controllable clock for the four lookups' cooldowns."""
+    c = Clock()
+    for name in (
+        "_lastfm_artist",
+        "_lastfm_album",
+        "_spotify_artist",
+        "_spotify_album",
+    ):
+        monkeypatch.setattr(getattr(library_metadata, name), "_clock", c)
+    return c
+
+
 @pytest.fixture
 def spotify(monkeypatch):
     def install(client):
@@ -353,19 +374,92 @@ def test_spotify_album(tmp_path, spotify, no_lastfm):
     assert client.searches == [("album", "artist:Radiohead album:OK Computer")]
 
 
-def test_spotify_album_detail_failure_degrades_to_no_popularity(
-    tmp_path, spotify, no_lastfm
+def test_spotify_album_detail_failure_is_retried_in_full(
+    tmp_path, spotify, no_lastfm, clock
 ):
-    spotify(
+    client = spotify(
         FakeSpotify(
             albums=[{"id": "abc", "images": [], "release_date": "2000"}],
             album_detail=RuntimeError("rate limited"),
         )
     )
 
+    assert album(tmp_path).stats is None
+    album(tmp_path)
+    assert len(client.searches) == 1  # in cooldown, nothing cached
+
+    clock.now += 61
+    client.album_detail = {"popularity": 77}
     stats = album(tmp_path).stats
 
-    assert (stats.popularity, stats.release_date) == (None, "2000")
+    assert len(client.searches) == 2
+    assert (stats.popularity, stats.release_date) == (77, "2000")
+
+
+LASTFM_CALLS = {
+    "artist": lambda tmp_path: artist(tmp_path),
+    "album": lambda tmp_path: album(tmp_path),
+}
+
+
+@pytest.mark.parametrize("kind", ["artist", "album"])
+def test_lastfm_error_6_is_cached_as_no_match(
+    tmp_path, lastfm, no_spotify, clock, kind
+):
+    session = lastfm(
+        {
+            "artist.getInfo": {"error": 6, "message": "not found"},
+            "album.getInfo": {"error": 6, "message": "not found"},
+        }
+    )
+
+    first = LASTFM_CALLS[kind](tmp_path)
+    clock.now += 61  # past any failure cooldown: only a cache answers
+    LASTFM_CALLS[kind](tmp_path)
+
+    assert (first.stats, first.art) == (None, None)
+    assert len(session.queries) == 1
+
+
+@pytest.mark.parametrize("kind", ["artist", "album"])
+def test_other_lastfm_error_codes_are_retried_after_cooldown(
+    tmp_path, lastfm, no_spotify, clock, kind
+):
+    session = lastfm(
+        {
+            "artist.getInfo": {"error": 10, "message": "bad key"},
+            "album.getInfo": {"error": 10, "message": "bad key"},
+        }
+    )
+
+    LASTFM_CALLS[kind](tmp_path)
+    LASTFM_CALLS[kind](tmp_path)
+    assert len(session.queries) == 1
+    clock.now += 61
+    LASTFM_CALLS[kind](tmp_path)
+
+    assert len(session.queries) == 2
+
+
+@pytest.mark.parametrize("kind", ["artist", "album"])
+def test_lastfm_non_200_status_is_retried_after_cooldown(
+    tmp_path, lastfm, no_spotify, clock, kind
+):
+    session = lastfm({"artist.getInfo": {}, "album.getInfo": {}})
+    real_get = session.get
+
+    def get(url, params):
+        response = real_get(url, params)
+        response.status = 503
+        return response
+
+    session.get = get
+
+    LASTFM_CALLS[kind](tmp_path)
+    clock.now += 61
+    LASTFM_CALLS[kind](tmp_path)
+
+    assert len(session.queries) == 2
 
 
 def test_clear_caches_clears_all_four_lookups(tmp_path, lastfm, spotify):
