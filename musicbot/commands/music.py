@@ -210,7 +210,7 @@ class Music(commands.Cog):
 
         try:
             song = await ctx.audiocontroller.process_song(
-                track, user=ctx.author
+                track, user=ctx.author, playnext=playnext
             )
         except SongError as e:
             await ctx.send(e)
@@ -231,14 +231,6 @@ class Music(commands.Cog):
                 await ctx.send(
                     embed=song.format_output(config.SONGINFO_NOW_PLAYING)
                 )
-            if playnext:
-                if len(ctx.audiocontroller.playlist) > 2:
-                    src_pos = len(ctx.audiocontroller.playlist)
-                    dest_pos = 2
-                    try:
-                        ctx.audiocontroller.move(src_pos - 1, dest_pos - 1)
-                    except PlaylistError as e:
-                        await ctx.send(e)
 
     @commands.hybrid_command(
         name="playnext",
@@ -421,6 +413,7 @@ class Music(commands.Cog):
     @commands.check(dj_check)
     @joins_voice
     async def _restore(self, ctx):
+        await ctx.defer()  # restoring extracts the head of the backup
         result = await ctx.audiocontroller.restore()
         if result is RestoreResult.REFUSED_WHILE_ACTIVE:
             await ctx.send(config.RESTORE_WHILE_ACTIVE)
