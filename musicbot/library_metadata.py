@@ -5,19 +5,50 @@ from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from typing import Dict, NamedTuple, Optional, Tuple
 
+from spotipy import Spotify
+
 from config import config
 from musicbot import linkutils
 from musicbot.linkutils import spotify_api
 from musicbot.audiotags import read_artwork, read_tags
 from musicbot.cached_lookup import CachedLookup
 
-# Dedicated pool (not the loop's shared default executor) for the
-# blocking calls this module makes - mutagen reads and spotipy's
-# synchronous HTTP client. asyncio.wait_for()'s timeout only abandons
-# the await, not the underlying thread, so a string of slow/hung
-# external calls could otherwise pile up threads in whatever pool the
-# rest of the bot shares.
-_executor = ThreadPoolExecutor(max_workers=4)
+# Dedicated pools (not the loop's shared default executor) for the
+# blocking calls this module makes. asyncio.wait_for()'s timeout only
+# abandons the await, not the underlying thread, so slow or hung calls
+# pile up threads. Local mutagen reads are short and Spotify's
+# synchronous HTTP client can be slow or rate-limited, so they get a
+# pool each: a stalled Spotify can never delay a tag or artwork read.
+_file_executor = ThreadPoolExecutor(max_workers=4)
+_network_executor = ThreadPoolExecutor(max_workers=4)
+
+# limits of the enrichment-only Spotify client: a slow or rate-limited
+# Spotify gives its thread back quickly, and the lookup cooldown takes
+# over
+_SPOTIFY_TIMEOUT = 3
+
+_enrichment_source = None
+_enrichment_client = None
+
+
+def _spotify_client():
+    """The client Spotify enrichment calls go through. A real
+    spotipy client is replaced by a low-limit one sharing its auth
+    manager (built lazily, rebuilt when `spotify_api` changes); any
+    other object is returned as is."""
+    global _enrichment_source, _enrichment_client
+    source = spotify_api
+    if not isinstance(source, Spotify):
+        return source
+    if _enrichment_source is not source:
+        _enrichment_client = Spotify(
+            auth_manager=source.auth_manager,
+            requests_timeout=_SPOTIFY_TIMEOUT,
+            retries=0,
+            status_retries=0,
+        )
+        _enrichment_source = source
+    return _enrichment_client
 
 
 # distinguishes "not looked up yet" from a looked-up-and-genuinely-
@@ -72,7 +103,7 @@ async def _resolve_names(
     loop = asyncio.get_running_loop()
     try:
         tags = await asyncio.wait_for(
-            loop.run_in_executor(_executor, read_tags, sample_file),
+            loop.run_in_executor(_file_executor, read_tags, sample_file),
             timeout=3,
         )
     except asyncio.TimeoutError:
@@ -231,7 +262,7 @@ class _SpotifyInfo(NamedTuple):
 
 
 def _spotify_artist_sync(name: str) -> Optional[_SpotifyInfo]:
-    results = spotify_api.search(q=name, type="artist", limit=1)
+    results = _spotify_client().search(q=name, type="artist", limit=1)
     items = results.get("artists", {}).get("items", [])
     if not items:
         return None
@@ -249,7 +280,7 @@ def _spotify_album_sync(
     artist_name: str, album_name: str
 ) -> Optional[_SpotifyInfo]:
     query = f"artist:{artist_name} album:{album_name}"
-    results = spotify_api.search(q=query, type="album", limit=1)
+    results = _spotify_client().search(q=query, type="album", limit=1)
     items = results.get("albums", {}).get("items", [])
     if not items:
         return None
@@ -263,7 +294,7 @@ def _spotify_album_sync(
     album_id = item.get("id")
     if album_id:
         try:
-            popularity = spotify_api.album(album_id).get("popularity")
+            popularity = _spotify_client().album(album_id).get("popularity")
         except Exception as e:
             print(
                 f"library_metadata: Spotify album detail failed"
@@ -280,14 +311,18 @@ def _spotify_album_sync(
 
 async def _spotify_artist_backend(name: str) -> Optional[_SpotifyInfo]:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, _spotify_artist_sync, name)
+    return await loop.run_in_executor(
+        _network_executor, _spotify_artist_sync, name
+    )
 
 
 async def _spotify_album_backend(
     key: Tuple[str, str],
 ) -> Optional[_SpotifyInfo]:
     loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(_executor, _spotify_album_sync, *key)
+    return await loop.run_in_executor(
+        _network_executor, _spotify_album_sync, *key
+    )
 
 
 # read at each lookup rather than captured here, so tests can
@@ -428,7 +463,7 @@ async def _embedded_art(sample_file: Path) -> Optional[ArtInfo]:
     loop = asyncio.get_running_loop()
     try:
         embedded = await asyncio.wait_for(
-            loop.run_in_executor(_executor, read_artwork, sample_file),
+            loop.run_in_executor(_file_executor, read_artwork, sample_file),
             timeout=3,
         )
     except asyncio.TimeoutError:
