@@ -930,16 +930,12 @@ class AudioController(object):
         result = await loader.preload(song)
         if result is loader.Preload.FAILED:
             return False
-        if (
-            result is loader.Preload.EXTRACTED
-            and song.saved_playlist is not None
-            and song.saved_url is not None
-        ):
+        if result is loader.Preload.EXTRACTED and song.saved_entry is not None:
             try:
                 await playlists.set_title(
                     self.bot.DbSession,
-                    song.saved_playlist,
-                    song.saved_url,
+                    song.saved_entry.ref,
+                    song.saved_entry.url,
                     song.title,
                 )
             except Exception:

@@ -882,12 +882,14 @@ def _queue_saved_playlist_song(controller, from_saved_playlist=True):
                     ac.SiteTypes.YT_DLP,
                     SAVED_URL,
                     title="fresh title",
-                    saved_playlist=(
-                        ac.playlists.PlaylistRef("1234", "mix")
+                    saved_entry=(
+                        ac.playlists.SavedEntry(
+                            ac.playlists.PlaylistRef("1234", "mix"),
+                            SAVED_URL,
+                        )
                         if from_saved_playlist
                         else None
                     ),
-                    saved_url=SAVED_URL if from_saved_playlist else None,
                 )
             ]
         )
@@ -1601,7 +1603,7 @@ def test_a_song_loaded_from_a_saved_playlist_keeps_its_title_refresh(
     ]
 
 
-def test_a_song_without_a_saved_url_refreshes_no_stored_title(
+def test_a_song_from_an_old_backup_refreshes_no_stored_title(
     controller, stub_loader
 ):
     _rewriting_preload(stub_loader, SAVED_URL)
@@ -1610,10 +1612,11 @@ def test_a_song_without_a_saved_url_refreshes_no_stored_title(
         song = ac.Song(
             ac.SiteTypes.YT_DLP,
             SAVED_URL,
-            saved_playlist=ac.playlists.PlaylistRef("1234", "mix"),
         )
-        # as unpickled from a backup written before saved_url existed
-        song.__dict__.pop("saved_url", None)
+        # as unpickled from a backup written before saved_entry existed
+        del song.__dict__["saved_entry"]
+        song.saved_playlist = ac.playlists.PlaylistRef("1234", "mix")
+        song.saved_url = SAVED_URL
         return song
 
     async def preload_once(ac, factory):
