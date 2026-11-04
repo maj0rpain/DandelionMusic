@@ -53,24 +53,28 @@ def test_add_song_replies_with_the_song_error_and_saves_nothing(monkeypatch):
     assert config.PLAYLIST_UPDATED not in ctx.sent
 
 
-def _wrappers(error):
-    invoke = commands.CommandInvokeError(error)
-    yield invoke
-    yield commands.HybridCommandError(
+def _hybrid(error):
+    return commands.HybridCommandError(
         app_commands.CommandInvokeError(
             types.SimpleNamespace(name="play"), error
         )
     )
 
 
-@pytest.mark.parametrize("wrapper", [0, 1])
-def test_command_error_handler_answers_a_song_error(monkeypatch, wrapper):
+@pytest.mark.parametrize(
+    "wrap",
+    [
+        pytest.param(commands.CommandInvokeError, id="prefix"),
+        pytest.param(_hybrid, id="hybrid"),
+    ],
+)
+def test_command_error_handler_answers_a_song_error(monkeypatch, wrap):
     printed = []
     monkeypatch.setattr(
         bot_module, "print_exception", lambda e: printed.append(e)
     )
     error = SongError("unsupported link")
-    wrapped = list(_wrappers(error))[wrapper]
+    wrapped = wrap(error)
 
     async def scenario():
         bot = make_bot()
