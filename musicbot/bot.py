@@ -114,40 +114,46 @@ class MusicBot(commands.Bot):
         loader.init()
         return await super().start(*args, **kwargs)
 
-    async def close(self):
-        print(config.SHUTDOWN_MESSAGE, flush=True)
-
+    async def _gather_per_guild(self, make_coro, what: str):
+        """Run make_coro(controller) for every controller; one guild's
+        failure is logged and never stops the others."""
         controllers = list(self.sessions)
         results = await asyncio.gather(
-            *(
-                controller.udisconnect("bot shutdown")
-                for controller in controllers
-            ),
+            *(make_coro(controller) for controller in controllers),
             return_exceptions=True,
         )
         for controller, result in zip(controllers, results):
             if isinstance(result, BaseException):
                 print(
-                    f"Disconnect failed for guild {controller.guild.name}:",
+                    f"{what} failed for guild {controller.guild.name}:",
                     file=sys.stderr,
                     flush=True,
                 )
                 print_exception(result)
 
+    async def close(self):
+        print(config.SHUTDOWN_MESSAGE, flush=True)
+
+        await self._gather_per_guild(
+            lambda controller: controller.udisconnect("bot shutdown"),
+            "Disconnect",
+        )
+
         # every remaining step runs; a later step's exception propagates
         # once the steps after it have run
-        async def stop_link():
-            # this loop's aiohttp session (see linkutils.get_session);
-            # each lane's worker closes its own when shutdown() stops it
-            await linkutils.stop()
-
         async def stop_loader():
             # joining the lanes' workers blocks; do it off the loop so other
             # tasks keep running until they have exited
             await asyncio.to_thread(loader.shutdown)
 
         failure = None
-        for step in (stop_link, stop_loader, super().close):
+        for step in (
+            # this loop's aiohttp session (see linkutils.get_session);
+            # each lane's worker closes its own when shutdown() stops it
+            linkutils.stop,
+            stop_loader,
+            super().close,
+        ):
             try:
                 await step()
             except Exception as e:
@@ -251,11 +257,8 @@ class MusicBot(commands.Bot):
 
     @tasks.loop(seconds=1)
     async def update_views(self):
-        await asyncio.gather(
-            *(
-                audiocontroller.update_view()
-                for audiocontroller in self.sessions
-            )
+        await self._gather_per_guild(
+            lambda controller: controller.update_view(), "View update"
         )
 
     async def get_prefix(self, message: discord.Message):
