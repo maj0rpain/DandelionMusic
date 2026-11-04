@@ -11,6 +11,8 @@ import pytest
 
 from config import config
 from musicbot import loader
+from musicbot.linkutils import SiteTypes
+from musicbot.song import Song
 
 URL = "https://example.invalid/a.mp3"
 
@@ -24,8 +26,12 @@ class FakePool:
         from concurrent.futures import Future
 
         future = Future()
-        outcome = self.outcomes.pop(0) if self.outcomes else "ok"
-        if outcome == "break":
+        outcome = (
+            self.outcomes.pop(0)
+            if self.outcomes
+            else Song(SiteTypes.YT_DLP, URL, title="ok")
+        )
+        if isinstance(outcome, str) and outcome == "break":
             future.set_exception(BrokenProcessPool("worker died"))
         else:
             future.set_result(outcome)
@@ -56,7 +62,7 @@ def _use(pool):
 def test_a_break_then_a_good_retry_returns_the_retried_result(pools):
     broken = FakePool(["break"])
     _use(broken)
-    assert asyncio.run(loader.load_song(URL)) == "ok"
+    assert asyncio.run(loader.load_song(URL)).title == "ok"
     assert (len(pools), loader._executor is pools[0]) == (1, True)
 
 
@@ -97,7 +103,7 @@ def test_concurrent_calls_on_one_broken_pool_rebuild_once(pools):
     async def many():
         return await asyncio.gather(*[loader.load_song(URL) for _ in range(4)])
 
-    assert asyncio.run(many()) == ["ok"] * 4
+    assert [s.title for s in asyncio.run(many())] == ["ok"] * 4
     assert len(pools) == 1
 
 

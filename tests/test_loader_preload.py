@@ -7,6 +7,7 @@ awaiting an extraction already in flight.
 """
 
 import asyncio
+from datetime import datetime, timedelta, timezone
 
 import pytest
 
@@ -101,6 +102,127 @@ def test_a_caller_awaiting_an_inflight_extraction_is_told_its_outcome(
         return await running, await waiting
 
     assert asyncio.run(run()) == (first, second)
+
+
+def test_cancelling_one_waiter_leaves_the_owner_and_other_waiters_alone(
+    monkeypatch,
+):
+    async def run():
+        release = asyncio.Event()
+
+        async def load_song(track):
+            await release.wait()
+            return Song(SiteTypes.YT_DLP, track, url="https://s.invalid")
+
+        monkeypatch.setattr(loader, "load_song", load_song)
+        song = _song()
+        owner = asyncio.create_task(loader.preload(song))
+        await asyncio.sleep(0)
+        cancelled = asyncio.create_task(loader.preload(song))
+        other = asyncio.create_task(loader.preload(song))
+        await asyncio.sleep(0)
+        cancelled.cancel()
+        await asyncio.sleep(0)
+        release.set()
+        return await asyncio.gather(
+            owner, cancelled, other, return_exceptions=True
+        )
+
+    owner, cancelled, other = asyncio.run(run())
+    assert isinstance(cancelled, asyncio.CancelledError)
+    assert (owner, other) == (Preload.EXTRACTED, Preload.CURRENT)
+
+
+NOW = datetime(2030, 1, 1, tzinfo=timezone.utc)
+MINUTE = timedelta(minutes=1)
+
+
+def _clock(monkeypatch, now=NOW):
+    monkeypatch.setattr(loader, "_now", lambda: now)
+
+
+def _expiring_in(delta):
+    return f"https://stream.invalid/a?expire={int((NOW + delta).timestamp())}"
+
+
+def _fresh_load(monkeypatch):
+    calls = []
+
+    async def load_song(track):
+        calls.append(track)
+        return Song(SiteTypes.YT_DLP, track, url="https://s.invalid/new")
+
+    monkeypatch.setattr(loader, "load_song", load_song)
+    return calls
+
+
+@pytest.mark.parametrize("count", [None, 2])
+def test_load_song_stamps_every_song_with_the_clock(monkeypatch, count):
+    _clock(monkeypatch)
+
+    async def run_sync(f, *args):
+        if count is None:
+            return Song(SiteTypes.YT_DLP, URL)
+        return [Song(SiteTypes.YT_DLP, URL) for _ in range(count)]
+
+    monkeypatch.setattr(loader, "_run_sync", run_sync)
+    result = asyncio.run(loader.load_song(URL))
+    songs = result if isinstance(result, list) else [result]
+    assert [s.extracted_at for s in songs] == [NOW] * (count or 1)
+
+
+def test_no_expire_with_a_fresh_stamp_is_current(monkeypatch):
+    _never_loads(monkeypatch)
+    _clock(monkeypatch)
+    song = _song(url="https://stream.invalid/a")
+    song.extracted_at = NOW - 9 * MINUTE
+    assert asyncio.run(loader.preload(song)) is Preload.CURRENT
+
+
+@pytest.mark.parametrize("age", [11 * MINUTE, None])
+def test_no_expire_with_a_stale_or_missing_stamp_is_reextracted(
+    monkeypatch, age
+):
+    calls = _fresh_load(monkeypatch)
+    _clock(monkeypatch)
+    song = _song(url="https://stream.invalid/a")
+    if age is not None:
+        song.extracted_at = NOW - age
+    assert asyncio.run(loader.preload(song)) is Preload.EXTRACTED
+    assert calls == [URL]
+
+
+def test_an_expire_within_the_margin_is_reextracted(monkeypatch):
+    calls = _fresh_load(monkeypatch)
+    _clock(monkeypatch)
+    song = _song(url=_expiring_in(9 * MINUTE))
+    assert asyncio.run(loader.preload(song)) is Preload.EXTRACTED
+    assert calls == [URL]
+
+
+def test_an_expire_beyond_the_margin_is_current(monkeypatch):
+    _never_loads(monkeypatch)
+    _clock(monkeypatch)
+    song = _song(url=_expiring_in(11 * MINUTE))
+    assert asyncio.run(loader.preload(song)) is Preload.CURRENT
+
+
+def test_a_stream_url_with_its_webpage_urls_expire_is_current(monkeypatch):
+    _never_loads(monkeypatch)
+    _clock(monkeypatch)
+    url = _expiring_in(MINUTE)
+    song = Song(SiteTypes.YT_DLP, url, url=url)
+    assert asyncio.run(loader.preload(song)) is Preload.CURRENT
+
+
+@pytest.mark.parametrize("host", [SiteTypes.LOCAL_LIBRARY, SiteTypes.CUSTOM])
+def test_local_library_and_custom_link_songs_are_always_current(
+    monkeypatch, host
+):
+    _never_loads(monkeypatch)
+    _clock(monkeypatch)
+    song = Song(host, "file:///music/a.mp3", url=_expiring_in(-MINUTE))
+    assert asyncio.run(loader.preload(song)) is Preload.CURRENT
 
 
 def test_the_controller_seams_stub_preload_matches_the_real_one():

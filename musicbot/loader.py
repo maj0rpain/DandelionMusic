@@ -6,8 +6,8 @@ from enum import Enum
 from inspect import getmodule
 from pathlib import Path
 from traceback import print_exc
+from datetime import datetime, timedelta, timezone
 from urllib.parse import unquote_to_bytes, urlparse
-from datetime import datetime, timezone
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context as mp_context
@@ -130,7 +130,19 @@ def shutdown():
     global _executor
     executor, _executor = _executor, None
     if executor is not None:
-        executor.shutdown()
+        executor.shutdown(wait=True, cancel_futures=True)
+
+
+# How long before a stream url's `expire=` preload re-extracts it, and
+# how long it trusts a stream url that has no `expire=`. They reflect how
+# hosts sign urls, so they are not Config settings.
+EXPIRY_MARGIN = timedelta(minutes=10)
+UNKNOWN_EXPIRY_MAX_AGE = timedelta(minutes=10)
+
+
+def _now() -> datetime:
+    """The loader's clock seam: tests monkeypatch it."""
+    return datetime.now(timezone.utc)
 
 
 _preloading = {}
@@ -150,7 +162,10 @@ class Preload(Enum):
 
     FAILED: an extraction was needed and failed.
     CURRENT: nothing needed extracting - the song has no webpage_url,
-    its stream url has not expired, or another caller's in-flight
+    is a local-library or custom-link song, has a stream url not within
+    EXPIRY_MARGIN of its expire= (or the link is its own stream), has a
+    stream url with no expire= extracted less than
+    UNKNOWN_EXPIRY_MAX_AGE ago, or another caller's in-flight
     extraction of it succeeded.
     EXTRACTED: this call ran an extraction and updated the song.
     """
@@ -194,7 +209,12 @@ def _search_youtube(title: str, count: int = 1) -> Optional[dict]:
 
 
 async def load_song(track: str) -> Union[Optional[Song], List[Song]]:
-    return await _run_sync(_load_song, track)
+    result = await _run_sync(_load_song, track)
+    now = _now()
+    for song in result if isinstance(result, list) else [result]:
+        if song is not None:
+            song.extracted_at = now
+    return result
 
 
 async def load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
@@ -369,24 +389,36 @@ def _parse_expire(url: str) -> Optional[int]:
         return None
 
 
+def _stream_url_is_current(song: Song) -> bool:
+    expire = _parse_expire(song.url)
+    if expire is None:
+        return (
+            song.extracted_at is not None
+            and _now() - song.extracted_at < UNKNOWN_EXPIRY_MAX_AGE
+        )
+    if expire == _parse_expire(song.webpage_url):
+        # the link is its own stream: re-extracting cannot refresh it
+        return True
+    return _now() < datetime.fromtimestamp(expire, timezone.utc) - (
+        EXPIRY_MARGIN
+    )
+
+
 async def preload(song: Song) -> Preload:
     if song.webpage_url is None:
         return Preload.CURRENT
 
-    if song.url is not None:
-        expire = _parse_expire(song.url)
-        if expire is None or expire == _parse_expire(song.webpage_url):
-            return Preload.CURRENT
-        if datetime.now(timezone.utc) < datetime.fromtimestamp(
-            expire, timezone.utc
-        ):
-            return Preload.CURRENT
+    if song.host in (SiteTypes.LOCAL_LIBRARY, SiteTypes.CUSTOM):
+        return Preload.CURRENT
+
+    if song.url is not None and _stream_url_is_current(song):
+        return Preload.CURRENT
 
     future = _preloading.get(song)
     if future:
         # only the caller that ran the extraction reports EXTRACTED,
         # so one extraction is acted on at most once
-        if await future:
+        if await asyncio.shield(future):
             return Preload.CURRENT
         return Preload.FAILED
     _preloading[song] = asyncio.Future()
@@ -408,7 +440,9 @@ async def preload(song: Song) -> Preload:
         if success:
             song.update(preloaded)
     finally:
-        _preloading.pop(song).set_result(success)
+        done = _preloading.pop(song)
+        if not done.done():
+            done.set_result(success)
 
     return Preload.EXTRACTED if success else Preload.FAILED
 
