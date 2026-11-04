@@ -4,21 +4,21 @@ import pickle
 from datetime import datetime, timezone
 
 from musicbot.linkutils import SiteTypes
-from musicbot.playlists import PlaylistRef
+from musicbot.playlists import PlaylistRef, SavedEntry
 from musicbot.settings import SavedPlaylist
 from musicbot.song import Song
 
 URL = "https://example.invalid/track"
 
 
-def test_update_with_a_yt_dlp_playlist_name_keeps_the_saved_playlist():
-    ref = PlaylistRef("123", "mix")
-    song = Song(SiteTypes.YT_DLP, URL, title="old", saved_playlist=ref)
+def test_update_with_a_yt_dlp_playlist_name_keeps_the_saved_entry():
+    entry = SavedEntry(PlaylistRef("123", "mix"), URL)
+    song = Song(SiteTypes.YT_DLP, URL, title="old", saved_entry=entry)
 
     song.update({"title": "new", "playlist": "Some YouTube playlist"})
 
     assert song.title == "new"
-    assert song.saved_playlist == PlaylistRef("123", "mix")
+    assert song.saved_entry == SavedEntry(PlaylistRef("123", "mix"), URL)
 
 
 def _old_shape_song():
@@ -38,11 +38,21 @@ def _old_shape_song():
     return old
 
 
-def test_a_song_pickled_in_the_old_shape_loads_with_no_saved_playlist():
+def test_a_song_pickled_in_the_old_shape_loads_with_no_saved_entry():
     restored = pickle.loads(pickle.dumps(_old_shape_song()))
 
     assert restored.title == "old track"
-    assert restored.saved_playlist is None
+    assert restored.saved_entry is None
+
+
+def test_a_song_pickled_with_the_two_old_saved_fields_loads_with_no_entry():
+    old = _old_shape_song()
+    old.saved_playlist = PlaylistRef("123", "mix")
+    old.saved_url = URL
+
+    restored = pickle.loads(pickle.dumps(old))
+
+    assert restored.saved_entry is None
 
 
 def test_a_song_pickled_in_the_old_shape_loads_with_no_extraction_stamp():

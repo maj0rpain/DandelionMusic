@@ -75,11 +75,11 @@ class FakeController:
         return outcome
 
 
-def react(monkeypatch, outcomes, *, resolves=True, thread=False):
+def react(monkeypatch, outcomes, *, resolves=True, thread=False, content=None):
     """Drive one reaction over links whose load gives `outcomes`;
     returns what the controller processed and what was sent."""
     sent = []
-    message = SimpleNamespace(content=" ".join(outcomes))
+    message = SimpleNamespace(content=content or " ".join(outcomes))
     channel = FakeChannel(message)
     controller = FakeController(outcomes)
     sett = SimpleNamespace(button_emote="x", command_channel=None)
@@ -144,6 +144,24 @@ def test_unresolvable_channel_does_nothing(monkeypatch):
     processed, sent = react(monkeypatch, {A: object()}, resolves=False)
     assert processed == []
     assert sent == []
+
+
+@pytest.mark.parametrize("kind", ["track", "album", "playlist"])
+def test_spotify_uri_returns_the_open_link(kind):
+    uri = f"spotify:{kind}:4uLU6hMCjMI75M1A2tKUQC"
+    assert Button.get_links(f"play {uri}") == [
+        f"https://open.spotify.com/{kind}/4uLU6hMCjMI75M1A2tKUQC"
+    ]
+
+
+def test_reacting_to_a_spotify_uri_processes_the_open_link(monkeypatch):
+    link = "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC"
+    processed, _sent = react(
+        monkeypatch,
+        {link: object()},
+        content="spotify:track:4uLU6hMCjMI75M1A2tKUQC",
+    )
+    assert processed == [link]
 
 
 def test_truncated_playlist_sends_exactly_the_notice(monkeypatch):
