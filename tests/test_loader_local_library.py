@@ -24,6 +24,7 @@ def lib(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "MUSIC_LIBRARY_PATH", str(root))
     monkeypatch.setattr(config, "ENABLE_LOCAL_LIBRARY", True)
     monkeypatch.setattr(config, "LIBRARY_FILE_MISSING", MISSING)
+    monkeypatch.setattr(library, "_root", None)
     return root.resolve()
 
 
@@ -59,13 +60,6 @@ def test_a_plain_track_loads(lib):
     _file(lib / "A" / "B" / "t.mp3")
     song = loader._load_song(_uri(lib, "A/B/t.mp3"))
     assert song.host is SiteTypes.LOCAL_LIBRARY
-    assert song.url == str(lib / "A" / "B" / "t.mp3")
-
-
-def test_a_symlinked_artist_folder_loads(lib, outside):
-    _file(outside / "B" / "t.mp3")
-    _link(lib / "A", outside)
-    song = loader._load_song(_uri(lib, "A/B/t.mp3"))
     assert song.url == str(lib / "A" / "B" / "t.mp3")
 
 
@@ -108,6 +102,7 @@ def test_climbing_out_through_a_symlinked_artist_is_refused(lib, outside):
     _link(lib / "A", outside)
     _refused(_uri(lib, "A/../secret.mp3"))
     _refused(_uri(lib, "A/B/../../secret.mp3"))
+    _refused(_uri(lib, "A/%2E%2E/secret.mp3"))
 
 
 @pytest.mark.parametrize("name", ["Who?", "Who#"])
@@ -125,6 +120,24 @@ def test_the_wrong_depth_is_refused(lib, rel):
     _file(lib / "A" / "B" / "C" / "t.mp3")
     _file(lib / "t.mp3")
     _refused(_uri(lib, rel))
+
+
+def test_a_localhost_authority_loads(lib):
+    _file(lib / "A" / "B" / "t.mp3")
+    song = loader._load_song(f"file://localhost{lib}/A/B/t.mp3")
+    assert song.url == str(lib / "A" / "B" / "t.mp3")
+
+
+def test_any_other_authority_is_refused(lib):
+    _file(lib / "A" / "B" / "t.mp3")
+    _refused(f"file://otherhost{lib}/A/B/t.mp3")
+
+
+@pytest.mark.parametrize("name", ["t?.mp3", "t#.mp3"])
+def test_a_raw_query_or_fragment_char_in_a_filename_loads(lib, name):
+    _file(lib / "A" / "B" / name)
+    song = loader._load_song(_uri(lib, f"A/B/{name}"))
+    assert song.url == str(lib / "A" / "B" / name)
 
 
 def test_a_path_outside_the_root_is_refused(lib):

@@ -14,6 +14,7 @@ from urllib3.util.retry import Retry
 from spotipy import Spotify
 from bs4 import BeautifulSoup
 from aiohttp import ClientSession, ClientTimeout
+from spotipy.cache_handler import MemoryCacheHandler
 from spotipy.oauth2 import SpotifyClientCredentials
 from yt_dlp.extractor import gen_extractor_classes
 from yt_dlp.extractor.common import InfoExtractor
@@ -22,9 +23,10 @@ from yt_dlp.extractor.lazy_extractors import LazyLoadExtractor
 from config import config
 from musicbot import loader
 
-# Limits on the network calls the extraction worker makes. One guild's
-# call that blocks holds the worker for every guild, so none may block
-# long. Deliberately not Config settings: nobody has a reason to tune them.
+# Limits on the network calls the extraction workers make. A call that
+# blocks holds its lane's worker (load or preload) for every guild using
+# that lane, so none may block long. Deliberately not Config settings:
+# nobody has a reason to tune them.
 # longest wait honoured for one Spotify 429 Retry-After header (seconds)
 RETRY_AFTER_MAX = 5
 # total time limit of one aiohttp request (seconds)
@@ -63,6 +65,7 @@ def build_spotify_api(client_id, client_secret) -> Optional[Spotify]:
                 client_secret=client_secret,
                 requests_session=session,
                 requests_timeout=5,
+                cache_handler=MemoryCacheHandler(),
             ),
         )
     except Exception:
@@ -104,9 +107,10 @@ headers = {}
 # aiohttp binds a ClientSession to whatever loop is running when it is
 # constructed and refuses to be driven from any other one, raising
 # "Timeout context manager should be used inside a task". This module
-# runs under two loops - the bot's own, in the bot's process, and
-# loader.py's private _loop that drives the Spotify page lookups, in the
-# extraction worker - so a session must belong to the loop that uses it.
+# runs under three loops - the bot's own, in the bot's process, and
+# loader.py's private _loop, which drives the Spotify page lookups in
+# each extraction lane's worker - so a session must belong to the loop
+# that uses it.
 # Keep one session per loop instead of a single global one.
 _sessions: Dict[asyncio.AbstractEventLoop, ClientSession] = {}
 
