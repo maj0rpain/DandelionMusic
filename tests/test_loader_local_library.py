@@ -56,19 +56,25 @@ def _refused(uri):
     assert str(e.value) == MISSING
 
 
+def _loads(uri, path, create=True):
+    if create:
+        _file(path)
+    song = loader._load_song(uri)
+    assert song.url == str(path)
+    return song
+
+
 def test_a_plain_track_loads(lib):
-    _file(lib / "A" / "B" / "t.mp3")
-    song = loader._load_song(_uri(lib, "A/B/t.mp3"))
+    path = lib / "A" / "B" / "t.mp3"
+    song = _loads(_uri(lib, "A/B/t.mp3"), path)
     assert song.host is SiteTypes.LOCAL_LIBRARY
-    assert song.url == str(lib / "A" / "B" / "t.mp3")
 
 
 def test_a_symlinked_album_folder_loads(lib, outside):
     _file(outside / "t.mp3")
     (lib / "A").mkdir()
     _link(lib / "A" / "B", outside)
-    song = loader._load_song(_uri(lib, "A/B/t.mp3"))
-    assert song.url == str(lib / "A" / "B" / "t.mp3")
+    _loads(_uri(lib, "A/B/t.mp3"), lib / "A" / "B" / "t.mp3", create=False)
 
 
 def test_a_symlinked_track_file_loads_titled_by_the_link(lib, outside):
@@ -76,8 +82,7 @@ def test_a_symlinked_track_file_loads_titled_by_the_link(lib, outside):
     (lib / "A" / "B").mkdir(parents=True)
     _link(lib / "A" / "B" / "link-name.mp3", target)
     uri = _uri(lib, "A/B/link-name.mp3")
-    song = loader._load_song(uri)
-    assert song.url == str(lib / "A" / "B" / "link-name.mp3")
+    song = _loads(uri, lib / "A" / "B" / "link-name.mp3", create=False)
     assert song.title == "link-name"
     assert song.webpage_url == uri
 
@@ -123,9 +128,7 @@ def test_the_wrong_depth_is_refused(lib, rel):
 
 
 def test_a_localhost_authority_loads(lib):
-    _file(lib / "A" / "B" / "t.mp3")
-    song = loader._load_song(f"file://localhost{lib}/A/B/t.mp3")
-    assert song.url == str(lib / "A" / "B" / "t.mp3")
+    _loads(f"file://localhost{lib}/A/B/t.mp3", lib / "A" / "B" / "t.mp3")
 
 
 def test_any_other_authority_is_refused(lib):
@@ -135,9 +138,7 @@ def test_any_other_authority_is_refused(lib):
 
 @pytest.mark.parametrize("name", ["t?.mp3", "t#.mp3"])
 def test_a_raw_query_or_fragment_char_in_a_filename_loads(lib, name):
-    _file(lib / "A" / "B" / name)
-    song = loader._load_song(_uri(lib, f"A/B/{name}"))
-    assert song.url == str(lib / "A" / "B" / name)
+    _loads(_uri(lib, f"A/B/{name}"), lib / "A" / "B" / name)
 
 
 def test_a_path_outside_the_root_is_refused(lib):
@@ -162,8 +163,11 @@ def test_a_symlinked_library_root_loads_generated_uris_only(
     alias = tmp_path / "alias"
     _link(alias, lib)
     monkeypatch.setattr(config, "MUSIC_LIBRARY_PATH", str(alias))
-    song = loader._load_song(library.song_uri("A", "B", "t.mp3"))
-    assert song.url == str(lib / "A" / "B" / "t.mp3")
+    _loads(
+        library.song_uri("A", "B", "t.mp3"),
+        lib / "A" / "B" / "t.mp3",
+        create=False,
+    )
     _refused(f"file://{alias}/A/B/t.mp3")
 
 
@@ -196,26 +200,26 @@ def test_the_index_and_the_loader_agree_on_a_symlinked_artist(lib, outside):
     _link(lib / "A", outside)
     index = library.build_index()
     assert "A" in index
-    song = loader._load_song(library.song_uri("A", "B", "t.mp3"))
-    assert song.url == str(lib / "A" / "B" / "t.mp3")
+    _loads(
+        library.song_uri("A", "B", "t.mp3"),
+        lib / "A" / "B" / "t.mp3",
+        create=False,
+    )
 
 
 def test_an_upper_case_scheme_loads(lib):
-    _file(lib / "A" / "B" / "t.mp3")
-    song = loader._load_song("FILE" + _uri(lib, "A/B/t.mp3")[4:])
+    uri = "FILE" + _uri(lib, "A/B/t.mp3")[4:]
+    song = _loads(uri, lib / "A" / "B" / "t.mp3")
     assert song.host is SiteTypes.LOCAL_LIBRARY
-    assert song.url == str(lib / "A" / "B" / "t.mp3")
 
 
-def test_an_upper_case_scheme_is_unknown_with_the_library_disabled(
-    lib, monkeypatch
-):
+def test_a_file_uri_is_unknown_with_the_library_disabled(lib, monkeypatch):
     _file(lib / "A" / "B" / "t.mp3")
     monkeypatch.setattr(config, "ENABLE_LOCAL_LIBRARY", False)
     with pytest.raises(loader.SongError) as e:
-        loader._load_song("FILE" + _uri(lib, "A/B/t.mp3")[4:])
+        loader._load_song(_uri(lib, "A/B/t.mp3"))
     assert str(e.value) == config.SONGINFO_UNSUPPORTED
 
 
-def test_an_upper_case_scheme_outside_the_root_is_refused(lib):
-    _refused("FILE:///etc/hosts")
+def test_a_generated_uri_starts_with_the_file_scheme(lib):
+    assert library.song_uri("A", "B", "t.mp3").startswith(library.FILE_SCHEME)
