@@ -114,7 +114,7 @@ class MusicBot(commands.Bot):
         loader.init()
         return await super().start(*args, **kwargs)
 
-    async def _gather_per_guild(self, make_coro, what: str):
+    async def _gather_per_guild(self, make_coro, action: str):
         """Run make_coro(controller) for every controller; one guild's
         failure is logged and never stops the others."""
         controllers = list(self.sessions)
@@ -125,7 +125,7 @@ class MusicBot(commands.Bot):
         for controller, result in zip(controllers, results):
             if isinstance(result, BaseException):
                 print(
-                    f"{what} failed for guild {controller.guild.name}:",
+                    f"{action} failed for guild {controller.guild.name}:",
                     file=sys.stderr,
                     flush=True,
                 )
@@ -345,10 +345,20 @@ class Context(commands.Context):
             return await self.interaction.original_response()
         return sent
 
-    async def response_send_message(self, *args, **kwargs):
+    async def _send_routed(
+        self, fallback, *args, original_response=False, **kwargs
+    ):
+        """The interaction-or-parent routing, written once: through
+        _send_to_interaction when self.interaction is set, else through
+        fallback."""
         if self.interaction:
-            return await self._send_to_interaction(*args, **kwargs)
-        return await self.send(*args, **kwargs)
+            return await self._send_to_interaction(
+                *args, original_response=original_response, **kwargs
+            )
+        return await fallback(*args, **kwargs)
+
+    async def response_send_message(self, *args, **kwargs):
+        return await self._send_routed(self.send, *args, **kwargs)
 
     async def send(self, *args, **kwargs):
         kwargs.pop("reference", None)  # not supported
@@ -376,18 +386,14 @@ class Context(commands.Context):
         ):
             # sending ephemeral message or using different channel
             # don't bother with views
-            if self.interaction:
-                return await self._send_to_interaction(*args, **kwargs)
-            return await super_send(*args, **kwargs)
+            return await self._send_routed(super_send, *args, **kwargs)
 
         async def send_with_view(view):
             if view:
                 kwargs["view"] = view
-            if self.interaction:
-                return await self._send_to_interaction(
-                    *args, original_response=True, **kwargs
-                )
-            return await super_send(*args, **kwargs)
+            return await self._send_routed(
+                super_send, *args, original_response=True, **kwargs
+            )
 
         return await audiocontroller.attach_view(send_with_view)
 
