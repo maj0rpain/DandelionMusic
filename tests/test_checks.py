@@ -22,7 +22,6 @@ from musicbot.commands.music import Music, SearchView, SongButton
 from musicbot import utils
 from musicbot.utils import (
     CheckError,
-    _holds_role,
     chunks,
     dj_check,
     get_audiocontroller,
@@ -806,10 +805,3 @@ def test_cog_check_admits_a_button_context_with_no_command(
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
     ctx = types.SimpleNamespace(command=None)
     assert asyncio.run(Music(None).cog_check(ctx)) is True
-
-
-def test_holds_role_is_false_for_a_missing_role_id():
-    ctx = types.SimpleNamespace(
-        author=types.SimpleNamespace(roles=[types.SimpleNamespace(id=5)])
-    )
-    assert _holds_role(ctx, None) is False

@@ -27,9 +27,5 @@ def test_a_timed_out_suno_link_is_a_named_download_error(
     assert info.value.msg == "TimeoutError"
 
 
-def test_download_error_names_an_exception_without_a_message():
-    assert linkutils.download_error(TimeoutError()).msg == "TimeoutError"
-
-
 def test_download_error_keeps_an_exceptions_message():
     assert linkutils.download_error(RuntimeError("404")).msg == "404"
