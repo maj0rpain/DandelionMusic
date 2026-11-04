@@ -2110,7 +2110,7 @@ def test_a_queue_that_plays_to_its_end_leaves_an_empty_backup(
 
 
 def test_disconnecting_while_playing_leaves_the_backup_holding_the_queue(
-    controller, no_disconnect_sound, monkeypatch, tmp_path
+    controller, monkeypatch, tmp_path
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
@@ -2154,9 +2154,7 @@ def test_pause_while_disconnecting_starts_no_timer(controller):
     assert asyncio.run(run()) is None
 
 
-def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(
-    controller, no_disconnect_sound
-):
+def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
         controller.guild.voice_client.playing = True
