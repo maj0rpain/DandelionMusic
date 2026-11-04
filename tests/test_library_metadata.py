@@ -2,11 +2,11 @@
 public entry points over canned responses.
 
 No HTTP: Last.fm's session is a fake that answers from canned response
-dicts, and `library_metadata.spotify_api` is a fake client, except in
-the Spotify client-limit tests, which build real spotipy `Spotify`
-clients (no request is sent) or read the playback client. The sample
-file does not exist, so the tag read falls back to the folder names and
-there is no embedded cover.
+dicts, and `library_metadata._enrichment_client` is a fake enrichment
+Spotify client, except in the Spotify client-limit tests, which build
+real spotipy `Spotify` clients (no request is sent) or read the
+playback client. The sample file does not exist, so the tag read falls
+back to the folder names and there is no embedded cover.
 """
 
 import asyncio
@@ -60,7 +60,10 @@ class FakeSpotify:
     """A spotipy client stand-in. `album_detail` is what `album()`
     returns, or raises when it is an exception."""
 
-    def __init__(self, artists=(), albums=(), album_detail=None):
+    def __init__(
+        self, artists=(), albums=(), album_detail=None, search_error=None
+    ):
+        self.search_error = search_error
         self.artists = list(artists)
         self.albums = list(albums)
         self.album_detail = album_detail or {}
@@ -68,6 +71,8 @@ class FakeSpotify:
 
     def search(self, q, type, limit):
         self.searches.append((type, q))
+        if self.search_error is not None:
+            raise self.search_error
         if type == "artist":
             return {"artists": {"items": self.artists}}
         return {"albums": {"items": self.albums}}
@@ -116,7 +121,7 @@ def clock(monkeypatch):
 @pytest.fixture
 def spotify(monkeypatch):
     def install(client):
-        monkeypatch.setattr(library_metadata, "spotify_api", client)
+        monkeypatch.setattr(library_metadata, "_enrichment_client", client)
         return client
 
     return install
@@ -124,7 +129,7 @@ def spotify(monkeypatch):
 
 @pytest.fixture
 def no_spotify(monkeypatch):
-    monkeypatch.setattr(library_metadata, "spotify_api", None)
+    monkeypatch.setattr(library_metadata, "_enrichment_client", None)
 
 
 @pytest.fixture
@@ -503,6 +508,30 @@ def test_a_timeout_is_logged_with_label_and_key(
     )
 
 
+def test_an_album_timeout_is_logged_with_label_and_key(
+    tmp_path, lastfm, no_spotify, capsys
+):
+    lastfm({"album.getInfo": asyncio.TimeoutError()})
+
+    album(tmp_path)
+
+    assert (
+        "library_metadata: Last.fm album.getInfo timed out for "
+        "('Radiohead', 'OK Computer')" in capsys.readouterr().err
+    )
+
+
+def test_the_same_album_twice_calls_each_backend_once(
+    tmp_path, lastfm, spotify
+):
+    session = lastfm({"album.getInfo": {"album": {"listeners": "5"}}})
+    client = spotify(FakeSpotify(albums=[{"images": []}]))
+
+    album(tmp_path)
+    album(tmp_path)
+
+    assert len(session.queries) == 1
+    assert len(client.searches) == 1
 def test_stalled_spotify_does_not_starve_file_reads(
     tmp_path, spotify, no_lastfm
 ):
@@ -564,32 +593,82 @@ def assert_default_limits(client):
         assert getattr(client, name) == params[name].default, name
 
 
-def test_enrichment_spotify_client_has_low_limits(monkeypatch):
-    auth_one = object()
-    auth_two = object()
-    first = Spotify(auth_manager=auth_one)
-    second = Spotify(auth_manager=auth_two)
-    fake = FakeSpotify()
+def test_low_limit_client_shares_the_auth_manager_with_low_limits():
+    import inspect
 
-    monkeypatch.setattr(library_metadata, "spotify_api", first)
-    client = library_metadata._spotify_client()
-    assert client is not first
-    assert client.auth_manager is auth_one
+    from spotipy import Spotify
+
+    auth = object()
+    source = Spotify(auth_manager=auth)
+
+    client = library_metadata._low_limit_client(source)
+
+    assert client is not source
+    assert client.auth_manager is auth
     assert client.requests_timeout == 3
     assert client.retries == 0
     assert client.status_retries == 0
-    assert library_metadata._spotify_client() is client
+    params = inspect.signature(Spotify.__init__).parameters
+    for name in ("requests_timeout", "retries", "status_retries"):
+        assert getattr(source, name) == params[name].default, name
 
-    monkeypatch.setattr(library_metadata, "spotify_api", second)
-    assert library_metadata._spotify_client().auth_manager is auth_two
 
-    monkeypatch.setattr(library_metadata, "spotify_api", fake)
-    assert library_metadata._spotify_client() is fake
+def test_low_limit_client_of_none_is_none():
+    assert library_metadata._low_limit_client(None) is None
 
-    assert_default_limits(first)
 
-    monkeypatch.setattr(library_metadata, "spotify_api", None)
+def test_spotify_enrichment_is_disabled_without_a_client(no_spotify):
     assert library_metadata._spotify_enabled() is False
+
+
+def test_the_import_built_enrichment_client_is_none_without_spotify_api():
+    if library_metadata.spotify_api is not None:
+        pytest.skip("Spotify credentials configured")
+    assert library_metadata._enrichment_client is None
+
+
+def test_the_import_built_enrichment_client_follows_spotify_api():
+    api = library_metadata.spotify_api
+    if api is None:
+        pytest.skip("no Spotify credentials configured")
+    client = library_metadata._enrichment_client
+    assert client is not api
+    assert client.auth_manager is api.auth_manager
+    assert client.requests_timeout == 3
+    assert client.retries == 0
+    assert client.status_retries == 0
+
+
+def test_a_failed_spotify_artist_search_is_logged(
+    tmp_path, spotify, no_lastfm, capsys
+):
+    spotify(FakeSpotify(search_error=RuntimeError("boom")))
+
+    artist(tmp_path)
+
+    assert (
+        "library_metadata: Spotify artist failed for Radiohead: boom"
+        in capsys.readouterr().err.splitlines()
+    )
+
+
+def test_a_failed_spotify_album_detail_is_logged(
+    tmp_path, spotify, no_lastfm, capsys
+):
+    spotify(
+        FakeSpotify(
+            albums=[{"id": "abc", "images": []}],
+            album_detail=RuntimeError("rate limited"),
+        )
+    )
+
+    album(tmp_path)
+
+    assert (
+        "library_metadata: Spotify album failed for "
+        "('Radiohead', 'OK Computer'): rate limited"
+        in capsys.readouterr().err.splitlines()
+    )
 
 
 def test_playback_spotify_client_keeps_default_limits():
