@@ -10,9 +10,9 @@ from discord.ext import commands
 from musicbot.bot import Context
 
 VIEW_SKIP_TRIGGERS = [
-    ({"view": "V"}, None),
-    ({"ephemeral": True}, None),
-    ({}, object()),
+    pytest.param({"view": "V"}, None, id="view"),
+    pytest.param({"ephemeral": True}, None, id="ephemeral"),
+    pytest.param({}, object(), id="other-channel"),
 ]
 
 
@@ -123,7 +123,6 @@ def test_no_controller_without_interaction_uses_parent_send(monkeypatch):
 @pytest.mark.parametrize(
     "kwargs, channel",
     VIEW_SKIP_TRIGGERS,
-    ids=["view", "ephemeral", "other-channel"],
 )
 def test_other_triggers_skip_the_view_without_interaction(
     monkeypatch, kwargs, channel
@@ -137,7 +136,6 @@ def test_other_triggers_skip_the_view_without_interaction(
 @pytest.mark.parametrize(
     "kwargs, channel",
     VIEW_SKIP_TRIGGERS,
-    ids=["view", "ephemeral", "other-channel"],
 )
 def test_other_triggers_skip_the_view_with_interaction(
     monkeypatch, kwargs, channel
