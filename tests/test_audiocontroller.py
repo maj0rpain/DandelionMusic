@@ -13,7 +13,7 @@ import threading
 
 import pytest
 
-from controller_seam import StubLoader, controller_seam
+from controller_seam import FakeVoiceClient, StubLoader, controller_seam
 
 
 def test_controller_pickles_its_playlist_into_the_temp_backup_dir(
@@ -1006,8 +1006,6 @@ async def _start_then_disconnect(controller):
 
 
 def _fresh_voice_client(controller):
-    from controller_seam import FakeVoiceClient
-
     controller.guild.voice_client = FakeVoiceClient()
     return controller.guild.voice_client
 
@@ -1035,6 +1033,8 @@ def test_restore_after_an_external_disconnect_starts_the_cut_off_song(
 
     async def run():
         await _start_then_disconnect(controller)
+        assert _titles(controller) == ["first"]
+        assert _backup(tmp_path) == ["first"]
         await controller.udisconnect("test")
         _fresh_voice_client(controller)
         restored = await controller.restore()
