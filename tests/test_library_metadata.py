@@ -1,19 +1,20 @@
 """Library enrichment from Last.fm and Spotify, driven through the
 public entry points over canned responses.
 
-No HTTP and no real spotipy: Last.fm's session is a fake that answers
-from canned response dicts, and `library_metadata._enrichment_client`
-is a fake enrichment Spotify client. The sample file does not exist,
-so the tag read falls back to the folder names and there is no
-embedded cover.
-
-Synchronous test functions running their coroutine through
-asyncio.run(): the dev group has no pytest-asyncio.
+No HTTP: Last.fm's session is a fake that answers from canned response
+dicts, and `library_metadata._enrichment_client` is a fake enrichment
+Spotify client, except in the Spotify client-limit tests, which build
+real spotipy `Spotify` clients (no request is sent) or read the
+playback client. The sample file does not exist, so the tag read falls
+back to the folder names and there is no embedded cover.
 """
 
 import asyncio
+import inspect
 
 import pytest
+from helpers import FakeClock, run
+from spotipy import Spotify
 
 from config import config
 from musicbot import library_metadata, linkutils
@@ -23,10 +24,6 @@ PLACEHOLDER = (
     "https://lastfm.freetls.fastly.net/i/u/300x300/"
     "2a96cbd8b46e442fc41c2b86b821562f.png"
 )
-
-
-def run(coro):
-    return asyncio.run(asyncio.wait_for(coro, timeout=5))
 
 
 class FakeResponse:
@@ -107,17 +104,10 @@ def lastfm(monkeypatch):
     return install
 
 
-class Clock:
-    now = 1000.0
-
-    def __call__(self):
-        return self.now
-
-
 @pytest.fixture
 def clock(monkeypatch):
     """A controllable clock for the four lookups' cooldowns."""
-    c = Clock()
+    c = FakeClock()
     for name in (
         "_lastfm_artist",
         "_lastfm_album",
@@ -544,34 +534,6 @@ def test_the_same_album_twice_calls_each_backend_once(
     assert len(client.searches) == 1
 
 
-# a 1x1 PNG-ish payload; mutagen stores the bytes verbatim
-COVER = b"\x89PNG\r\n\x1a\nembedded-cover-bytes"
-
-
-def make_tagged_flac(path):
-    """A minimal FLAC (marker + STREAMINFO) tagged through mutagen."""
-    from mutagen.flac import FLAC, Picture
-
-    streaminfo = (
-        (4096).to_bytes(2, "big")
-        + (4096).to_bytes(2, "big")
-        + b"\x00" * 6
-        + ((44100 << 44) | (1 << 41) | (15 << 36) | 44100).to_bytes(8, "big")
-        + b"\x00" * 16
-    )
-    path.write_bytes(b"fLaC" + bytes([0x80, 0, 0, 34]) + streaminfo)
-    flac = FLAC(path)
-    flac["artist"] = "Tag Artist"
-    flac["albumartist"] = "Tag Album Artist"
-    flac["album"] = "Tag Album"
-    pic = Picture()
-    pic.type = 3
-    pic.mime = "image/png"
-    pic.data = COVER
-    flac.add_picture(pic)
-    flac.save()
-
-
 def test_stalled_spotify_does_not_starve_file_reads(
     tmp_path, spotify, no_lastfm
 ):
@@ -589,8 +551,6 @@ def test_stalled_spotify_does_not_starve_file_reads(
 
     spotify(BlockingSpotify())
     sample = tmp_path / "Folder Artist" / "Folder Album" / "01.flac"
-    sample.parent.mkdir(parents=True)
-    make_tagged_flac(sample)
 
     async def scenario():
         stalled = [
@@ -620,20 +580,22 @@ def test_stalled_spotify_does_not_starve_file_reads(
         return names, art, elapsed
 
     try:
-        names, art, elapsed = asyncio.run(scenario())
+        names, art, elapsed = run(scenario())
     finally:
         release.set()
 
     assert elapsed < 1
-    assert names == ("Tag Album Artist", "Tag Album")
-    assert art is not None and art.data == COVER
+    assert names == ("Folder Artist", "Folder Album")
+    assert art is None
+
+
+def assert_default_limits(client):
+    params = inspect.signature(Spotify.__init__).parameters
+    for name in ("requests_timeout", "retries", "status_retries"):
+        assert getattr(client, name) == params[name].default, name
 
 
 def test_low_limit_client_shares_the_auth_manager_with_low_limits():
-    import inspect
-
-    from spotipy import Spotify
-
     auth = object()
     source = Spotify(auth_manager=auth)
 
@@ -644,9 +606,7 @@ def test_low_limit_client_shares_the_auth_manager_with_low_limits():
     assert client.requests_timeout == 3
     assert client.retries == 0
     assert client.status_retries == 0
-    params = inspect.signature(Spotify.__init__).parameters
-    for name in ("requests_timeout", "retries", "status_retries"):
-        assert getattr(source, name) == params[name].default, name
+    assert_default_limits(source)
 
 
 def test_low_limit_client_of_none_is_none():
@@ -711,10 +671,4 @@ def test_playback_spotify_client_keeps_default_limits():
     api = linkutils.spotify_api
     if api is None:
         pytest.skip("no Spotify credentials configured")
-    import inspect
-
-    from spotipy import Spotify
-
-    params = inspect.signature(Spotify.__init__).parameters
-    for name in ("requests_timeout", "retries", "status_retries"):
-        assert getattr(api, name) == params[name].default, name
+    assert_default_limits(api)

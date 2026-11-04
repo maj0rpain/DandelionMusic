@@ -114,40 +114,46 @@ class MusicBot(commands.Bot):
         loader.init()
         return await super().start(*args, **kwargs)
 
-    async def close(self):
-        print(config.SHUTDOWN_MESSAGE, flush=True)
-
+    async def _gather_per_guild(self, make_coro, what: str):
+        """Run make_coro(controller) for every controller; one guild's
+        failure is logged and never stops the others."""
         controllers = list(self.sessions)
         results = await asyncio.gather(
-            *(
-                controller.udisconnect("bot shutdown")
-                for controller in controllers
-            ),
+            *(make_coro(controller) for controller in controllers),
             return_exceptions=True,
         )
         for controller, result in zip(controllers, results):
             if isinstance(result, BaseException):
                 print(
-                    f"Disconnect failed for guild {controller.guild.name}:",
+                    f"{what} failed for guild {controller.guild.name}:",
                     file=sys.stderr,
                     flush=True,
                 )
                 print_exception(result)
 
+    async def close(self):
+        print(config.SHUTDOWN_MESSAGE, flush=True)
+
+        await self._gather_per_guild(
+            lambda controller: controller.udisconnect("bot shutdown"),
+            "Disconnect",
+        )
+
         # every remaining step runs; a later step's exception propagates
         # once the steps after it have run
-        async def stop_link():
-            # this loop's aiohttp session (see linkutils.get_session);
-            # each lane's worker closes its own when shutdown() stops it
-            await linkutils.stop()
-
         async def stop_loader():
             # joining the lanes' workers blocks; do it off the loop so other
             # tasks keep running until they have exited
             await asyncio.to_thread(loader.shutdown)
 
         failure = None
-        for step in (stop_link, stop_loader, super().close):
+        for step in (
+            # this loop's aiohttp session (see linkutils.get_session);
+            # each lane's worker closes its own when shutdown() stops it
+            linkutils.stop,
+            stop_loader,
+            super().close,
+        ):
             try:
                 await step()
             except Exception as e:
@@ -233,7 +239,7 @@ class MusicBot(commands.Bot):
                 await asyncio.sleep(VC_CONNECT_TIMEOUT)
             if guild.voice_client:
                 is_playing = guild.voice_client.is_playing()
-                await audiocontroller.timer.start(is_playing)
+                await audiocontroller.start_idle_timer(is_playing)
                 if is_playing:
                     # bot was moved, restore playback
                     await asyncio.sleep(1)
@@ -247,15 +253,14 @@ class MusicBot(commands.Bot):
             and all(m.bot for m in before.channel.members)
         ):
             # all users left
-            await audiocontroller.timer.start(guild.voice_client.is_playing())
+            await audiocontroller.start_idle_timer(
+                guild.voice_client.is_playing()
+            )
 
     @tasks.loop(seconds=1)
     async def update_views(self):
-        await asyncio.gather(
-            *(
-                audiocontroller.update_view()
-                for audiocontroller in self.sessions
-            )
+        await self._gather_per_guild(
+            lambda controller: controller.update_view(), "View update"
         )
 
     async def get_prefix(self, message: discord.Message):
@@ -325,13 +330,24 @@ class Context(commands.Context):
         if self.interaction and not self.interaction.response.is_done():
             await self.interaction.response.defer(ephemeral=ephemeral)
 
+    async def _send_to_interaction(
+        self, *args, original_response=False, **kwargs
+    ):
+        """The interaction routing, written once: a followup when the
+        response is done, else the first response (returning the
+        original response message when original_response is true, else
+        send_message's own result).
+        Call only when self.interaction is set."""
+        if self.interaction.response.is_done():
+            return await self.interaction.followup.send(*args, **kwargs)
+        sent = await self.interaction.response.send_message(*args, **kwargs)
+        if original_response:
+            return await self.interaction.original_response()
+        return sent
+
     async def response_send_message(self, *args, **kwargs):
         if self.interaction:
-            if self.interaction.response.is_done():
-                return await self.interaction.followup.send(*args, **kwargs)
-            return await self.interaction.response.send_message(
-                *args, **kwargs
-            )
+            return await self._send_to_interaction(*args, **kwargs)
         return await self.send(*args, **kwargs)
 
     async def send(self, *args, **kwargs):
@@ -345,6 +361,9 @@ class Context(commands.Context):
         # view, so fall through to the plain send below.
         audiocontroller = self.bot.sessions.controller(self.guild)
         channel = audiocontroller.command_channel if audiocontroller else None
+        # bound here: a zero-argument super() inside the closure below
+        # would bind to its `view` parameter and raise TypeError
+        super_send = super().send
         if (
             audiocontroller is None
             or "view" in kwargs
@@ -358,28 +377,19 @@ class Context(commands.Context):
             # sending ephemeral message or using different channel
             # don't bother with views
             if self.interaction:
-                if self.interaction.response.is_done():
-                    return await self.interaction.followup.send(
-                        *args, **kwargs
-                    )
-                return await self.interaction.response.send_message(
-                    *args, **kwargs
-                )
-            return await super().send(*args, **kwargs)
+                return await self._send_to_interaction(*args, **kwargs)
+            return await super_send(*args, **kwargs)
 
-        async def send(view):
+        async def send_with_view(view):
             if view:
                 kwargs["view"] = view
             if self.interaction:
-                if self.interaction.response.is_done():
-                    return await self.interaction.followup.send(
-                        *args, **kwargs
-                    )
-                await self.interaction.response.send_message(*args, **kwargs)
-                return await self.interaction.original_response()
-            return await super(Context, self).send(*args, **kwargs)
+                return await self._send_to_interaction(
+                    *args, original_response=True, **kwargs
+                )
+            return await super_send(*args, **kwargs)
 
-        return await audiocontroller.attach_view(send)
+        return await audiocontroller.attach_view(send_with_view)
 
 
 class UniversalHelpCommand(DefaultHelpCommand):

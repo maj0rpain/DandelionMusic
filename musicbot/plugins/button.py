@@ -18,9 +18,10 @@ class Button(commands.Cog):
 
     @staticmethod
     def get_links(text: str):
+        links = map(linkutils.normalize_track, linkutils.get_urls(text))
         return [
             link
-            for link in linkutils.get_urls(text)
+            for link in links
             if linkutils.get_site_type(link) in SUPPORTED_SITES
         ]
 

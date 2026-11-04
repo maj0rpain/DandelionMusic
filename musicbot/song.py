@@ -9,19 +9,18 @@ from musicbot.linkutils import SiteTypes
 from musicbot.truncation import Truncation
 
 if TYPE_CHECKING:
-    from musicbot.playlists import PlaylistRef
+    # type-only: song -> playlists -> settings -> utils -> song is an
+    # import cycle, so an unconditional import fails at import time
+    from musicbot.playlists import SavedEntry
 
 
 class Song:
     # class-level, so a Song unpickled from a queue backup written
-    # before songs carried a PlaylistRef reads as having none
-    saved_playlist: Optional[PlaylistRef] = None
+    # before songs carried a SavedEntry reads as having none
+    saved_entry: Optional[SavedEntry] = None
     # when the loader extracted this song's stream url; class-level for
     # the same reason - a song from an old backup reads as unstamped
     extracted_at: Optional[datetime.datetime] = None
-    # likewise: the saved entry's URL exactly as stored, which
-    # extraction never rewrites (unlike webpage_url)
-    saved_url: Optional[str] = None
 
     def __init__(
         self,
@@ -32,8 +31,7 @@ class Song:
         uploader: Optional[str] = None,
         duration: Optional[int] = None,
         thumbnail: Optional[str] = None,
-        saved_playlist: Optional[PlaylistRef] = None,
-        saved_url: Optional[str] = None,
+        saved_entry: Optional[SavedEntry] = None,
     ):
         self.host = host
         self.webpage_url = webpage_url
@@ -42,8 +40,7 @@ class Song:
         self.uploader = uploader
         self.duration = duration
         self.thumbnail = thumbnail
-        self.saved_playlist = saved_playlist
-        self.saved_url = saved_url
+        self.saved_entry = saved_entry
 
     def format_output(self, playtype: str) -> discord.Embed:
         if self.host == SiteTypes.LOCAL_LIBRARY:
