@@ -13,6 +13,9 @@ from musicbot.linkutils import spotify_api
 from musicbot.audiotags import read_artwork, read_tags
 from musicbot.cached_lookup import CachedLookup
 
+# prefix of every line this module logs and of its lookup labels
+_LOG_PREFIX = "library_metadata: "
+
 # Dedicated pools (not the loop's shared default executor) for the
 # blocking calls this module makes. asyncio.wait_for()'s timeout only
 # abandons the await, not the underlying thread, so slow or hung calls
@@ -101,13 +104,13 @@ async def _resolve_names(
         )
     except asyncio.TimeoutError:
         print(
-            f"library_metadata: reading tags from {sample_file} timed out",
+            f"{_LOG_PREFIX}reading tags from {sample_file} timed out",
             file=sys.stderr,
         )
         return artist_folder, album_folder
     except Exception as e:
         print(
-            f"library_metadata: reading tags from {sample_file} failed: {e}",
+            f"{_LOG_PREFIX}reading tags from {sample_file} failed: {e}",
             file=sys.stderr,
         )
         return artist_folder, album_folder
@@ -254,12 +257,12 @@ def _lastfm_enabled() -> bool:
 _lastfm_artist: CachedLookup[str, _LastfmInfo] = CachedLookup(
     _lastfm_enabled,
     _lastfm_artist_backend,
-    "library_metadata: Last.fm artist.getInfo",
+    _LOG_PREFIX + "Last.fm artist.getInfo",
 )
 _lastfm_album: CachedLookup[_AlbumKey, _LastfmInfo] = CachedLookup(
     _lastfm_enabled,
     _lastfm_album_backend,
-    "library_metadata: Last.fm album.getInfo",
+    _LOG_PREFIX + "Last.fm album.getInfo",
 )
 
 
@@ -285,10 +288,8 @@ def _spotify_artist_sync(name: str) -> Optional[_SpotifyInfo]:
     )
 
 
-def _spotify_album_sync(
-    artist_name: str, album_name: str
-) -> Optional[_SpotifyInfo]:
-    query = f"artist:{artist_name} album:{album_name}"
+def _spotify_album_sync(key: _AlbumKey) -> Optional[_SpotifyInfo]:
+    query = f"artist:{key.artist} album:{key.album}"
     results = _enrichment_client.search(q=query, type="album", limit=1)
     items = results.get("albums", {}).get("items", [])
     if not items:
@@ -324,7 +325,7 @@ async def _spotify_album_backend(
 ) -> Optional[_SpotifyInfo]:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
-        _network_executor, _spotify_album_sync, key.artist, key.album
+        _network_executor, _spotify_album_sync, key
     )
 
 
@@ -335,12 +336,12 @@ def _spotify_enabled() -> bool:
 _spotify_artist: CachedLookup[str, _SpotifyInfo] = CachedLookup(
     _spotify_enabled,
     _spotify_artist_backend,
-    "library_metadata: Spotify artist",
+    _LOG_PREFIX + "Spotify artist",
 )
 _spotify_album: CachedLookup[_AlbumKey, _SpotifyInfo] = CachedLookup(
     _spotify_enabled,
     _spotify_album_backend,
-    "library_metadata: Spotify album",
+    _LOG_PREFIX + "Spotify album",
 )
 
 
@@ -473,15 +474,13 @@ async def _embedded_art(sample_file: Path) -> Optional[ArtInfo]:
         )
     except asyncio.TimeoutError:
         print(
-            f"library_metadata: reading artwork from {sample_file}"
-            " timed out",
+            f"{_LOG_PREFIX}reading artwork from {sample_file} timed out",
             file=sys.stderr,
         )
         return None
     except Exception as e:
         print(
-            f"library_metadata: reading artwork from {sample_file}"
-            f" failed: {e}",
+            f"{_LOG_PREFIX}reading artwork from {sample_file} failed: {e}",
             file=sys.stderr,
         )
         return None
