@@ -98,11 +98,7 @@ def test_a_rate_limited_request_retries_briefly_then_gives_up(
     assert max(sleeps) <= 5
 
 
-
-
-def test_build_spotify_api_gives_both_clients_the_capped_session(
-    monkeypatch,
-):
+def test_build_spotify_api_gives_both_clients_the_capped_session():
     api = linkutils.build_spotify_api("id", "secret")
     for session in (api._session, api.auth_manager._session):
         retry = session.get_adapter("https://api.spotify.com").max_retries
