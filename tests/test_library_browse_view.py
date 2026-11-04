@@ -711,20 +711,82 @@ def _descend_past_kept_components():
     return scenario
 
 
-def test_component_from_an_earlier_scope_is_acknowledged_and_ignored():
+PAGED_INDEX = {
+    "Artist": {f"Album {n:02}": [make_song("Song")] for n in range(30)}
+}
+
+
+async def _view_at_paged_artist():
+    view = make_view(PAGED_INDEX)
+    stub_enrichment_by_level(view, {})
+    clicks = Clicks(view)
+    await finish(
+        clicks.click(LibrarySelect, clicks.interaction(), label="Artist")
+    )
+    return view, clicks
+
+
+@pytest.mark.parametrize(
+    "kind", [LibrarySelect, BackButton, PageButton, QueueLevelButton]
+)
+def test_component_from_an_earlier_scope_is_acknowledged_and_ignored(
+    kind, monkeypatch
+):
+    queued = []
+
+    async def queue_songs(ctx, interaction, triples, source):
+        queued.append(triples)
+
+    monkeypatch.setattr(library_commands, "queue_songs", queue_songs)
+
     async def scenario():
-        view, clicks, kept = await _descend_past_kept_components()()
-        select = next(i for i in kept if isinstance(i, LibrarySelect))
+        view, clicks = await _view_at_paged_artist()
+        kept = next(i for i in clicks.shown if isinstance(i, kind))
+        await finish(
+            clicks.click(
+                LibrarySelect, clicks.interaction(), label="Album 00"
+            )
+        )
+        where = (view.cursor.artist, view.cursor.album, view.cursor.page)
         picking = clicks.interaction()
         picking.data = {"values": ["1"]}
-        select._refresh_state(picking, picking.data)
-        await select.callback(picking)
-        return view, picking
+        if kind is LibrarySelect:
+            kept._refresh_state(picking, picking.data)
+        await kept.callback(picking)
+        return view, where, picking
 
-    view, picking = run(scenario)
+    view, where, picking = run(scenario)
 
     assert picking.deferred == 1
-    assert (view.cursor.artist, view.cursor.album) == ("Radiohead", None)
+    assert (view.cursor.artist, view.cursor.album, view.cursor.page) == where
+    assert where[:2] == ("Artist", "Album 00")
+    assert queued == []
+
+
+def test_every_browse_component_is_built_on_the_stale_guard_base():
+    async def scenario():
+        views = []
+        view = make_view()
+        views.append(list(view.children))
+        view.cursor.descend("Radiohead")
+        view.build_items()
+        views.append(list(view.children))
+        view.cursor.descend("Kid A")
+        view.build_items()
+        views.append(list(view.children))
+        paged = make_view(PAGED_INDEX)
+        paged.cursor.descend("Artist")
+        paged.build_items()
+        views.append(list(paged.children))
+        return views
+
+    views = run(scenario)
+
+    items = [item for children in views for item in children]
+    assert any(isinstance(i, PageButton) for i in items)
+    for item in items:
+        assert isinstance(item, library_commands._BrowseItem)
+        assert type(item).callback is library_commands._BrowseItem.callback
 
 
 def test_stranger_on_a_stale_scope_component_is_told_it_is_not_theirs():

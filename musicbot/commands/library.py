@@ -124,20 +124,33 @@ def _fmt_years(stats: library.LevelStats) -> Optional[str]:
     return str(stats.year_min)
 
 
-async def _is_stale(item, interaction: discord.Interaction) -> bool:
-    """A click on a component built for a scope the cursor has left is
-    acknowledged silently and must do nothing. Keyed on the scope, not
-    on level_revision, so components a failed draw restores still act.
-    Checked at the start of callback(), after the view's ownership and
-    double-click checks - never in a per-item interaction_check, which
-    discord.py runs before the view's."""
-    if item.scope == item.browse_view.cursor.screen().scope:
-        return False
-    await interaction.response.defer()
-    return True
+class _BrowseItem:
+    """Mixin for every component of a LibraryBrowseView: owns the stale
+    guard, so a component gets it just by subclassing. List it first in
+    the bases, so its callback() wins in the MRO; implement on_click()."""
+
+    def __init__(self, browse_view: "LibraryBrowseView", **kwargs):
+        super().__init__(**kwargs)
+        self.browse_view = browse_view
+        self.scope: Tuple[Optional[str], Optional[str]] = browse_view.scope
+
+    async def callback(self, interaction: discord.Interaction):
+        """A click on a component built for a scope the cursor has left is
+        acknowledged silently and must do nothing. Keyed on the scope, not
+        on level_revision, so components a failed draw restores still act.
+        Checked at the start of callback(), after the view's ownership and
+        double-click checks - never in a per-item interaction_check, which
+        discord.py runs before the view's."""
+        if self.scope != self.browse_view.scope:
+            await interaction.response.defer()
+            return
+        await self.on_click(interaction)
+
+    async def on_click(self, interaction: discord.Interaction):
+        raise NotImplementedError
 
 
-class LibrarySelect(discord.ui.Select):
+class LibrarySelect(_BrowseItem, discord.ui.Select):
     def __init__(
         self,
         entries: List[str],
@@ -146,11 +159,8 @@ class LibrarySelect(discord.ui.Select):
         browse_view: "LibraryBrowseView",
     ):
         self._entries = entries
-        self.browse_view = browse_view
-        self.scope: Tuple[Optional[str], Optional[str]] = (
-            browse_view.cursor.screen().scope
-        )
         super().__init__(
+            browse_view,
             placeholder="Choose...",
             options=[
                 discord.SelectOption(
@@ -162,9 +172,7 @@ class LibrarySelect(discord.ui.Select):
             ],
         )
 
-    async def callback(self, interaction: discord.Interaction):
-        if await _is_stale(self, interaction):
-            return
+    async def on_click(self, interaction: discord.Interaction):
         index = int(self.values[0])
         chosen = self._entries[index]
         # the option's own label, not the underlying entry (a raw
@@ -173,53 +181,44 @@ class LibrarySelect(discord.ui.Select):
         await self.browse_view.descend(interaction, chosen, label)
 
 
-class BackButton(discord.ui.Button):
+class BackButton(_BrowseItem, discord.ui.Button):
     def __init__(self, browse_view: "LibraryBrowseView"):
-        super().__init__(label="Back", style=discord.ButtonStyle.grey, row=1)
-        self.browse_view = browse_view
-        self.scope: Tuple[Optional[str], Optional[str]] = (
-            browse_view.cursor.screen().scope
+        super().__init__(
+            browse_view, label="Back", style=discord.ButtonStyle.grey, row=1
         )
 
-    async def callback(self, interaction: discord.Interaction):
-        if await _is_stale(self, interaction):
-            return
+    async def on_click(self, interaction: discord.Interaction):
         await self.browse_view.go_back(interaction)
 
 
-class PageButton(discord.ui.Button):
+class PageButton(_BrowseItem, discord.ui.Button):
     def __init__(
         self, browse_view: "LibraryBrowseView", delta: int, label: str
     ):
-        super().__init__(label=label, style=discord.ButtonStyle.blurple, row=2)
-        self.browse_view = browse_view
         self.delta = delta
-        self.scope: Tuple[Optional[str], Optional[str]] = (
-            browse_view.cursor.screen().scope
+        super().__init__(
+            browse_view,
+            label=label,
+            style=discord.ButtonStyle.blurple,
+            row=2,
         )
 
-    async def callback(self, interaction: discord.Interaction):
-        if await _is_stale(self, interaction):
-            return
+    async def on_click(self, interaction: discord.Interaction):
         await self.browse_view.turn_page(interaction, self.delta)
 
 
-class QueueLevelButton(discord.ui.Button):
+class QueueLevelButton(_BrowseItem, discord.ui.Button):
     def __init__(self, browse_view: "LibraryBrowseView"):
         label = (
             "Queue this Album"
             if browse_view.cursor.at_album_level
             else "Queue this Artist"
         )
-        super().__init__(label=label, style=discord.ButtonStyle.green, row=1)
-        self.browse_view = browse_view
-        self.scope: Tuple[Optional[str], Optional[str]] = (
-            browse_view.cursor.screen().scope
+        super().__init__(
+            browse_view, label=label, style=discord.ButtonStyle.green, row=1
         )
 
-    async def callback(self, interaction: discord.Interaction):
-        if await _is_stale(self, interaction):
-            return
+    async def on_click(self, interaction: discord.Interaction):
         await self.browse_view.queue_current_level(interaction)
 
 
@@ -484,6 +483,11 @@ class LibraryBrowseView(LibraryView):
         # serialises the message edits themselves - see render()
         self._render_lock = asyncio.Lock()
         self.build_items()
+
+    @property
+    def scope(self) -> Tuple[Optional[str], Optional[str]]:
+        """The (artist, album) pair of the level shown now."""
+        return self.cursor.screen().scope
 
     async def _resolve_enrichment(
         self,
