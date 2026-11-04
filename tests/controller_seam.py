@@ -77,7 +77,7 @@ class StubLoader(types.ModuleType):
         return self._record("load_local_songs", tracks, default=[])
 
 
-class FakeSettings:
+class ControllerSettings:
     def __init__(self, default_volume=70):
         self.default_volume = default_volume
         self.announce_songs = False
@@ -96,7 +96,7 @@ class FakeSessions:
         self._settings[guild] = settings
 
 
-class FakeBot:
+class ControllerBot:
     """`sessions.settings(guild)` and `loop`: what AudioController
     reads."""
 
@@ -110,12 +110,12 @@ class FakeSource:
         self.volume = 1.0
 
 
-class FakeChannel:
+class ControllerChannel:
     def __init__(self):
         self.members = []
 
 
-class FakeVoiceClient:
+class PlaybackVoiceClient:
     """Behaves like discord.py's VoiceClient where the controller can
     tell: play() refuses while something is playing, and stop() ends
     the track and runs the `after` callback play() was given."""
@@ -126,7 +126,7 @@ class FakeVoiceClient:
         self.stopped = 0
         self.source = FakeSource()
         self.played = []
-        self.channel = FakeChannel()
+        self.channel = ControllerChannel()
         self.disconnected = False
         self.connected = True
         self._after = None
@@ -173,7 +173,7 @@ class FakeVoiceClient:
         self.disconnected = True
 
 
-class FakeGuild:
+class ControllerGuild:
     def __init__(self, guild_id=1234, voice_client=None):
         self.id = guild_id
         self.name = f"guild {guild_id}"
@@ -211,10 +211,10 @@ def controller_seam(workdir: Path) -> Iterator[Tuple[object, StubLoader]]:
         config.ANNOUNCE_DISCONNECT = False
         audiocontroller = importlib.import_module("musicbot.audiocontroller")
 
-        voice_client = FakeVoiceClient()
-        guild = FakeGuild(voice_client=voice_client)
-        bot = FakeBot()
-        bot.sessions.add_settings(guild, FakeSettings())
+        voice_client = PlaybackVoiceClient()
+        guild = ControllerGuild(voice_client=voice_client)
+        bot = ControllerBot()
+        bot.sessions.add_settings(guild, ControllerSettings())
         yield audiocontroller.AudioController(bot, guild), stub
     finally:
         config.ANNOUNCE_DISCONNECT = old_announce

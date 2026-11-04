@@ -29,7 +29,7 @@ OTHER = 2
 URLS = ["https://youtu.be/one", "https://youtu.be/two"]
 
 
-class FakeMessage(discord.Message):
+class EditRecordingMessage(discord.Message):
     """A bot-sent message. Records every edit; raises from it while
     `fail` is set."""
 
@@ -187,7 +187,7 @@ def test_the_owner_is_admitted():
 
 def test_a_non_owner_is_told_privately_and_nothing_happens():
     async def go():
-        view, cog = make_view(message=FakeMessage())
+        view, cog = make_view(message=EditRecordingMessage())
         inter = await click(view, 0, user_id=OTHER)
         return view, cog, inter
 
@@ -202,7 +202,7 @@ def test_a_non_owner_is_told_privately_and_nothing_happens():
 
 def test_a_second_owner_click_is_deferred_silently_and_refused():
     async def go():
-        view, cog = make_view(message=FakeMessage())
+        view, cog = make_view(message=EditRecordingMessage())
         first = SearchInteraction(OWNER)
         second = SearchInteraction(OWNER)
         assert await view.interaction_check(first)
@@ -222,7 +222,7 @@ def test_a_second_owner_click_is_deferred_silently_and_refused():
 
 def test_the_owners_pick_queues_its_url_and_disables_the_buttons():
     async def go():
-        message = FakeMessage()
+        message = EditRecordingMessage()
         view, cog = make_view(message=message)
         await click(view, 1)
         return view, cog, message
@@ -236,7 +236,7 @@ def test_the_owners_pick_queues_its_url_and_disables_the_buttons():
 
 def test_a_pick_failing_the_play_check_is_refused_and_can_be_retried():
     async def go():
-        view, cog = make_view(message=FakeMessage())
+        view, cog = make_view(message=EditRecordingMessage())
         cog.check_error = CheckError("Join a voice channel first.")
         inter = await click(view, 0)
         state = (
@@ -261,7 +261,7 @@ def test_a_pick_failing_the_play_check_is_refused_and_can_be_retried():
 
 def test_a_pick_whose_join_fails_is_refused_and_can_be_retried():
     async def go():
-        view, cog = make_view(message=FakeMessage())
+        view, cog = make_view(message=EditRecordingMessage())
         inter = SearchInteraction()
         inter.ctx.bot_out_of_voice(connect_error=asyncio.TimeoutError())
         await click(view, 0, inter=inter)
@@ -286,7 +286,7 @@ def test_a_pick_whose_join_fails_is_refused_and_can_be_retried():
 
 def test_a_pick_failing_after_the_claim_is_used_up_and_reported():
     async def go():
-        message = FakeMessage()
+        message = EditRecordingMessage()
         view, cog = make_view(message=message)
         cog.check_error = discord.ClientException("voice join failed")
         inter = await click(view, 0)
@@ -304,7 +304,7 @@ def test_a_pick_failing_after_the_claim_is_used_up_and_reported():
 
 def test_a_failed_defer_uses_up_the_pick_and_is_reported_once():
     async def go():
-        message = FakeMessage()
+        message = EditRecordingMessage()
         view, cog = make_view(message=message)
         inter = SearchInteraction(OWNER, defer_fails=True)
         await click(view, 0, inter=inter)
@@ -319,7 +319,7 @@ def test_a_failed_defer_uses_up_the_pick_and_is_reported_once():
 
 def test_a_play_failing_after_the_pick_was_used_up_edits_once_and_reports():
     async def go():
-        message = FakeMessage()
+        message = EditRecordingMessage()
         view, cog = make_view(message=message)
         cog.play_error = discord.ClientException("play failed")
         inter = await click(view, 0)
@@ -332,7 +332,7 @@ def test_a_play_failing_after_the_pick_was_used_up_edits_once_and_reports():
 
 def test_a_failed_message_edit_still_queues_the_pick():
     async def go():
-        view, cog = make_view(message=FakeMessage(fail=True))
+        view, cog = make_view(message=EditRecordingMessage(fail=True))
         await click(view, 0)
         return cog
 
@@ -344,7 +344,7 @@ def test_a_failed_message_edit_still_queues_the_pick():
 
 def test_timeout_disables_the_buttons_and_edits_the_message():
     async def go():
-        message = FakeMessage()
+        message = EditRecordingMessage()
         view, _ = make_view(message=message)
         await view.on_timeout()
         return view, message
@@ -356,7 +356,7 @@ def test_timeout_disables_the_buttons_and_edits_the_message():
 
 def test_timeout_swallows_a_failed_edit():
     async def go():
-        view, _ = make_view(message=FakeMessage(fail=True))
+        view, _ = make_view(message=EditRecordingMessage(fail=True))
         await view.on_timeout()
         return view
 
