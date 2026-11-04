@@ -847,7 +847,7 @@ class AudioController(object):
         The per-track equivalent is process_song() in a loop, which is
         what queueing an album or a discography from the library
         browser used to be: one IPC round trip through the
-        single-worker loader process per track, and a fresh preload
+        load-lane loader process per track, and a fresh preload
         sweep per track on top - each of which walks up to
         MAX_SONG_PRELOAD songs, so a few hundred tracks meant a few
         thousand redundant iterations. Here the load is one call (two
