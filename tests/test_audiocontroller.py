@@ -1678,6 +1678,7 @@ def test_a_song_from_an_old_backup_refreshes_no_stored_title(
             SAVED_URL,
         )
         # as unpickled from a backup written before saved_entry existed
+        del song.__dict__["saved_entry"]
         song.saved_playlist = ac.playlists.PlaylistRef("1234", "mix")
         song.saved_url = SAVED_URL
         return song
