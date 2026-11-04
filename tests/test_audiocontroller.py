@@ -710,7 +710,10 @@ def _track_end_stderr(controller, capsys, monkeypatch, error):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second", "third")
 
-    asyncio.run(_end_first_track_on_audio_thread(controller, error))
+    _run(
+        controller,
+        lambda: _end_first_track_on_audio_thread(controller, error),
+    )
     return capsys.readouterr().err
 
 
@@ -969,7 +972,7 @@ def test_an_external_disconnect_leaves_the_queue_history_and_backup(
     _queue(controller, "first", "second")
     old = controller.guild.voice_client
 
-    asyncio.run(_start_then_disconnect(controller))
+    _run(controller, lambda: _start_then_disconnect(controller))
 
     assert _titles(controller) == ["first", "second"]
     assert _history(controller) == ["first"]
@@ -1123,7 +1126,7 @@ def test_a_song_that_finishes_on_its_own_is_recorded_once(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first")
 
-    asyncio.run(_end_first_track_on_audio_thread(controller))
+    _run(controller, lambda: _end_first_track_on_audio_thread(controller))
 
     assert _history(controller) == ["first"]
 
@@ -1761,7 +1764,7 @@ def test_prev_during_a_pending_start_plays_the_previous_track_only(
         release.set()
         await _finish(task)
         await _settle()
-        return [c[1][0].title for c in stub_loader.calls[before:]]
+        return _preloaded(stub_loader)[before:]
 
     later = _run(controller, scenario)
 
@@ -1788,7 +1791,7 @@ def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
         release.set()
         await _finish(task)
         await _settle()
-        return [c[1][0].title for c in stub_loader.calls[before:]]
+        return _preloaded(stub_loader)[before:]
 
     later = _run(controller, scenario)
 
@@ -1990,7 +1993,7 @@ def test_a_superseded_start_dropping_out_leaves_the_newer_one_pending(
         before = len(stub_loader.calls)
         release.set()
         await _finish(task)
-        later = [c[1][0].title for c in stub_loader.calls[before:]]
+        later = _preloaded(stub_loader)[before:]
         await controller.queue(_songs(controller, "added"))
         await _settle()
         assert _played(controller) == []
