@@ -15,16 +15,10 @@ from musicbot.commands.developer import (
     run_and_report,
 )
 
+from discord_fakes import RecordingCtx
+
 PREFIX, SUFFIX = OUTPUT_FORMAT.split("{}")
 DISCORD_MESSAGE_LIMIT = 2000
-
-
-class FakeContext:
-    def __init__(self):
-        self.sent = []
-
-    async def send(self, content):
-        self.sent.append(content)
 
 
 def py(code):
@@ -32,7 +26,7 @@ def py(code):
 
 
 def report(argv):
-    ctx = FakeContext()
+    ctx = RecordingCtx()
     asyncio.run(run_and_report(ctx, argv))
     return ctx.sent
 
@@ -124,7 +118,7 @@ def test_event_loop_stays_free_while_the_child_runs():
                 ticks += 1
 
         task = asyncio.create_task(ticker())
-        await run_and_report(FakeContext(), py("import time; time.sleep(1)"))
+        await run_and_report(RecordingCtx(), py("import time; time.sleep(1)"))
         task.cancel()
         return ticks
 
@@ -138,7 +132,7 @@ def test_update_says_updating_then_pulls(monkeypatch):
         calls.append((list(ctx.sent), argv))
 
     monkeypatch.setattr(developer, "run_and_report", recorder)
-    ctx = FakeContext()
+    ctx = RecordingCtx()
     asyncio.run(Developer._update.callback(None, ctx))
     assert calls == [(["Updating..."], ["git", "pull"])]
 
