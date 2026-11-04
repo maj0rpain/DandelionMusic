@@ -942,9 +942,9 @@ async def _fire_without_raising(after, error=None):
     loop = asyncio.get_running_loop()
     raised = []
     loop.set_exception_handler(lambda _loop, context: raised.append(context))
-    _, error = _in_thread(after, error)
+    _, thread_error = _in_thread(after, error)
     await _settle()
-    assert error is None
+    assert thread_error is None
     assert raised == []
 
 
@@ -1630,7 +1630,6 @@ def _pending_start(controller, stub_loader, monkeypatch, *titles, result=None):
     """Queues `titles` and starts the first one with its preload held.
     Returns (release event, the start's task, its song)."""
     _fake_ffmpeg(monkeypatch)
-    controller.bot.loop = asyncio.get_running_loop()
     controller.command_channel = _Channel()
     _queue(controller, *titles)
     slow = controller.playlist[0]
