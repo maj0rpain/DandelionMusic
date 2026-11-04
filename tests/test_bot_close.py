@@ -139,3 +139,17 @@ def test_failing_loader_shutdown_still_closes_discord_then_raises(
     with pytest.raises(OSError, match="join"):
         asyncio.run(scenario())
     assert calls == ["stop", "shutdown", "discord"]
+
+
+def test_two_failing_steps_raise_the_later_chained_onto_the_earlier(
+    monkeypatch,
+):
+    calls, scenario = _close(
+        monkeypatch,
+        stop_error=ValueError("stop"),
+        shutdown_error=OSError("join"),
+    )
+    with pytest.raises(OSError, match="join") as raised:
+        asyncio.run(scenario())
+    assert calls == ["stop", "shutdown", "discord"]
+    assert isinstance(raised.value.__context__, ValueError)

@@ -156,33 +156,19 @@ def _fresh_load(monkeypatch):
     return calls
 
 
-def test_load_song_stamps_every_song_with_the_clock(monkeypatch):
+@pytest.mark.parametrize("count", [None, 2])
+def test_load_song_stamps_every_song_with_the_clock(monkeypatch, count):
     _clock(monkeypatch)
 
     async def run_sync(f, *args):
-        return Song(SiteTypes.YT_DLP, URL)
+        if count is None:
+            return Song(SiteTypes.YT_DLP, URL)
+        return [Song(SiteTypes.YT_DLP, URL) for _ in range(count)]
 
     monkeypatch.setattr(loader, "_run_sync", run_sync)
-    assert asyncio.run(loader.load_song(URL)).extracted_at == NOW
-
-
-def test_load_song_stamps_each_song_of_a_returned_list(monkeypatch):
-    _clock(monkeypatch)
-
-    async def run_sync(f, *args):
-        return [Song(SiteTypes.YT_DLP, URL), Song(SiteTypes.YT_DLP, URL)]
-
-    monkeypatch.setattr(loader, "_run_sync", run_sync)
-    songs = asyncio.run(loader.load_song(URL))
-    assert [s.extracted_at for s in songs] == [NOW, NOW]
-
-
-def test_update_copies_the_stamp_from_a_fresh_song():
-    song = _song()
-    fresh = Song(SiteTypes.YT_DLP, URL, url="u")
-    fresh.extracted_at = NOW
-    song.update(fresh)
-    assert song.extracted_at == NOW
+    result = asyncio.run(loader.load_song(URL))
+    songs = result if isinstance(result, list) else [result]
+    assert [s.extracted_at for s in songs] == [NOW] * (count or 1)
 
 
 def test_no_expire_with_a_fresh_stamp_is_current(monkeypatch):

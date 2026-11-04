@@ -129,23 +129,26 @@ class MusicBot(commands.Bot):
 
         # every remaining step runs; a later step's exception propagates
         # once the steps after it have run
-        failure = None
-        try:
+        async def stop_link():
             # this loop's aiohttp session (see linkutils.get_session);
             # the worker closes its own when shutdown() stops it
             await linkutils.stop()
-        except Exception as e:
-            failure = e
-        try:
+
+        async def stop_loader():
             # joining the worker blocks; do it off the loop so other
             # tasks keep running until it has exited
             await asyncio.to_thread(loader.shutdown)
-        except Exception as e:
-            failure = e
-        try:
-            await super().close()
-        except Exception as e:
-            failure = e
+
+        failure = None
+        for step in (stop_link, stop_loader, super().close):
+            try:
+                await step()
+            except Exception as e:
+                if failure is not None:
+                    # as a try/finally chain would: the later one
+                    # carries the earlier one
+                    e.__context__ = failure
+                failure = e
         if failure is not None:
             raise failure
 
