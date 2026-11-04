@@ -419,3 +419,124 @@ def test_a_timeout_is_logged_with_label_and_key(
         "library_metadata: Last.fm artist.getInfo timed out for Radiohead"
         in capsys.readouterr().err
     )
+
+
+# a 1x1 PNG-ish payload; mutagen stores the bytes verbatim
+COVER = b"\x89PNG\r\n\x1a\nembedded-cover-bytes"
+
+
+def make_tagged_flac(path):
+    """A minimal FLAC (marker + STREAMINFO) tagged through mutagen."""
+    from mutagen.flac import FLAC, Picture
+
+    streaminfo = (
+        (4096).to_bytes(2, "big")
+        + (4096).to_bytes(2, "big")
+        + b"\x00" * 6
+        + ((44100 << 44) | (1 << 41) | (15 << 36) | 44100).to_bytes(8, "big")
+        + b"\x00" * 16
+    )
+    path.write_bytes(b"fLaC" + bytes([0x80, 0, 0, 34]) + streaminfo)
+    flac = FLAC(path)
+    flac["artist"] = "Tag Artist"
+    flac["albumartist"] = "Tag Album Artist"
+    flac["album"] = "Tag Album"
+    pic = Picture()
+    pic.type = 3
+    pic.mime = "image/png"
+    pic.data = COVER
+    flac.add_picture(pic)
+    flac.save()
+
+
+def test_stalled_spotify_does_not_starve_file_reads(
+    tmp_path, spotify, no_lastfm
+):
+    import threading
+    import time
+
+    release = threading.Event()
+    entered = threading.Semaphore(0)
+
+    class BlockingSpotify(FakeSpotify):
+        def search(self, q, type, limit):
+            entered.release()
+            release.wait(30)
+            return super().search(q, type, limit)
+
+    spotify(BlockingSpotify())
+    sample = tmp_path / "Folder Artist" / "Folder Album" / "01.flac"
+    sample.parent.mkdir(parents=True)
+    make_tagged_flac(sample)
+
+    async def scenario():
+        stalled = [
+            asyncio.ensure_future(
+                library_metadata.get_artist_enrichment(
+                    f"Stalled {i}", tmp_path / "x.flac"
+                )
+            )
+            for i in range(4)
+        ]
+        loop = asyncio.get_running_loop()
+        for _ in range(4):
+            assert await loop.run_in_executor(None, entered.acquire, True, 5)
+        start = time.monotonic()
+        names = await asyncio.wait_for(
+            library_metadata._resolve_names(
+                "Folder Artist", "Folder Album", sample
+            ),
+            timeout=1,
+        )
+        art = await asyncio.wait_for(
+            library_metadata._embedded_art(sample), timeout=1
+        )
+        elapsed = time.monotonic() - start
+        release.set()
+        await asyncio.gather(*stalled, return_exceptions=True)
+        return names, art, elapsed
+
+    try:
+        names, art, elapsed = asyncio.run(scenario())
+    finally:
+        release.set()
+
+    assert elapsed < 1
+    assert names == ("Tag Album Artist", "Tag Album")
+    assert art is not None and art.data == COVER
+
+
+def test_enrichment_spotify_client_has_low_limits(monkeypatch):
+    from spotipy import Spotify
+
+    auth_one = object()
+    auth_two = object()
+    first = Spotify(auth_manager=auth_one)
+    second = Spotify(auth_manager=auth_two)
+    fake = FakeSpotify()
+
+    monkeypatch.setattr(library_metadata, "spotify_api", first)
+    client = library_metadata._spotify_client()
+    assert client is not first
+    assert client.auth_manager is auth_one
+    assert client.requests_timeout == 3
+    assert client.retries == 0
+    assert client.status_retries == 0
+    assert library_metadata._spotify_client() is client
+
+    monkeypatch.setattr(library_metadata, "spotify_api", second)
+    assert library_metadata._spotify_client().auth_manager is auth_two
+
+    monkeypatch.setattr(library_metadata, "spotify_api", fake)
+    assert library_metadata._spotify_client() is fake
+
+    monkeypatch.setattr(library_metadata, "spotify_api", None)
+    assert library_metadata._spotify_enabled() is False
+
+
+def test_playback_spotify_client_keeps_default_limits():
+    api = linkutils.spotify_api
+    if api is None:
+        pytest.skip("no Spotify credentials configured")
+    assert api.requests_timeout == 5
+    assert api.retries == 3
