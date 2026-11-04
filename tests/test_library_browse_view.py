@@ -977,7 +977,6 @@ def test_trim_drops_whole_char_when_budget_ends_in_surrogate_pair():
     result = library_commands._trim(text, 4)
 
     assert result == "x\U0001f600\u2026"
-    assert utf16_units(result) <= 4 + 1
 
 
 def test_trim_cuts_bmp_text_at_the_limit():
