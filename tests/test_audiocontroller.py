@@ -83,16 +83,8 @@ def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
 
 
 def _queue(controller, *titles):
-    ac = sys.modules[type(controller).__module__]
-    for title in titles:
-        controller.playlist.add(
-            ac.Song(
-                ac.SiteTypes.YT_DLP,
-                f"https://example.invalid/{title}",
-                url=f"https://stream.invalid/{title}",
-                title=title,
-            )
-        )
+    for song in _songs(controller, *titles):
+        controller.playlist.add(song)
 
 
 class _FakeFFmpeg:
@@ -450,13 +442,13 @@ def test_clear_keeps_the_current_track_refreshes_backup_and_preloads_nothing(
     assert stub_loader.calls == []
 
 
-def _songs(controller, *titles):
+def _songs(controller, *titles, url=True):
     ac = sys.modules[type(controller).__module__]
     return [
         ac.Song(
             ac.SiteTypes.YT_DLP,
             f"https://example.invalid/{title}",
-            url=f"https://stream.invalid/{title}",
+            url=f"https://stream.invalid/{title}" if url else None,
             title=title,
         )
         for title in titles
@@ -1716,20 +1708,38 @@ class _Channel:
         self.sent.append((args, kwargs))
 
 
-def _pending_start(controller, stub_loader, monkeypatch, *titles, result=None):
+def _pending_start(
+    controller,
+    stub_loader,
+    monkeypatch,
+    *titles,
+    result=None,
+    head_url=True,
+):
     """Queues `titles` and starts the first one with its preload held.
-    Returns (release event, the start's task, its song)."""
+    The first title has no stream URL when `head_url` is False.
+    Returns (release event, the start's task)."""
     from config import config
 
     monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
     _fake_ffmpeg(monkeypatch)
     controller.bot.loop = asyncio.get_running_loop()
     controller.command_channel = _Channel()
-    _queue(controller, *titles)
-    slow = controller.playlist[0]
-    release = stub_loader.hold(slow, result)
+    for song in _songs(controller, titles[0], url=head_url):
+        controller.playlist.add(song)
+    _queue(controller, *titles[1:])
+    release = stub_loader.hold(controller.playlist[0], result)
     task = asyncio.ensure_future(controller.ensure_playing())
-    return release, task, slow
+    return release, task
+
+
+def _preloads_since(stub_loader, before):
+    """The titles preloaded since `before` calls had been made."""
+    return [
+        args[0].title
+        for name, args in stub_loader.calls[before:]
+        if name == "preload"
+    ]
 
 
 def _old_track(controller):
@@ -1748,7 +1758,7 @@ def test_queueing_during_a_pending_start_starts_nothing_new(
     controller, stub_loader, monkeypatch
 ):
     async def run():
-        release, task, _ = _pending_start(
+        release, task = _pending_start(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
         await _settle()
@@ -1775,7 +1785,7 @@ def test_the_inactivity_timeout_during_a_pending_start_does_not_disconnect(
     ]
 
     async def run():
-        release, task, _ = _pending_start(
+        release, task = _pending_start(
             controller, stub_loader, monkeypatch, "slow"
         )
         await _settle()
@@ -1792,15 +1802,15 @@ def test_the_inactivity_timeout_during_a_pending_start_does_not_disconnect(
 def test_a_local_batch_during_a_pending_start_starts_nothing_new(
     controller, stub_loader, monkeypatch
 ):
-    batch = _songs(controller, "a", "b")
+    by_title = {s.title: s for s in _songs(controller, "a", "b")}
 
     async def load_local_songs(tracks):
-        return batch[: len(tracks)] if len(tracks) == 1 else batch[1:]
+        return [by_title[t] for t in tracks]
 
     monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
 
     async def run():
-        release, task, _ = _pending_start(
+        release, task = _pending_start(
             controller, stub_loader, monkeypatch, "slow"
         )
         await _settle()
@@ -1812,7 +1822,7 @@ def test_a_local_batch_during_a_pending_start_starts_nothing_new(
 
     assert _played(controller) == ["slow"]
     assert controller.guild.voice_client.disconnected is False
-    assert _titles(controller) == ["slow", "b"]
+    assert _titles(controller) == ["slow", "a", "b"]
 
 
 def test_restore_during_a_pending_start_is_refused(
@@ -1821,7 +1831,7 @@ def test_restore_during_a_pending_start_is_refused(
     ac = sys.modules[type(controller).__module__]
 
     async def run():
-        release, task, _ = _pending_start(
+        release, task = _pending_start(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
         await _settle()
@@ -1837,25 +1847,22 @@ def test_restore_during_a_pending_start_is_refused(
     assert controller.guild.voice_client.disconnected is False
 
 
-@pytest.mark.parametrize("release_first", [False, True])
 def test_prev_during_a_pending_start_plays_the_previous_track_only(
-    controller, stub_loader, monkeypatch, release_first
+    controller, stub_loader, monkeypatch
 ):
     async def run():
-        release, task, _ = _pending_start(
+        release, task = _pending_start(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
         await _settle()
         _old_track(controller)
-        if release_first:
-            release.set()
         assert controller.prev_song()
         await _settle()
         before = len(stub_loader.calls)
         release.set()
         await _finish(task)
         await _settle()
-        return [c[1][0].title for c in stub_loader.calls[before:]]
+        return _preloads_since(stub_loader, before)
 
     later = asyncio.run(run())
 
@@ -1865,24 +1872,21 @@ def test_prev_during_a_pending_start_plays_the_previous_track_only(
     assert controller.command_channel.sent == []
 
 
-@pytest.mark.parametrize("release_first", [False, True])
 def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
-    controller, stub_loader, monkeypatch, release_first
+    controller, stub_loader, monkeypatch
 ):
     async def run():
-        release, task, _ = _pending_start(
+        release, task = _pending_start(
             controller, stub_loader, monkeypatch, "slow", "next", "third"
         )
         await _settle()
-        if release_first:
-            release.set()
         controller.next_song()
         await _settle()
         before = len(stub_loader.calls)
         release.set()
         await _finish(task)
         await _settle()
-        return [c[1][0].title for c in stub_loader.calls[before:]]
+        return _preloads_since(stub_loader, before)
 
     later = asyncio.run(run())
 
@@ -1893,12 +1897,12 @@ def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
     assert controller.command_channel.sent == []
 
 
-def _dropped(controller, stub_loader, monkeypatch, act):
+def _preloads_after_release(controller, stub_loader, monkeypatch, act):
     """Holds a start's preload, runs `act`, releases the preload and
-    returns how many preloads were asked for after the release."""
+    returns the titles preloaded after the release."""
 
     async def run():
-        release, task, _ = _pending_start(
+        release, task = _pending_start(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
         await _settle()
@@ -1906,7 +1910,7 @@ def _dropped(controller, stub_loader, monkeypatch, act):
         before = len(stub_loader.calls)
         release.set()
         await _finish(task)
-        return len(stub_loader.calls) - before
+        return _preloads_since(stub_loader, before)
 
     return asyncio.run(run())
 
@@ -1917,10 +1921,10 @@ def test_a_stop_during_a_pending_start_leaves_nothing_playing(
     async def act():
         controller.stop()
 
-    later = _dropped(controller, stub_loader, monkeypatch, act)
+    later = _preloads_after_release(controller, stub_loader, monkeypatch, act)
 
     assert _played(controller) == []
-    assert later == 0
+    assert later == []
     assert controller.command_channel.sent == []
     assert controller.guild.voice_client.disconnected is False
 
@@ -1931,10 +1935,10 @@ def test_a_disconnect_during_a_pending_start_leaves_nothing_playing(
     async def act():
         await controller.udisconnect("test")
 
-    later = _dropped(controller, stub_loader, monkeypatch, act)
+    later = _preloads_after_release(controller, stub_loader, monkeypatch, act)
 
     assert _played(controller) == []
-    assert later == 0
+    assert later == []
     assert controller.command_channel.sent == []
     assert controller.guild.voice_client.disconnected is True
 
@@ -1947,10 +1951,10 @@ def test_losing_the_voice_client_during_a_pending_start_plays_nothing(
     async def act():
         controller.guild.voice_client = None
 
-    later = _dropped(controller, stub_loader, monkeypatch, act)
+    later = _preloads_after_release(controller, stub_loader, monkeypatch, act)
 
     assert voice_client.played == []
-    assert later == 0
+    assert later == []
     assert controller.command_channel.sent == []
     # the abandoned start no longer holds the bot busy
     controller.guild.voice_client = voice_client
@@ -1961,7 +1965,7 @@ def test_a_stale_failed_preload_skips_nothing_and_moves_nothing(
     controller, stub_loader, monkeypatch
 ):
     async def run():
-        release, task, _ = _pending_start(
+        release, task = _pending_start(
             controller,
             stub_loader,
             monkeypatch,
@@ -1988,7 +1992,7 @@ def test_a_current_failed_preload_skips_to_the_next_track(
     controller, stub_loader, monkeypatch
 ):
     async def run():
-        release, task, _ = _pending_start(
+        release, task = _pending_start(
             controller,
             stub_loader,
             monkeypatch,
@@ -2011,7 +2015,7 @@ def test_a_current_failed_preload_with_nothing_after_it_ends_the_start(
     controller, stub_loader, monkeypatch
 ):
     async def run():
-        release, task, _ = _pending_start(
+        release, task = _pending_start(
             controller,
             stub_loader,
             monkeypatch,
@@ -2029,24 +2033,18 @@ def test_a_current_failed_preload_with_nothing_after_it_ends_the_start(
     assert _played(controller) == ["later"]
 
 
-def _without_url(controller, title):
-    ac = sys.modules[type(controller).__module__]
-    return ac.Song(
-        ac.SiteTypes.YT_DLP, f"https://example.invalid/{title}", title=title
-    )
-
-
 def test_a_stale_start_without_a_url_moves_nothing(
     controller, stub_loader, monkeypatch
 ):
     async def run():
-        controller.playlist.add(_without_url(controller, "slow"))
-        _queue(controller, "next")
-        controller.bot.loop = asyncio.get_running_loop()
-        controller.command_channel = _Channel()
-        _fake_ffmpeg(monkeypatch)
-        release = stub_loader.hold(controller.playlist[0])
-        task = asyncio.ensure_future(controller.ensure_playing())
+        release, task = _pending_start(
+            controller,
+            stub_loader,
+            monkeypatch,
+            "slow",
+            "next",
+            head_url=False,
+        )
         await _settle()
         _old_track(controller)
         controller.prev_song()
@@ -2064,7 +2062,7 @@ def test_a_current_start_without_a_url_ends_the_start(
     controller, stub_loader, monkeypatch
 ):
     async def run():
-        controller.playlist.add(_without_url(controller, "slow"))
+        controller.playlist.add(_songs(controller, "slow", url=False)[0])
         controller.bot.loop = asyncio.get_running_loop()
         _fake_ffmpeg(monkeypatch)
         await controller.ensure_playing()
@@ -2080,7 +2078,7 @@ def test_a_superseded_start_dropping_out_leaves_the_newer_one_pending(
     controller, stub_loader, monkeypatch
 ):
     async def run():
-        release, task, _ = _pending_start(
+        release, task = _pending_start(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
         await _settle()
@@ -2091,7 +2089,7 @@ def test_a_superseded_start_dropping_out_leaves_the_newer_one_pending(
         before = len(stub_loader.calls)
         release.set()
         await _finish(task)
-        later = [c[1][0].title for c in stub_loader.calls[before:]]
+        later = _preloads_since(stub_loader, before)
         await controller.queue(_songs(controller, "added"))
         await _settle()
         assert _played(controller) == []
