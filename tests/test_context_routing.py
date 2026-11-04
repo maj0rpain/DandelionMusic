@@ -14,7 +14,7 @@ def make_ctx(response_done):
     interaction = SimpleNamespace(
         response=SimpleNamespace(
             is_done=lambda: response_done,
-            send_message=AsyncMock(),
+            send_message=AsyncMock(return_value="first"),
         ),
         followup=SimpleNamespace(send=AsyncMock(return_value="followup")),
         original_response=AsyncMock(return_value="original"),
@@ -38,6 +38,11 @@ def test_response_not_done_sends_message():
     asyncio.run(ctx._send_to_interaction("hi"))
     i.response.send_message.assert_awaited_once_with("hi")
     i.original_response.assert_not_awaited()
+
+
+def test_response_not_done_returns_send_message_result():
+    ctx, i = make_ctx(False)
+    assert asyncio.run(ctx._send_to_interaction("hi")) == "first"
 
 
 def test_response_not_done_returns_original_response():

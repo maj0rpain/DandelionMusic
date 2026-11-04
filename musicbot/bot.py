@@ -335,13 +335,15 @@ class Context(commands.Context):
     ):
         """The interaction routing, written once: a followup when the
         response is done, else the first response (returning the
-        original response message when original_response is true).
+        original response message when original_response is true, else
+        send_message's own result).
         Call only when self.interaction is set."""
         if self.interaction.response.is_done():
             return await self.interaction.followup.send(*args, **kwargs)
-        await self.interaction.response.send_message(*args, **kwargs)
+        sent = await self.interaction.response.send_message(*args, **kwargs)
         if original_response:
             return await self.interaction.original_response()
+        return sent
 
     async def response_send_message(self, *args, **kwargs):
         if self.interaction:
