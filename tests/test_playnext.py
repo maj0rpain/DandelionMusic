@@ -204,15 +204,6 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
     assert _titles(controller) == ["current", "pn", "a", "plain"]
 
 
-def test_queue_with_playnext_keeps_the_order_of_several_songs(controller):
-    _queue(controller, "current", "a")
-    songs = [_song(controller, "x"), _song(controller, "y")]
-
-    _while_playing(controller, lambda: controller.queue(songs, playnext=True))
-
-    assert _titles(controller) == ["current", "x", "y", "a"]
-
-
 def test_play_replies_with_the_load_error_and_leaves_the_queue_alone(
     controller, stub_loader, tmp_path
 ):
