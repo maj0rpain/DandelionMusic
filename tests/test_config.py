@@ -134,7 +134,7 @@ def test_dockerfile_installs_db_drivers_without_dev():
         assert flag in run
 
 
-def _index(commands, predicate):
+def _indices_where(commands, predicate):
     return [i for i, c in enumerate(commands) if predicate(c)]
 
 
@@ -147,11 +147,9 @@ def test_dockerfile_runs_as_a_non_root_user():
 
 def test_dockerfile_copies_source_only_after_dependencies():
     commands = _dockerfile_commands()
-    (sync,) = _index(commands, lambda c: "uv sync" in c)
-    (copy_all,) = _index(commands, lambda c: c.startswith("COPY . ."))
+    (sync,) = _indices_where(commands, lambda c: "uv sync" in c)
+    (copy_all,) = _indices_where(commands, lambda c: c.startswith("COPY . ."))
     assert copy_all > sync
-    for i in _index(commands, lambda c: "apt-get" in c):
-        assert commands[i].startswith("RUN") and i < sync
     early_copies = [
         c.split()[1:-1]
         for c in commands[:sync]
@@ -180,6 +178,10 @@ def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
 
 
 def test_dockerfile_apt_installs_are_minimal_and_clean():
+    commands = _dockerfile_commands()
+    (sync,) = _indices_where(commands, lambda c: "uv sync" in c)
+    for i in _indices_where(commands, lambda c: "apt-get" in c):
+        assert commands[i].startswith("RUN") and i < sync
     for c in _dockerfile_commands():
         if "apt-get install" not in c:
             continue
