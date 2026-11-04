@@ -51,13 +51,16 @@ class TestGetEnvVar:
 @pytest.mark.parametrize(
     "url, expected",
     [
-        ("sqlite:///settings.db", "sqlite+aiosqlite:///settings.db"),
-        ("postgres://h/d", "postgresql+asyncpg://h/d"),
-        ("mysql://h/d", "mysql+aiomysql://h/d"),
-        ("weird+driver://h/d", "weird+driver://h/d"),
-        ("postgresql://h/d", "postgresql+asyncpg://h/d"),
-        ("postgres+asyncpg://h/d", "postgresql+asyncpg://h/d"),
-        ("mysql+aiomysql://h/d", "mysql+aiomysql://h/d"),
+        (
+            "sqlite:///settings.db",
+            ("sqlite+aiosqlite:///settings.db", "aiosqlite"),
+        ),
+        ("postgres://h/d", ("postgresql+asyncpg://h/d", "asyncpg")),
+        ("mysql://h/d", ("mysql+aiomysql://h/d", "aiomysql")),
+        ("weird+driver://h/d", ("weird+driver://h/d", "driver")),
+        ("postgresql://h/d", ("postgresql+asyncpg://h/d", "asyncpg")),
+        ("postgres+asyncpg://h/d", ("postgresql+asyncpg://h/d", "asyncpg")),
+        ("mysql+aiomysql://h/d", ("mysql+aiomysql://h/d", "aiomysql")),
     ],
 )
 def test_alchemize_url(url, expected):
@@ -107,6 +110,26 @@ def test_config_keeps_the_rest_of_the_url_when_naming_the_driver(
 def test_config_load_rejects_an_unmappable_url(config_factory):
     with pytest.raises(ValueError):
         config_factory(SECRETS_ENV + "DATABASE_URL=mariadb://u:p@h/db\n")
+
+
+def test_config_rejects_a_driver_requirement_rejects(config_factory):
+    with pytest.raises(ValueError):
+        config_factory(
+            SECRETS_ENV + "DATABASE_URL=postgresql+bad name://h/d\n"
+        )
+
+
+def test_config_rejects_a_non_bare_driver_naming_only_the_driver(
+    config_factory,
+):
+    with pytest.raises(ValueError) as exc:
+        config_factory(
+            SECRETS_ENV
+            + "DATABASE_URL=postgresql+asyncpg>=1://u:secret@h/d\n"
+        )
+    msg = str(exc.value)
+    assert "asyncpg>=1" in msg
+    assert "secret" not in msg
 
 
 def _dockerfile_commands():

@@ -153,12 +153,12 @@ class Config:
             else ("/" if self.ENABLE_SLASH_COMMANDS else "@bot ")
         )
 
-        self.DATABASE = alchemize_url(self.DATABASE_URL)
-        driver_name = self.DATABASE.partition("+")[2].partition(":")[0]
-        db_req = Requirement(driver_name)
-        dialect, _, rest = self.DATABASE.partition("+")
-        rest = rest.partition("://")[2]
-        self.DATABASE = f"{dialect}+{db_req.name}://{rest}"
+        self.DATABASE, driver = alchemize_url(self.DATABASE_URL)
+        db_req = Requirement(driver)
+        if db_req.name != driver:
+            raise ValueError(
+                f"DATABASE_URL driver {driver!r} is not a bare package name"
+            )
         self.DATABASE_LIBRARY_NAME = db_req.name
 
         # Convert EMBED_COLOR to integer if it's a string
