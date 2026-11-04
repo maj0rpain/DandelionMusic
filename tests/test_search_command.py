@@ -7,7 +7,7 @@ from musicbot.commands import music
 from musicbot.commands.music import Music
 
 
-class FakeCtx:
+class RecordingCtx:
     def __init__(self):
         self.sent = []
 
@@ -23,7 +23,7 @@ def run_search(results, monkeypatch):
         return results
 
     monkeypatch.setattr(music, "search_youtube", search_youtube)
-    ctx = FakeCtx()
+    ctx = RecordingCtx()
     asyncio.run(Music._search.callback(Music(None), ctx, query="q"))
     return ctx.sent
 
