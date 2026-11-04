@@ -196,3 +196,34 @@ class TestEnsureSqliteParent:
 
         src = inspect.getsource(MusicBot.__init__)
         assert "ensure_sqlite_parent(config.DATABASE)" in src
+
+
+def test_heroku_db_is_used_as_the_database_url(config_factory):
+    config = config_factory(SECRETS_ENV + "HEROKU_DB=postgresql://u:p@h/db\n")
+    assert config.DATABASE == "postgresql+asyncpg://u:p@h/db"
+
+
+def test_database_url_wins_over_heroku_db(config_factory):
+    config = config_factory(
+        SECRETS_ENV
+        + "HEROKU_DB=postgresql://u:p@h/heroku\n"
+        + "DATABASE_URL=postgresql://u:p@h/real\n"
+    )
+    assert config.DATABASE == "postgresql+asyncpg://u:p@h/real"
+
+
+def test_heroku_db_is_not_reported_as_unknown(config_factory):
+    config = config_factory(SECRETS_ENV + "HEROKU_DB=sqlite:///x.db\n")
+    assert "HEROKU_DB" not in config.unknown_vars
+
+
+def test_unknown_var_warning_names_it_without_its_value(config_factory):
+    config = config_factory(
+        SECRETS_ENV + "MY_API_TOKEN=zq81xk-middle-v7mw\n"
+    )
+    with pytest.warns(UserWarning) as record:
+        config.warn_unknown_vars()
+    text = " ".join(str(w.message) for w in record)
+    assert "MY_API_TOKEN" in text
+    assert "zq81" not in text
+    assert "v7mw" not in text
