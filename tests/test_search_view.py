@@ -21,8 +21,8 @@ from config import config
 from musicbot.bot import MusicBot
 from musicbot.commands.music import SearchView, SongButton
 from musicbot.utils import CheckError
-from discord_fakes import FakeInteraction
-from discord_fakes import VoiceGuild, http_error, run
+from discord_fakes import FakeInteraction, VoiceGuild, http_error
+from helpers import run
 
 OWNER = 1
 OTHER = 2

@@ -13,12 +13,12 @@ import asyncio
 import inspect
 
 import pytest
-from helpers import FakeClock, run
 from spotipy import Spotify
 
 from config import config
 from musicbot import library_metadata, linkutils
 from musicbot.library_metadata import ArtInfo, ExternalStats
+from helpers import FakeClock, run
 
 PLACEHOLDER = (
     "https://lastfm.freetls.fastly.net/i/u/300x300/"

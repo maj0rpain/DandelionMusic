@@ -264,7 +264,7 @@ class ResettableController(FakeController):
         await super().dispose(reason)
 
 
-class FakeVoiceChannel:
+class CountingVoiceChannel:
     """The user's voice channel: connect() joins it, or raises `fail`."""
 
     def __init__(self, guild, name="General", fail=None):
@@ -330,7 +330,7 @@ def test_reset_command_replaces_the_controller_and_keeps_settings():
     """d!reset goes through the registry: the old controller is
     disposed of, the bot joins the user's channel, the settings stay."""
     guild = FakeGuild(1)
-    channel = FakeVoiceChannel(guild)
+    channel = CountingVoiceChannel(guild)
 
     sessions, old, settings, sent, refusal = run_reset(guild, channel)
 
@@ -354,7 +354,7 @@ def test_reset_tells_the_user_when_the_voice_connect_fails(error, capsys):
     from config import config
 
     guild = FakeGuild(1)
-    channel = FakeVoiceChannel(guild, fail=error)
+    channel = CountingVoiceChannel(guild, fail=error)
 
     _, _, _, sent, refusal = run_reset(guild, channel)
 
@@ -374,7 +374,7 @@ def test_reset_refuses_when_the_bot_is_still_in_voice(monkeypatch):
     monkeypatch.setattr(asyncio, "sleep", no_sleep)
     guild = FakeGuild(1)
     guild.voice_client = object()
-    channel = FakeVoiceChannel(guild)
+    channel = CountingVoiceChannel(guild)
 
     _, _, _, sent, refusal = run_reset(guild, channel)
 
