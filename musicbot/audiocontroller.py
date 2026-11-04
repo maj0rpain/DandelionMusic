@@ -56,8 +56,8 @@ class MusicButton(discord.ui.Button):
     """A button running `callback` once `check` admits the click.
     A player button never touches voice: its default check,
     player_check(), refuses it while the bot is out of voice. A
-    button that starts playback (a search pick) overrides join() to
-    join voice (connect, or move the bot) before its action."""
+    joining button (a search pick) overrides join() to join voice
+    (connect, or move the bot) before its action."""
 
     def __init__(self, callback, check=player_check, **kwargs):
         super().__init__(**kwargs)
@@ -92,7 +92,7 @@ class MusicButton(discord.ui.Button):
                 await dj_check(ctx)
             await self.join(ctx)
         except CheckError as e:
-            self.on_refused(e)
+            self.on_refused()
             await ctx.send(e, ephemeral=True)
             return
         res = self._callback(ctx)
@@ -106,8 +106,8 @@ class MusicButton(discord.ui.Button):
             else:
                 await controller.update_view()
 
-    def on_refused(self, error: CheckError):
-        """Called with every CheckError that refuses a click (its
+    def on_refused(self):
+        """Called for every CheckError that refuses a click (its
         check, the DJ check or a failed voice join), before the
         ephemeral refusal goes out. Does nothing by default."""
 
@@ -226,6 +226,12 @@ class AudioController(object):
         self.set_volume(max(self.volume - 10, 0))
 
     async def register_voice_channel(self, channel: discord.VoiceChannel):
+        """The controller's voice entry point: GuildSessions (whose
+        auto-join calls it) and the button plugin connect or move
+        through it. GuildSessions is generic over its controller and
+        imports neither discord nor the voice utilities, and its
+        tests fake exactly this method, so callers do not inline
+        connect_to."""
         await utils.connect_to(self.guild, channel)
 
     def make_view(self):
@@ -841,7 +847,7 @@ class AudioController(object):
         The per-track equivalent is process_song() in a loop, which is
         what queueing an album or a discography from the library
         browser used to be: one IPC round trip through the
-        single-worker loader process per track, and a fresh preload
+        load-lane loader process per track, and a fresh preload
         sweep per track on top - each of which walks up to
         MAX_SONG_PRELOAD songs, so a few hundred tracks meant a few
         thousand redundant iterations. Here the load is one call (two

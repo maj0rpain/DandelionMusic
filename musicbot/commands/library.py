@@ -17,7 +17,7 @@ from musicbot.utils import (
     get_audiocontroller,
     owner_check,
     join_voice,
-    joins_voice,
+    joining_command,
     play_check,
 )
 
@@ -1102,10 +1102,7 @@ class Library(commands.Cog):
         help=config.HELP_LIBRARY_SEARCH_LONG,
     )
     @app_commands.describe(query="Artist, album or song to look for")
-    # marked as joining: a pick from the view it opens queues songs
-    # and joins voice through join_voice(), whose context is this
-    # command's (the Library cog itself never joins before invoke)
-    @joins_voice
+    @joining_command
     async def _library_search(self, ctx, *, query: str):
         if not config.MUSIC_LIBRARY_PATH:
             await ctx.send(config.LIBRARY_NOT_CONFIGURED)
@@ -1159,10 +1156,7 @@ class Library(commands.Cog):
         description=config.HELP_LIBRARY_BROWSE_SHORT,
         help=config.HELP_LIBRARY_BROWSE_LONG,
     )
-    # marked as joining: a pick from the view it opens queues songs
-    # and joins voice through join_voice(), whose context is this
-    # command's (the Library cog itself never joins before invoke)
-    @joins_voice
+    @joining_command
     async def _library_browse(self, ctx):
         if not config.MUSIC_LIBRARY_PATH:
             await ctx.send(config.LIBRARY_NOT_CONFIGURED)

@@ -21,11 +21,12 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 
 - `musicbot/__main__.py` / `run.py` - entrypoint; `run.py` is a thin forwarder (PyInstaller entry).
 - `musicbot/bot.py` - `MusicBot`, custom `Context`; user-facing replies go through `ctx.send(...)`, not raw channel sends.
+- `musicbot/utils.py` - command and button checks (`play_check`, `player_check`, `voice_check`), the joining-command marker (`joining_command`), and voice connect/join (`join_needed`, `join_target`, `join_voice`, `connect_to`).
 - `musicbot/sessions.py` - `GuildSessions` (`bot.sessions`): each guild's settings and controller, their creation, lookup (`None` when not registered) and disposal.
-- `musicbot/audiocontroller.py` - per-guild playback state machine (voice, volume, loop, inactivity timer, playlist backup).
+- `musicbot/audiocontroller.py` - per-guild playback state machine (volume, loop, inactivity timer, playlist backup).
 - `musicbot/playlist.py` / `musicbot/song.py` - queue/history and per-track metadata.
 - `musicbot/playlists.py` - saved playlists: the only reader/writer of `SavedPlaylist.songs_json`; callers use `PlaylistEntry`/`PlaylistRef`/`PlaylistContents`.
-- `musicbot/loader.py` - yt-dlp extraction in a worker process; calling it before `init()` raises `LoaderNotRunning`.
+- `musicbot/loader.py` - yt-dlp extraction in two worker processes, the load lane and the preload lane; calling it before `init()` raises `LoaderNotRunning`.
 - `musicbot/linkutils.py` - URL classification and Spotify resolution.
 - `musicbot/library_metadata.py` - library enrichment (Last.fm/Spotify stats and art, embedded covers); the four remote lookups are `CachedLookup` instances, and `clear_caches()` clears them with the local caches.
 - `musicbot/cached_lookup.py` - `CachedLookup`: a remote lookup's cache, in-flight dedup (shielded), timeout and failure cooldown, around a backend passed in; imports only the standard library.
