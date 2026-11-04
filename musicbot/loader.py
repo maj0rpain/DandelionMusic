@@ -45,15 +45,19 @@ class LoaderProcess(_context.Process):
             pass
 
 
-# Importing this module changes no process-global state: everything
-# below is None until init() (in the bot's process) or _init_worker()
-# (in the spawned extraction worker) sets it up.
+# Importing this module changes no process-global state: _executor,
+# _loop and _downloader are None until init() (in the bot's process) or
+# _init_worker() (in the spawned extraction worker) sets them up.
 _executor: Optional[ProcessPoolExecutor] = None
 # the worker's own event loop and downloader - read by extraction here
 # and by the Discord-attachment and Suno yt-dlp plugins
 # (`from musicbot.loader import _loop`)
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _downloader: Optional[YoutubeDL] = None
+# empty at import, filled at run time: _preloading by preload() in the
+# bot's process, _site_locks by extract_info() in the worker
+_preloading = {}
+_site_locks = {}
 
 
 def _new_downloader() -> YoutubeDL:
@@ -143,9 +147,6 @@ def _now() -> datetime:
     """The loader's clock seam: tests monkeypatch it."""
     return datetime.now(timezone.utc)
 
-
-_preloading = {}
-_site_locks = {}
 
 
 class LoaderNotRunning(RuntimeError):
