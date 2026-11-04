@@ -182,19 +182,11 @@ def test_dockerfile_apt_installs_are_minimal_and_clean():
     (sync,) = _indices_where(commands, lambda c: "uv sync" in c)
     for i in _indices_where(commands, lambda c: "apt-get" in c):
         assert commands[i].startswith("RUN") and i < sync
-    for c in _dockerfile_commands():
+    for c in commands:
         if "apt-get install" not in c:
             continue
         assert "curl" not in c.split() and "unzip" not in c.split()
         assert "rm -rf /var/lib/apt/lists/*" in c
-
-
-def test_compose_bgutil_provider_publishes_no_host_port():
-    import yaml
-
-    text = (REPO_ROOT / "docker-compose.yaml").read_text()
-    services = yaml.safe_load(text)["services"]
-    assert "ports" not in services["bgutil-provider"]
 
 
 def _compose_services():
@@ -202,6 +194,10 @@ def _compose_services():
 
     text = (REPO_ROOT / "docker-compose.yaml").read_text()
     return yaml.safe_load(text)["services"]
+
+
+def test_compose_bgutil_provider_publishes_no_host_port():
+    assert "ports" not in _compose_services()["bgutil-provider"]
 
 
 def _image_tag(image):
