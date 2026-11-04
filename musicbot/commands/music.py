@@ -190,8 +190,9 @@ class Music(commands.Cog):
 
     async def cog_check(self, ctx):
         # the playlist gate refuses before any voice or channel refusal
+        # a button's context (Context.from_interaction) has no command
         cmd = ctx.command
-        if (cmd.root_parent or cmd) is self._playlist:
+        if cmd is not None and (cmd.root_parent or cmd) is self._playlist:
             playlists_enabled(ctx)
         ctx.audiocontroller = utils.get_audiocontroller(ctx)
         return await utils.play_check(ctx)
