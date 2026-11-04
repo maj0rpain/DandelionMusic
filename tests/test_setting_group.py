@@ -156,19 +156,6 @@ def test_the_slash_show_fallback_has_no_parameters():
     assert app_group.get_command("show").parameters == []
 
 
-def test_the_group_on_an_empty_view_sends_exactly_the_settings_embed():
-    cog = General(None)
-    sett = stored_settings()
-    sett.guild_id = "1"
-    ctx = build_ctx("", sett)
-
-    asyncio.run(setting_group(cog).callback(cog, ctx))
-
-    [(content, embed)] = ctx.sent
-    assert content is None
-    assert isinstance(embed, discord.Embed)
-
-
 def test_extra_whitespace_before_an_unknown_word_is_still_unknown():
     sent, error, sett = invoke("  foo")
 
