@@ -19,7 +19,7 @@ def test_shutdown_cancels_queued_futures_and_waits(monkeypatch):
     monkeypatch.setattr(
         loader,
         "_pools",
-        {loader.LOAD_LANE: stubs[0], loader.PRELOAD_LANE: stubs[1]},
+        {loader.Lane.LOAD: stubs[0], loader.Lane.PRELOAD: stubs[1]},
     )
 
     loader.shutdown()
