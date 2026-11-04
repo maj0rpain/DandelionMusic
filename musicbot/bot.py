@@ -63,6 +63,13 @@ async def _help_autocomplete(
 class MusicBot(commands.Bot):
     def __init__(self, initial_extensions: List[str], *args, **kwargs):
         kwargs.setdefault("help_command", UniversalHelpCommand())
+        # slash commands are offered in guilds only, never DMs
+        kwargs.setdefault(
+            "allowed_contexts",
+            app_commands.AppCommandContext(
+                guild=True, dm_channel=False, private_channel=False
+            ),
+        )
         super().__init__(*args, **kwargs)
         self.initial_extensions = initial_extensions
 
