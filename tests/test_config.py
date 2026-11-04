@@ -313,6 +313,52 @@ def test_heroku_db_is_not_reported_as_unknown(config_factory):
     assert "HEROKU_DB" not in config.unknown_vars
 
 
+def test_spotipy_aliases_are_not_reported_as_unknown(config_factory):
+    config = config_factory(
+        SECRETS_ENV
+        + "SPOTIPY_CLIENT_ID=cid\nSPOTIPY_CLIENT_SECRET=csecret\n"
+        + "MY_TYPO=1\n"
+    )
+    assert set(config.unknown_vars) == {"MY_TYPO"}
+
+
+def test_heroku_db_applies_when_database_url_is_empty(config_factory):
+    config = config_factory(
+        SECRETS_ENV + "DATABASE_URL=\nHEROKU_DB=postgresql://u:p@h/db\n"
+    )
+    assert config.DATABASE == "postgresql+asyncpg://u:p@h/db"
+
+
+def test_spotipy_alias_applies_when_canonical_is_empty(config_factory):
+    config = config_factory(
+        "BOT_TOKEN=t\nLASTFM_API_KEY=k\nGUILD_WHITELIST=[111]\n"
+        "SPOTIFY_ID=\nSPOTIPY_CLIENT_ID=cid\n"
+        "SPOTIPY_CLIENT_SECRET=csecret\n"
+    )
+    assert (config.SPOTIFY_ID, config.SPOTIFY_SECRET) == ("cid", "csecret")
+
+
+def test_canonical_spotify_variable_wins_over_alias(config_factory):
+    config = config_factory(
+        SECRETS_ENV + "SPOTIFY_ID=real\nSPOTIPY_CLIENT_ID=alias\n"
+    )
+    assert config.SPOTIFY_ID == "real"
+
+
+def test_empty_heroku_db_changes_nothing(config_factory):
+    config = config_factory(SECRETS_ENV + "HEROKU_DB=\n")
+    assert config.DATABASE.startswith("sqlite+aiosqlite:")
+    with pytest.raises(ValueError):
+        config_factory(SECRETS_ENV + "DATABASE_URL=\nHEROKU_DB=\n")
+
+
+def test_aliases_do_not_write_the_environment(config_factory):
+    import os
+
+    config_factory(SECRETS_ENV + "HEROKU_DB=sqlite:///x.db\n")
+    assert os.environ.get("DATABASE_URL", "") == ""
+
+
 def test_unknown_var_warning_names_it_without_its_value(config_factory):
     config = config_factory(SECRETS_ENV + "MY_API_TOKEN=zq81xk-middle-v7mw\n")
     with pytest.warns(UserWarning) as record:

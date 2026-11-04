@@ -21,6 +21,14 @@ from utils import (  # noqa: E402
 
 del sys.path[0]
 
+# Every honoured .env alias, mapped to the Config attribute it stands
+# for. load() applies them and the unknown-variable scan exempts them.
+ENV_ALIASES = {
+    "HEROKU_DB": "DATABASE_URL",
+    "SPOTIPY_CLIENT_ID": "SPOTIFY_ID",
+    "SPOTIPY_CLIENT_SECRET": "SPOTIFY_SECRET",
+}
+
 
 def parse_env_file(path: str) -> tuple:
     """Reads an env-style file into (raw text, {key: raw value}).
@@ -205,10 +213,6 @@ class Config:
         self._env_path = find_dotenv() or os.path.abspath(".env")
         load_dotenv(self._env_path)
 
-        # HEROKU_DB is an alias for DATABASE_URL; DATABASE_URL wins
-        if "HEROKU_DB" in os.environ and "DATABASE_URL" not in os.environ:
-            os.environ["DATABASE_URL"] = os.environ["HEROKU_DB"]
-
         # Check for deprecated environment variable with typo
         if "VC_TIMOUT_DEFAULT" in os.environ:
             # in env, we can't fix it easily
@@ -230,7 +234,7 @@ class Config:
         for key, value in parse_env_file(self._env_path)[1].items():
             if (
                 key not in current_cfg
-                and key != "HEROKU_DB"
+                and key not in ENV_ALIASES
                 and not key.startswith("_")
             ):
                 self.unknown_vars[key] = value
@@ -238,11 +242,10 @@ class Config:
         for key, default in current_cfg.items():
             current_cfg[key] = get_env_var(key, default)
 
-        for key, alias in (
-            ("SPOTIFY_ID", "SPOTIPY_CLIENT_ID"),
-            ("SPOTIFY_SECRET", "SPOTIPY_CLIENT_SECRET"),
-        ):
-            if not current_cfg[key]:
+        # An alias applies when its canonical variable is unset or
+        # empty in the environment; a class default is not a value.
+        for alias, key in ENV_ALIASES.items():
+            if not os.environ.get(key) and os.environ.get(alias):
                 current_cfg[key] = get_env_var(alias, current_cfg[key])
 
         # Embeds are limited to 25 fields
