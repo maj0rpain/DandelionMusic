@@ -842,12 +842,14 @@ def test_a_stop_skips_the_backup_after_the_hop(
         controller.stop()
         # stop() snapshots the queue itself; what follows is the hop
         snapshot = backup.read_bytes() if backup.exists() else None
+        seen = _record_threads(controller, monkeypatch)
         await _settle()
-        return snapshot
+        return snapshot, seen
 
-    snapshot = asyncio.run(run())
+    snapshot, seen = asyncio.run(run())
 
-    # the hop ran and wrote no backup: it holds stop()'s snapshot still
+    # the hop ran - it advanced the emptied queue - and wrote no backup
+    assert "next" in [name for name, _ in seen]
     after = backup.read_bytes() if backup.exists() else None
     assert after == snapshot
     assert controller.guild.voice_client.stopped == 1
