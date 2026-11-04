@@ -335,33 +335,23 @@ class LibraryView(discord.ui.View):
         # click spinner and re-enables the view immediately rather than
         # showing a "thinking" placeholder, so without it a second
         # click could start while the first is still drawing or
-        # queueing. For navigation it is held across the first draw's
-        # render() - its edit, and before that any wait on the render
-        # lock behind an enrichment edit already in flight, which can
-        # be uploading megabytes of artwork. It is never held across a
-        # level's own enrichment lookup and edit. So a click made
-        # while an enrichment edit uploads is accepted, but its draw
-        # then waits out that upload holding the guard, and any
-        # further click made during that wait is turned away.
+        # queueing.
         #
-        # Held by the first draw of a level, a page turn and a bulk
-        # queue. Not by the enrichment edit, which runs unguarded so a
-        # click made while its artwork uploads is accepted rather than
-        # dropped. Such a click reaches
-        # the view at all only because LibraryBrowseView._draw() keeps
-        # the components the message still shows pointed at the view
-        # until the edit replacing them lands - discord.py discards a
-        # click on an item with no view, before any check runs.
+        # Held by a cursor move's draw (a level's first draw or a page
+        # turn) and a bulk queue, across the render lock wait as well as
+        # the edit. Not by the enrichment edit - see
+        # LibraryBrowseView._enter_level(). A click reaches the view
+        # during a redraw at all only because LibraryBrowseView._draw()
+        # keeps the old components pointed at it - see there.
         #
-        # Keeping the message edits in order is not this
-        # guard's job: the browser's render lock serialises them - see
+        # Keeping the message edits in order is not this guard's job:
+        # the browser's render lock serialises them - see
         # LibraryBrowseView.render().
         #
-        # A depth count rather than a flag, so that two holders
-        # overlapping - as the enrichment edit once did, when it took
-        # the guard and could resume in the middle of a queue - can
-        # never have the first one out clear the other's guard and let
-        # a second click queue the same album twice.
+        # A depth count rather than a flag, as deliberate defence-in-depth:
+        # should two holders ever overlap, the first one out must not clear
+        # the other's guard and let a second click queue the same album
+        # twice.
         self._busy: int = 0
         # whatever Context.send handed back, which is not always a
         # Message: the prefix paths and the deferred search path give
@@ -393,21 +383,17 @@ class LibraryView(discord.ui.View):
             )
             return False
         if self._busy:
-            # (A click reaches this check during a redraw only because
-            # _draw() keeps the old components attached to the view.)
-            # acknowledged silently rather than answered with an
-            # ephemeral complaint. For navigation and paging the
-            # guard's window is a level's first draw or a page turn -
-            # its own edit, plus any wait behind an enrichment edit
-            # already in flight on the render lock, never a level's
-            # enrichment edit itself. So the clicks it catches are the
+            # (Why a click reaches this check during a redraw: see
+            # _busy.) Acknowledged silently rather than answered with an
+            # ephemeral complaint. The clicks the guard catches are the
             # second half of a double-click, or clicks made after an
             # accepted one while its draw waits behind an artwork
-            # upload. Telling someone off for either reads as a
-            # malfunction. The one operation still slow enough to be
-            # worth explaining - a bulk queue - puts up its own
-            # ephemeral "Queueing..." message while it runs, so the
-            # user can already see why nothing else is responding.
+            # upload (see LibraryBrowseView._enter_level()). Telling
+            # someone off for either reads as a malfunction. The one
+            # operation still slow enough to be worth explaining - a
+            # bulk queue - puts up its own ephemeral "Queueing..."
+            # message while it runs, so the user can already see why
+            # nothing else is responding.
             await interaction.response.defer()
             return False
         self._last_click = interaction
@@ -479,7 +465,7 @@ class LibraryBrowseView(LibraryView):
         self.cursor = library_browse.BrowseCursor(index, PAGE_SIZE)
         self._enrichment: Optional[library_metadata.Enrichment] = None
         # what _attachment_key() described the last time an edit
-        # actually carried an `attachments` field - see render()
+        # actually carried an `attachments` field - see _draw()
         self._attached: Optional[str] = None
         # serialises the message edits themselves - see render()
         self._render_lock = asyncio.Lock()
@@ -647,7 +633,7 @@ class LibraryBrowseView(LibraryView):
         # is not what makes that true: screen() rebuilds as soon as
         # its scope stops matching the cursor, which makes this
         # equivalent to reading cursor.artist/album directly. What
-        # keeps all three agreeing is render() never awaiting between
+        # keeps all three agreeing is _draw() never awaiting between
         # them - see there.
         artist, album = self.cursor.screen().scope
         return f"{artist}/{album}.{art.extension}"
@@ -677,65 +663,34 @@ class LibraryBrowseView(LibraryView):
         interaction: discord.Interaction,
         sync_attachments: bool = False,
     ) -> bool:
-        """Redraws the message. `interaction` must already have been
-        deferred - every edit goes out as a followup, so that waiting
-        on the lock below can never eat the three seconds an
+        """The locked entry point for redrawing the message; see _draw()
+        for the rules the draw keeps. `interaction` must already have
+        been deferred - every edit goes out as a followup, so that
+        waiting on the lock can never eat the three seconds an
         interaction has to be answered in.
 
-        Serialised, because _busy does not cover the enrichment edit.
-        _busy turns away new *clicks* while a first draw, page turn or
-        bulk queue runs; the enrichment edit in _enter_level() is not
-        a click, and runs outside _busy altogether - both its wait and
-        the edit itself - so it can arrive here while a click's edit
-        is still in flight, and a click can arrive while it is. Two
-        edits to one message would then land in either order - drawing
-        the enrichment and then replacing it with the page turn's
-        older embed - and each would write back an _attached it
-        sampled before the other ran. That last part is
-        the lasting damage: the record of what the message carries ends
-        up disagreeing with the message, so a later navigation omits an
-        `attachments` field it needed and strands a cover under an
-        embed that no longer references it.
+        The lock exists because two edits to one message could
+        otherwise land in either order, each writing back an _attached
+        sampled before the other ran, so a later navigation omits an
+        `attachments` field it needed. A click's edit and the
+        enrichment edit (which waits on this lock, and is not covered
+        by _busy - see _enter_level()) are the two that can overlap.
 
-        Nothing may await between the first read of self.cursor below
-        and the edit: build_items(), embed() and _attachment_key() each
-        read the cursor separately, and a click landing between them
-        would move it, leaving the components, the embed and the
-        attachment key describing two different levels on one
-        message.
-
-        A cursor move whose first draw fails here is undone by its
-        caller (see _first_draw()) on a False return and on any
-        exception alike.
-
-        Returns True when the edit lands. When it raises
-        discord.HTTPException (a 429 that outlives its retries, a
-        5xx) this puts the previous components back, logs the failure
-        and returns False; any other exception puts them back and
-        propagates. Putting them back is what keeps the message
-        usable: build_items() detaches every old child before the
-        edit, so _draw() points each of them back at this view with
-        Item._update_view() - discord.py drops a click on an item whose
-        .view is None, and keeps the old items registered until the
-        edit that replaces them lands. A click made during the edit
-        therefore reaches interaction_check(). If the edit fails the
-        old items are also put back as children, so the next edit
-        serialises them and they keep working; once it lands,
-        discord.py forgets their custom_ids and leaving their .view
-        set does no harm."""
+        A cursor move whose draw fails here is undone by its caller
+        (see _draw_or_undo()) on a False return and on any exception
+        alike."""
         async with self._render_lock:
             return await self._draw(interaction, sync_attachments)
 
     async def _render_enrichment(
         self,
         interaction: discord.Interaction,
-        nav: int,
+        level_revision: int,
         enrichment: Optional[library_metadata.Enrichment],
     ) -> None:
-        """Draws `enrichment` over the level it was resolved for -
-        the one whose level_revision was `nav` - unless the cursor has
-        left that level, in which case nothing is drawn and
-        _enrichment is left alone.
+        """Draws `enrichment` over the level it was resolved for, unless
+        the cursor has left that level, in which case nothing is drawn
+        and _enrichment is left alone.
 
         The check is made *inside* the render lock, because this edit
         is unguarded: a click can move the cursor while it waits here
@@ -745,7 +700,7 @@ class LibraryBrowseView(LibraryView):
         _draw()'s reads of the cursor then follow without an await
         between them, so no click can land in between either."""
         async with self._render_lock:
-            if nav != self.cursor.level_revision:
+            if level_revision != self.cursor.level_revision:
                 return
             self._enrichment = enrichment
             await self._draw(interaction, sync_attachments=True)
@@ -753,14 +708,36 @@ class LibraryBrowseView(LibraryView):
     async def _draw(
         self, interaction: discord.Interaction, sync_attachments: bool
     ) -> bool:
-        """render()'s body, for a caller already holding the render
-        lock - see render() for every rule it keeps."""
+        """Draws the current cursor position over the message. The
+        caller must hold the render lock (see render()).
+
+        Nothing may be awaited between the first read of self.cursor
+        below and the edit: build_items(), embed() and
+        _attachment_key() each read the cursor separately, and a click
+        landing between them would move it, leaving the components, the
+        embed and the attachment key describing two different levels on
+        one message.
+
+        Returns True when the edit lands. When it raises
+        discord.HTTPException (a 429 that outlives its retries, a 5xx)
+        this puts the previous components back, logs the failure and
+        returns False; any other exception puts them back and
+        propagates. Putting them back keeps the message usable:
+        build_items() detaches every old child before the edit, so each
+        is pointed back at this view with Item._update_view() -
+        discord.py drops a click on an item whose .view is None, and
+        keeps the old items registered until the edit that replaces
+        them lands. A click made during the edit therefore reaches
+        interaction_check(). If the edit fails the old items are also
+        put back as children, so the next edit serialises them and they
+        keep working; once it lands, discord.py forgets their
+        custom_ids and leaving their .view set does no harm.
+
+        _attached is written back only once the edit has landed: a
+        failed edit leaves whatever was already on the message."""
         previous = list(self.children)
         self.build_items()
-        # clear_items() detached them, but the message keeps showing
-        # them, and discord.py drops any click on an item with no view
-        # until this edit lands and it forgets their custom_ids. Point
-        # them back at this view so such a click reaches it.
+        # pointed back at this view - see the docstring
         for item in previous:
             item._update_view(self)
         kwargs = {"embed": self.embed(), "view": self}
@@ -778,8 +755,7 @@ class LibraryBrowseView(LibraryView):
         except BaseException:
             self._restore_items(previous)
             raise
-        # only once the edit has landed: a failed edit leaves
-        # whatever was already on the message
+        # only once the edit has landed - see the docstring
         self._attached = attached
         return True
 
@@ -791,9 +767,10 @@ class LibraryBrowseView(LibraryView):
             self.add_item(item)
 
     async def turn_page(self, interaction: discord.Interaction, delta: int):
-        """Applies a page delta under the double-click guard - the one
-        the first draw of a level and a bulk queue also hold, and the
-        enrichment edit does not.
+        """Applies a page delta. The double-click guard (see _busy) is
+        held by a cursor move's draw (a level's first draw or a page
+        turn) and a bulk queue, but not by the enrichment edit - see
+        _enter_level(). The draw and its undo are in _draw_or_undo().
 
         The guard matters on its own account: the button stays
         clickable until the edit lands and discord.py dispatches every
@@ -802,32 +779,31 @@ class LibraryBrowseView(LibraryView):
         BrowseCursor.page_by() for why an unclamped page is silently
         destructive.
 
-        The turn is undone when its draw does not land, for any
-        reason (a False render, any exception from the edit or from
-        the defer): the page goes back to the one the message still
-        shows. It is restored by page_by(saved - page), never by
+        The turn is undone when its draw does not land (see
+        _draw_or_undo()): the page goes back to the one the message
+        still shows. It is restored by page_by(saved - page), never by
         page_by(-delta), because the clamp may have absorbed part of
         the delta. level_revision and _enrichment are not touched, so
         an enrichment in flight for this level still lands."""
         saved = self.cursor.page
         self.cursor.page_by(delta)
-        await self._first_draw(
+        await self._draw_or_undo(
             interaction,
             lambda: self.cursor.page_by(saved - self.cursor.page),
         )
 
-    async def _first_draw(
+    async def _draw_or_undo(
         self,
         interaction: discord.Interaction,
         undo: Callable[[], None],
     ) -> bool:
-        """A cursor move's first draw: under busy(), defers the
-        interaction and renders the new position. When the draw does
-        not land - render() returned False, or the defer or the
-        render raised anything at all, cancellation included - calls
-        `undo`, which puts the cursor back to what the message still
-        shows, and then re-raises the exception, if there was one.
-        Returns whether the draw landed.
+        """A cursor move's draw (a level's first draw or a page turn):
+        under busy(), defers the interaction and renders the new
+        position. When the draw does not land - render() returned
+        False, or the defer or the render raised anything at all,
+        cancellation included - calls `undo`, which puts the cursor
+        back to what the message still shows, and then re-raises the
+        exception, if there was one. Returns whether the draw landed.
 
         Every cursor-moving click goes through here, so none can
         forget the undo."""
@@ -837,16 +813,17 @@ class LibraryBrowseView(LibraryView):
                 # deferred before render() for the reason given there:
                 # a render can have to wait for one already in flight
                 await interaction.response.defer()
-                # Syncs attachments even though a page turn cannot
-                # change them, so that this heals a level whose
-                # enrichment edit failed. That edit assigns
+                # Every move syncs attachments. On a level change they
+                # really change, so the sync is required. On a page
+                # turn they cannot, and the sync repairs a level whose
+                # enrichment edit failed: that edit assigns
                 # _enrichment before sending, so a failure (a 429 that
                 # outlives its retries, a 5xx) leaves the embed asking
                 # for attachment://cover.<ext> while the message
                 # carries no such file - and every later page turn
-                # would redraw that broken reference. Costs nothing
-                # when nothing has changed: render() compares the key
-                # first and omits the field.
+                # would redraw that broken reference. It costs nothing
+                # when the attachment key is unchanged: _draw()
+                # compares the key first and omits the field.
                 landed = await self.render(interaction, sync_attachments=True)
         finally:
             if not landed:
@@ -902,7 +879,7 @@ class LibraryBrowseView(LibraryView):
     def _undo_level_change(self, previous: LevelSnapshot) -> None:
         """Moves the cursor back to `previous` through its own API,
         after a level change whose first draw failed. The message -
-        and the components render() restored - still show that level,
+        and the components _draw() restored - still show that level,
         so the cursor has to agree with them again. level_revision is
         left bumped: any enrichment still in flight for the old level
         was started before the move and is dropped either way."""
@@ -937,16 +914,17 @@ class LibraryBrowseView(LibraryView):
 
         Only the first draw is made under _busy, so the second half
         of a double-click on a Select entry is turned away instead of
-        skipping a level. Everything after it is deliberately left
-        unguarded - the wait for the enrichment and the edit that
-        draws it, which can upload megabytes of embedded artwork:
-        that is exactly when someone browsing quickly clicks again,
-        and they should be able to. Such a click moves the cursor at
-        once; its own redraw waits behind the enrichment edit on the
-        render lock, and an enrichment for a level it has left is
-        never drawn - see _render_enrichment(). Leaving a level does
-        not cancel its enrichment either: the lookup finishes in the
-        background and caches its result, so a revisit is instant.
+        skipping a level. Everything after it - the wait for the
+        enrichment and the edit that draws it, which can upload
+        megabytes of embedded artwork - is deliberately left
+        unguarded: that is exactly when someone browsing quickly
+        clicks again, and a click made then must be accepted, not
+        dropped. Such a click moves the cursor at once, and its own
+        redraw queues behind the enrichment edit on the render lock.
+        An enrichment for a level the cursor has left is never drawn -
+        see _render_enrichment(). Leaving a level does not cancel its
+        enrichment either: the lookup finishes in the background and
+        caches its result, so a revisit is instant.
 
         The cursor has already moved by the time this is called, and
         bumped level_revision doing it. Nothing may be awaited between
@@ -956,21 +934,17 @@ class LibraryBrowseView(LibraryView):
         suspension here is the defer().) For the same reason
         level_revision has to stay a plain attribute - a coroutine
         property would put an await inside the staleness check in
-        _render_enrichment() -
-        and _enrichment has to stay on the view, since it describes
-        what this message is showing rather than where the cursor
-        is.
+        _render_enrichment() - and _enrichment has to stay on the view,
+        since it describes what this message is showing rather than
+        where the cursor is.
 
         `previous` is the caller's _level_snapshot() from before the
-        move. When the first draw fails the message still shows that
-        level, with render() having put its components back, so the
-        move is undone and no enrichment is resolved for a level
-        nobody can see. That holds for any failed first draw, not only
-        a False render: an exception from the edit or from the defer
-        (cancellation included) undoes the move too, and propagates."""
-        nav = self.cursor.level_revision
+        move. A failed first draw is undone by _draw_or_undo(), which
+        puts the cursor back to what the message still shows, so no
+        enrichment is resolved for a level nobody can see."""
+        level_revision = self.cursor.level_revision
         self._enrichment = None
-        if not await self._first_draw(
+        if not await self._draw_or_undo(
             interaction, lambda: self._undo_level_change(previous)
         ):
             return
@@ -981,14 +955,8 @@ class LibraryBrowseView(LibraryView):
             print(f"library: enrichment failed: {e}", file=sys.stderr)
             return
 
-        # Unguarded, unlike the first draw: this edit can upload
-        # megabytes of embedded artwork, and a click turned away for
-        # all that time reads as a frozen screen. A click arriving
-        # meanwhile moves the cursor at once and its redraw queues
-        # behind this one on the render lock. Whether the level is
-        # still the one this was resolved for is checked inside that
-        # lock - see _render_enrichment().
-        await self._render_enrichment(interaction, nav, enrichment)
+        # unguarded, staleness checked in _render_enrichment()
+        await self._render_enrichment(interaction, level_revision, enrichment)
 
     async def queue_current_level(self, interaction: discord.Interaction):
         artist, album = self.cursor.artist, self.cursor.album
