@@ -45,7 +45,7 @@ print(json.dumps({
     "stdout_untouched": sys.stdout is stdout,
     "stderr_untouched": sys.stderr is stderr,
     "atexit_callbacks": atexit._ncallbacks() - baseline_callbacks,
-    "executor_built": loader._executor is not None,
+    "executor_built": bool(loader._pools),
     "sessions": len(linkutils._sessions),
     "children": len(multiprocessing.active_children()),
     "spawn_process_is_stdlib": (
@@ -104,12 +104,15 @@ if __name__ == "__main__":
     before_init = calls_without_worker()
     loader.shutdown()  # safe without a prior init()
     loader.init()
-    worker_ready = loader._executor.submit(worker_state_is_set).result()
+    worker_ready = all(
+        loader._pools[lane].submit(worker_state_is_set).result()
+        for lane in (loader.LOAD_LANE, loader.PRELOAD_LANE)
+    )
     children_after_init = len(multiprocessing.active_children())
     loader.init()
     children_after_second_init = len(multiprocessing.active_children())
     run_sync_reaches_worker = asyncio.run(
-        loader._run_sync(worker_state_is_set)
+        loader._run_sync(loader.PRELOAD_LANE, worker_state_is_set)
     )
     loader.shutdown()
     children_after_shutdown = len(multiprocessing.active_children())
@@ -138,21 +141,21 @@ from musicbot import loader
 
 
 async def main():
-    killed_pid = multiprocessing.active_children()[0].pid
+    killed_pids = {p.pid for p in multiprocessing.active_children()}
     # straight to the pool, so no retry runs os._exit again
     try:
-        loader._executor.submit(os._exit, 1).result()
+        loader._pools[loader.LOAD_LANE].submit(os._exit, 1).result()
     except BrokenProcessPool:
         broke = True
     else:
         broke = False
     song = await loader.load_song("https://example.invalid/a.mp3")
-    live_pid = multiprocessing.active_children()[0].pid
+    live_pids = {p.pid for p in multiprocessing.active_children()}
     return {
         "broke": broke,
         "loaded": song is not None and song.webpage_url
         == "https://example.invalid/a.mp3",
-        "new_worker": live_pid != killed_pid,
+        "new_worker": len(live_pids) == 2 and live_pids != killed_pids,
     }
 
 
@@ -342,7 +345,7 @@ def test_loader_lifecycle_second_init_spawns_no_second_worker(lifecycle):
     assert (
         lifecycle["children_after_init"],
         lifecycle["children_after_second_init"],
-    ) == (1, 1)
+    ) == (2, 2)
 
 
 def test_loader_lifecycle_shutdown_leaves_no_children(lifecycle):
