@@ -19,7 +19,6 @@ from musicbot.audiocontroller import (
 )
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
-from musicbot.playlists import PlaylistEntry
 from musicbot.linkutils import get_site_type, url_regex
 
 
@@ -160,6 +159,19 @@ def playlists_enabled(ctx):
     if not config.ENABLE_PLAYLISTS:
         raise utils.CheckError(config.PLAYLISTS_ARE_DISABLED)
     return True
+
+
+def _saved_playlist_error_reply(e: playlists.SavedPlaylistError) -> str:
+    """The reply text for a saved-playlist failure."""
+    if isinstance(e, playlists.PlaylistNotFound):
+        return config.PLAYLIST_NOT_FOUND
+    if isinstance(e, playlists.InvalidPosition):
+        return f"Invalid position. Playlist has {e.size} songs."
+    if isinstance(e, playlists.PlaylistExists):
+        return config.PLAYLIST_ALREADY_EXISTS
+    if isinstance(e, playlists.OnlySongInPlaylist):
+        return "Can't remove the only song from playlist."
+    raise e
 
 
 def _playlist_ref(ctx, name: str) -> playlists.PlaylistRef:
@@ -555,7 +567,7 @@ class Music(commands.Cog):
     async def _playlist_save(self, ctx, name: str):
         await ctx.defer()
         songs = [
-            PlaylistEntry(song.webpage_url, song.title)
+            playlists.PlaylistEntry(song.webpage_url, song.title)
             for song in ctx.audiocontroller.playlist.playque
         ]
         if not songs:
@@ -565,8 +577,8 @@ class Music(commands.Cog):
             await playlists.save(
                 ctx.bot.DbSession, _playlist_ref(ctx, name), songs
             )
-        except playlists.PlaylistExists:
-            await ctx.send(config.PLAYLIST_ALREADY_EXISTS)
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
             return
         await ctx.send(config.PLAYLIST_SAVED_MESSAGE)
 
@@ -622,8 +634,8 @@ class Music(commands.Cog):
                 ctx.bot.DbSession,
                 _playlist_ref(ctx, name),
             )
-        except playlists.PlaylistNotFound:
-            await ctx.send(config.PLAYLIST_NOT_FOUND)
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
             return
         await ctx.send(config.PLAYLIST_REMOVED)
 
@@ -711,10 +723,13 @@ class Music(commands.Cog):
             await playlists.add_songs(
                 ctx.bot.DbSession,
                 _playlist_ref(ctx, playlist),
-                [PlaylistEntry(s.webpage_url, s.title) for s in songs],
+                [
+                    playlists.PlaylistEntry(s.webpage_url, s.title)
+                    for s in songs
+                ],
             )
-        except playlists.PlaylistNotFound:
-            await ctx.send(config.PLAYLIST_NOT_FOUND)
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
             return
         if isinstance(song, PartialPlaylist):
             await ctx.send(_truncation_text(song))
@@ -743,14 +758,8 @@ class Music(commands.Cog):
                 _playlist_ref(ctx, playlist),
                 position,
             )
-        except playlists.PlaylistNotFound:
-            await ctx.send(config.PLAYLIST_NOT_FOUND)
-            return
-        except playlists.InvalidPosition as e:
-            await ctx.send(f"Invalid position. Playlist has {e.size} songs.")
-            return
-        except playlists.OnlySongInPlaylist:
-            await ctx.send("Can't remove the only song from playlist.")
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
             return
         await ctx.send(config.PLAYLIST_UPDATED)
 
@@ -779,11 +788,8 @@ class Music(commands.Cog):
                 source_position,
                 destination_position,
             )
-        except playlists.PlaylistNotFound:
-            await ctx.send(config.PLAYLIST_NOT_FOUND)
-            return
-        except playlists.InvalidPosition as e:
-            await ctx.send(f"Invalid position. Playlist has {e.size} songs.")
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
             return
         await ctx.send(config.PLAYLIST_UPDATED)
 
