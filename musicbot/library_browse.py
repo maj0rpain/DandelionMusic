@@ -105,7 +105,7 @@ class BrowseCursor:
 
     def _build_screen(self) -> Screen:
         if self.artist is None:
-            entries = sorted(self.index.keys())
+            entries = sorted(self.index.keys(), key=str.casefold)
             # entries and labels are the same list above the song
             # level; nothing mutates either, so they can share it
             return Screen(
@@ -117,7 +117,9 @@ class BrowseCursor:
                 None,
             )
         if self.album is None:
-            entries = sorted(self.index.get(self.artist, {}).keys())
+            entries = sorted(
+                self.index.get(self.artist, {}).keys(), key=str.casefold
+            )
             return Screen(
                 entries,
                 entries,
