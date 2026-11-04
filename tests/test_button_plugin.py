@@ -7,7 +7,9 @@ import pytest
 
 from config import config
 from musicbot import loader, utils
+from musicbot.audiocontroller import QueuedPlaylist
 from musicbot.plugins.button import Button
+from musicbot.truncation import Truncation, TruncationReason
 
 YOUTUBE = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 YOUTU_BE = "https://youtu.be/dQw4w9WgXcQ"
@@ -148,4 +150,15 @@ def test_reaction_in_a_thread_is_processed(monkeypatch):
 def test_unresolvable_channel_does_nothing(monkeypatch):
     processed, sent = react(monkeypatch, {A: object()}, resolves=False)
     assert processed == []
+    assert sent == []
+
+
+def test_truncated_playlist_sends_exactly_the_notice(monkeypatch):
+    cut = Truncation(50, TruncationReason.NO_API)
+    _, sent = react(monkeypatch, {A: QueuedPlaylist(30, cut)})
+    assert sent == [cut.notice(30)]
+
+
+def test_untruncated_playlist_sends_nothing(monkeypatch):
+    _, sent = react(monkeypatch, {A: QueuedPlaylist(30)})
     assert sent == []

@@ -5,6 +5,7 @@ import pytest
 
 from musicbot import linkutils, loader
 from musicbot.linkutils import SpotifyPlaylistTypes, fetch_playlist_with_api
+from musicbot.truncation import Truncation, TruncationReason
 
 
 def url(n):
@@ -103,8 +104,7 @@ def test_paging_failure_after_page_one_returns_partial_with_reason(
     result = fetch_playlist_with_api(SpotifyPlaylistTypes.PLAYLIST, "p")
 
     assert result.links == [url(1), url(2)]
-    assert result.total == 4
-    assert result.reason == "SPOTIFY_TRUNCATED_API_ERROR"
+    assert result.truncation == Truncation(4, TruncationReason.API_ERROR)
 
 
 def test_failure_before_any_page_propagates(monkeypatch):
@@ -123,7 +123,7 @@ def test_completed_fetch_with_removed_track_has_no_total(spotify):
 
     result = fetch_playlist_with_api(SpotifyPlaylistTypes.PLAYLIST, "p")
 
-    assert result.total is None and result.reason is None
+    assert result.truncation is None
 
 
 def _page(count, song_count):
@@ -135,7 +135,10 @@ def _page(count, song_count):
     return BeautifulSoup(f"<html><head>{tags}</head></html>", "html.parser")
 
 
-@pytest.mark.parametrize("count, expected", [(50, 50), (None, None)])
+@pytest.mark.parametrize(
+    "count, expected",
+    [(50, Truncation(50, TruncationReason.NO_API)), (None, None)],
+)
 def test_scrape_reports_song_count_as_total(monkeypatch, count, expected):
     monkeypatch.setattr(linkutils, "spotify_api", None)
 
@@ -149,8 +152,7 @@ def test_scrape_reports_song_count_as_total(monkeypatch, count, expected):
     )
 
     assert len(result.links) == 30
-    assert result.total == expected
-    assert result.reason == "SPOTIFY_TRUNCATED_NO_API"
+    assert result.truncation == expected
 
 
 def test_fetch_spotify_with_credentials_looks_the_track_up_by_id(

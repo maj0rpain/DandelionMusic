@@ -166,19 +166,6 @@ def _playlist_ref(ctx, name: str) -> playlists.PlaylistRef:
     return playlists.PlaylistRef(str(ctx.guild.id), name)
 
 
-def _truncation_text(result) -> str:
-    """The "only N of M tracks" notice for a partly loaded playlist,
-    from a QueuedPlaylist or a PartialPlaylist."""
-    queued = getattr(result, "queued", None)
-    if queued is None:
-        queued = len(result)
-    return config.SPOTIFY_PLAYLIST_TRUNCATED.format(
-        queued=queued,
-        total=result.total,
-        reason=getattr(config, result.reason),
-    )
-
-
 class Music(commands.Cog):
     """A collection of the commands related to music playback.
 
@@ -245,7 +232,7 @@ class Music(commands.Cog):
 
         if isinstance(song, QueuedPlaylist):
             if song.truncated:
-                await ctx.send(_truncation_text(song))
+                await ctx.send(song.truncation.notice(song.queued))
             else:
                 await ctx.send(config.SONGINFO_PLAYLIST_QUEUED)
         else:
@@ -718,7 +705,7 @@ class Music(commands.Cog):
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
         if isinstance(song, PartialPlaylist):
-            await ctx.send(_truncation_text(song))
+            await ctx.send(song.truncation.notice(len(song)))
         await ctx.send(config.PLAYLIST_UPDATED)
 
     @_playlist.command(
