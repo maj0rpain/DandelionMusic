@@ -197,7 +197,7 @@ async def get_soup(url: str) -> BeautifulSoup:
 
 async def fetch_spotify(
     url: str,
-) -> Optional[Union[dict, SpotifyTracks]]:
+) -> Union[dict, SpotifyTracks]:
     """Searches YouTube for Spotify song or loads Spotify playlist"""
     match = spotify_regex.match(url)
     # strip any extra parts
