@@ -5,7 +5,6 @@ import sys
 import asyncio
 import discord
 import subprocess
-from enum import Enum
 from traceback import print_exc
 from subprocess import CalledProcessError, check_output
 from typing import (
@@ -420,12 +419,6 @@ def chunks(lst: list, n: int) -> List[list]:
     """Yield successive n-sized chunks from lst."""
     for i in range(0, len(lst), n):
         yield lst[i : i + n]
-
-
-# StrEnum doesn't exist in Python < 3.11
-class StrEnum(str, Enum):
-    def __str__(self):
-        return self._value_
 
 
 class Timer:

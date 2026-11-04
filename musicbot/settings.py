@@ -2,6 +2,7 @@ import json
 import os
 import re
 from dataclasses import dataclass
+from enum import StrEnum
 from inspect import isawaitable
 from typing import (
     TYPE_CHECKING,
@@ -34,7 +35,7 @@ from alembic.operations import Operations, ops as alembic_ops
 from typing_extensions import Annotated
 
 from config import config
-from musicbot.utils import StrEnum, get_emoji
+from musicbot.utils import get_emoji
 
 # avoiding circular import
 if TYPE_CHECKING:
