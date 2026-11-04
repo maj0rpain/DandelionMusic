@@ -25,7 +25,8 @@ from musicbot import loader
 
 # Limits on the network calls the extraction workers make. A call that
 # blocks holds its lane's worker (load or preload) for every guild using
-# that lane, so none may block long. Deliberately not Config settings: nobody has a reason to tune them.
+# that lane, so none may block long. Deliberately not Config settings:
+# nobody has a reason to tune them.
 # longest wait honoured for one Spotify 429 Retry-After header (seconds)
 RETRY_AFTER_MAX = 5
 # total time limit of one aiohttp request (seconds)

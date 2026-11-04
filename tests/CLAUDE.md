@@ -14,7 +14,7 @@ Only the parts that need no Discord connection: config loading, `Playlist`, save
 
 ## Subprocess probes
 
-`tests/test_import_inert.py` runs fresh-interpreter subprocesses to check that importing `musicbot` changes no process-global state, that the entrypoint wraps stdout/stderr before `bot.run()`, that `MusicBot` can be built with no current event loop, and the loader's `init()`/`shutdown()` lifecycle and its crash recovery (a worker killed with `os._exit` is replaced and the next no-network `load_song` succeeds) - both start real extraction workers (one per lane). `tests/test_loader_lanes.py` holds one real lane with a flag-file blocker: a preload completes while the load lane is held, and a worker killed in either lane leaves the other lane's in-flight and next calls intact while the killed lane's next call succeeds after its rebuild.
+`tests/test_import_inert.py` runs fresh-interpreter subprocesses to check that importing `musicbot` changes no process-global state, that the entrypoint wraps stdout/stderr before `bot.run()`, that `MusicBot` can be built with no current event loop, and the loader's `init()`/`shutdown()` lifecycle and its crash recovery (a worker killed with `os._exit` is replaced and the next no-network `load_song` succeeds) - both start real extraction workers (one per lane). `tests/test_loader_lanes.py` holds one real lane with a manager-Event blocker: a preload completes while the load lane is held, and a worker killed in either lane leaves the other lane's in-flight and next calls intact while the killed lane's next call succeeds after its rebuild.
 
 ## The Config/dotenv trap
 

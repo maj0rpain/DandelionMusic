@@ -1,7 +1,7 @@
 """The two extraction lanes are independent, on the real workers.
 
 Each scenario runs in a fresh interpreter after a real loader.init(),
-holding a lane with a picklable blocker that waits on a flag file.
+holding a lane with a picklable blocker that waits on a manager Event.
 """
 
 import pytest
@@ -11,25 +11,20 @@ from test_import_inert import _observed, _run_in_fresh_interpreter
 PRELUDE = """
 import asyncio
 import json
+import multiprocessing
 import os
-import time
 from concurrent.futures.process import BrokenProcessPool
-from pathlib import Path
 
 from musicbot import loader
 from musicbot.linkutils import SiteTypes
 from musicbot.song import Song
 
-FLAG = Path(os.getcwd()) / "flag"
-STARTED = Path(os.getcwd()) / "started"
 LOAD, PRELOAD = loader.LOAD_LANE, loader.PRELOAD_LANE
 
 
-def block(flag, started):
-    Path(started).write_text("x")
-    deadline = time.monotonic() + 90
-    while not os.path.exists(flag) and time.monotonic() < deadline:
-        time.sleep(0.02)
+def block(started, release):
+    started.set()
+    release.wait(90)
     return "released"
 
 
@@ -37,12 +32,12 @@ def ping():
     return os.getpid()
 
 
-async def hold(lane):
+async def hold(lane, events):
+    started, release = events
     task = asyncio.ensure_future(
-        loader._run_sync(lane, block, str(FLAG), str(STARTED))
+        loader._run_sync(lane, block, started, release)
     )
-    while not STARTED.exists():
-        await asyncio.sleep(0.02)
+    await asyncio.get_running_loop().run_in_executor(None, started.wait)
     return task
 
 
@@ -61,13 +56,13 @@ def other(lane):
 INDEPENDENCE_PROBE = (
     PRELUDE
     + """
-async def main():
-    blocker = await hold(LOAD)
+async def main(events):
+    blocker = await hold(LOAD, events)
     song = Song(SiteTypes.YT_DLP, "https://example.invalid/a")
     result = await asyncio.wait_for(loader.preload(song), 60)
     probe_pid = await asyncio.wait_for(loader._run_sync(PRELOAD, ping), 60)
     still_blocked = not blocker.done()
-    FLAG.write_text("go")
+    events[1].set()
     return {
         "preload": result.value,
         "probe_ran": isinstance(probe_pid, int),
@@ -79,7 +74,9 @@ async def main():
 if __name__ == "__main__":
     loader.init()
     try:
-        observed = asyncio.run(main())
+        with multiprocessing.Manager() as manager:
+            events = (manager.Event(), manager.Event())
+            observed = asyncio.run(main(events))
     finally:
         loader.shutdown()
     print(json.dumps(observed))
@@ -89,13 +86,13 @@ if __name__ == "__main__":
 CRASH_PROBE = (
     PRELUDE
     + """
-async def main(killed):
+async def main(killed, events):
     held = other(killed)
-    blocker = await hold(held)
+    blocker = await hold(held, events)
     broke = await kill(killed)
     killed_next = await asyncio.wait_for(loader._run_sync(killed, ping), 60)
     other_blocked = not blocker.done()
-    FLAG.write_text("go")
+    events[1].set()
     return {
         "broke": broke,
         "killed_next_ok": isinstance(killed_next, int),
@@ -110,7 +107,9 @@ async def main(killed):
 if __name__ == "__main__":
     loader.init()
     try:
-        observed = asyncio.run(main(os.environ_lane))
+        with multiprocessing.Manager() as manager:
+            events = (manager.Event(), manager.Event())
+            observed = asyncio.run(main(os.environ_lane, events))
     finally:
         loader.shutdown()
     print(json.dumps(observed))
@@ -144,7 +143,7 @@ def test_a_preload_completes_while_the_load_lane_is_held(independence):
     assert independence["probe_ran"] is True
 
 
-def test_the_held_load_lane_call_finishes_once_the_flag_exists(independence):
+def test_the_held_load_lane_call_finishes_once_it_is_released(independence):
     assert (independence["still_blocked"], independence["released"]) == (
         True,
         "released",
