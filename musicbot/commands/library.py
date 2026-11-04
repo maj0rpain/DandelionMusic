@@ -389,14 +389,6 @@ class LibraryView(OwnedView):
         with self.busy():
             await queue_songs(self.ctx, interaction, triples, source)
 
-    async def on_timeout(self):
-        # Without this, a click after the 5-minute timeout just fails
-        # silently client-side (discord.py stops dispatching to a
-        # timed-out view's items) and the message's Select/Buttons
-        # stay visibly enabled forever.
-        self.disable()
-        await self.refresh_message()
-
 
 class LibraryBrowseView(LibraryView):
     """The Discord half of the browser: components, message edits,

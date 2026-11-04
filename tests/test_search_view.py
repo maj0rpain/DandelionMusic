@@ -279,17 +279,17 @@ def test_a_pick_failing_the_play_check_is_refused_and_can_be_retried():
             buttons_enabled(view),
         )
         cog.check_error = None
-        retry_admitted = await view.interaction_check(FakeInteraction())
-        return state, retry_admitted
+        await click(view, 1)
+        return state, list(cog.played)
 
-    (played, sent, finished, enabled), retry_admitted = run(go)
+    (played, sent, finished, enabled), retried = run(go)
     assert played == []
     assert [(str(a[0]), k) for a, k in sent] == [
         ("Join a voice channel first.", {"ephemeral": True})
     ]
     assert not finished
     assert enabled
-    assert retry_admitted is True
+    assert retried == [URLS[1]]
 
 
 def test_a_pick_whose_join_fails_is_refused_and_can_be_retried():
@@ -410,18 +410,6 @@ def test_timeout_with_no_message_and_no_interaction_edits_nothing():
 
 
 # --- Claim ---
-
-
-def test_a_refused_pick_releases_the_claim_and_a_repick_queues():
-    async def go():
-        view, cog = make_view(message=FakeMessage())
-        cog.check_error = CheckError("Join a voice channel first.")
-        await click(view, 0)
-        cog.check_error = None
-        await click(view, 1)
-        return cog
-
-    assert run(go).played == [URLS[1]]
 
 
 # --- Refresh through the pick's click followup ---

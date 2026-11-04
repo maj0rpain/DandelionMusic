@@ -81,10 +81,6 @@ class SearchView(OwnedView):
         self.disable()
         await self.refresh_message()
 
-    async def on_timeout(self):
-        self.disable()
-        await self.refresh_message()
-
 
 class SongButton(MusicButton):
     def __init__(self, cog: "Music", num: int, song: str):
