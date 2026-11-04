@@ -3,7 +3,7 @@ import asyncio
 from bs4 import BeautifulSoup
 import pytest
 
-from musicbot import linkutils
+from musicbot import linkutils, loader
 from musicbot.linkutils import SpotifyPlaylistTypes, fetch_playlist_with_api
 
 
@@ -151,3 +151,24 @@ def test_scrape_reports_song_count_as_total(monkeypatch, count, expected):
     assert len(result.links) == 30
     assert result.total == expected
     assert result.reason == "SPOTIFY_TRUNCATED_NO_API"
+
+
+def test_fetch_spotify_with_credentials_looks_the_track_up_by_id(
+    monkeypatch,
+):
+    calls = []
+
+    class FakeApi:
+        def track(self, arg):
+            calls.append(arg)
+            return {"name": "T", "artists": [{"name": "A"}]}
+
+    monkeypatch.setattr(linkutils, "spotify_api", FakeApi())
+    monkeypatch.setattr(
+        loader, "_search_youtube", lambda query: [{"url": "u"}]
+    )
+    track_id = "4cOdK2wGLETKBW3PvgPWqT"
+    asyncio.run(
+        linkutils.fetch_spotify(f"HTTPS://OPEN.SPOTIFY.COM/track/{track_id}")
+    )
+    assert calls == [track_id]

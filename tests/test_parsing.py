@@ -2,12 +2,9 @@
 URL routing. Each one decides something the bot then acts on, and each
 is a pure function of its input."""
 
-import asyncio
-
 import pytest
 
 from musicbot.audiotags import AudioTags, _parse_year, nice_title
-from musicbot import linkutils, loader
 from musicbot.linkutils import (
     SiteTypes,
     get_urls,
@@ -159,6 +156,10 @@ SPOTIFY_ID = "4cOdK2wGLETKBW3PvgPWqT"
             f"https://open.spotify.com/TRACK/{SPOTIFY_ID}",
             f"https://open.spotify.com/TRACK/{SPOTIFY_ID}",
         ),
+        (
+            f"spotify:track:{SPOTIFY_ID}.",
+            f"https://open.spotify.com/track/{SPOTIFY_ID}",
+        ),
         ("never gonna give you up.", "never gonna give you up."),
         ("  never gonna give you up  ", "never gonna give you up"),
         ("hello.", "hello."),
@@ -189,23 +190,3 @@ def test_spotify_link_with_an_upper_case_type_segment_is_not_spotify():
         identify_url(f"https://open.spotify.com/TRACK/{SPOTIFY_ID}")
         is not SiteTypes.SPOTIFY
     )
-
-
-def test_fetch_spotify_with_credentials_looks_the_track_up_by_id(
-    monkeypatch,
-):
-    calls = []
-
-    class FakeApi:
-        def track(self, arg):
-            calls.append(arg)
-            return {"name": "T", "artists": [{"name": "A"}]}
-
-    monkeypatch.setattr(linkutils, "spotify_api", FakeApi())
-    monkeypatch.setattr(
-        loader, "_search_youtube", lambda query: [{"url": "u"}]
-    )
-    asyncio.run(
-        linkutils.fetch_spotify(f"HTTPS://OPEN.SPOTIFY.COM/track/{SPOTIFY_ID}")
-    )
-    assert calls == [SPOTIFY_ID]

@@ -304,11 +304,11 @@ def normalize_track(text: str) -> str:
         and url_regex.fullmatch(text[1:-1])
     ):
         text = text[1:-1]
-    if m := _spotify_uri_regex.fullmatch(text):
-        return f"https://open.spotify.com/{m.group(1)}/{m.group(2)}"
     bare = text.rstrip(_TRAILING_PUNCTUATION)
     if bare != text and url_regex.fullmatch(bare):
-        return bare
+        text = bare
+    if m := _spotify_uri_regex.fullmatch(text):
+        return f"https://open.spotify.com/{m.group(1)}/{m.group(2)}"
     return text
 
 
