@@ -129,10 +129,9 @@ def play_ctx(controller=None, on_send=None):
     """The fake command context for `Music` callbacks, and the list of
     its replies (what `send` was given, as strings).
 
-    `controller` is the context's audiocontroller: a real seam controller,
-    a `ProcessController`, or None for the playlist-command case, where
-    the command has no controller. `on_send(sent)`, when given, is awaited
-    after each reply. The controller is never modified.
+    `controller` is whatever the callback reads from `ctx.audiocontroller`
+    (None when the command needs none). `on_send(sent)`, when given, is
+    awaited after each reply. The controller is never modified.
     """
 
     sent = []
