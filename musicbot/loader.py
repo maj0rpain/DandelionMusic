@@ -6,7 +6,7 @@ from enum import Enum
 from inspect import getmodule
 from pathlib import Path
 from traceback import print_exc
-from urllib.parse import unquote, urlparse
+from urllib.parse import unquote, unquote_to_bytes, urlparse
 from datetime import datetime, timezone
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context as mp_context
@@ -262,8 +262,11 @@ def _library_track_path(track: str) -> Path:
         raise SongError(config.LIBRARY_FILE_MISSING)
     root = Path(config.MUSIC_LIBRARY_PATH).resolve()
     path = Path.from_uri(track)
-    decoded = unquote(urlparse(track).path)
-    if any(seg in (".", "..") for seg in decoded.split("/")):
+    # Decoded exactly as Path.from_uri decodes it: urlparse would split
+    # a raw `?` or `#` off as query/fragment, which from_uri keeps in
+    # the path.
+    decoded = unquote_to_bytes(track[len("file:") :])
+    if any(seg in (b".", b"..") for seg in decoded.split(b"/")):
         raise SongError(config.LIBRARY_FILE_MISSING)
     if (
         not path.is_relative_to(root)

@@ -110,6 +110,15 @@ def test_climbing_out_through_a_symlinked_artist_is_refused(lib, outside):
     _refused(_uri(lib, "A/B/../../secret.mp3"))
 
 
+@pytest.mark.parametrize("name", ["Who?", "Who#"])
+def test_dots_after_a_query_or_fragment_char_are_refused(lib, outside, name):
+    _file(outside.parent / "x.mp3")
+    (outside / "B").mkdir()
+    _link(lib / name, outside)
+    _refused(_uri(lib, f"{name}/B/../../x.mp3"))
+    _refused(_uri(lib, f"{name}/../x.mp3"))
+
+
 @pytest.mark.parametrize("rel", ["A/t.mp3", "A/B/C/t.mp3", "t.mp3"])
 def test_the_wrong_depth_is_refused(lib, rel):
     _file(lib / "A" / "t.mp3")
@@ -145,11 +154,20 @@ def test_a_symlinked_library_root_loads_generated_uris_only(
     _refused(f"file://{alias}/A/B/t.mp3")
 
 
-def test_one_bad_track_leaves_the_rest_of_the_batch(lib):
+def test_one_bad_track_leaves_the_rest_of_the_batch(lib, monkeypatch):
     _file(lib / "A" / "B" / "t.mp3")
+    _file(lib / "A" / "B" / "bad.mp3")
+    real = loader.read_tags
+
+    def read_tags(path):
+        if path.name == "bad.mp3":
+            raise RuntimeError("corrupt tags")
+        return real(path)
+
+    monkeypatch.setattr(loader, "read_tags", read_tags)
     good = _uri(lib, "A/B/t.mp3")
     songs = loader._load_local_songs(
-        [_uri(lib, "A/B/gone.mp3"), good, "file://relative/x.mp3", good]
+        [_uri(lib, "A/B/gone.mp3"), good, _uri(lib, "A/B/bad.mp3"), good]
     )
     assert [s is None for s in songs] == [True, False, True, False]
 
