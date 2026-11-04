@@ -73,7 +73,6 @@ def invoke(text, is_dj=True, sett=None):
     sett = sett or stored_settings()
     sett.guild_id = "1"
     ctx = build_ctx(text, sett, is_dj)
-    ctx.view.skip_ws()
     ctx.invoked_with = "setting"
     ctx.command = group
     ctx.invoked_parents = []
