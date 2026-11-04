@@ -3,7 +3,6 @@ import re
 import atexit
 
 from discord.http import HTTPClient
-from yt_dlp.utils import DownloadError
 from yt_dlp.extractor.common import InfoExtractor
 
 from config import config
@@ -33,7 +32,7 @@ def _get_client(loop):
             loop.run_until_complete(client.close())
         except Exception:
             pass
-        raise DownloadError(str(e) or type(e).__name__) from e
+        raise linkutils.download_error(e) from e
     _client = client
     atexit.register(lambda: loop.run_until_complete(client.close()))
     return client
@@ -63,7 +62,7 @@ class DiscordAttachmentsIE(InfoExtractor):
                 )
             )
         except Exception as e:
-            raise DownloadError(str(e) or type(e).__name__) from e
+            raise linkutils.download_error(e) from e
         uploader = resp["author"]["username"]
         entries = [
             {

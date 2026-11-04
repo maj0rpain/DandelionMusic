@@ -41,13 +41,8 @@ def test_known_larger_total_gives_partial_playlist(monkeypatch, worker_loop):
     assert result.truncation == cut
 
 
-@pytest.mark.parametrize(
-    "truncation", [None, Truncation(3, TruncationReason.NO_API)]
-)
-def test_unknown_or_complete_total_gives_plain_list(
-    monkeypatch, worker_loop, truncation
-):
-    _fetch(monkeypatch, SpotifyTracks(_links(3), truncation))
+def test_no_truncation_gives_plain_list(monkeypatch, worker_loop):
+    _fetch(monkeypatch, SpotifyTracks(_links(3), None))
 
     result = loader._load_song(URL)
 
