@@ -14,6 +14,7 @@ package's attributes - otherwise a later test module's
 `from musicbot import loader` would get the stub.
 """
 
+import asyncio
 import contextlib
 import enum
 import importlib
@@ -28,7 +29,8 @@ class StubLoader(types.ModuleType):
     """Stands in for musicbot.loader and records what it is asked.
 
     Every call lands in `calls` as (name, args). `preload` reports a
-    fresh extraction (`Preload.EXTRACTED`) by default; the load_*
+    fresh extraction (`Preload.EXTRACTED`) by default, at once, unless
+    hold() holds a song's preload; the load_*
     functions return what `results` holds for their name, an empty
     value otherwise.
     """
@@ -45,13 +47,28 @@ class StubLoader(types.ModuleType):
         super().__init__("musicbot.loader")
         self.calls = []
         self.results = {"preload": self.Preload.EXTRACTED}
+        self._holds = {}
+        self._song_results = {}
 
     def _record(self, name, *args, default=None):
         self.calls.append((name, args))
         return self.results.get(name, default)
 
+    def hold(self, song, result=None):
+        """Makes `song`'s preload wait until the returned event is
+        set, and report `result` (the default result when None). Only
+        that song is held: every other preload returns at once."""
+        self._holds[song] = asyncio.Event()
+        if result is not None:
+            self._song_results[song] = result
+        return self._holds[song]
+
     async def preload(self, song):
-        return self._record("preload", song)
+        result = self._record("preload", song)
+        hold = self._holds.get(song)
+        if hold is not None:
+            await hold.wait()
+        return self._song_results.get(song, result)
 
     async def load_song(self, track):
         return self._record("load_song", track)
