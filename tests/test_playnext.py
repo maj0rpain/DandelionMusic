@@ -81,10 +81,11 @@ def test_playnext_goes_to_index_1_and_refreshes_backup_and_preload_once(
     assert _titles(controller) == ["current", "x", "a", "b"]
     assert _backup(controller, tmp_path) == ["current", "x", "a", "b"]
     assert _preloaded(stub_loader) == ["x", "a", "b"]
+    assert controller.guild.voice_client.played == []
 
 
 def test_playnext_on_an_empty_queue_starts_the_track(
-    controller, stub_loader, monkeypatch
+    controller, stub_loader, monkeypatch, tmp_path
 ):
     _fake_ffmpeg(monkeypatch)
     stub_loader.results["load_song"] = _song(controller, "x")
@@ -98,6 +99,7 @@ def test_playnext_on_an_empty_queue_starts_the_track(
     assert _titles(controller) == ["x"]
     played = controller.guild.voice_client.played
     assert [s.original.url for s in played] == ["https://stream.invalid/x"]
+    assert _backup(controller, tmp_path) == ["x"]
 
 
 def test_playnext_one_item_playlist_goes_next(controller, stub_loader):
