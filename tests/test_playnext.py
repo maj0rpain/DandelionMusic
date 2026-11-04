@@ -13,6 +13,7 @@ import pytest
 from musicbot.commands.music import Music
 from test_audiocontroller import (
     _backup,
+    _backup_path,
     _fake_ffmpeg,
     _queue,
     _settle,
@@ -87,7 +88,7 @@ def test_playnext_goes_to_index_1_and_refreshes_backup_and_preload_once(
     _run(controller, lambda: controller.process_song("x", playnext=True))
 
     assert _titles(controller) == ["current", "x", "a", "b"]
-    assert _backup(tmp_path) == ["current", "x", "a", "b"]
+    assert _backup(controller, tmp_path) == ["current", "x", "a", "b"]
     assert _preloaded(stub_loader) == ["x", "a", "b"]
 
 
@@ -167,7 +168,7 @@ def test_unsupported_or_unloadable_playnext_leaves_everything_alone(
     _run(controller, go)
 
     assert _titles(controller) == ["current", "a"]
-    assert not (tmp_path / "backup" / "playlist_1234.pickle").exists()
+    assert not (_backup_path(controller, tmp_path)).exists()
     assert _preloaded(stub_loader) == []
 
 

@@ -14,6 +14,7 @@ the dev group has no pytest-asyncio.
 from types import SimpleNamespace
 
 import discord
+import pytest
 
 from config import config
 from musicbot.audiocontroller import MusicButton
@@ -87,6 +88,26 @@ def test_the_click_is_deferred_before_the_check_runs():
 
     run(MusicButton(action, check=check).callback(inter))
     assert deferred_at_check == [True]
+
+
+@pytest.mark.parametrize(
+    "error",
+    [RuntimeError("boom"), CheckError("from the action")],
+    ids=["action failure", "check error from the action"],
+)
+def test_an_action_failure_is_reraised_not_refused(error):
+    inter, ctx = click()
+
+    def action(ctx):
+        raise error
+
+    try:
+        run(MusicButton(action, check=admit).callback(inter))
+    except Exception as e:
+        assert e is error
+    else:
+        raise AssertionError("not re-raised")
+    assert inter.followups == []
 
 
 def test_a_refused_check_is_an_ephemeral_followup():
