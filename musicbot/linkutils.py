@@ -30,13 +30,21 @@ from musicbot.truncation import Truncation, TruncationReason
 # nobody has a reason to tune them.
 # longest wait honoured for one Spotify 429 Retry-After header (seconds)
 RETRY_AFTER_MAX = 5
-# total time limit of one aiohttp request (seconds)
+# total time limit of one aiohttp or Discord API request (seconds)
 HTTP_TIMEOUT = 15
+# time limit of one Spotify API or token request (seconds)
+SPOTIFY_TIMEOUT = 5
 
 
 def spotify_session() -> requests.Session:
     """A requests session whose retries match spotipy's own defaults,
-    except that a Retry-After wait is capped at RETRY_AFTER_MAX."""
+    except that a Retry-After wait is capped at RETRY_AFTER_MAX.
+
+    Hand-copied from spotipy 2.26.0. connect, read, allowed_methods and
+    backoff_factor are copied from Spotify._build_session; total and
+    status are read from Spotify.max_retries and status_forcelist from
+    Spotify.default_retry_codes. retry_after_max is our one addition.
+    tests/test_worker_network_limits.py fails if spotipy drifts."""
     retry = Retry(
         total=Spotify.max_retries,
         connect=None,
@@ -61,11 +69,12 @@ def build_spotify_api(client_id, client_secret) -> Optional[Spotify]:
         session = spotify_session()
         return Spotify(
             requests_session=session,
+            requests_timeout=SPOTIFY_TIMEOUT,
             auth_manager=SpotifyClientCredentials(
                 client_id=client_id,
                 client_secret=client_secret,
                 requests_session=session,
-                requests_timeout=5,
+                requests_timeout=SPOTIFY_TIMEOUT,
                 cache_handler=MemoryCacheHandler(),
             ),
         )
