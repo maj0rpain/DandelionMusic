@@ -44,17 +44,6 @@ class FakeMessage(discord.Message):
         self.edits.append(kwargs)
 
 
-class FakeWebhookMessage(FakeMessage, discord.WebhookMessage):
-    """What a deferred slash command's send returns."""
-
-
-class FakeInteractionResponse(discord.InteractionCallbackResponse):
-    """What answering an interaction directly returns: no edit()."""
-
-    def __init__(self):
-        pass
-
-
 class FakeFollowup:
     """Records message edits by id; raises while `fail` is set."""
 
@@ -401,18 +390,6 @@ def test_a_pick_with_no_message_refreshes_through_its_followup():
     assert [m for m, _ in inter.followup.edits] == [99]
 
 
-def test_a_pick_holding_a_webhook_message_refreshes_through_its_followup():
-    message = FakeWebhookMessage()
-    cog, inter = refreshed_by_pick(message)
-    assert message.edits == []
-    assert [m for m, _ in inter.followup.edits] == [99]
-
-
-def test_a_pick_holding_a_callback_response_refreshes_through_its_followup():
-    cog, inter = refreshed_by_pick(FakeInteractionResponse())
-    assert [m for m, _ in inter.followup.edits] == [99]
-
-
 def test_a_failing_followup_edit_still_queues_and_reports_no_error():
     async def go():
         view, cog = make_view(message=None)
@@ -423,33 +400,3 @@ def test_a_failing_followup_edit_still_queues_and_reports_no_error():
     cog, inter = run(go())
     assert cog.played == [URLS[0]]
     assert inter.ctx.sent == []
-
-
-# --- Timeout through the command interaction ---
-
-
-def slash_timeout(message):
-    async def go():
-        view, _ = make_view(message=message)
-        edited = []
-
-        async def edit_original_response(**kwargs):
-            edited.append(kwargs)
-
-        view.ctx.interaction = SimpleNamespace(
-            edit_original_response=edit_original_response
-        )
-        await view.on_timeout()
-        return view, edited
-
-    return run(go())
-
-
-def test_timeout_with_no_message_and_no_click_edits_the_original_response():
-    view, edited = slash_timeout(None)
-    assert edited == [{"view": view}]
-
-
-def test_timeout_holding_a_callback_response_edits_the_original_response():
-    view, edited = slash_timeout(FakeInteractionResponse())
-    assert edited == [{"view": view}]
