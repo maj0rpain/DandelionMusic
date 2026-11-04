@@ -13,6 +13,8 @@ from multiprocessing import get_context as mp_context
 from typing import List, Optional, Union
 
 from aiohttp import ClientResponseError
+from requests.exceptions import RequestException
+from spotipy.exceptions import SpotifyBaseException
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
@@ -260,7 +262,12 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
     elif host == SiteTypes.SPOTIFY:
         try:
             data = _loop.run_until_complete(fetch_spotify(track))
-        except ClientResponseError as e:
+        except (
+            ClientResponseError,
+            SpotifyBaseException,
+            RequestException,
+            TimeoutError,
+        ) as e:
             raise SongError(config.SONGINFO_ERROR) from e
         if isinstance(data, list):
             data = [{"url": url} for url in data]

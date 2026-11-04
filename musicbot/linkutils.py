@@ -7,9 +7,12 @@ from urllib.parse import urlparse
 from multiprocessing import current_process
 from typing import Dict, Optional, Union, List
 
+import requests
+from requests.adapters import HTTPAdapter
+from urllib3.util.retry import Retry
 from spotipy import Spotify
 from bs4 import BeautifulSoup
-from aiohttp import ClientSession
+from aiohttp import ClientSession, ClientTimeout
 from spotipy.oauth2 import SpotifyClientCredentials
 from yt_dlp.extractor import gen_extractor_classes
 from yt_dlp.extractor.common import InfoExtractor
@@ -19,14 +22,47 @@ from config import config
 from musicbot import loader
 
 
-spotify_api = None
-if config.SPOTIFY_ID or config.SPOTIFY_SECRET:
+# Limits on the network calls the extraction worker makes. One guild's
+# call that blocks holds the worker for every guild, so none may block
+# long. Deliberately not Config settings: nobody has a reason to tune them.
+# longest wait honoured for one Spotify 429 Retry-After header (seconds)
+RETRY_AFTER_MAX = 5
+# total time limit of one aiohttp request (seconds)
+HTTP_TIMEOUT = 15
+
+
+def spotify_session() -> requests.Session:
+    """A requests session whose retries match spotipy's own defaults,
+    except that a Retry-After wait is capped at RETRY_AFTER_MAX."""
+    retry = Retry(
+        total=Spotify.max_retries,
+        connect=None,
+        read=False,
+        allowed_methods=frozenset(["GET", "POST", "PUT", "DELETE"]),
+        status=Spotify.max_retries,
+        backoff_factor=0.3,
+        status_forcelist=Spotify.default_retry_codes,
+        retry_after_max=RETRY_AFTER_MAX,
+    )
+    adapter = HTTPAdapter(max_retries=retry)
+    session = requests.Session()
+    session.mount("http://", adapter)
+    session.mount("https://", adapter)
+    return session
+
+
+def build_spotify_api(client_id, client_secret) -> Optional[Spotify]:
+    if not (client_id or client_secret):
+        return None
     try:
-        spotify_api = Spotify(
+        session = spotify_session()
+        return Spotify(
+            requests_session=session,
             auth_manager=SpotifyClientCredentials(
-                client_id=config.SPOTIFY_ID,
-                client_secret=config.SPOTIFY_SECRET,
-            )
+                client_id=client_id,
+                client_secret=client_secret,
+                requests_session=session,
+            ),
         )
     except Exception:
         if (
@@ -40,6 +76,10 @@ if config.SPOTIFY_ID or config.SPOTIFY_SECRET:
                 " because of the above exception.",
                 file=sys.stderr,
             )
+        return None
+
+
+spotify_api = build_spotify_api(config.SPOTIFY_ID, config.SPOTIFY_SECRET)
 
 ExtractorT = Union[InfoExtractor, LazyLoadExtractor]
 EXTRACTORS = gen_extractor_classes()
@@ -91,7 +131,9 @@ def get_session() -> ClientSession:
     loop = asyncio.get_running_loop()
     session = _sessions.get(loop)
     if session is None:
-        session = _sessions[loop] = ClientSession(headers=headers)
+        session = _sessions[loop] = ClientSession(
+            headers=headers, timeout=ClientTimeout(total=HTTP_TIMEOUT)
+        )
     return session
 
 
