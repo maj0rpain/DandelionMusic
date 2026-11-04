@@ -459,13 +459,14 @@ def test_queue_click_during_enrichment_edit_queues_the_level(monkeypatch):
     ]
 
 
-def test_page_click_during_enrichment_edit_turns_the_page_once():
-    index = {
-        "Artist": {f"Album {n:02}": [make_song("Song")] for n in range(30)}
-    }
+PAGED_INDEX = {
+    "Artist": {f"Album {n:02}": [make_song("Song")] for n in range(30)}
+}
 
+
+def test_page_click_during_enrichment_edit_turns_the_page_once():
     async def scenario():
-        view = make_view(index)
+        view = make_view(PAGED_INDEX)
         stub_enrichment_by_level(view, {("Artist", None): COVER})
         clicks = Clicks(view)
         entering = clicks.interaction()
@@ -709,11 +710,6 @@ def _descend_past_kept_components():
         return view, clicks, kept
 
     return scenario
-
-
-PAGED_INDEX = {
-    "Artist": {f"Album {n:02}": [make_song("Song")] for n in range(30)}
-}
 
 
 async def _view_at_paged_artist():
