@@ -15,6 +15,7 @@ from http.server import BaseHTTPRequestHandler, HTTPServer
 import aiohttp
 import pytest
 import requests
+from spotipy import Spotify
 from spotipy.exceptions import SpotifyException, SpotifyOauthError
 
 from config import config
@@ -22,14 +23,6 @@ from musicbot import linkutils, loader
 from musicbot.loader import SongError
 
 TRACK = "https://open.spotify.com/track/abc123"
-
-
-@pytest.fixture
-def worker_loop(monkeypatch):
-    loop = asyncio.new_event_loop()
-    monkeypatch.setattr(loader, "_loop", loop)
-    yield loop
-    loop.close()
 
 
 class _FailingApi:
@@ -57,9 +50,7 @@ def test_a_failed_spotify_lookup_is_a_could_not_load_error(
     monkeypatch.setattr(linkutils, "spotify_api", _FailingApi(exc))
     with pytest.raises(SongError) as info:
         loader._load_song(TRACK)
-    assert str(info.value) == config.SONGINFO_ERROR or (
-        info.value.args[0] == config.SONGINFO_ERROR
-    )
+    assert str(info.value) == config.SONGINFO_ERROR
     assert info.value.__cause__ is exc
 
 
@@ -95,25 +86,41 @@ def test_a_rate_limited_request_retries_briefly_then_gives_up(
     monkeypatch.setattr(time, "sleep", sleeps.append)
     with pytest.raises(requests.exceptions.RetryError):
         linkutils.spotify_session().get(rate_limiting_server)
-    assert _Always429.hits == 4  # the request and 3 retries
+    assert _Always429.hits == Spotify.max_retries + 1  # and its retries
     assert sleeps
-    assert max(sleeps) <= 5
+    assert max(sleeps) <= linkutils.RETRY_AFTER_MAX
 
 
-def test_build_spotify_api_gives_both_clients_the_capped_session():
-    api = linkutils.build_spotify_api("id", "secret")
+@pytest.fixture
+def api():
+    return linkutils.build_spotify_api("id", "secret")
+
+
+def test_build_spotify_api_gives_both_clients_the_capped_session(api):
     for session in (api._session, api.auth_manager._session):
         retry = session.get_adapter("https://api.spotify.com").max_retries
-        assert retry.total == 3
-        assert retry.status == 3
-        assert retry.retry_after_max == 5
+        assert retry.total == Spotify.max_retries
+        assert retry.status == Spotify.max_retries
+        assert retry.retry_after_max == linkutils.RETRY_AFTER_MAX
         assert 429 in retry.status_forcelist
 
 
-def test_build_spotify_api_bounds_the_token_request():
-    api = linkutils.build_spotify_api("id", "secret")
-    assert api.auth_manager.requests_timeout == 5
-    assert api.requests_timeout == 5
+def test_build_spotify_api_bounds_the_token_request(api):
+    assert api.requests_timeout == linkutils.SPOTIFY_TIMEOUT
+    assert api.auth_manager.requests_timeout == linkutils.SPOTIFY_TIMEOUT
+
+
+def test_our_spotify_retry_matches_spotipys_own():
+    ours = vars(
+        linkutils.spotify_session().get_adapter("https://x").max_retries
+    )
+    theirs = vars(
+        Spotify(auth="x")._session.get_adapter("https://x").max_retries
+    )
+    # urllib3 gives its own Retry a default retry_after_max; ours is capped
+    ours.pop("retry_after_max")
+    theirs.pop("retry_after_max", None)
+    assert ours == theirs
 
 
 def test_build_spotify_api_writes_no_token_cache_file(tmp_path, monkeypatch):
@@ -139,11 +146,11 @@ def test_build_spotify_api_returns_none_when_construction_fails(
     assert linkutils.build_spotify_api("id", "secret") is None
 
 
-def test_every_http_session_has_a_15_second_total_timeout():
+def test_every_http_session_has_the_total_timeout():
     async def run():
         try:
             return linkutils.get_session().timeout.total
         finally:
             await linkutils.stop()
 
-    assert asyncio.run(run()) == 15
+    assert asyncio.run(run()) == linkutils.HTTP_TIMEOUT
