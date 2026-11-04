@@ -130,7 +130,7 @@ def init():
 
 def shutdown():
     """Stops both extraction workers. Safe without init(), and twice."""
-    pools = list(_pools.values())
+    pools = [_pools[lane] for lane in Lane if lane in _pools]
     _pools.clear()
     for pool in pools:
         pool.shutdown(wait=True, cancel_futures=True)
