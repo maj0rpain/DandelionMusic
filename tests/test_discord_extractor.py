@@ -17,7 +17,7 @@ from musicbot.yt_dlp_plugins.extractor.discord import DiscordAttachmentsIE
 
 URL = "https://discord.com/channels/1/2/3"
 LIMIT = 0.05
-FAST = LIMIT * 10
+MAX_ELAPSED = LIMIT * 10
 
 MESSAGE = {
     "author": {"username": "alice"},
@@ -74,22 +74,24 @@ def _extract():
     try:
         return DiscordAttachmentsIE()._real_extract(URL)
     finally:
-        assert time.monotonic() - start < FAST
+        assert time.monotonic() - start < MAX_ELAPSED
 
 
-def _fails():
-    with pytest.raises(DownloadError):
+def _fails(message=None):
+    with pytest.raises(DownloadError) as info:
         _extract()
+    if message is not None:
+        assert info.value.msg == message
 
 
 def test_a_stalled_login_is_a_download_error(http):
     http.login_delay = None
-    _fails()
+    _fails("TimeoutError")
 
 
 def test_a_stalled_fetch_is_a_download_error(http):
     http.fetch_delay = None
-    _fails()
+    _fails("TimeoutError")
 
 
 def test_a_raising_login_is_a_download_error(http):

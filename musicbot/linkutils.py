@@ -19,6 +19,7 @@ from spotipy.oauth2 import SpotifyClientCredentials
 from yt_dlp.extractor import gen_extractor_classes
 from yt_dlp.extractor.common import InfoExtractor
 from yt_dlp.extractor.lazy_extractors import LazyLoadExtractor
+from yt_dlp.utils import DownloadError
 
 from config import config
 from musicbot import loader
@@ -31,7 +32,8 @@ from musicbot.truncation import Truncation, TruncationReason
 # nobody has a reason to tune them.
 # longest wait honoured for one Spotify 429 Retry-After header (seconds)
 RETRY_AFTER_MAX = 5
-# total time limit of one aiohttp or Discord API request (seconds)
+# total time limit of one aiohttp request, or of each Discord API request
+# (a first Discord link logs in, then fetches) (seconds)
 HTTP_TIMEOUT = 15
 # time limit of one Spotify API or token request (seconds)
 SPOTIFY_TIMEOUT = 5
@@ -176,6 +178,12 @@ class SpotifyTracks:
 
     links: List[str]
     truncation: Optional[Truncation] = None
+
+
+def download_error(e: Exception) -> DownloadError:
+    """A DownloadError for e, named by its type when its message is empty
+    (a TimeoutError stringifies empty)."""
+    return DownloadError(str(e) or type(e).__name__)
 
 
 async def get_soup(url: str) -> BeautifulSoup:

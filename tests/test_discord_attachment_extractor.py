@@ -1,4 +1,3 @@
-import asyncio
 import atexit
 import sys
 
@@ -6,7 +5,6 @@ import pytest
 from yt_dlp.utils import DownloadError
 
 from config import config
-from musicbot import loader
 from musicbot.yt_dlp_plugins.extractor import discord as extractor
 
 URL = "https://discord.com/channels/1/22/333"
@@ -46,22 +44,19 @@ class FakeHTTPClient:
 
 
 @pytest.fixture
-def env(monkeypatch):
+def exit_handlers(monkeypatch, worker_loop):
     FakeHTTPClient.instances = []
     FakeHTTPClient.login_error = None
     FakeHTTPClient.fetch_error = None
-    loop = asyncio.new_event_loop()
     handlers = []
     monkeypatch.setattr(extractor, "HTTPClient", FakeHTTPClient)
     monkeypatch.setattr(extractor, "_client", None)
-    monkeypatch.setattr(loader, "_loop", loop)
     monkeypatch.setattr(config, "BOT_TOKEN", "tok")
     monkeypatch.setattr(
         atexit, "register", lambda f, *a, **k: handlers.append(f)
     )
     monkeypatch.delitem(sys.modules, "musicbot.__main__", raising=False)
     yield handlers
-    loop.close()
 
 
 def extract():
@@ -69,7 +64,7 @@ def extract():
     return ie._real_extract(URL)
 
 
-def test_two_extractions_log_in_once_and_fetch_by_ids(env):
+def test_two_extractions_log_in_once_and_fetch_by_ids(exit_handlers):
     extract()
     extract()
     (client,) = FakeHTTPClient.instances
@@ -77,7 +72,7 @@ def test_two_extractions_log_in_once_and_fetch_by_ids(env):
     assert client.fetches == [(22, 333), (22, 333)]
 
 
-def test_result_is_playlist_of_attachments(env):
+def test_result_is_playlist_of_attachments(exit_handlers):
     assert extract() == {
         "_type": "playlist",
         "entries": [
@@ -97,33 +92,33 @@ def test_result_is_playlist_of_attachments(env):
     }
 
 
-def test_one_exit_handler_closes_the_client(env):
+def test_one_exit_handler_closes_the_client(exit_handlers):
     extract()
     extract()
-    assert len(env) == 1
-    env[0]()
+    assert len(exit_handlers) == 1
+    exit_handlers[0]()
     assert FakeHTTPClient.instances[0].closed
 
 
-def test_fetch_failure_is_download_error(env):
+def test_fetch_failure_is_download_error(exit_handlers):
     FakeHTTPClient.fetch_error = RuntimeError("boom")
     with pytest.raises(DownloadError):
         extract()
 
 
-def test_extraction_does_not_import_the_bot_entrypoint(env):
+def test_extraction_does_not_import_the_bot_entrypoint(exit_handlers):
     extract()
     assert "musicbot.__main__" not in sys.modules
 
 
-def test_failed_login_is_download_error_and_retried(env):
+def test_failed_login_is_download_error_and_retried(exit_handlers):
     FakeHTTPClient.login_error = RuntimeError("bad token")
     with pytest.raises(DownloadError):
         extract()
     assert FakeHTTPClient.instances[0].closed
-    assert env == []
+    assert exit_handlers == []
     FakeHTTPClient.login_error = None
     extract()
     assert len(FakeHTTPClient.instances) == 2
     assert FakeHTTPClient.instances[1].logins == ["tok"]
-    assert len(env) == 1
+    assert len(exit_handlers) == 1
