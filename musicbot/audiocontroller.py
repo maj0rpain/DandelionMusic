@@ -797,7 +797,7 @@ class AudioController(object):
         elif isinstance(loaded_song, Song):
             added = [loaded_song]
             print(
-                f"{user} queued {loaded_song.title!r}"
+                f"{user} queued {loaded_song.display_name!r}"
                 f" by {loaded_song.uploader or 'unknown'}"
                 f" ({loaded_song.host.name}) in guild {self.guild.name!r}"
             )
@@ -808,7 +808,7 @@ class AudioController(object):
                 # special-case one-item playlists
                 loaded_song = loaded_song[0]
                 print(
-                    f"{user} queued {loaded_song.title!r}"
+                    f"{user} queued {loaded_song.display_name!r}"
                     f" by {loaded_song.uploader or 'unknown'}"
                     f" ({loaded_song.host.name})"
                     f" in guild {self.guild.name!r}"

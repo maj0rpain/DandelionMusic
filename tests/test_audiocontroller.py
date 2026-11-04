@@ -476,7 +476,7 @@ def _songs(controller, *titles):
     ]
 
 
-def test_queue_appends_while_playing_and_refreshes_backup_and_preload(
+def test_enqueue_appends_while_playing_and_refreshes_backup_and_preload(
     controller, stub_loader, tmp_path
 ):
     _queue(controller, "current")
@@ -496,7 +496,7 @@ def test_queue_appends_while_playing_and_refreshes_backup_and_preload(
     assert _preloaded(stub_loader) == ["a", "b"]
 
 
-def test_queue_starts_the_first_track_when_idle(
+def test_enqueue_starts_the_first_track_when_idle(
     controller, stub_loader, monkeypatch, tmp_path
 ):
     _fake_ffmpeg(monkeypatch)
@@ -829,23 +829,27 @@ def test_a_track_end_from_a_replaced_track_drops_its_pending_pick(
     assert _played(controller) == ["first", "second", "third"]
 
 
-def test_a_stop_skips_the_backup_after_the_hop(controller, monkeypatch):
+def test_a_stop_skips_the_backup_after_the_hop(
+    controller, monkeypatch, tmp_path
+):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
+    backup = tmp_path / "backup" / "playlist_1234.pickle"
 
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
         await controller.ensure_playing()
         controller.stop()
         # stop() snapshots the queue itself; what follows is the hop
-        seen = _record_threads(controller, monkeypatch)
+        snapshot = backup.read_bytes() if backup.exists() else None
         await _settle()
-        return seen
+        return snapshot
 
-    seen = asyncio.run(run())
+    snapshot = asyncio.run(run())
 
-    # the hop ran - it advanced the emptied queue - and wrote no backup
-    assert [name for name, _ in seen] == ["next"]
+    # the hop ran and wrote no backup: it holds stop()'s snapshot still
+    after = backup.read_bytes() if backup.exists() else None
+    assert after == snapshot
     assert controller.guild.voice_client.stopped == 1
 
 

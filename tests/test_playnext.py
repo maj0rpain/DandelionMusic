@@ -217,7 +217,7 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
     assert _titles(controller) == ["current", "pn", "a", "plain"]
 
 
-def test_queue_with_playnext_keeps_the_order_of_several_songs(controller):
+def test_enqueue_with_playnext_keeps_the_order_of_several_songs(controller):
     _queue(controller, "current", "a")
     songs = [_song(controller, "x"), _song(controller, "y")]
 
