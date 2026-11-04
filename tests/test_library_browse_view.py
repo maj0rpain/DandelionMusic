@@ -33,7 +33,7 @@ from musicbot.commands.library import (
 )
 from musicbot.library import LibrarySong
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
-from tests.discord_fakes import http_error, run
+from discord_fakes import http_error, run
 
 
 def make_song(title):

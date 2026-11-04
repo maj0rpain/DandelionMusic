@@ -70,8 +70,9 @@ class FakeVoiceChannel:
 
 
 class VoiceGuild:
-    """A guild whose bot is in `bot_in` (a channel name) or out of
-    voice (None). `fail` is raised by the next connect or move."""
+    """A guild whose bot is out of voice until `put_bot_in(channel)` or
+    a connect sets `voice_client`. `fail` is raised by the next connect
+    or move."""
 
     def __init__(self):
         self.id = 1

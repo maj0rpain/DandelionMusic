@@ -21,8 +21,8 @@ from config import config
 from musicbot.bot import MusicBot
 from musicbot.commands.music import SearchView, SongButton
 from musicbot.utils import CheckError
-from tests.discord_fakes import FakeInteraction as ClickInteraction
-from tests.discord_fakes import VoiceGuild, http_error, run
+from discord_fakes import FakeInteraction
+from discord_fakes import VoiceGuild, http_error, run
 
 OWNER = 1
 OTHER = 2
@@ -95,7 +95,7 @@ class FakeCog:
         self.played.append(track)
 
 
-class FakeInteraction(ClickInteraction):
+class SearchInteraction(FakeInteraction):
     """The shared click fake over a FakeContext, whose client also
     has the bot's real error handler."""
 
@@ -132,7 +132,7 @@ def buttons_enabled(view):
 async def click(view, index, user_id=OWNER):
     """What discord.py does with a click: the view's check, then the
     item's callback only when the check admits it."""
-    inter = FakeInteraction(user_id)
+    inter = SearchInteraction(user_id)
     if await view.interaction_check(inter):
         await view.children[index].callback(inter)
     return inter
@@ -144,7 +144,7 @@ async def click(view, index, user_id=OWNER):
 def test_the_owner_is_admitted():
     async def go():
         view, _ = make_view()
-        return await view.interaction_check(FakeInteraction(OWNER))
+        return await view.interaction_check(SearchInteraction(OWNER))
 
     assert run(go()) is True
 
@@ -167,8 +167,8 @@ def test_a_non_owner_is_told_privately_and_nothing_happens():
 def test_a_second_owner_click_is_deferred_silently_and_refused():
     async def go():
         view, cog = make_view(message=FakeMessage())
-        first = FakeInteraction(OWNER)
-        second = FakeInteraction(OWNER)
+        first = SearchInteraction(OWNER)
+        second = SearchInteraction(OWNER)
         assert await view.interaction_check(first)
         admitted = await view.interaction_check(second)
         await view.children[0].callback(first)
@@ -210,7 +210,7 @@ def test_a_pick_failing_the_play_check_is_refused_and_can_be_retried():
             buttons_enabled(view),
         )
         cog.check_error = None
-        retry_admitted = await view.interaction_check(FakeInteraction())
+        retry_admitted = await view.interaction_check(SearchInteraction())
         return state, retry_admitted
 
     (played, sent, finished, enabled), retry_admitted = run(go())
@@ -226,7 +226,7 @@ def test_a_pick_failing_the_play_check_is_refused_and_can_be_retried():
 def test_a_pick_whose_join_fails_is_refused_and_can_be_retried():
     async def go():
         view, cog = make_view(message=FakeMessage())
-        inter = FakeInteraction()
+        inter = SearchInteraction()
         inter.ctx.bot_out_of_voice(connect_error=asyncio.TimeoutError())
         assert await view.interaction_check(inter)
         await view.children[0].callback(inter)
@@ -236,7 +236,7 @@ def test_a_pick_whose_join_fails_is_refused_and_can_be_retried():
             view.is_finished(),
             buttons_enabled(view),
         )
-        retry_admitted = await view.interaction_check(FakeInteraction())
+        retry_admitted = await view.interaction_check(SearchInteraction())
         return state, retry_admitted
 
     (played, sent, finished, enabled), retry_admitted = run(go())
