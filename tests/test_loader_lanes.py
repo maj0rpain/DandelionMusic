@@ -6,6 +6,7 @@ holding a lane with a picklable blocker that waits on a flag file.
 
 import pytest
 
+from musicbot import loader
 from test_import_inert import _observed, _run_in_fresh_interpreter
 
 PRELUDE = """
@@ -22,7 +23,7 @@ from musicbot.song import Song
 
 FLAG = Path(os.getcwd()) / "flag"
 STARTED = Path(os.getcwd()) / "started"
-LOAD, PRELOAD = loader.LOAD_LANE, loader.PRELOAD_LANE
+LOAD, PRELOAD = loader.Lane.LOAD, loader.Lane.PRELOAD
 
 
 def block(flag, started):
@@ -110,7 +111,7 @@ async def main(killed):
 if __name__ == "__main__":
     loader.init()
     try:
-        observed = asyncio.run(main(os.environ_lane))
+        observed = asyncio.run(main(__LANE__))
     finally:
         loader.shutdown()
     print(json.dumps(observed))
@@ -129,9 +130,15 @@ def independence(tmp_path_factory):
     )
 
 
-@pytest.fixture(scope="module", params=["load", "preload"])
+@pytest.fixture(
+    scope="module",
+    params=list(loader.Lane),
+    ids=[lane.value for lane in loader.Lane],
+)
 def crash(request, tmp_path_factory):
-    script = CRASH_PROBE.replace("os.environ_lane", repr(request.param))
+    script = CRASH_PROBE.replace(
+        "__LANE__", f"loader.Lane.{request.param.name}"
+    )
     return _observed(
         _run_in_fresh_interpreter(
             tmp_path_factory.mktemp("crash"), script, as_file=True

@@ -75,7 +75,7 @@ def pools(monkeypatch):
     return factory
 
 
-def _use(pool, lane=loader.LOAD_LANE):
+def _use(pool, lane=loader.Lane.LOAD):
     loader._pools[lane] = pool
 
 
@@ -83,7 +83,7 @@ def test_a_break_then_a_good_retry_returns_the_retried_result(pools):
     broken = FakePool(["break"])
     _use(broken)
     assert asyncio.run(loader.load_song(URL)).title == "ok"
-    in_load_lane = loader._pools[loader.LOAD_LANE] is pools.built[0]
+    in_load_lane = loader._pools[loader.Lane.LOAD] is pools.built[0]
     assert (len(pools.built), in_load_lane) == (1, True)
 
 
@@ -100,6 +100,16 @@ def test_a_rebuild_prints_one_stderr_line(pools, capsys):
     assert len(capsys.readouterr().err.strip().splitlines()) == 1
 
 
+@pytest.mark.parametrize(
+    "lane", list(loader.Lane), ids=[lane.value for lane in loader.Lane]
+)
+def test_a_rebuild_names_the_lane_by_its_plain_value(pools, capsys, lane):
+    _use(FakePool(["break"]), lane)
+    asyncio.run(loader._load(lane, URL))
+    err = capsys.readouterr().err
+    assert (f"the {lane.value} lane" in err, "Lane." in err) == (True, False)
+
+
 def test_a_double_break_leaves_a_fresh_pool(pools):
     _use(FakePool(["break"]))
     pools.upcoming = [FakePool(["break"])]
@@ -107,7 +117,7 @@ def test_a_double_break_leaves_a_fresh_pool(pools):
         asyncio.run(loader.load_song(URL))
     assert str(e.value) == config.LOADER_CRASHED
     assert len(pools.built) == 2
-    assert loader._pools[loader.LOAD_LANE] is pools.built[1]
+    assert loader._pools[loader.Lane.LOAD] is pools.built[1]
     assert pools.built[0].shutdown_calls == [False]
 
 
@@ -141,53 +151,53 @@ def test_a_break_on_the_retry_after_shutdown_raises_not_running(pools):
 
 def test_a_break_in_the_preload_lane_rebuilds_only_that_lane(pools):
     load_pool = FakePool()
-    _use(load_pool, loader.LOAD_LANE)
-    _use(FakePool(["break"]), loader.PRELOAD_LANE)
-    song = asyncio.run(loader._load(loader.PRELOAD_LANE, URL))
+    _use(load_pool, loader.Lane.LOAD)
+    _use(FakePool(["break"]), loader.Lane.PRELOAD)
+    song = asyncio.run(loader._load(loader.Lane.PRELOAD, URL))
     assert (
         song.title,
         len(pools.built),
-        loader._pools[loader.PRELOAD_LANE] is pools.built[0],
-        loader._pools[loader.LOAD_LANE] is load_pool,
+        loader._pools[loader.Lane.PRELOAD] is pools.built[0],
+        loader._pools[loader.Lane.LOAD] is load_pool,
         load_pool.shutdown_calls,
     ) == ("ok", 1, True, True, [])
 
 
 def test_a_break_in_the_load_lane_leaves_the_preload_lane_alone(pools):
     preload_pool = FakePool()
-    _use(FakePool(["break"]), loader.LOAD_LANE)
-    _use(preload_pool, loader.PRELOAD_LANE)
+    _use(FakePool(["break"]), loader.Lane.LOAD)
+    _use(preload_pool, loader.Lane.PRELOAD)
     asyncio.run(loader.load_song(URL))
     assert (
         len(pools.built),
-        loader._pools[loader.PRELOAD_LANE] is preload_pool,
+        loader._pools[loader.Lane.PRELOAD] is preload_pool,
         preload_pool.shutdown_calls,
     ) == (1, True, [])
 
 
 def test_a_double_break_in_one_lane_fails_without_touching_the_other(pools):
     other = FakePool()
-    _use(FakePool(["break"]), loader.PRELOAD_LANE)
-    _use(other, loader.LOAD_LANE)
+    _use(FakePool(["break"]), loader.Lane.PRELOAD)
+    _use(other, loader.Lane.LOAD)
     pools.upcoming = [FakePool(["break"])]
     with pytest.raises(loader.SongError) as e:
-        asyncio.run(loader._load(loader.PRELOAD_LANE, URL))
-    assert (str(e.value), loader._pools[loader.LOAD_LANE] is other) == (
+        asyncio.run(loader._load(loader.Lane.PRELOAD, URL))
+    assert (str(e.value), loader._pools[loader.Lane.LOAD] is other) == (
         config.LOADER_CRASHED,
         True,
     )
 
 
 def test_concurrent_breaks_in_two_lanes_rebuild_each_once(pools):
-    _use(FakePool(["break"] * 2), loader.LOAD_LANE)
-    _use(FakePool(["break"] * 2), loader.PRELOAD_LANE)
+    _use(FakePool(["break"] * 2), loader.Lane.LOAD)
+    _use(FakePool(["break"] * 2), loader.Lane.PRELOAD)
 
     async def many():
         return await asyncio.gather(
             loader.load_song(URL),
             loader.load_song(URL),
-            loader._load(loader.PRELOAD_LANE, URL),
-            loader._load(loader.PRELOAD_LANE, URL),
+            loader._load(loader.Lane.PRELOAD, URL),
+            loader._load(loader.Lane.PRELOAD, URL),
         )
 
     asyncio.run(many())
@@ -195,10 +205,10 @@ def test_concurrent_breaks_in_two_lanes_rebuild_each_once(pools):
 
 
 def test_a_break_in_the_preload_lane_after_shutdown_builds_nothing(pools):
-    _use(FakePool(), loader.LOAD_LANE)
-    _use(ShutdownOnSubmit(["break"]), loader.PRELOAD_LANE)
+    _use(FakePool(), loader.Lane.LOAD)
+    _use(ShutdownOnSubmit(["break"]), loader.Lane.PRELOAD)
     with pytest.raises(loader.LoaderNotRunning):
-        asyncio.run(loader._load(loader.PRELOAD_LANE, URL))
+        asyncio.run(loader._load(loader.Lane.PRELOAD, URL))
     assert pools.built == []
 
 
@@ -236,7 +246,7 @@ class _Logged:
 @pytest.fixture
 def warm_pools(monkeypatch):
     log, built = [], []
-    names = iter([loader.LOAD_LANE, loader.PRELOAD_LANE])
+    names = iter([loader.Lane.LOAD, loader.Lane.PRELOAD])
     failing = set()
 
     def new_pool():
@@ -261,11 +271,11 @@ def test_init_submits_both_warm_ups_before_awaiting_either(warm_pools):
 
 def test_a_failing_warm_up_raises_and_keeps_both_pools(warm_pools):
     _, built, failing = warm_pools
-    failing.add(loader.LOAD_LANE)
+    failing.add(loader.Lane.LOAD)
     with pytest.raises(RuntimeError, match="warm-up failed"):
         loader.init()
     loader.init()
     assert (sorted(loader._pools), len(built)) == (
-        [loader.LOAD_LANE, loader.PRELOAD_LANE],
+        [loader.Lane.LOAD, loader.Lane.PRELOAD],
         2,
     )

@@ -2,7 +2,7 @@ import os
 import sys
 import atexit
 import asyncio
-from enum import Enum
+from enum import Enum, StrEnum
 from pathlib import Path
 from traceback import print_exc
 from datetime import datetime, timedelta, timezone
@@ -49,14 +49,15 @@ class LoaderProcess(_context.Process):
 # The preload lane serves only preload()'s extraction, so playback never
 # waits behind a user-requested load; the load lane serves every other
 # loader call. A fixed property of the code, not a Config setting.
-LOAD_LANE = "load"
-PRELOAD_LANE = "preload"
-_LANES = (LOAD_LANE, PRELOAD_LANE)
+class Lane(StrEnum):
+    LOAD = "load"
+    PRELOAD = "preload"
+
 
 # Importing this module changes no process-global state: everything
-# below is None until init() (in the bot's process) or _init_worker()
-# (in the spawned extraction worker) sets it up.
-_pools: Dict[str, ProcessPoolExecutor] = {}
+# below is None, or empty, until init() (in the bot's process) or
+# _init_worker() (in the spawned extraction worker) sets it up.
+_pools: Dict[Lane, ProcessPoolExecutor] = {}
 # the worker's own event loop and downloader - read by extraction here
 # and by the Discord-attachment and Suno yt-dlp plugins
 # (`from musicbot.loader import _loop`)
@@ -119,10 +120,10 @@ def init():
     if _pools:
         return
     _context.Process = LoaderProcess
-    for lane in _LANES:
+    for lane in Lane:
         _pools[lane] = _new_pool()
     # wake both up to spawn the processes immediately, together
-    futures = [_pools[lane].submit(_noop) for lane in _LANES]
+    futures = [_pools[lane].submit(_noop) for lane in Lane]
     for future in futures:
         future.result()
 
@@ -183,7 +184,7 @@ def extract_info(url: str, ie: Optional[ExtractorT] = None) -> Optional[dict]:
 
 
 async def search_youtube(title: str, count: int = 1) -> Optional[dict]:
-    return await _run_sync(LOAD_LANE, _search_youtube, title, count)
+    return await _run_sync(Lane.LOAD, _search_youtube, title, count)
 
 
 def _search_youtube(title: str, count: int = 1) -> Optional[dict]:
@@ -199,10 +200,10 @@ def _search_youtube(title: str, count: int = 1) -> Optional[dict]:
 
 
 async def load_song(track: str) -> Union[Song, List[Song]]:
-    return await _load(LOAD_LANE, track)
+    return await _load(Lane.LOAD, track)
 
 
-async def _load(lane: str, track: str) -> Union[Song, List[Song]]:
+async def _load(lane: Lane, track: str) -> Union[Song, List[Song]]:
     """Runs _load_song in the given lane and stamps the result."""
     result = await _run_sync(lane, _load_song, track)
     now = _now()
@@ -238,7 +239,7 @@ async def load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
     for track in tracks:
         if identify_url(track) is not SiteTypes.LOCAL_LIBRARY:
             raise ValueError(f"not a local library track: {track!r}")
-    return await _run_sync(LOAD_LANE, _load_local_songs, tracks)
+    return await _run_sync(Lane.LOAD, _load_local_songs, tracks)
 
 
 def _load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
@@ -438,7 +439,7 @@ async def preload(song: Song) -> Preload:
     success = False
     try:
         try:
-            preloaded = await _load(PRELOAD_LANE, song.webpage_url)
+            preloaded = await _load(Lane.PRELOAD, song.webpage_url)
         except SongError:
             pass
         except Exception:
@@ -458,7 +459,7 @@ def _new_pool() -> ProcessPoolExecutor:
     return ProcessPoolExecutor(1, _context, initializer=_init_worker)
 
 
-def _replace_broken(lane: str, broken: ProcessPoolExecutor) -> None:
+def _replace_broken(lane: Lane, broken: ProcessPoolExecutor) -> None:
     """Swaps in a fresh pool for `broken` in `lane`, unless another call
     already did (one crash fails every call queued in the lane's
     single-worker pool, and they all share one rebuild) or shutdown()
@@ -476,7 +477,7 @@ def _replace_broken(lane: str, broken: ProcessPoolExecutor) -> None:
     broken.shutdown(wait=False)
 
 
-def _require_running(lane: str) -> ProcessPoolExecutor:
+def _require_running(lane: Lane) -> ProcessPoolExecutor:
     pool = _pools.get(lane)
     if pool is None:
         raise LoaderNotRunning(
@@ -486,7 +487,7 @@ def _require_running(lane: str) -> ProcessPoolExecutor:
     return pool
 
 
-async def _run_sync(lane, f, *args):
+async def _run_sync(lane: Lane, f, *args):
     # run_in_executor(None, ...) would pick asyncio's default thread pool
     # and run extraction in this process, with no worker state set up
     loop = asyncio.get_running_loop()

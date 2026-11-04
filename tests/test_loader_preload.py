@@ -25,10 +25,10 @@ def _song(**kw):
 
 
 def _never_loads(monkeypatch):
-    async def load_song(lane, track):
+    async def load(lane, track):
         raise AssertionError("preload extracted a song that was current")
 
-    monkeypatch.setattr(loader, "_load", load_song)
+    monkeypatch.setattr(loader, "_load", load)
 
 
 def test_a_song_with_no_webpage_url_is_current(monkeypatch):
@@ -44,7 +44,7 @@ def test_a_song_whose_stream_url_has_not_expired_is_current(monkeypatch):
 
 
 def test_a_fresh_extraction_updates_the_song_and_reports_it(monkeypatch):
-    async def load_song(lane, track):
+    async def load(lane, track):
         return Song(
             SiteTypes.YT_DLP,
             track,
@@ -52,7 +52,7 @@ def test_a_fresh_extraction_updates_the_song_and_reports_it(monkeypatch):
             title="fresh title",
         )
 
-    monkeypatch.setattr(loader, "_load", load_song)
+    monkeypatch.setattr(loader, "_load", load)
     song = _song(title="stale title")
     assert asyncio.run(loader.preload(song)) is Preload.EXTRACTED
     assert song.title == "fresh title"
@@ -62,10 +62,10 @@ def test_a_fresh_extraction_updates_the_song_and_reports_it(monkeypatch):
     "outcome", [loader.SongError("gone"), RuntimeError("boom")]
 )
 def test_a_failed_extraction_reports_failure(monkeypatch, outcome):
-    async def load_song(lane, track):
+    async def load(lane, track):
         raise outcome
 
-    monkeypatch.setattr(loader, "_load", load_song)
+    monkeypatch.setattr(loader, "_load", load)
     song = _song(title="stale title")
     assert asyncio.run(loader.preload(song)) is Preload.FAILED
     assert song.title == "stale title"
@@ -84,13 +84,13 @@ def test_a_caller_awaiting_an_inflight_extraction_is_told_its_outcome(
     async def run():
         release = asyncio.Event()
 
-        async def load_song(lane, track):
+        async def load(lane, track):
             await release.wait()
             if extracted:
                 return Song(SiteTypes.YT_DLP, track, url="https://s.invalid")
             raise loader.SongError("gone")
 
-        monkeypatch.setattr(loader, "_load", load_song)
+        monkeypatch.setattr(loader, "_load", load)
         song = _song()
         running = asyncio.create_task(loader.preload(song))
         await asyncio.sleep(0)
@@ -108,11 +108,11 @@ def test_cancelling_one_waiter_leaves_the_owner_and_other_waiters_alone(
     async def run():
         release = asyncio.Event()
 
-        async def load_song(lane, track):
+        async def load(lane, track):
             await release.wait()
             return Song(SiteTypes.YT_DLP, track, url="https://s.invalid")
 
-        monkeypatch.setattr(loader, "_load", load_song)
+        monkeypatch.setattr(loader, "_load", load)
         song = _song()
         owner = asyncio.create_task(loader.preload(song))
         await asyncio.sleep(0)
@@ -146,11 +146,11 @@ def _expiring_in(delta):
 def _fresh_load(monkeypatch):
     calls = []
 
-    async def load_song(lane, track):
+    async def load(lane, track):
         calls.append(track)
         return Song(SiteTypes.YT_DLP, track, url="https://s.invalid/new")
 
-    monkeypatch.setattr(loader, "_load", load_song)
+    monkeypatch.setattr(loader, "_load", load)
     return calls
 
 
@@ -240,8 +240,8 @@ def test_load_in_the_preload_lane_dispatches_there_and_stamps_the_clock(
         return Song(SiteTypes.YT_DLP, URL)
 
     monkeypatch.setattr(loader, "_run_sync", run_sync)
-    song = asyncio.run(loader._load(loader.PRELOAD_LANE, URL))
-    assert (lanes, song.extracted_at) == ([loader.PRELOAD_LANE], NOW)
+    song = asyncio.run(loader._load(loader.Lane.PRELOAD, URL))
+    assert (lanes, song.extracted_at) == ([loader.Lane.PRELOAD], NOW)
 
 
 def test_preload_extracts_in_the_preload_lane(monkeypatch):
@@ -253,4 +253,4 @@ def test_preload_extracts_in_the_preload_lane(monkeypatch):
 
     monkeypatch.setattr(loader, "_load", load)
     asyncio.run(loader.preload(_song()))
-    assert lanes == [loader.PRELOAD_LANE]
+    assert lanes == [loader.Lane.PRELOAD]
