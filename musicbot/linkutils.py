@@ -23,9 +23,9 @@ from yt_dlp.extractor.lazy_extractors import LazyLoadExtractor
 from config import config
 from musicbot import loader
 
-# Limits on the network calls the extraction worker makes. One guild's
-# call that blocks holds the worker for every guild, so none may block
-# long. Deliberately not Config settings: nobody has a reason to tune them.
+# Limits on the network calls the extraction workers make. A call that
+# blocks holds its lane's worker (load or preload) for every guild using
+# that lane, so none may block long. Deliberately not Config settings: nobody has a reason to tune them.
 # longest wait honoured for one Spotify 429 Retry-After header (seconds)
 RETRY_AFTER_MAX = 5
 # total time limit of one aiohttp request (seconds)

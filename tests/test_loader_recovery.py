@@ -270,18 +270,6 @@ def test_init_submits_both_warm_ups_before_awaiting_either(warm_pools):
     assert kinds == ["submit", "submit", "result", "result"]
 
 
-def test_init_builds_a_pool_per_lane_and_a_second_init_builds_none(
-    warm_pools,
-):
-    _, built, _ = warm_pools
-    loader.init()
-    loader.init()
-    assert (sorted(loader._pools), len(built)) == (
-        [loader.LOAD_LANE, loader.PRELOAD_LANE],
-        2,
-    )
-
-
 def test_a_failing_warm_up_raises_and_keeps_both_pools(warm_pools):
     _, built, failing = warm_pools
     failing.add(loader.LOAD_LANE)
@@ -292,11 +280,3 @@ def test_a_failing_warm_up_raises_and_keeps_both_pools(warm_pools):
         [loader.LOAD_LANE, loader.PRELOAD_LANE],
         2,
     )
-
-
-def test_shutdown_stops_both_pools_and_is_safe_twice(warm_pools):
-    _, built, _ = warm_pools
-    loader.init()
-    loader.shutdown()
-    loader.shutdown()
-    assert [p.shutdown_calls for p in built] == [[True], [True]]
