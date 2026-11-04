@@ -57,10 +57,10 @@ class SearchView(OwnedView):
         # its own task, and a button's checks and voice join run
         # before the pick stops the view, so stop() alone
         # would let two quick clicks both queue. Taken in
-        # accepts_click, before the first await of the click.
+        # claim_click, before the first await of the click.
         self._picked = False
 
-    def accepts_click(self) -> bool:
+    def claim_click(self) -> bool:
         if self._picked:
             # the second half of a double-click: acknowledged silently
             return False

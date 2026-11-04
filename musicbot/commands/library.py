@@ -367,7 +367,7 @@ class LibraryView(OwnedView):
         finally:
             self._busy -= 1
 
-    def accepts_click(self) -> bool:
+    def claim_click(self) -> bool:
         # (Why a click reaches this check during a redraw: see
         # _busy.) Acknowledged silently rather than answered with an
         # ephemeral complaint. The clicks the guard catches are the
