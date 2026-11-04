@@ -147,7 +147,7 @@ def test_whitelist_commands_admit_extra_owners_only(
         asyncio.run(check(99))
 
 
-def execute(code, monkeypatch=None):
+def execute(code):
     cog = Developer(None)
     ctx = FakeCtx(FakeBot([]))
     asyncio.run(cog._execute.callback(cog, ctx, code=code))
@@ -168,15 +168,22 @@ def test_execute_ignores_concurrent_prints(capsys):
     ctx = FakeCtx(FakeBot([]))
 
     async def main():
+        started, done = asyncio.Event(), asyncio.Event()
+        ctx.started, ctx.done = started, done
+
         async def other():
-            await asyncio.sleep(0.01)
+            await started.wait()
             print("OTHER")
+            done.set()
 
         t = asyncio.ensure_future(other())
         await cog._execute.callback(
-            cog, ctx, code="await asyncio.sleep(0.05)\nprint('mine')"
+            cog,
+            ctx,
+            code="ctx.started.set()\nawait ctx.done.wait()\nprint('mine')",
         )
         await t
+
 
     asyncio.run(main())
     assert "mine" in ctx.sent[0] and "OTHER" not in ctx.sent[0]

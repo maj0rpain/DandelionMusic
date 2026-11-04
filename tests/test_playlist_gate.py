@@ -50,8 +50,8 @@ def test_refuses_while_disabled(cmd, monkeypatch):
 @pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
 def test_gate_admits_while_enabled(cmd, monkeypatch):
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", True)
-    gate = music.playlists_enabled.predicate
-    assert gate in cmd.checks
+    gate = next(c for c in cmd.checks if c.__name__ == "playlists_enabled")
+    assert cmd.checks[0] is gate
     assert gate(types.SimpleNamespace()) is True
 
 

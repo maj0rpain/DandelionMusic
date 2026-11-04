@@ -530,8 +530,8 @@ class Music(commands.Cog):
         description=config.HELP_SAVE_PLAYLIST_LONG,
         help=config.HELP_SAVE_PLAYLIST_SHORT,
     )
-    @commands.check(dj_check)
     @playlists_enabled
+    @commands.check(dj_check)
     async def _playlist_save(self, ctx, name: str):
         await ctx.defer()
         songs = [
@@ -588,9 +588,9 @@ class Music(commands.Cog):
         description=config.HELP_REMOVE_PLAYLIST_LONG,
         help=config.HELP_REMOVE_PLAYLIST_SHORT,
     )
+    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(name=_playlist_autocomplete)
-    @playlists_enabled
     async def _playlist_remove(
         self,
         ctx,
@@ -631,9 +631,9 @@ class Music(commands.Cog):
         description=config.HELP_PLAYLIST_SHOW_LONG,
         help=config.HELP_PLAYLIST_SHOW_SHORT,
     )
+    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
-    @playlists_enabled
     async def _playlist_show(
         self,
         ctx,
@@ -668,9 +668,9 @@ class Music(commands.Cog):
         description=config.HELP_ADD_TO_PLAYLIST_LONG,
         help=config.HELP_ADD_TO_PLAYLIST_SHORT,
     )
+    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
-    @playlists_enabled
     async def _playlist_add_song(
         self,
         ctx,
@@ -704,9 +704,9 @@ class Music(commands.Cog):
         description=config.HELP_REMOVE_FROM_PLAYLIST_LONG,
         help=config.HELP_REMOVE_FROM_PLAYLIST_SHORT,
     )
+    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
-    @playlists_enabled
     async def _playlist_remove_song(
         self,
         ctx,
@@ -738,9 +738,9 @@ class Music(commands.Cog):
         description=config.HELP_MOVE_IN_PLAYLIST_LONG,
         help=config.HELP_MOVE_IN_PLAYLIST_SHORT,
     )
+    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
-    @playlists_enabled
     async def _playlist_move_song(
         self,
         ctx,
