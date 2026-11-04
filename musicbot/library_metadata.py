@@ -127,6 +127,16 @@ async def _resolve_names(
     return artist_name, album_name
 
 
+class _AlbumKey(NamedTuple):
+    """One artist/album pair, keying the album lookups' caches."""
+
+    artist: str
+    album: str
+
+    def __repr__(self) -> str:
+        return tuple.__repr__(self)
+
+
 class _LastfmInfo(NamedTuple):
     image_url: Optional[str]
     listeners: Optional[int]
@@ -231,17 +241,15 @@ def _parse_lastfm(data: dict) -> Optional[_LastfmInfo]:
 
 
 async def _lastfm_artist_backend(name: str) -> Optional[_LastfmInfo]:
-    return _parse_lastfm(
-        await _fetch_lastfm("artist.getInfo", {"artist": name})
-    )
+    data = await _fetch_lastfm("artist.getInfo", {"artist": name})
+    return _parse_lastfm(data)
 
 
 async def _lastfm_album_backend(
-    key: Tuple[str, str],
+    key: _AlbumKey,
 ) -> Optional[_LastfmInfo]:
-    artist_name, album_name = key
     data = await _fetch_lastfm(
-        "album.getInfo", {"artist": artist_name, "album": album_name}
+        "album.getInfo", {"artist": key.artist, "album": key.album}
     )
     return _parse_lastfm(data)
 
@@ -251,10 +259,14 @@ def _lastfm_enabled() -> bool:
 
 
 _lastfm_artist: CachedLookup[str, _LastfmInfo] = CachedLookup(
-    _lastfm_enabled, _lastfm_artist_backend, "Last.fm artist.getInfo"
+    _lastfm_enabled,
+    _lastfm_artist_backend,
+    "library_metadata: Last.fm artist.getInfo",
 )
-_lastfm_album: CachedLookup[Tuple[str, str], _LastfmInfo] = CachedLookup(
-    _lastfm_enabled, _lastfm_album_backend, "Last.fm album.getInfo"
+_lastfm_album: CachedLookup[_AlbumKey, _LastfmInfo] = CachedLookup(
+    _lastfm_enabled,
+    _lastfm_album_backend,
+    "library_metadata: Last.fm album.getInfo",
 )
 
 
@@ -315,11 +327,11 @@ async def _spotify_artist_backend(name: str) -> Optional[_SpotifyInfo]:
 
 
 async def _spotify_album_backend(
-    key: Tuple[str, str],
+    key: _AlbumKey,
 ) -> Optional[_SpotifyInfo]:
     loop = asyncio.get_running_loop()
     return await loop.run_in_executor(
-        _network_executor, _spotify_album_sync, *key
+        _network_executor, _spotify_album_sync, key.artist, key.album
     )
 
 
@@ -330,10 +342,14 @@ def _spotify_enabled() -> bool:
 
 
 _spotify_artist: CachedLookup[str, _SpotifyInfo] = CachedLookup(
-    _spotify_enabled, _spotify_artist_backend, "Spotify artist"
+    _spotify_enabled,
+    _spotify_artist_backend,
+    "library_metadata: Spotify artist",
 )
-_spotify_album: CachedLookup[Tuple[str, str], _SpotifyInfo] = CachedLookup(
-    _spotify_enabled, _spotify_album_backend, "Spotify album"
+_spotify_album: CachedLookup[_AlbumKey, _SpotifyInfo] = CachedLookup(
+    _spotify_enabled,
+    _spotify_album_backend,
+    "library_metadata: Spotify album",
 )
 
 
@@ -543,7 +559,7 @@ async def get_album_enrichment(
     artist_name, album_name = await _resolve_names(
         artist_folder, album_folder, sample_file
     )
-    key = (artist_name, album_name)
+    key = _AlbumKey(artist_name, album_name)
     embedded, spotify, lastfm = await asyncio.gather(
         _embedded_art(sample_file),
         _spotify_album.get(key),

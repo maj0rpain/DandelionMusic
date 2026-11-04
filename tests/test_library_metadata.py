@@ -512,6 +512,32 @@ def test_a_timeout_is_logged_with_label_and_key(
     )
 
 
+def test_an_album_timeout_is_logged_with_label_and_key(
+    tmp_path, lastfm, no_spotify, capsys
+):
+    lastfm({"album.getInfo": asyncio.TimeoutError()})
+
+    album(tmp_path)
+
+    assert (
+        "library_metadata: Last.fm album.getInfo timed out for "
+        "('Radiohead', 'OK Computer')" in capsys.readouterr().err
+    )
+
+
+def test_the_same_album_twice_calls_each_backend_once(
+    tmp_path, lastfm, spotify
+):
+    session = lastfm({"album.getInfo": {"album": {"listeners": "5"}}})
+    client = spotify(FakeSpotify(albums=[{"images": []}]))
+
+    album(tmp_path)
+    album(tmp_path)
+
+    assert len(session.queries) == 1
+    assert len(client.searches) == 1
+
+
 # a 1x1 PNG-ish payload; mutagen stores the bytes verbatim
 COVER = b"\x89PNG\r\n\x1a\nembedded-cover-bytes"
 
