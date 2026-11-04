@@ -8,7 +8,6 @@ from config import config
 from musicbot.song import Song
 from musicbot.utils import StrEnum, songs_embed
 
-
 LoopMode = StrEnum("LoopMode", config.get_dict("LoopMode"))
 LoopState = StrEnum("LoopState", config.get_dict("LoopState"))
 PauseState = StrEnum("PauseState", config.get_dict("PauseState"))
@@ -52,6 +51,14 @@ class Playlist:
 
     def add(self, track: Song):
         self.playque.append(track)
+
+    def insert_next(self, track: Song):
+        """Puts `track` directly after the current track; on an empty
+        queue it becomes the head."""
+        if self.playque:
+            self.playque.insert(1, track)
+        else:
+            self.playque.append(track)
 
     def has_next(self) -> bool:
         return len(self.playque) >= (2 if self.loop != LoopMode.ALL else 1)

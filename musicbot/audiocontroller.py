@@ -616,11 +616,18 @@ class AudioController(object):
         else:
             self._preload_queue()
 
-    async def queue(self, songs: Iterable[Song]):
-        """Appends `songs` to the queue, refreshes the backup and
-        starts playing if nothing is (see ensure_playing())."""
+    async def queue(self, songs: Iterable[Song], playnext=False):
+        """Appends `songs` to the queue (with `playnext`, puts them
+        directly after the current track instead), refreshes the backup
+        and starts playing if nothing is (see ensure_playing()).
+
+        Placement happens before the first await, so no other command
+        can slip between a playnext track and its slot."""
         for song in songs:
-            self.playlist.add(song)
+            if playnext:
+                self.playlist.insert_next(song)
+            else:
+                self.playlist.add(song)
         self._pickle_playlist()
         await self.ensure_playing()
 
@@ -644,9 +651,14 @@ class AudioController(object):
         self,
         track: str,
         user: Optional[discord.abc.User] = None,
+        playnext=False,
     ) -> Union[Optional[Song], Literal[PLAYLIST]]:
         """Adds the track to the playlist instance
         Starts playing if it is the first song.
+
+        With `playnext` a single track (or a one-item playlist) goes
+        directly after the current track; a longer playlist is still
+        appended.
 
         For many tracks at once use process_local_tracks() rather than
         calling this in a loop - pickling here on every call would mean
@@ -702,7 +714,7 @@ class AudioController(object):
                 )
                 loaded_song = PLAYLIST
 
-        await self.queue(added)
+        await self.queue(added, playnext=playnext and len(added) == 1)
 
         return loaded_song
 
