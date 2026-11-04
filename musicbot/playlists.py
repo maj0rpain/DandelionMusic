@@ -12,7 +12,9 @@ Failures the caller must tell apart are raised as the exceptions
 below; ``get`` returns ``None`` for a missing playlist instead.
 """
 
+import asyncio
 import json
+import weakref
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional
 
@@ -67,6 +69,20 @@ class InvalidPosition(PlaylistError):
 
 class OnlySongInPlaylist(PlaylistError):
     pass
+
+
+# One lock per saved playlist: changes to it run one at a time. Weak
+# values, so an entry goes once nothing holds or waits on its lock.
+_locks: "weakref.WeakValueDictionary[PlaylistRef, asyncio.Lock]" = (
+    weakref.WeakValueDictionary()
+)
+
+
+def _lock(playlist: PlaylistRef) -> asyncio.Lock:
+    lock = _locks.get(playlist)
+    if lock is None:
+        lock = _locks[playlist] = asyncio.Lock()
+    return lock
 
 
 def _decode(songs_json: str) -> List[PlaylistEntry]:
@@ -141,7 +157,7 @@ async def save(
 async def delete(
     session_factory: SessionFactory, playlist: PlaylistRef
 ) -> None:
-    async with session_factory() as session:
+    async with _lock(playlist), session_factory() as session:
         result = await session.execute(
             sql_delete(SavedPlaylist).where(*_matches(playlist))
         )
@@ -158,7 +174,7 @@ async def _update(
     """Loads the playlist's entries, lets ``change`` edit them in
     place (or raise), and stores the result. A change that leaves
     the entries as they were writes nothing."""
-    async with session_factory() as session:
+    async with _lock(playlist), session_factory() as session:
         row = await _load_row(session, playlist)
         if row is None:
             raise PlaylistNotFound(playlist.name)
