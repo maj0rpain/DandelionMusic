@@ -1,6 +1,6 @@
 """Loader shutdown cancels queued extractions and still waits.
 
-A stub executor stands in for the process pool: no worker is started.
+Stub executors stand in for the process pool: no worker is started.
 """
 
 from musicbot import loader
@@ -15,9 +15,14 @@ class StubExecutor:
 
 
 def test_shutdown_cancels_queued_futures_and_waits(monkeypatch):
-    stub = StubExecutor()
-    monkeypatch.setattr(loader, "_executor", stub)
+    stubs = [StubExecutor(), StubExecutor()]
+    monkeypatch.setattr(
+        loader,
+        "_pools",
+        {loader.LOAD_LANE: stubs[0], loader.PRELOAD_LANE: stubs[1]},
+    )
 
     loader.shutdown()
 
-    assert stub.calls == [((), {"wait": True, "cancel_futures": True})]
+    expected = [((), {"wait": True, "cancel_futures": True})]
+    assert [s.calls for s in stubs] == [expected, expected]
