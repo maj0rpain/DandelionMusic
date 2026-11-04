@@ -657,17 +657,22 @@ def test_spotify_enrichment_is_disabled_without_a_client(no_spotify):
     assert library_metadata._spotify_enabled() is False
 
 
+def test_the_import_built_enrichment_client_is_none_without_spotify_api():
+    if library_metadata.spotify_api is not None:
+        pytest.skip("Spotify credentials configured")
+    assert library_metadata._enrichment_client is None
+
+
 def test_the_import_built_enrichment_client_follows_spotify_api():
     api = library_metadata.spotify_api
-    client = library_metadata._enrichment_client
     if api is None:
-        assert client is None
-    else:
-        assert client is not api
-        assert client.auth_manager is api.auth_manager
-        assert client.requests_timeout == 3
-        assert client.retries == 0
-        assert client.status_retries == 0
+        pytest.skip("no Spotify credentials configured")
+    client = library_metadata._enrichment_client
+    assert client is not api
+    assert client.auth_manager is api.auth_manager
+    assert client.requests_timeout == 3
+    assert client.retries == 0
+    assert client.status_retries == 0
 
 
 def test_a_failed_spotify_artist_search_is_logged(
