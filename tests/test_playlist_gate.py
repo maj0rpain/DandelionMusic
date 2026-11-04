@@ -65,8 +65,13 @@ def test_autocomplete_offers_nothing_while_disabled(monkeypatch):
 @pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
 def test_cog_check_gates_before_other_refusals(cmd, monkeypatch):
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
+    # the registered cog holds per-instance copies of its commands
+    cog = Music(None)
+    group = cog._playlist
+    subs = {c.name: c for c in group.commands}
+    cmd = group if cmd.name == group.name else subs[cmd.name]
     # no guild, channel or author: any other refusal would break differently
     ctx = types.SimpleNamespace(command=cmd)
     with pytest.raises(CheckError) as exc:
-        asyncio.run(Music.cog_check(types.SimpleNamespace(), ctx))
+        asyncio.run(cog.cog_check(ctx))
     assert str(exc.value) == config.PLAYLISTS_ARE_DISABLED

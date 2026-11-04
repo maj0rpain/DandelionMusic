@@ -179,7 +179,7 @@ class Music(commands.Cog):
     async def cog_check(self, ctx):
         # the playlist gate refuses before any voice or channel refusal
         cmd = getattr(ctx, "command", None)
-        if cmd is not None and (cmd.root_parent or cmd) is Music._playlist:
+        if cmd is not None and (cmd.root_parent or cmd) is self._playlist:
             await playlists_enabled.predicate(ctx)
         ctx.audiocontroller = utils.get_audiocontroller(ctx)
         return await utils.play_check(ctx)
