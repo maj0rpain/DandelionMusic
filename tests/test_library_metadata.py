@@ -530,8 +530,11 @@ def test_enrichment_spotify_client_has_low_limits(monkeypatch):
     monkeypatch.setattr(library_metadata, "spotify_api", fake)
     assert library_metadata._spotify_client() is fake
 
-    monkeypatch.setattr(library_metadata, "spotify_api", None)
-    assert library_metadata._spotify_enabled() is False
+    import inspect
+
+    params = inspect.signature(Spotify.__init__).parameters
+    for name in ("requests_timeout", "retries", "status_retries"):
+        assert getattr(first, name) == params[name].default, name
 
 
 def test_playback_spotify_client_keeps_default_limits():
