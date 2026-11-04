@@ -13,7 +13,8 @@ from musicbot.truncation import Truncation, TruncationReason
 YOUTUBE = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 YOUTU_BE = "https://youtu.be/dQw4w9WgXcQ"
 SOUNDCLOUD = "https://soundcloud.com/some-artist/some-track"
-SPOTIFY = "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC"
+SPOTIFY_ID = "4uLU6hMCjMI75M1A2tKUQC"
+SPOTIFY = f"https://open.spotify.com/track/{SPOTIFY_ID}"
 
 
 @pytest.mark.parametrize("link", [YOUTUBE, YOUTU_BE, SOUNDCLOUD, SPOTIFY])
@@ -148,20 +149,19 @@ def test_unresolvable_channel_does_nothing(monkeypatch):
 
 @pytest.mark.parametrize("kind", ["track", "album", "playlist"])
 def test_spotify_uri_returns_the_open_link(kind):
-    uri = f"spotify:{kind}:4uLU6hMCjMI75M1A2tKUQC"
+    uri = f"spotify:{kind}:{SPOTIFY_ID}"
     assert Button.get_links(f"play {uri}") == [
-        f"https://open.spotify.com/{kind}/4uLU6hMCjMI75M1A2tKUQC"
+        f"https://open.spotify.com/{kind}/{SPOTIFY_ID}"
     ]
 
 
 def test_reacting_to_a_spotify_uri_processes_the_open_link(monkeypatch):
-    link = "https://open.spotify.com/track/4uLU6hMCjMI75M1A2tKUQC"
     processed, _sent = react(
         monkeypatch,
-        {link: object()},
-        content="spotify:track:4uLU6hMCjMI75M1A2tKUQC",
+        {SPOTIFY: object()},
+        content=f"spotify:track:{SPOTIFY_ID}",
     )
-    assert processed == [link]
+    assert processed == [SPOTIFY]
 
 
 def test_truncated_playlist_sends_exactly_the_notice(monkeypatch):
