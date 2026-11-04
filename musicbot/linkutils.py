@@ -301,7 +301,7 @@ def normalize_track(text: str) -> str:
         len(text) > 2
         and text[0] == "<"
         and text[-1] == ">"
-        and not re.search(r"[\s<>]", text[1:-1])
+        and url_regex.fullmatch(text[1:-1])
     ):
         text = text[1:-1]
     if m := _spotify_uri_regex.fullmatch(text):

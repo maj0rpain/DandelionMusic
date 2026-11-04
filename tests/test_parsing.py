@@ -163,6 +163,7 @@ SPOTIFY_ID = "4cOdK2wGLETKBW3PvgPWqT"
         ("  never gonna give you up  ", "never gonna give you up"),
         ("hello.", "hello."),
         ("<never gonna give you up>", "<never gonna give you up>"),
+        ("<hello>", "<hello>"),
     ],
 )
 def test_normalize_track(text, expected):
@@ -208,25 +209,3 @@ def test_fetch_spotify_with_credentials_looks_the_track_up_by_id(
         linkutils.fetch_spotify(f"HTTPS://OPEN.SPOTIFY.COM/track/{SPOTIFY_ID}")
     )
     assert calls == [SPOTIFY_ID]
-
-
-def test_load_song_classifies_and_loads_the_cleaned_text(monkeypatch):
-    fetched = []
-
-    async def fake_fetch(url):
-        fetched.append(url)
-        return {"url": "https://example.com/a", "title": "t"}
-
-    extracted = []
-
-    def fake_extract(url, ie=None):
-        extracted.append(url)
-        return {"url": url, "title": "t"}
-
-    monkeypatch.setattr(loader, "fetch_spotify", fake_fetch)
-    monkeypatch.setattr(loader, "extract_info", fake_extract)
-    monkeypatch.setattr(loader, "_loop", asyncio.new_event_loop())
-    loader._load_song("<https://open.spotify.com/track/x>")
-    loader._load_song("https://youtu.be/dQw4w9WgXcQ.")
-    assert fetched == ["https://open.spotify.com/track/x"]
-    assert extracted[0] == "https://youtu.be/dQw4w9WgXcQ"

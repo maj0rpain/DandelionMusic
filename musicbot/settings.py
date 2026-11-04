@@ -551,14 +551,21 @@ SAFE_MIGRATION_OPS = (
 )
 
 
+def _leaf_ops(op):
+    """Yields the leaf operations of a (possibly nested) op container."""
+    if isinstance(op, alembic_ops.OpContainer):
+        for child in op.ops:
+            yield from _leaf_ops(child)
+    else:
+        yield op
+
+
 def _find_unsafe_ops(op):
     """Yields any migration operation that isn't a known-additive
     schema change."""
-    if isinstance(op, alembic_ops.OpContainer):
-        for child in op.ops:
-            yield from _find_unsafe_ops(child)
-    elif not isinstance(op, SAFE_MIGRATION_OPS):
-        yield op
+    for leaf in _leaf_ops(op):
+        if not isinstance(leaf, SAFE_MIGRATION_OPS):
+            yield leaf
 
 
 def _include_name(name, type_, parent_names):
@@ -573,13 +580,11 @@ def _include_name(name, type_, parent_names):
 def _find_required_column_adds(op):
     """Yields 'table.column' for each added column that is NOT NULL
     with no server default."""
-    if isinstance(op, alembic_ops.OpContainer):
-        for child in op.ops:
-            yield from _find_required_column_adds(child)
-    elif isinstance(op, alembic_ops.AddColumnOp):
-        column = op.column
-        if not column.nullable and column.server_default is None:
-            yield f"{op.table_name}.{column.name}"
+    for leaf in _leaf_ops(op):
+        if isinstance(leaf, alembic_ops.AddColumnOp):
+            column = leaf.column
+            if not column.nullable and column.server_default is None:
+                yield f"{leaf.table_name}.{column.name}"
 
 
 def run_migrations(connection):
@@ -608,8 +613,8 @@ def run_migrations(connection):
         raise RuntimeError(
             "Refusing to start: the code adds a NOT NULL column with no "
             f"server default ({', '.join(required)}), which existing "
-            "rows cannot satisfy. Give the column a server_default or "
-            "make it nullable."
+            "rows cannot satisfy. Such a column needs a server default "
+            "or a manual migration."
         )
 
     code = render_python_code(upgrade_ops, migration_context=ctx)

@@ -14,14 +14,6 @@ from musicbot.loader import PartialPlaylist, SongError
 URL = "https://open.spotify.com/playlist/p"
 
 
-@pytest.fixture
-def worker_loop(monkeypatch):
-    loop = asyncio.new_event_loop()
-    monkeypatch.setattr(loader, "_loop", loop)
-    yield loop
-    loop.close()
-
-
 def _fetch(monkeypatch, result):
     async def fetch_spotify(url):
         if isinstance(result, Exception):
@@ -89,3 +81,26 @@ def test_partial_playlist_survives_pickling():
     assert isinstance(copy, PartialPlaylist)
     assert list(copy) == ["a", "b"]
     assert (copy.total, copy.reason) == (9, "SPOTIFY_TRUNCATED_API_ERROR")
+
+
+def test_load_song_classifies_and_loads_the_cleaned_text(
+    monkeypatch, worker_loop
+):
+    fetched = []
+
+    async def fake_fetch(url):
+        fetched.append(url)
+        return {"url": "https://example.com/a", "title": "t"}
+
+    extracted = []
+
+    def fake_extract(url, ie=None):
+        extracted.append(url)
+        return {"url": url, "title": "t"}
+
+    monkeypatch.setattr(loader, "fetch_spotify", fake_fetch)
+    monkeypatch.setattr(loader, "extract_info", fake_extract)
+    loader._load_song("<https://open.spotify.com/track/x>")
+    loader._load_song("https://youtu.be/dQw4w9WgXcQ.")
+    assert fetched == ["https://open.spotify.com/track/x"]
+    assert extracted[0] == "https://youtu.be/dQw4w9WgXcQ"

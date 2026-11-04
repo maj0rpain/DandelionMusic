@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 
@@ -105,3 +106,13 @@ def controller(controller_and_stub):
 @pytest.fixture
 def stub_loader(controller_and_stub):
     return controller_and_stub[1]
+
+
+@pytest.fixture
+def worker_loop(monkeypatch):
+    from musicbot import loader
+
+    loop = asyncio.new_event_loop()
+    monkeypatch.setattr(loader, "_loop", loop)
+    yield loop
+    loop.close()

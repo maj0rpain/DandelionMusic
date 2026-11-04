@@ -58,7 +58,9 @@ def test_foreign_table_survives_migration(engine):
 def test_not_null_add_without_default_is_refused(engine):
     make_old_probe(engine)
     probe_table(sa.Column("name", sa.String(10), nullable=False))
-    with pytest.raises(RuntimeError, match=r"probe\.name"):
+    with pytest.raises(
+        RuntimeError, match=r"probe\.name.*server default.*manual migration"
+    ):
         migrate(engine)
     assert columns(engine, "probe") == ["id"]
     assert "bot_state" not in sa.inspect(engine).get_table_names()
