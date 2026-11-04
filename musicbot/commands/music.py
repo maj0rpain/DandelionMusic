@@ -576,6 +576,7 @@ class Music(commands.Cog):
                 entry.url,
                 title=entry.title,
                 saved_playlist=contents.ref,
+                saved_url=entry.url,
             )
             for entry in contents.entries
         )

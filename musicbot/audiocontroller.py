@@ -806,12 +806,13 @@ class AudioController(object):
         if (
             result is loader.Preload.EXTRACTED
             and song.saved_playlist is not None
+            and song.saved_url is not None
         ):
             try:
                 await playlists.set_title(
                     self.bot.DbSession,
                     song.saved_playlist,
-                    song.webpage_url,
+                    song.saved_url,
                     song.title,
                 )
             except Exception:

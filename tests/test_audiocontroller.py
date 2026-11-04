@@ -10,10 +10,12 @@ import asyncio
 import pickle
 import sys
 import threading
+import types
 
 import pytest
 
 from controller_seam import StubLoader, controller_seam
+from musicbot.commands.music import Music
 
 
 def test_controller_pickles_its_playlist_into_the_temp_backup_dir(
@@ -919,6 +921,7 @@ def _queue_saved_playlist_song(controller, from_saved_playlist=True):
                             if from_saved_playlist
                             else None
                         ),
+                        saved_url=SAVED_URL if from_saved_playlist else None,
                     )
                 ]
             )
@@ -1268,3 +1271,114 @@ def test_a_refresh_after_a_failed_edit_applies_the_view_again(
     asyncio.run(run())
 
     assert len(message.edits) == 1 and message.edits[0] is not None
+
+def _rewriting_preload(stub_loader, normalised):
+    """Makes every extraction rewrite the song's web page URL, as
+    yt-dlp does when it normalises it or resolves a Spotify entry."""
+
+    async def preload(song):
+        song.webpage_url = normalised
+        return stub_loader.Preload.EXTRACTED
+
+    stub_loader.preload = preload
+
+
+def _stored_titles_after_preloading(controller, make_song, preloads=1):
+    """Queues the song `make_song(ac)` behind a playing track with
+    "stale title" stored, preloads it `preloads` times, and returns
+    the stored titles."""
+    ac = sys.modules[type(controller).__module__]
+    _queue(controller, "playing")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        engine, factory = await _saved_playlist_db(
+            ac,
+            "1234",
+            "mix",
+            [ac.playlists.PlaylistEntry(SAVED_URL, "stale title")],
+        )
+        controller.bot.DbSession = factory
+        try:
+            controller.guild.voice_client.playing = True
+            song = make_song(ac)
+            controller.playlist.add(song)
+            for n in range(preloads):
+                song.title = f"fresh title {n}"
+                assert await controller._preload(song)
+            contents = await ac.playlists.get(
+                factory, ac.playlists.PlaylistRef("1234", "mix")
+            )
+            return [entry.title for entry in contents.entries]
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(run())
+
+
+def test_a_song_loaded_from_a_saved_playlist_keeps_its_title_refresh(
+    controller, stub_loader
+):
+    ac = sys.modules[type(controller).__module__]
+    _queue(controller, "playing")
+    _rewriting_preload(stub_loader, "https://example.invalid/normalised")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        engine, factory = await _saved_playlist_db(
+            ac,
+            "1234",
+            "mix",
+            [ac.playlists.PlaylistEntry(SAVED_URL, "stale title")],
+        )
+
+        async def noop(*args, **kwargs):
+            pass
+
+        ctx = types.SimpleNamespace(
+            bot=types.SimpleNamespace(DbSession=factory),
+            guild=controller.guild,
+            audiocontroller=controller,
+            defer=noop,
+            send=noop,
+        )
+        controller.bot.DbSession = factory
+        try:
+            controller.guild.voice_client.playing = True
+            await Music._playlist_load.callback(Music(None), ctx, "mix")
+            await _drain(controller)
+            song = controller.playlist.playque[-1]
+            titles = []
+            for n in range(2):
+                # the stream URL expired: the song is extracted again
+                song.title = f"fresh title {n}"
+                assert await controller._preload(song)
+                contents = await ac.playlists.get(
+                    factory, ac.playlists.PlaylistRef("1234", "mix")
+                )
+                titles.append([e.title for e in contents.entries])
+            return titles
+        finally:
+            await engine.dispose()
+
+    assert asyncio.run(run()) == [["fresh title 0"], ["fresh title 1"]]
+
+
+def test_a_song_without_a_saved_url_refreshes_no_stored_title(
+    controller, stub_loader
+):
+    _rewriting_preload(stub_loader, SAVED_URL)
+
+    def make_song(ac):
+        song = ac.Song(
+            ac.SiteTypes.YT_DLP,
+            SAVED_URL,
+            saved_playlist=ac.playlists.PlaylistRef("1234", "mix"),
+        )
+        # as unpickled from a backup written before saved_url existed
+        song.__dict__.pop("saved_url", None)
+        return song
+
+    assert _stored_titles_after_preloading(controller, make_song) == [
+        "stale title"
+    ]
