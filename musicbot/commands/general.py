@@ -22,14 +22,6 @@ from musicbot.utils import (
 SHOW_SUBCOMMAND = "show"
 
 
-async def _update_or_report(ctx, sett, setting: str, value) -> bool:
-    """Updates a guild setting, replying with an error if it failed"""
-    if await sett.update_setting(setting, value, ctx):
-        return True
-    await ctx.send(f"`Error: Setting {setting} could not be updated.`")
-    return False
-
-
 async def _apply_setting(ctx, descriptor: SettingDescriptor, value):
     """The body of every d!setting <name> subcommand: replies with the
     refusal or error, or confirms the update"""
@@ -39,20 +31,25 @@ async def _apply_setting(ctx, descriptor: SettingDescriptor, value):
         return
     sett = get_settings(ctx)
     try:
-        updated = await _update_or_report(ctx, sett, descriptor.name, value)
+        updated = await sett.update_setting(descriptor.name, value, ctx)
     except ConversionError as e:
         await ctx.send(f"`Error: {e}`")
         return
-    if updated:
+    if not updated:
         await ctx.send(
-            f"Setting `{descriptor.name}` updated to"
-            f" {descriptor.confirm(value)}!"
+            f"`Error: Setting {descriptor.name} could not be updated.`"
         )
+        return
+    await ctx.send(
+        f"Setting `{descriptor.name}` updated to"
+        f" {descriptor.confirm(value)}!"
+    )
 
 
-def _setting_subcommand(descriptor: SettingDescriptor):
+def _setting_subcommand(descriptor: SettingDescriptor, owner: str):
     """The callback of the d!setting subcommand for one setting, taking
-    the descriptor's parameter name and type"""
+    the descriptor's parameter name and type; owner is the qualname of
+    the class the callback becomes a method of"""
 
     async def callback(self, ctx: commands.Context, value):
         await _apply_setting(ctx, descriptor, value)
@@ -72,7 +69,10 @@ def _setting_subcommand(descriptor: SettingDescriptor):
         descriptor.param_name: descriptor.param_type,
     }
     callback.__name__ = f"_set_{descriptor.name}"
-    callback.__qualname__ = f"General._set_{descriptor.name}"
+    # discord.py's is_inside_class reads the qualname to decide whether
+    # the callback takes self: without this override it would end in
+    # <locals>, self would not be skipped and every subcommand would break
+    callback.__qualname__ = f"{owner}._set_{descriptor.name}"
     return callback
 
 
@@ -177,7 +177,11 @@ class General(commands.Cog):
     for _descriptor in SETTINGS.values():
         vars()[f"_set_{_descriptor.name}"] = _settings.command(
             name=_descriptor.name
-        )(commands.check(dj_check)(_setting_subcommand(_descriptor)))
+        )(
+            commands.check(dj_check)(
+                _setting_subcommand(_descriptor, __qualname__)
+            )
+        )
     del _descriptor
 
     @commands.hybrid_command(
