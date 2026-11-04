@@ -10,12 +10,7 @@ from config import config
 from musicbot import linkutils, utils, loader, playlists
 from musicbot.song import PartialPlaylist, Song
 from musicbot.bot import MusicBot, Context
-from musicbot.utils import (
-    dj_check,
-    chunks,
-    joining_command,
-    SimplePaginator,
-)
+from musicbot.utils import dj_check, chunks, joining_command, SimplePaginator
 from musicbot.audiocontroller import (
     QueuedPlaylist,
     AudioController,

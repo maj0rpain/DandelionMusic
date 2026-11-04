@@ -311,9 +311,7 @@ def check_voice_permissions(
         raise CheckError(config.VOICE_PERMISSIONS_MISSING)
 
 
-async def connect_to(
-    guild: discord.Guild, channel: discord.VoiceChannel
-):
+async def connect_to(guild: discord.Guild, channel: discord.VoiceChannel):
     """Connects the bot to `channel`, or moves it there when it is
     already in voice."""
     check_voice_permissions(guild, channel)
