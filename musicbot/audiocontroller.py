@@ -182,6 +182,12 @@ class AudioController(object):
             print_exc(file=sys.stderr)
 
     def _pickle_playlist(self):
+        # An idle controller with an empty queue has nothing to save, and
+        # writing it would wipe the last real backup d!restore reloads.
+        # _playing keeps the save when the last track ends on its own, so
+        # a finished queue still leaves an empty backup.
+        if not self.playlist and not self._playing:
+            return
         with open(self.pickle_file, "wb") as f:
             pickle.dump(self.playlist, f)
 
@@ -870,7 +876,6 @@ class AudioController(object):
         # sampled before the teardown below wipes both - see the
         # no-connection branch
         had_session = self._playing or bool(self.playlist)
-        self._pickle_playlist()
         self.stop()
         await self.update_view(None)
         # Cancelled here rather than after the disconnect below, so
