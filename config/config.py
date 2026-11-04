@@ -250,6 +250,11 @@ class Config:
             current_cfg["MAX_SONG_PRELOAD"], 25
         )
 
+        # Keycap emoji exist only for 0-9, and a search needs one result
+        current_cfg["SEARCH_RESULTS"] = max(
+            1, min(current_cfg["SEARCH_RESULTS"], 9)
+        )
+
         self.update(current_cfg)
         return current_cfg
 
