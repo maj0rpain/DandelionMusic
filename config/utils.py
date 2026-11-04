@@ -3,7 +3,7 @@ import sys
 import ast
 import jsonc
 import string
-from typing import TypeVar, Callable, Iterable, Optional, List
+from typing import TypeVar, Callable, Iterable, Optional, List, Tuple
 
 
 T = TypeVar("T")
@@ -41,8 +41,10 @@ _DEFAULT_DRIVERS = {
 }
 
 
-def alchemize_url(url: str) -> str:
+def alchemize_url(url: str) -> Tuple[str, str]:
     """Give a DATABASE_URL an async driver.
+
+    Returns the normalised URL and the driver it ended up with.
 
     A driverless sqlite/postgres/postgresql/mysql URL gets its dialect's
     async default; a named driver is kept, with the `postgres` dialect
@@ -59,9 +61,10 @@ def alchemize_url(url: str) -> str:
     if plus and driver:
         if dialect == "postgres":
             dialect = "postgresql"
-        return f"{dialect}+{driver}://{rest}"
+        return f"{dialect}+{driver}://{rest}", driver
     if not plus and dialect in _DEFAULT_DRIVERS:
-        return f"{_DEFAULT_DRIVERS[dialect]}://{rest}"
+        full = _DEFAULT_DRIVERS[dialect]
+        return f"{full}://{rest}", full.partition("+")[2]
     raise ValueError(
         f"DATABASE_URL scheme {scheme!r} names no async driver "
         f"(accepted forms: {_ACCEPTED_FORMS})"

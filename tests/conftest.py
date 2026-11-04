@@ -6,6 +6,7 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+from config.config import ENV_ALIASES  # noqa: E402
 from config.config import Config as ConfigClass  # noqa: E402
 
 
@@ -29,17 +30,15 @@ def config_factory(tmp_path, monkeypatch):
     # upper-cases keys) meant PATH, SYSTEMROOT and TEMP as well - fine
     # while nothing under test shells out or uses tempfile, and a
     # baffling failure the moment something does.
-    # load_dotenv() puts the .env's values into os.environ, and
-    # Config.load() copies HEROKU_DB into DATABASE_URL. Setting both
-    # first makes monkeypatch restore them to unset afterwards instead
-    # of leaking them into later tests' subprocesses.
+    # load_dotenv() puts the .env's values into os.environ. Setting
+    # DATABASE_URL and HEROKU_DB first makes monkeypatch restore them to
+    # unset afterwards instead of leaking them into later tests'
+    # subprocesses.
     monkeypatch.setenv("DATABASE_URL", "")
     monkeypatch.setenv("HEROKU_DB", "")
     for key in (
         *ConfigClass.as_dict(),
-        "SPOTIPY_CLIENT_ID",
-        "SPOTIPY_CLIENT_SECRET",
-        "HEROKU_DB",
+        *ENV_ALIASES,
         "VC_TIMOUT_DEFAULT",
     ):
         monkeypatch.delenv(key, raising=False)
