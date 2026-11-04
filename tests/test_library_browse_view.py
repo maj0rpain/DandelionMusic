@@ -25,12 +25,14 @@ import pytest
 from musicbot.commands import library as library_commands
 from musicbot.commands.library import (
     BackButton,
+    CheckError,
     LibraryBrowseView,
+    LibrarySearchView,
     LibrarySelect,
     PageButton,
     QueueLevelButton,
 )
-from musicbot.library import LibrarySong
+from musicbot.library import LibrarySong, SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 
 
@@ -1015,7 +1017,9 @@ class ClickInteraction:
             self.deferred += 1
 
         self.response = SimpleNamespace(
-            send_message=send_message, defer=defer
+            send_message=send_message,
+            defer=defer,
+            is_done=lambda: bool(self.sent) or bool(self.deferred),
         )
 
     async def edit_original_response(self, **kwargs):
@@ -1058,18 +1062,46 @@ def test_timeout_after_a_click_edits_by_id_through_its_followup():
     assert all(item.disabled for item in view.children)
 
 
-def test_timeout_after_a_bulk_queue_click_edits_the_view_not_the_placeholder():
+def test_timeout_after_a_bulk_queue_click_edits_the_view_not_the_placeholder(
+    monkeypatch,
+):
+    async def refuse(ctx):
+        raise CheckError("nope")
+
+    monkeypatch.setattr(library_commands, "play_check", refuse)
+
     async def go():
         view = timeout_view(SimpleNamespace())
         click = ClickInteraction()
         assert await view.interaction_check(click)
-        # the click's original response is now "Queueing..."
+        await view.queue(click, [("A", "B", "c.mp3")], "test")
+        # the click's original response is now the "Queueing..." message
+        assert click.sent == [("Queueing...",)]
         await view.on_timeout()
         return view, click
 
     view, click = run(go)
-    assert [m for m, _ in click.followup.edits] == [MESSAGE_ID]
-    assert click.original_edits == []
+    assert click.followup.edits == [(MESSAGE_ID, {"view": view})]
+    assert all("view" not in edit for edit in click.original_edits)
+
+
+def test_search_view_timeout_edits_a_webhook_message_through_the_followup():
+    async def go():
+        message = timeout_message(discord.WebhookMessage)
+        ctx = SimpleNamespace(
+            author=SimpleNamespace(id=AUTHOR_ID), interaction=None
+        )
+        results = [SearchResult("artist", "A", None, None, "A", 1.0)]
+        view = LibrarySearchView(ctx, INDEX, "a", results)
+        view.message = message
+        click = ClickInteraction()
+        assert await view.interaction_check(click)
+        await view.on_timeout()
+        return message, click, view
+
+    message, click, view = run(go)
+    assert message.edits == []
+    assert click.followup.edits == [(MESSAGE_ID, {"view": view})]
 
 
 def test_timeout_uses_the_later_of_two_accepted_clicks():
