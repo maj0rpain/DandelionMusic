@@ -27,12 +27,11 @@ from musicbot.commands.library import (
     BackButton,
     CheckError,
     LibraryBrowseView,
-    LibrarySearchView,
     LibrarySelect,
     PageButton,
     QueueLevelButton,
 )
-from musicbot.library import LibrarySong, SearchResult
+from musicbot.library import LibrarySong
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 
 
@@ -83,14 +82,22 @@ class FakeInteraction:
     message in. `deferred` counts the interaction's acknowledgements.
     """
 
-    def __init__(self, log=None, clicks=None):
+    def __init__(
+        self,
+        log=None,
+        clicks=None,
+        fail=False,
+        fail_on=None,
+        edit_error=None,
+        defer_error=None,
+    ):
         self.edits = []
-        self.fail = False
-        self.fail_on = set()
+        self.fail = fail
+        self.fail_on = set() if fail_on is None else fail_on
         # what a failing edit / defer() raises; an HTTPException by
         # default for the edit, nothing for defer()
-        self.edit_error = None
-        self.defer_error = None
+        self.edit_error = edit_error
+        self.defer_error = defer_error
         self.log = log
         self.clicks = clicks
         self.message = SimpleNamespace(id=MESSAGE_ID)
@@ -164,19 +171,30 @@ class Clicks:
         self.shown = list(view.children)
         self.store.add_view(view, MESSAGE_ID)
 
-    def interaction(self, log=None):
-        return FakeInteraction(log, clicks=self)
+    def interaction(self, log=None, **kwargs):
+        return FakeInteraction(log, clicks=self, **kwargs)
 
     def click(self, kind, interaction, label=None):
         """Clicks the shown `kind` component; for a Select, the
         option labelled `label`."""
         item = next(i for i in self.shown if isinstance(i, kind))
         if label is not None:
-            option = next(o for o in item.options if o.label == label)
-            interaction.data = {"values": [option.value]}
+            pick(item, interaction, label)
         before = len(self.tasks)
         self.store.dispatch_view(item.type.value, item.custom_id, interaction)
         return self.tasks[-1] if len(self.tasks) > before else None
+
+
+def pick(select, interaction, label):
+    """Picks the option of `select` labelled `label`, as discord.py
+    does before it calls the select's callback."""
+    value = next(o.value for o in select.options if o.label == label)
+    interaction.data = {"values": [value]}
+    select._refresh_state(interaction, interaction.data)
+
+
+def level_of(view):
+    return (view.cursor.artist, view.cursor.album)
 
 
 async def finish(*tasks):
@@ -188,8 +206,7 @@ def test_failed_render_keeps_previous_components_live(capsys):
         view = make_view()
         before = list(view.children)
         attached = view._attached
-        interaction = FakeInteraction()
-        interaction.fail = True
+        interaction = FakeInteraction(fail=True)
         view.cursor.descend("Radiohead")
         result = await view.render(interaction, sync_attachments=True)
         return view, before, attached, result
@@ -243,19 +260,6 @@ def test_render_without_sync_leaves_attachments_alone():
     assert view._attached is None
 
 
-def stub_enrichment(view, result=None):
-    """Replaces the disk and HTTP lookup; returns the list each
-    resolution is appended to."""
-    resolved = []
-
-    async def resolve():
-        resolved.append(result)
-        return result
-
-    view._resolve_enrichment = resolve
-    return resolved
-
-
 # thirty artists: two pages of the root's Select
 PAGED = {f"Artist {n:02}": {"Album": [make_song("Song")]} for n in range(30)}
 
@@ -263,16 +267,15 @@ PAGED = {f"Artist {n:02}": {"Album": [make_song("Song")]} for n in range(30)}
 def test_failed_descend_is_undone():
     async def scenario():
         view = make_view(PAGED)
-        resolved = stub_enrichment(view, COVER)
+        resolved = stub_enrichment(view, default=COVER)
         await view.turn_page(FakeInteraction(), 1)
-        interaction = FakeInteraction()
-        interaction.fail = True
+        interaction = FakeInteraction(fail=True)
         await view.descend(interaction, "Artist 27")
         return view, resolved
 
     view, resolved = run(scenario)
 
-    assert (view.cursor.artist, view.cursor.album) == (None, None)
+    assert level_of(view) == (None, None)
     assert view.cursor.page == 1
     assert resolved == []
 
@@ -284,24 +287,20 @@ def test_failed_back_is_undone():
         await view.descend(FakeInteraction(), "Radiohead")
         await view.descend(FakeInteraction(), "OK Computer")
         resolved.clear()
-        interaction = FakeInteraction()
-        interaction.fail = True
+        interaction = FakeInteraction(fail=True)
         await view.go_back(interaction)
         return view, resolved
 
     view, resolved = run(scenario)
 
-    assert (view.cursor.artist, view.cursor.album) == (
-        "Radiohead",
-        "OK Computer",
-    )
+    assert level_of(view) == ("Radiohead", "OK Computer")
     assert resolved == []
 
 
 def test_failed_enrichment_edit_is_healed_by_next_page_turn():
     async def scenario():
         view = make_view()
-        stub_enrichment(view, COVER)
+        stub_enrichment(view, default=COVER)
         interaction = FakeInteraction()
 
         async def edit(**kwargs):
@@ -351,15 +350,17 @@ class Gated(NamedTuple):
     result: Optional[Enrichment]
 
 
-def stub_enrichment_by_level(view, results):
-    """Replaces the lookup with one answering per (artist, album),
-    None for a level `results` does not name. Returns the list each
-    *finished* resolution's level is appended to."""
+def stub_enrichment(view, results=None, default=None):
+    """Replaces the disk and HTTP lookup with one answering per
+    (artist, album) from `results`, `default` for a level it does not
+    name. Returns the list each *finished* resolution's level is
+    appended to."""
+    results = results or {}
     finished = []
 
     async def resolve():
-        level = (view.cursor.artist, view.cursor.album)
-        result = results.get(level)
+        level = level_of(view)
+        result = results.get(level, default)
         if isinstance(result, Gated):
             await result.gate.wait()
             result = result.result
@@ -381,59 +382,74 @@ def carries_enrichment(edit):
     )
 
 
-def _click_during_enrichment_edit(click):
+class EditClick(NamedTuple):
+    view: LibraryBrowseView
+    moved_to: tuple
+    page: int
+    handler: Optional[asyncio.Task]
+    entering: FakeInteraction
+    clicking: FakeInteraction
+    log: list
+
+
+def _click_during_enrichment_edit(click, index=INDEX, artist="Radiohead"):
     """Holds the artist level's enrichment edit in flight and
     dispatches `click(clicks, interaction)` meanwhile."""
 
     async def scenario():
-        view = make_view()
-        stub_enrichment_by_level(view, {("Radiohead", None): COVER})
+        view = make_view(index)
+        stub_enrichment(view, {(artist, None): COVER})
         clicks = Clicks(view)
         log = []
         entering = clicks.interaction(log)
         entering.hold(1)
-        entry = clicks.click(LibrarySelect, entering, label="Radiohead")
+        entry = clicks.click(LibrarySelect, entering, label=artist)
         await entering.in_flight.wait()
         clicking = clicks.interaction(log)
         handler = click(clicks, clicking)
         await settle()
-        moved_to = (view.cursor.artist, view.cursor.album)
+        moved_to = level_of(view)
         page = view.cursor.page
         entering.release()
         await finish(entry, handler)
-        return moved_to, page, handler, entering, clicking, log
+        return EditClick(
+            view, moved_to, page, handler, entering, clicking, log
+        )
 
     return run(scenario)
 
 
 def test_back_click_during_enrichment_edit_is_accepted():
-    moved_to, _, handler, entering, clicking, log = (
-        _click_during_enrichment_edit(
-            lambda clicks, i: clicks.click(BackButton, i)
-        )
+    result = _click_during_enrichment_edit(
+        lambda clicks, i: clicks.click(BackButton, i)
     )
 
-    assert handler is not None
-    assert moved_to == (None, None)
-    assert clicking.deferred == 1
-    assert len(entering.edits) == 2
-    assert [who for who, _ in log[:3]] == [entering, entering, clicking]
-    assert log[1][1]["attachments"][0].filename == "cover.png"
+    assert result.handler is not None
+    assert result.moved_to == (None, None)
+    assert result.clicking.deferred == 1
+    assert len(result.entering.edits) == 2
+    assert [who for who, _ in result.log[:3]] == [
+        result.entering,
+        result.entering,
+        result.clicking,
+    ]
+    assert result.log[1][1]["attachments"][0].filename == "cover.png"
 
 
 def test_select_click_during_enrichment_edit_is_accepted():
-    moved_to, _, handler, entering, clicking, log = (
-        _click_during_enrichment_edit(
-            lambda clicks, i: clicks.click(
-                LibrarySelect, i, label="OK Computer"
-            )
-        )
+    result = _click_during_enrichment_edit(
+        lambda clicks, i: clicks.click(LibrarySelect, i, label="OK Computer")
     )
+    log = result.log
 
-    assert handler is not None
-    assert moved_to == ("Radiohead", "OK Computer")
-    assert len(entering.edits) == 2
-    assert [who for who, _ in log[:3]] == [entering, entering, clicking]
+    assert result.handler is not None
+    assert result.moved_to == ("Radiohead", "OK Computer")
+    assert len(result.entering.edits) == 2
+    assert [who for who, _ in log[:3]] == [
+        result.entering,
+        result.entering,
+        result.clicking,
+    ]
     assert log[2][1]["embed"].title != log[1][1]["embed"].title
 
 
@@ -446,12 +462,12 @@ def test_queue_click_during_enrichment_edit_queues_the_level(monkeypatch):
 
     monkeypatch.setattr(library_commands, "queue_songs", queue_songs)
 
-    moved_to, _, handler, _, clicking, _ = _click_during_enrichment_edit(
+    result = _click_during_enrichment_edit(
         lambda clicks, i: clicks.click(QueueLevelButton, i)
     )
 
-    assert handler is not None
-    assert clicking.deferred == 1
+    assert result.handler is not None
+    assert result.clicking.deferred == 1
     assert sorted(f for _, _, f in queued) == [
         "Airbag.flac",
         "Lucky.flac",
@@ -464,34 +480,22 @@ def test_page_click_during_enrichment_edit_turns_the_page_once():
         "Artist": {f"Album {n:02}": [make_song("Song")] for n in range(30)}
     }
 
-    async def scenario():
-        view = make_view(index)
-        stub_enrichment_by_level(view, {("Artist", None): COVER})
-        clicks = Clicks(view)
-        entering = clicks.interaction()
-        entering.hold(1)
-        entry = clicks.click(LibrarySelect, entering, label="Artist")
-        await entering.in_flight.wait()
-        clicking = clicks.interaction()
-        handler = clicks.click(PageButton, clicking)
-        await settle()
-        page = view.cursor.page
-        entering.release()
-        await finish(entry, handler)
-        return handler, page, view
+    result = _click_during_enrichment_edit(
+        lambda clicks, i: clicks.click(PageButton, i),
+        index=index,
+        artist="Artist",
+    )
 
-    handler, page, view = run(scenario)
-
-    assert handler is not None
-    assert page == 1
-    assert view.cursor.page == 1
+    assert result.handler is not None
+    assert result.page == 1
+    assert result.view.cursor.page == 1
 
 
 def test_enrichment_resolving_after_moving_on_is_not_drawn():
     async def scenario():
         view = make_view()
         gate = asyncio.Event()
-        finished = stub_enrichment_by_level(
+        finished = stub_enrichment(
             view, {("Radiohead", None): Gated(gate, STALE)}
         )
         entering = FakeInteraction()
@@ -536,7 +540,7 @@ def test_enrichment_resolving_after_moving_on_is_not_drawn():
 def test_second_select_click_during_first_draw_is_turned_away():
     async def scenario():
         view = make_view()
-        stub_enrichment_by_level(view, {})
+        stub_enrichment(view)
         clicks = Clicks(view)
         entering = clicks.interaction()
         entering.hold(0)
@@ -553,7 +557,7 @@ def test_second_select_click_during_first_draw_is_turned_away():
 
     assert handler is not None
     assert second.deferred == 1
-    assert (view.cursor.artist, view.cursor.album) == ("Radiohead", None)
+    assert level_of(view) == ("Radiohead", None)
 
 
 def test_second_click_during_page_turn_is_turned_away():
@@ -587,7 +591,7 @@ def test_select_from_previous_page_during_page_turn_opens_its_entry():
     # callback is awaited directly.
     async def scenario():
         view = make_view(PAGED)
-        stub_enrichment_by_level(view, {})
+        stub_enrichment(view)
         clicks = Clicks(view)
         previous = next(
             i for i in view.children if isinstance(i, LibrarySelect)
@@ -600,31 +604,23 @@ def test_select_from_previous_page_during_page_turn_opens_its_entry():
         await finish(turn)
         assert view.cursor.page == 1
         picking = clicks.interaction()
-        picking.data = {
-            "values": [
-                next(
-                    o.value for o in previous.options if o.label == "Artist 03"
-                )
-            ]
-        }
-        previous._refresh_state(picking, picking.data)
+        pick(previous, picking, "Artist 03")
         await previous.callback(picking)
         return view
 
     view = run(scenario)
 
-    assert (view.cursor.artist, view.cursor.album) == ("Artist 03", None)
+    assert level_of(view) == ("Artist 03", None)
 
 
 def test_click_after_failed_first_draw_acts_on_the_shown_level():
     async def scenario():
         view = make_view()
-        stub_enrichment_by_level(view, {})
+        stub_enrichment(view)
         clicks = Clicks(view)
-        failing = clicks.interaction()
-        failing.fail = True
+        failing = clicks.interaction(fail=True)
         await finish(clicks.click(LibrarySelect, failing, label="Radiohead"))
-        undone = (view.cursor.artist, view.cursor.album)
+        undone = level_of(view)
         again = clicks.interaction()
         await finish(clicks.click(LibrarySelect, again, label="The Beatles"))
         return undone, view
@@ -632,16 +628,15 @@ def test_click_after_failed_first_draw_acts_on_the_shown_level():
     undone, view = run(scenario)
 
     assert undone == (None, None)
-    assert (view.cursor.artist, view.cursor.album) == ("The Beatles", None)
+    assert level_of(view) == ("The Beatles", None)
 
 
 def test_click_after_failed_page_turn_acts_on_the_shown_page():
     async def scenario():
         view = make_view(PAGED)
-        stub_enrichment_by_level(view, {})
+        stub_enrichment(view)
         clicks = Clicks(view)
-        failing = clicks.interaction()
-        failing.fail = True
+        failing = clicks.interaction(fail=True)
         await finish(clicks.click(PageButton, failing))
         undone_page = view.cursor.page
         again = clicks.interaction()
@@ -651,16 +646,15 @@ def test_click_after_failed_page_turn_acts_on_the_shown_page():
     undone_page, view = run(scenario)
 
     assert undone_page == 0
-    assert (view.cursor.artist, view.cursor.album) == ("Artist 03", None)
+    assert level_of(view) == ("Artist 03", None)
 
 
 def test_click_after_failed_enrichment_edit_acts_on_the_shown_level():
     async def scenario():
         view = make_view()
-        stub_enrichment_by_level(view, {("Radiohead", None): COVER})
+        stub_enrichment(view, {("Radiohead", None): COVER})
         clicks = Clicks(view)
-        entering = clicks.interaction()
-        entering.fail_on = {1}
+        entering = clicks.interaction(fail_on={1})
         await finish(clicks.click(LibrarySelect, entering, label="Radiohead"))
         again = clicks.interaction()
         await finish(clicks.click(BackButton, again))
@@ -668,14 +662,14 @@ def test_click_after_failed_enrichment_edit_acts_on_the_shown_level():
 
     view = run(scenario)
 
-    assert (view.cursor.artist, view.cursor.album) == (None, None)
+    assert level_of(view) == (None, None)
 
 
 def test_leaving_a_level_lets_its_enrichment_finish_undrawn():
     async def scenario():
         view = make_view()
         gate = asyncio.Event()
-        finished = stub_enrichment_by_level(
+        finished = stub_enrichment(
             view, {("Radiohead", None): Gated(gate, STALE)}
         )
         entering = FakeInteraction()
@@ -698,7 +692,7 @@ def _descend_past_kept_components():
 
     async def scenario():
         view = make_view()
-        stub_enrichment_by_level(view, {})
+        stub_enrichment(view)
         clicks = Clicks(view)
         kept = list(clicks.shown)
         await finish(
@@ -716,15 +710,14 @@ def test_component_from_an_earlier_scope_is_acknowledged_and_ignored():
         view, clicks, kept = await _descend_past_kept_components()()
         select = next(i for i in kept if isinstance(i, LibrarySelect))
         picking = clicks.interaction()
-        picking.data = {"values": ["1"]}
-        select._refresh_state(picking, picking.data)
+        pick(select, picking, "The Beatles")
         await select.callback(picking)
         return view, picking
 
     view, picking = run(scenario)
 
     assert picking.deferred == 1
-    assert (view.cursor.artist, view.cursor.album) == ("Radiohead", None)
+    assert level_of(view) == ("Radiohead", None)
 
 
 def test_stranger_on_a_stale_scope_component_is_told_it_is_not_theirs():
@@ -759,7 +752,7 @@ def test_stranger_on_a_stale_scope_component_is_told_it_is_not_theirs():
 
     assert replies == ["This belongs to someone else."]
     assert stranger.deferred == 0
-    assert (view.cursor.artist, view.cursor.album) == ("Radiohead", None)
+    assert level_of(view) == ("Radiohead", None)
 
 
 def reset_error():
@@ -785,11 +778,9 @@ def test_descend_edit_reset_is_undone_and_next_pick_opens_it():
     async def scenario():
         view = make_view()
         resolved = stub_enrichment(view)
-        interaction = FakeInteraction()
-        interaction.fail = True
-        interaction.edit_error = reset_error()
+        interaction = FakeInteraction(fail=True, edit_error=reset_error())
         raised = await attempt(view.descend(interaction, "Radiohead"))
-        cursor = (view.cursor.artist, view.cursor.album)
+        cursor = level_of(view)
         await view.descend(FakeInteraction(), "The Beatles")
         return view, resolved, raised, cursor
 
@@ -797,8 +788,8 @@ def test_descend_edit_reset_is_undone_and_next_pick_opens_it():
 
     assert isinstance(raised, aiohttp.ClientOSError)
     assert cursor == (None, None)
-    assert (view.cursor.artist, view.cursor.album) == ("The Beatles", None)
-    assert resolved == [None]
+    assert level_of(view) == ("The Beatles", None)
+    assert resolved == [("The Beatles", None)]
 
 
 def test_back_edit_reset_is_undone():
@@ -808,68 +799,47 @@ def test_back_edit_reset_is_undone():
         await view.descend(FakeInteraction(), "Radiohead")
         await view.descend(FakeInteraction(), "OK Computer")
         resolved.clear()
-        interaction = FakeInteraction()
-        interaction.fail = True
-        interaction.edit_error = reset_error()
+        interaction = FakeInteraction(fail=True, edit_error=reset_error())
         raised = await attempt(view.go_back(interaction))
         return view, resolved, raised
 
     view, resolved, raised = run(scenario)
 
     assert isinstance(raised, aiohttp.ClientOSError)
-    assert (view.cursor.artist, view.cursor.album) == (
-        "Radiohead",
-        "OK Computer",
-    )
+    assert level_of(view) == ("Radiohead", "OK Computer")
     assert resolved == []
-
-
-def test_failed_page_turn_http_error_is_undone(capsys):
-    async def scenario():
-        view = make_view(PAGED)
-        failing = FakeInteraction()
-        failing.fail = True
-        await view.turn_page(failing, 1)
-        page = view.cursor.page
-        await view.turn_page(FakeInteraction(), 1)
-        return page, view.cursor.page
-
-    page, after_next = run(scenario)
-
-    assert page == 0
-    assert after_next == 1
-    assert "library: render failed:" in capsys.readouterr().err
 
 
 def test_page_turn_edit_reset_is_undone():
     async def scenario():
         view = make_view(PAGED)
-        interaction = FakeInteraction()
-        interaction.fail = True
-        interaction.edit_error = reset_error()
+        interaction = FakeInteraction(fail=True, edit_error=reset_error())
         raised = await attempt(view.turn_page(interaction, 1))
-        return view, raised
+        page = view.cursor.page
+        await view.turn_page(FakeInteraction(), 1)
+        return view, raised, page
 
-    view, raised = run(scenario)
+    view, raised, page = run(scenario)
 
     assert isinstance(raised, aiohttp.ClientOSError)
-    assert view.cursor.page == 0
+    assert page == 0
+    assert view.cursor.page == 1
 
 
 def test_descend_cancelled_edit_is_undone():
     async def scenario():
         view = make_view()
         resolved = stub_enrichment(view)
-        interaction = FakeInteraction()
-        interaction.fail = True
-        interaction.edit_error = asyncio.CancelledError()
+        interaction = FakeInteraction(
+            fail=True, edit_error=asyncio.CancelledError()
+        )
         raised = await attempt(view.descend(interaction, "Radiohead"))
         return view, resolved, raised
 
     view, resolved, raised = run(scenario)
 
     assert isinstance(raised, asyncio.CancelledError)
-    assert (view.cursor.artist, view.cursor.album) == (None, None)
+    assert level_of(view) == (None, None)
     assert resolved == []
 
 
@@ -878,8 +848,7 @@ def test_failed_clamped_page_turn_is_undone():
         view = make_view(PAGED)
         await view.turn_page(FakeInteraction(), 1)
         last = view.cursor.page
-        failing = FakeInteraction()
-        failing.fail = True
+        failing = FakeInteraction(fail=True)
         await view.turn_page(failing, 5)
         return last, view.cursor.page
 
@@ -893,14 +862,11 @@ def test_enrichment_in_flight_still_lands_after_failed_page_turn():
     async def scenario():
         view = make_view()
         gate = asyncio.Event()
-        stub_enrichment_by_level(
-            view, {("Radiohead", None): Gated(gate, COVER)}
-        )
+        stub_enrichment(view, {("Radiohead", None): Gated(gate, COVER)})
         entering = FakeInteraction()
         entry = asyncio.create_task(view.descend(entering, "Radiohead"))
         await settle()
-        failing = FakeInteraction()
-        failing.fail = True
+        failing = FakeInteraction(fail=True)
         await view.turn_page(failing, 1)
         gate.set()
         await entry
@@ -911,8 +877,14 @@ def test_enrichment_in_flight_still_lands_after_failed_page_turn():
     assert carries_enrichment(entering.edits[-1])
 
 
-@pytest.mark.parametrize("error", [reset_error, not_found])
-@pytest.mark.parametrize("click", ["descend", "back", "page"])
+@pytest.mark.parametrize(
+    "click, error",
+    [
+        ("descend", reset_error),
+        ("back", not_found),
+        ("page", reset_error),
+    ],
+)
 def test_failed_defer_leaves_cursor_unchanged(click, error):
     async def scenario():
         view = make_view(PAGED if click == "page" else INDEX)
@@ -920,9 +892,8 @@ def test_failed_defer_leaves_cursor_unchanged(click, error):
         if click == "back":
             await view.descend(FakeInteraction(), "Radiohead")
             resolved.clear()
-        before = (view.cursor.artist, view.cursor.album, view.cursor.page)
-        interaction = FakeInteraction()
-        interaction.defer_error = error()
+        before = (*level_of(view), view.cursor.page)
+        interaction = FakeInteraction(defer_error=error())
         if click == "descend":
             coro = view.descend(interaction, "Radiohead")
         elif click == "back":
@@ -930,7 +901,7 @@ def test_failed_defer_leaves_cursor_unchanged(click, error):
         else:
             coro = view.turn_page(interaction, 1)
         raised = await attempt(coro)
-        after = (view.cursor.artist, view.cursor.album, view.cursor.page)
+        after = (*level_of(view), view.cursor.page)
         return before, after, raised, resolved
 
     before, after, raised, resolved = run(scenario)
@@ -1120,25 +1091,6 @@ def test_timeout_after_a_bulk_queue_click_edits_the_view_not_the_placeholder(
     assert all("view" not in edit for edit in click.original_edits)
 
 
-def test_search_view_timeout_edits_a_webhook_message_through_the_followup():
-    async def go():
-        message = timeout_message(discord.WebhookMessage)
-        ctx = SimpleNamespace(
-            author=SimpleNamespace(id=AUTHOR_ID), interaction=None
-        )
-        results = [SearchResult("artist", "A", None, None, "A", 1.0)]
-        view = LibrarySearchView(ctx, INDEX, "a", results)
-        view.message = message
-        click = ClickInteraction()
-        assert await view.interaction_check(click)
-        await view.on_timeout()
-        return message, click, view
-
-    message, click, view = run(go)
-    assert message.edits == []
-    assert click.followup.edits == [(MESSAGE_ID, {"view": view})]
-
-
 def test_timeout_uses_the_later_of_two_accepted_clicks():
     async def go():
         view = timeout_view(SimpleNamespace())
@@ -1189,11 +1141,11 @@ def test_timeout_edits_a_webhook_message_view_through_the_click_followup():
         click = ClickInteraction()
         assert await view.interaction_check(click)
         await view.on_timeout()
-        return message, click
+        return message, click, view
 
-    message, click = run(go)
+    message, click, view = run(go)
     assert message.edits == []
-    assert len(click.followup.edits) == 1
+    assert click.followup.edits == [(MESSAGE_ID, {"view": view})]
 
 
 def test_timeout_without_a_click_edits_a_webhook_message_directly():
