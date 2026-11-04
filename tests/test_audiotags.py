@@ -4,6 +4,8 @@ from pathlib import Path
 
 import pytest
 from mutagen.asf import ASF
+from mutagen.flac import FLAC, Picture
+from mutagen.mp4 import MP4, MP4Cover
 from mutagen.id3 import (
     APIC,
     ID3,
@@ -18,7 +20,7 @@ from mutagen.id3 import (
 from mutagen.aiff import AIFF
 from mutagen.wave import WAVE
 
-from musicbot.audiotags import read_artwork, read_tags
+from musicbot.audiotags import AudioTags, read_artwork, read_tags
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -181,4 +183,186 @@ def test_unsupported_apic_mime_gives_no_cover(maker, tmp_path):
 def test_no_apic_gives_no_cover(maker, tmp_path):
     path = maker(tmp_path)
     tag(path, {"title": "Song"})
+    assert read_artwork(path) is None
+
+
+def make_mp3(tmp_path: Path) -> Path:
+    path = tmp_path / "a.mp3"
+    # a run of valid MPEG-1 layer 3 frames (128 kbps, 44.1 kHz)
+    path.write_bytes((b"\xff\xfb\x90\x00" + b"\x00" * 413) * 20)
+    return path
+
+
+def make_flac(tmp_path: Path) -> Path:
+    path = tmp_path / "a.flac"
+    shutil.copy(FIXTURES / "silent.flac", path)
+    return path
+
+
+def make_mp4(tmp_path: Path) -> Path:
+    path = tmp_path / "a.m4a"
+    shutil.copy(FIXTURES / "silent.m4a", path)
+    return path
+
+
+def tag_mp3(path: Path, pictures=()) -> None:
+    id3 = ID3()
+    for ptype, mime in pictures:
+        id3.add(
+            APIC(
+                encoding=3,
+                mime=mime,
+                type=ptype,
+                desc="",
+                data=b"img" + bytes([int(ptype)]),
+            )
+        )
+    id3.save(path)
+
+
+def tag_flac(path: Path, values: dict = None, pictures=()) -> None:
+    audio = FLAC(path)
+    for field, value in (values or {}).items():
+        audio[EASY_KEYS[field]] = [value]
+    for ptype, mime in pictures:
+        picture = Picture()
+        picture.type = ptype
+        picture.mime = mime
+        picture.data = b"img" + bytes([int(ptype)])
+        audio.add_picture(picture)
+    audio.save()
+
+
+def tag_mp4(path: Path, values: dict = None, covers=()) -> None:
+    audio = MP4(path)
+    audio.add_tags()
+    for field, value in (values or {}).items():
+        audio[MP4_KEYS[field]] = [value]
+    if covers:
+        audio["covr"] = [MP4Cover(data, fmt) for data, fmt in covers]
+    audio.save()
+
+
+EASY_KEYS = {
+    "title": "title",
+    "artist": "artist",
+    "album": "album",
+    "album_artist": "albumartist",
+    "genre": "genre",
+    "year": "date",
+}
+MP4_KEYS = {
+    "title": "\xa9nam",
+    "artist": "\xa9ART",
+    "album": "\xa9alb",
+    "album_artist": "aART",
+    "genre": "\xa9gen",
+    "year": "\xa9day",
+}
+SIX = ("title", "artist", "album", "album_artist", "genre", "year")
+
+
+@pytest.mark.parametrize(
+    "maker, tagger",
+    [(make_flac, tag_flac), (make_mp4, tag_mp4)],
+    ids=["flac", "mp4"],
+)
+def test_flac_and_mp4_read_all_six_fields(maker, tagger, tmp_path):
+    path = maker(tmp_path)
+    tagger(path, FULL)
+    tags = read_tags(path)
+    assert tuple(getattr(tags, f) for f in SIX) == (
+        "Song",
+        "Artist",
+        "Album",
+        "Various",
+        "Rock",
+        2007,
+    )
+
+
+def test_mp3_front_cover_picked_over_earlier_non_front(tmp_path):
+    path = make_mp3(tmp_path)
+    tag_mp3(
+        path,
+        [
+            (PictureType.OTHER, "image/png"),
+            (PictureType.COVER_FRONT, "image/jpeg"),
+        ],
+    )
+    assert read_artwork(path) == (b"img" + bytes([3]), "jpg")
+
+
+def test_mp3_without_cover_gives_none(tmp_path):
+    path = make_mp3(tmp_path)
+    tag_mp3(path)
+    assert read_artwork(path) is None
+
+
+def test_flac_front_cover_picked_over_earlier_non_front(tmp_path):
+    path = make_flac(tmp_path)
+    tag_flac(
+        path,
+        pictures=[
+            (PictureType.OTHER, "image/png"),
+            (PictureType.COVER_FRONT, "image/jpeg"),
+        ],
+    )
+    assert read_artwork(path) == (b"img" + bytes([3]), "jpg")
+
+
+def test_flac_without_front_marked_picture_gives_the_first(tmp_path):
+    path = make_flac(tmp_path)
+    tag_flac(
+        path,
+        pictures=[
+            (PictureType.OTHER, "image/png"),
+            (PictureType.COVER_BACK, "image/jpeg"),
+        ],
+    )
+    assert read_artwork(path) == (b"img" + bytes([0]), "png")
+
+
+def test_flac_without_cover_gives_none(tmp_path):
+    path = make_flac(tmp_path)
+    tag_flac(path, {"title": "Song"})
+    assert read_artwork(path) is None
+
+
+def test_mp4_png_cover_yields_png(tmp_path):
+    path = make_mp4(tmp_path)
+    tag_mp4(path, covers=[(b"pngdata", MP4Cover.FORMAT_PNG)])
+    assert read_artwork(path) == (b"pngdata", "png")
+
+
+def test_mp4_jpeg_cover_yields_jpg(tmp_path):
+    path = make_mp4(tmp_path)
+    tag_mp4(path, covers=[(b"jpgdata", MP4Cover.FORMAT_JPEG)])
+    assert read_artwork(path) == (b"jpgdata", "jpg")
+
+
+def test_mp4_without_cover_gives_none(tmp_path):
+    path = make_mp4(tmp_path)
+    tag_mp4(path, {"title": "Song"})
+    assert read_artwork(path) is None
+
+
+def test_wma_has_no_artwork(tmp_path):
+    path = make_wma(tmp_path)
+    tag(path, FULL)
+    assert read_artwork(path) is None
+
+
+def test_cover_larger_than_max_bytes_gives_none(tmp_path):
+    path = make_flac(tmp_path)
+    tag_flac(path, pictures=[(PictureType.COVER_FRONT, "image/jpeg")])
+    assert read_artwork(path, max_bytes=3) is None
+    assert read_artwork(path, max_bytes=4) is not None
+
+
+@pytest.mark.parametrize("suffix", [".mp3", ".flac", ".m4a", ".wav", ".wma"])
+def test_corrupt_file_gives_empty_tags_and_no_cover(suffix, tmp_path):
+    path = tmp_path / f"bad{suffix}"
+    path.write_bytes(b"not audio at all" * 8)
+    assert read_tags(path) == AudioTags(*[None] * 10)
     assert read_artwork(path) is None
