@@ -155,6 +155,13 @@ def active_only(ctx):
     return True
 
 
+@commands.check
+def playlists_enabled(ctx):
+    if not config.ENABLE_PLAYLISTS:
+        raise utils.CheckError(config.PLAYLISTS_ARE_DISABLED)
+    return True
+
+
 def _playlist_ref(ctx, name: str) -> playlists.PlaylistRef:
     return playlists.PlaylistRef(str(ctx.guild.id), name)
 
@@ -499,6 +506,8 @@ class Music(commands.Cog):
     async def _playlist_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
+        if not config.ENABLE_PLAYLISTS:
+            return []
         choices = await playlists.list_names(
             self.bot.DbSession, str(interaction.guild.id), prefix=current
         )
@@ -511,6 +520,7 @@ class Music(commands.Cog):
         aliases=["pl"],
         invoke_without_command=True,
     )
+    @playlists_enabled
     async def _playlist(self, ctx):
         await ctx.send("Use subcommands to manage playlists.")
 
@@ -521,11 +531,8 @@ class Music(commands.Cog):
         help=config.HELP_SAVE_PLAYLIST_SHORT,
     )
     @commands.check(dj_check)
+    @playlists_enabled
     async def _playlist_save(self, ctx, name: str):
-        if not config.ENABLE_PLAYLISTS:
-            await ctx.send(config.PLAYLISTS_ARE_DISABLED)
-            return
-
         await ctx.defer()
         songs = [
             PlaylistEntry(song.webpage_url, song.title)
@@ -551,6 +558,7 @@ class Music(commands.Cog):
     )
     @app_commands.autocomplete(name=_playlist_autocomplete)
     @joins_voice
+    @playlists_enabled
     async def _playlist_load(
         self,
         ctx,
@@ -582,6 +590,7 @@ class Music(commands.Cog):
     )
     @commands.check(dj_check)
     @app_commands.autocomplete(name=_playlist_autocomplete)
+    @playlists_enabled
     async def _playlist_remove(
         self,
         ctx,
@@ -604,6 +613,7 @@ class Music(commands.Cog):
         description=config.HELP_LIST_PLAYLISTS_LONG,
         help=config.HELP_LIST_PLAYLISTS_SHORT,
     )
+    @playlists_enabled
     async def _playlist_list(self, ctx):
         names = await playlists.list_names(
             ctx.bot.DbSession, str(ctx.guild.id)
@@ -623,6 +633,7 @@ class Music(commands.Cog):
     )
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
+    @playlists_enabled
     async def _playlist_show(
         self,
         ctx,
@@ -659,6 +670,7 @@ class Music(commands.Cog):
     )
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
+    @playlists_enabled
     async def _playlist_add_song(
         self,
         ctx,
@@ -694,6 +706,7 @@ class Music(commands.Cog):
     )
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
+    @playlists_enabled
     async def _playlist_remove_song(
         self,
         ctx,
@@ -727,6 +740,7 @@ class Music(commands.Cog):
     )
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
+    @playlists_enabled
     async def _playlist_move_song(
         self,
         ctx,
