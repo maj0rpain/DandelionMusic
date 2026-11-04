@@ -6,7 +6,7 @@ from enum import Enum
 from inspect import getmodule
 from pathlib import Path
 from traceback import print_exc
-from urllib.parse import unquote, unquote_to_bytes, urlparse
+from urllib.parse import unquote_to_bytes, urlparse
 from datetime import datetime, timezone
 from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context as mp_context
