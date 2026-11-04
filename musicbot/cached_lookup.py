@@ -126,9 +126,10 @@ class CachedLookup(Generic[K, V]):
                 self._cache[key] = result
         finally:
             # an owner cancelled mid-lookup skips both branches above:
-            # nothing cached, no cooldown, and its waiters get None
-            pending = self._futures.pop(key)
-            if not pending.done():
-                pending.set_result(result)
+            # nothing cached, no cooldown, and its waiters get None. Only
+            # this owner pops and resolves the future (waiters reach it
+            # only through asyncio.shield, and clear() leaves in-flight
+            # futures alone), so it cannot already be done
+            self._futures.pop(key).set_result(result)
 
         return result

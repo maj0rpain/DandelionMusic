@@ -16,6 +16,7 @@ from musicbot.commands.developer import (
 )
 
 PREFIX, SUFFIX = OUTPUT_FORMAT.split("{}")
+DISCORD_MESSAGE_LIMIT = 2000
 
 
 class FakeContext:
@@ -81,7 +82,7 @@ def test_long_output_is_split_within_the_limit():
     text = "\n".join(lines)
     sent = report(py(f"print({text!r})"))
     assert len(sent) > 1
-    assert all(len(p) <= 2000 for p in sent)
+    assert all(len(p) <= DISCORD_MESSAGE_LIMIT for p in sent)
     joined = "".join(unwrap(p) for p in sent)
     expected = "".join(text.split())
     assert "".join(joined.split()) == expected
@@ -108,7 +109,7 @@ def test_nonzero_exit_without_output_says_no_output_then_exit():
 def test_single_unbroken_line_is_split_within_the_limit():
     sent = report(py("print('y' * 5000)"))
     assert len(sent) > 1
-    assert all(len(p) <= 2000 for p in sent)
+    assert all(len(p) <= DISCORD_MESSAGE_LIMIT for p in sent)
     assert "".join(unwrap(p) for p in sent) == "y" * 5000
 
 
