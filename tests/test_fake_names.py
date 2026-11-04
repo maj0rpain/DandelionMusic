@@ -167,8 +167,6 @@ def test_no_test_fake_shadows_a_shared_fake():
     fakes = _shared_fakes(_shared_sources())
     problems = []
     for path in sorted(TESTS.glob("test_*.py")):
-        if path.name == Path(__file__).name:
-            continue
         problems += shadowing_names(path.name, _read(path), fakes)
     assert problems == []
 

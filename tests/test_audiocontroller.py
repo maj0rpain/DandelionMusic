@@ -14,6 +14,8 @@ import types
 
 import pytest
 
+from musicbot import playlists
+from musicbot.commands.music import Music
 from controller_helpers import (
     _backup,
     _backup_path,
@@ -26,8 +28,6 @@ from controller_helpers import (
     _songs,
     _titles,
 )
-from musicbot import playlists
-from musicbot.commands.music import Music
 from controller_seam import PlaybackVoiceClient, StubLoader, controller_seam
 from db_seam import in_memory_db
 from discord_fakes import PLAYER_BUTTONS

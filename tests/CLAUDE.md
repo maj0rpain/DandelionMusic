@@ -22,11 +22,11 @@ Only the parts that need no Discord connection: config loading, `Playlist`, save
 
 ## Shared helpers
 
-A shared test-helper module is any of `discord_fakes`, `helpers`, `developer_fakes`, `setting_fakes`, `controller_seam`, `controller_helpers` and `db_seam`. No two of them define the same name, and no fake in a test module takes a shared fake's name: one whose shape differs takes a distinct, descriptive name (`EditingInteraction`, `CountingVoiceChannel`, `RespondedInteraction`), and one with the same shape imports the shared fake. `tests/test_fake_names.py` asserts both.
-
 `tests/helpers.py` holds `run()`, the suite's one bounded coroutine runner (a coroutine run through `asyncio.run` with a 5 s bound), and `FakeClock`. Import them with `from helpers import ...`; never define a per-file `run(coro)`.
 
 Import each shared test-helper module (listed below) in a single `from <module> import ...` statement, in one final block after the third-party, `config` and `musicbot` imports. The one exception: where the import depends on setup code (a `sys.path` or monkeypatch prelude), the helper block, still one block, goes directly after that setup code.
+
+A shared test-helper module is any of `discord_fakes`, `helpers`, `developer_fakes`, `setting_fakes`, `controller_seam`, `controller_helpers` and `db_seam`. No two of them define the same name, and no fake in a test module takes a shared fake's name: one whose shape differs takes a distinct, descriptive name (`EditingInteraction`, `CountingVoiceChannel`, `RespondedInteraction`), and one with the same shape imports the shared fake. `tests/test_fake_names.py` asserts both.
 
 ## Subprocess probes
 
