@@ -130,9 +130,14 @@ class AudioController(object):
         self.pickle_file = Path("backup") / f"playlist_{guild.id}.pickle"
         self.pickle_file.parent.mkdir(parents=True, exist_ok=True)
         self._next_song = None
-        # bumped by play_song() for every track it starts; a track
-        # end carries the generation it was started as
+        # The start token: bumped when a start is committed to (see
+        # _claim_start()), before its preload. A track end carries the
+        # generation it was started as; a start whose generation is no
+        # longer current has been overtaken.
         self._generation = 0
+        # the generation of the start under way, or None - see
+        # is_idle()
+        self._pending: Optional[int] = None
         self.guild = guild
 
         # True from the moment playback starts until the queue runs
@@ -368,6 +373,35 @@ class AudioController(object):
             client.is_playing() or client.is_paused()
         )
 
+    def is_idle(self) -> bool:
+        """True when a new track may be started: the voice client is
+        neither playing nor paused and no start is pending.
+
+        A pending start is one play_song() has committed to but not yet
+        handed to the voice client: its preload is still awaited, so
+        the voice client reads idle and current_song reads None, yet a
+        second start would make discord.py refuse play(). Every "start
+        if idle" path asks this. Loop only."""
+        return not self.is_active() and self._pending is None
+
+    def _claim_start(self) -> int:
+        """Commits to a start: bumps the generation, which
+        supersedes any pending start, and marks the new one pending.
+        Called in the same loop step as the decision to start. A track
+        a skip picked for an earlier track's end is not this one's
+        next. Loop only."""
+        self._generation += 1
+        self._pending = self._generation
+        self._next_song = None
+        return self._generation
+
+    def _invalidate_start(self):
+        """Drops a pending start, if any, so that it plays nothing
+        once its preload returns. Loop only."""
+        if self._pending is not None:
+            self._generation += 1
+            self._pending = None
+
     def track_history(self):
         history_string = config.INFO_HISTORY_TITLE
         for trackname in self.playlist.trackname_history:
@@ -445,7 +479,7 @@ class AudioController(object):
         With a track playing, it picks the next track and stops the
         voice client: the after= hop of that track (see
         _on_track_end()) does the advance. With nothing playing, it
-        advances directly."""
+        advances directly, dropping a pending start."""
         _require_loop()
 
         if self.is_active():
@@ -453,6 +487,7 @@ class AudioController(object):
             self.guild.voice_client.stop()
             return
 
+        self._invalidate_start()
         self._advance(forced)
 
     def _track_end_callback(self, generation: int):
@@ -517,6 +552,7 @@ class AudioController(object):
             # nothing left to advance to - the next song to start is a
             # fresh one, and play_song() should say so
             self._playing = False
+            self._pending = None
             # if self.pickle_file.exists():
             #     self.pickle_file.unlink()
             if not self.timer.triggered and self.guild.voice_client:
@@ -530,18 +566,32 @@ class AudioController(object):
                 )
             return
 
-        coro = self.play_song(next_song)
+        coro = self.play_song(next_song, self._claim_start())
         self.add_task(coro)
 
-    async def play_song(self, song: Song):
-        """Plays a song object"""
+    async def play_song(self, song: Song, generation: Optional[int] = None):
+        """Plays a song object. `generation` is the start the caller
+        already claimed for it (see _claim_start()); without one, the
+        start is claimed here, before the preload.
 
-        if not await self._preload(song):
+        Once the preload returns, a start that was overtaken - a stop,
+        a disconnect or a newer start replaced it, or the bot left
+        voice - is dropped: nothing plays, is said or advances."""
+        if generation is None:
+            generation = self._claim_start()
+
+        preloaded = await self._preload(song)
+        if self._overtaken(generation):
+            return
+
+        if not preloaded:
             if self.command_channel:
                 await self.command_channel.send(
                     f"{config.SONGINFO_ERROR}\n"
                     f"(Skipped: {song.title or song.webpage_url})"
                 )
+                if self._overtaken(generation):
+                    return
             self.next_song(forced=True)
             return
 
@@ -570,12 +620,9 @@ class AudioController(object):
         # raises below disconnects, and stop() clears it there.
         was_idle = not self._playing
         self._playing = True
-        # a track end from an earlier track arriving after this one
-        # has started must not end it - see _on_track_end() - and a
-        # track a skip picked for an earlier track's end is not this
-        # one's next
-        self._generation += 1
-        self._next_song = None
+        # no longer pending once it reaches play(); the generation
+        # token that guards the start is _claim_start()'s
+        self._pending = None
         try:
             self.guild.voice_client.play(
                 discord.PCMVolumeTransformer(
@@ -587,7 +634,7 @@ class AudioController(object):
                     ),
                     float(self.volume) / 100.0,
                 ),
-                after=self._track_end_callback(self._generation),
+                after=self._track_end_callback(generation),
             )
         except discord.ClientException:
             await self.udisconnect("playback error")
@@ -613,11 +660,22 @@ class AudioController(object):
 
         self._preload_queue()
 
+    def _overtaken(self, generation: int) -> bool:
+        if generation != self._generation:
+            # a newer start owns the pending mark
+            return True
+        if self.guild.voice_client is None:
+            # abandoned while still the current start: release its mark
+            # so the bot is not left busy
+            self._pending = None
+            return True
+        return False
+
     async def ensure_playing(self):
         """Starts the head of the queue if nothing is playing and the
         queue is non-empty; otherwise preloads the queue. The one
         "start if idle" rule for everything that adds to the queue."""
-        if self.current_song is None and len(self.playlist) > 0:
+        if self.is_idle() and len(self.playlist) > 0:
             await self.play_song(self.playlist[0])
         else:
             self._preload_queue()
@@ -646,7 +704,7 @@ class AudioController(object):
         discord.py refuse play() and the controller disconnect (#24).
         Reports NOTHING_TO_RESTORE, playing nothing, when there is no
         queue to restore."""
-        if self.is_active():
+        if not self.is_idle():
             return RestoreResult.REFUSED_WHILE_ACTIVE
         self.load_pickle_playlist()
         if not self.playlist:
@@ -766,7 +824,7 @@ class AudioController(object):
         # seconds of it on a network-mounted library. One extra round
         # trip buys that back; loading a single track costs about
         # 1.5ms.
-        if self.current_song is None and len(tracks) > 1:
+        if self.is_idle() and len(tracks) > 1:
             songs += await loader.load_local_songs(tracks[:1])
             tail = tracks[1:]
             if songs[0] is not None:
@@ -849,6 +907,10 @@ class AudioController(object):
         self.playlist.loop = LoopMode.OFF
         self.playlist.clear()
         self.playlist.next()
+        # a pending start would otherwise play once its preload ends;
+        # a playing track needs no bump - its teardown hop must stay
+        # current
+        self._invalidate_start()
 
         if not self.is_active():
             return
@@ -866,7 +928,7 @@ class AudioController(object):
             return False
 
         if not self.is_active():
-            self.add_task(self.play_song(prev_song))
+            self.add_task(self.play_song(prev_song, self._claim_start()))
         else:
             self._next_song = prev_song
             self.guild.voice_client.stop()
@@ -880,7 +942,10 @@ class AudioController(object):
         sett = self.bot.sessions.settings(self.guild)
 
         if sett.vc_timeout and (
-            not self.guild.voice_client.is_playing()
+            (
+                not self.guild.voice_client.is_playing()
+                and self._pending is None
+            )
             or all(m.bot for m in self.guild.voice_client.channel.members)
         ):
             await self.udisconnect("inactivity timeout")
