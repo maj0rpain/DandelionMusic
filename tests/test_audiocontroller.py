@@ -14,6 +14,7 @@ import types
 
 import pytest
 
+from db_seam import in_memory_db
 from controller_seam import FakeVoiceClient, StubLoader, controller_seam
 from musicbot.commands.music import Music
 
@@ -153,6 +154,9 @@ def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
     monkeypatch.chdir(caller)
     work = tmp_path / "work"
     before = sys.modules.get("musicbot.loader")
+    from config import config
+
+    announce_before = config.ANNOUNCE_DISCONNECT
 
     with controller_seam(work) as (built, _):
         assert isinstance(sys.modules["musicbot.loader"], StubLoader)
@@ -161,6 +165,7 @@ def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
 
     after = sys.modules.get("musicbot.loader")
     assert after is before
+    assert config.ANNOUNCE_DISCONNECT == announce_before
     assert not isinstance(
         getattr(sys.modules.get("musicbot"), "loader", None), StubLoader
     )
@@ -170,15 +175,6 @@ def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
     )
     assert not (caller / "backup").exists()
     assert (work / built.pickle_file).exists()
-
-
-@pytest.fixture
-def no_disconnect_sound(monkeypatch):
-    """Stops a disconnect from announcing itself to a channel the
-    fakes do not have."""
-    from config import config
-
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
 
 
 def test_ensure_playing_starts_the_head_of_the_queue_when_idle(
@@ -399,7 +395,7 @@ def _restore_while_active(controller, monkeypatch, tmp_path, pause):
 
 @pytest.mark.parametrize("pause", [False, True])
 def test_restore_while_active_is_refused_and_changes_nothing(
-    controller, no_disconnect_sound, monkeypatch, tmp_path, pause
+    controller, monkeypatch, tmp_path, pause
 ):
     ac = sys.modules[type(controller).__module__]
     (playlist, backup_bytes), result = _restore_while_active(
@@ -581,7 +577,7 @@ def test_attach_view_records_an_interactions_original_response(controller):
 
 
 def test_dispose_cancels_the_timer_and_every_pending_task(
-    controller, no_disconnect_sound, monkeypatch
+    controller, monkeypatch
 ):
 
     async def run():
@@ -870,24 +866,6 @@ def test_the_after_callback_drops_the_track_end_once_the_loop_is_closed(
     assert _played(controller) == ["first"]
 
 
-async def _saved_playlist_db(ac, guild_id, name, entries):
-    """An in-memory database holding one saved playlist, built on the
-    playlists and settings modules the controller itself sees."""
-    from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
-    from sqlalchemy.orm import sessionmaker
-    from sqlalchemy.pool import StaticPool
-
-    settings = sys.modules["musicbot.settings"]
-    engine = create_async_engine("sqlite+aiosqlite://", poolclass=StaticPool)
-    async with engine.connect() as conn:
-        await conn.run_sync(settings.run_migrations)
-    factory = sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
-    await ac.playlists.save(
-        factory, ac.playlists.PlaylistRef(guild_id, name), entries
-    )
-    return engine, factory
-
-
 async def _drain(controller):
     while controller._tasks:
         await asyncio.gather(*controller._tasks)
@@ -1063,7 +1041,7 @@ def test_a_skip_with_loop_all_records_the_skipped_song(
 
 
 def test_two_skips_before_the_end_hops_back_record_each_started_song_once(
-    controller, no_disconnect_sound, monkeypatch
+    controller, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second", "third", "fourth")
@@ -1106,7 +1084,7 @@ def test_a_stop_while_playing_leaves_the_stopped_song_in_the_history(
 
 
 def test_a_disconnect_while_playing_leaves_the_song_in_the_history(
-    controller, no_disconnect_sound, monkeypatch
+    controller, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
@@ -1144,7 +1122,7 @@ def test_a_song_without_a_direct_url_is_not_recorded(controller, monkeypatch):
 
 
 def test_a_play_the_voice_client_refuses_is_not_recorded(
-    controller, no_disconnect_sound, monkeypatch
+    controller, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "refused")
@@ -1260,9 +1238,6 @@ def test_a_track_end_while_reconnecting_still_advances(
 def test_the_teardown_hop_after_a_disconnect_keeps_the_backup(
     controller, monkeypatch, tmp_path
 ):
-    from config import config
-
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
     old = controller.guild.voice_client
@@ -1348,7 +1323,6 @@ def _idle_timer_that_fires_at_once(controller, monkeypatch):
     from config import config
 
     monkeypatch.setattr(config, "VC_TIMEOUT", 0)
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
     controller.bot.sessions.settings(controller.guild).vc_timeout = True
     voice_client = controller.guild.voice_client
     disconnects = []
@@ -1595,18 +1569,15 @@ def _with_saved_playlist_db(controller, run_in_db):
 
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
-        engine, factory = await _saved_playlist_db(
-            ac,
-            "1234",
-            "mix",
-            [ac.playlists.PlaylistEntry(SAVED_URL, "stale title")],
-        )
-        controller.bot.DbSession = factory
-        try:
+        async with in_memory_db(sys.modules["musicbot.settings"]) as factory:
+            await ac.playlists.save(
+                factory,
+                ac.playlists.PlaylistRef("1234", "mix"),
+                [ac.playlists.PlaylistEntry(SAVED_URL, "stale title")],
+            )
+            controller.bot.DbSession = factory
             controller.guild.voice_client.playing = True
             return await run_in_db(ac, factory)
-        finally:
-            await engine.dispose()
 
     return asyncio.run(run())
 
@@ -1696,9 +1667,6 @@ class _Channel:
 def _pending_start(controller, stub_loader, monkeypatch, *titles, result=None):
     """Queues `titles` and starts the first one with its preload held.
     Returns (release event, the start's task, its song)."""
-    from config import config
-
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
     _fake_ffmpeg(monkeypatch)
     controller.bot.loop = asyncio.get_running_loop()
     controller.command_channel = _Channel()
@@ -2088,7 +2056,7 @@ def test_a_superseded_start_dropping_out_leaves_the_newer_one_pending(
 
 
 def test_a_second_disconnect_leaves_the_backup_holding_the_queue(
-    controller, no_disconnect_sound, monkeypatch, tmp_path
+    controller, monkeypatch, tmp_path
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
@@ -2106,7 +2074,7 @@ def test_a_second_disconnect_leaves_the_backup_holding_the_queue(
 
 
 def test_a_disconnect_after_a_stop_leaves_the_stop_backup(
-    controller, no_disconnect_sound, monkeypatch, tmp_path
+    controller, monkeypatch, tmp_path
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
@@ -2123,7 +2091,7 @@ def test_a_disconnect_after_a_stop_leaves_the_stop_backup(
 
 
 def test_disconnecting_a_new_idle_controller_keeps_an_existing_backup(
-    controller, no_disconnect_sound, monkeypatch, tmp_path
+    controller, monkeypatch, tmp_path
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "kept", "also kept")
