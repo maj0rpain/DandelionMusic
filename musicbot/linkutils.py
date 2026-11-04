@@ -21,7 +21,6 @@ from yt_dlp.extractor.lazy_extractors import LazyLoadExtractor
 from config import config
 from musicbot import loader
 
-
 # Limits on the network calls the extraction worker makes. One guild's
 # call that blocks holds the worker for every guild, so none may block
 # long. Deliberately not Config settings: nobody has a reason to tune them.
@@ -95,7 +94,7 @@ url_regex = re.compile(
     r".,<>?«»“”‘’])))"
 )
 spotify_regex = re.compile(
-    r"^https?://open\.spotify\.com/([^/]+/)?"
+    r"^(?i:https?://open\.spotify\.com)/([^/]+/)?"
     r"(?P<type>track|playlist|album)/(?P<code>\w+)"
 )
 
@@ -170,7 +169,7 @@ async def fetch_spotify(url: str) -> Optional[Union[dict, List[str]]]:
         return await fetch_spotify_playlist(url, url_type, match.group("code"))
 
     if spotify_api:
-        track_data = spotify_api.track(url)
+        track_data = spotify_api.track(match.group("code"))
         title = track_data["name"]
         artist = track_data["artists"][0]["name"]
     else:
@@ -253,6 +252,31 @@ def fetch_playlist_with_api(
                 file=sys.stderr,
             )
     return links
+
+
+_spotify_uri_regex = re.compile(r"spotify:(track|album|playlist):(\w+)")
+_TRAILING_PUNCTUATION = ".,!?;:"
+
+
+def normalize_track(text: str) -> str:
+    """Cleans up user-typed track text before it is classified: strips
+    whitespace, unwraps one <...> around a single URL, drops trailing
+    sentence punctuation after a single URL and rewrites spotify: URIs.
+    Anything else is returned unchanged apart from the strip."""
+    text = text.strip()
+    if (
+        len(text) > 2
+        and text[0] == "<"
+        and text[-1] == ">"
+        and not re.search(r"[\s<>]", text[1:-1])
+    ):
+        text = text[1:-1]
+    if m := _spotify_uri_regex.fullmatch(text):
+        return f"https://open.spotify.com/{m.group(1)}/{m.group(2)}"
+    bare = text.rstrip(_TRAILING_PUNCTUATION)
+    if bare != text and url_regex.fullmatch(bare):
+        return bare
+    return text
 
 
 def get_urls(content: str) -> List[str]:

@@ -2,10 +2,18 @@
 URL routing. Each one decides something the bot then acts on, and each
 is a pure function of its input."""
 
+import asyncio
+
 import pytest
 
 from musicbot.audiotags import AudioTags, _parse_year, nice_title
-from musicbot.linkutils import SiteTypes, get_urls, identify_url
+from musicbot import linkutils, loader
+from musicbot.linkutils import (
+    SiteTypes,
+    get_urls,
+    identify_url,
+    normalize_track,
+)
 from musicbot.loader import _parse_expire
 
 
@@ -114,3 +122,111 @@ class TestGetUrls:
 
     def test_no_links(self):
         assert get_urls("nothing here") == []
+
+
+SPOTIFY_ID = "4cOdK2wGLETKBW3PvgPWqT"
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("  https://youtu.be/xyz  ", "https://youtu.be/xyz"),
+        ("<https://youtu.be/xyz>", "https://youtu.be/xyz"),
+        ("  <https://youtu.be/xyz> ", "https://youtu.be/xyz"),
+        ("https://youtu.be/xyz.", "https://youtu.be/xyz"),
+        ("https://youtu.be/xyz,", "https://youtu.be/xyz"),
+        ("https://youtu.be/xyz!", "https://youtu.be/xyz"),
+        ("https://youtu.be/xyz?", "https://youtu.be/xyz"),
+        ("https://youtu.be/xyz;", "https://youtu.be/xyz"),
+        ("https://youtu.be/xyz:", "https://youtu.be/xyz"),
+        (
+            f"spotify:track:{SPOTIFY_ID}",
+            f"https://open.spotify.com/track/{SPOTIFY_ID}",
+        ),
+        (
+            f"spotify:album:{SPOTIFY_ID}",
+            f"https://open.spotify.com/album/{SPOTIFY_ID}",
+        ),
+        (
+            f"spotify:playlist:{SPOTIFY_ID}",
+            f"https://open.spotify.com/playlist/{SPOTIFY_ID}",
+        ),
+        (
+            f"HTTPS://OPEN.SPOTIFY.COM/track/{SPOTIFY_ID}",
+            f"HTTPS://OPEN.SPOTIFY.COM/track/{SPOTIFY_ID}",
+        ),
+        (
+            f"https://open.spotify.com/TRACK/{SPOTIFY_ID}",
+            f"https://open.spotify.com/TRACK/{SPOTIFY_ID}",
+        ),
+        ("never gonna give you up.", "never gonna give you up."),
+        ("  never gonna give you up  ", "never gonna give you up"),
+        ("hello.", "hello."),
+        ("<never gonna give you up>", "<never gonna give you up>"),
+    ],
+)
+def test_normalize_track(text, expected):
+    assert normalize_track(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"https://open.spotify.com/track/{SPOTIFY_ID}",
+        f"HTTPS://OPEN.SPOTIFY.COM/track/{SPOTIFY_ID}",
+        f"Https://Open.Spotify.Com/album/{SPOTIFY_ID}",
+    ],
+)
+def test_spotify_links_are_recognised_whatever_the_case_of_scheme_and_host(
+    text,
+):
+    assert identify_url(text) is SiteTypes.SPOTIFY
+
+
+def test_spotify_link_with_an_upper_case_type_segment_is_not_spotify():
+    assert (
+        identify_url(f"https://open.spotify.com/TRACK/{SPOTIFY_ID}")
+        is not SiteTypes.SPOTIFY
+    )
+
+
+def test_fetch_spotify_with_credentials_looks_the_track_up_by_id(
+    monkeypatch,
+):
+    calls = []
+
+    class FakeApi:
+        def track(self, arg):
+            calls.append(arg)
+            return {"name": "T", "artists": [{"name": "A"}]}
+
+    monkeypatch.setattr(linkutils, "spotify_api", FakeApi())
+    monkeypatch.setattr(
+        loader, "_search_youtube", lambda query: [{"url": "u"}]
+    )
+    asyncio.run(
+        linkutils.fetch_spotify(f"HTTPS://OPEN.SPOTIFY.COM/track/{SPOTIFY_ID}")
+    )
+    assert calls == [SPOTIFY_ID]
+
+
+def test_load_song_classifies_and_loads_the_cleaned_text(monkeypatch):
+    fetched = []
+
+    async def fake_fetch(url):
+        fetched.append(url)
+        return {"url": "https://example.com/a", "title": "t"}
+
+    extracted = []
+
+    def fake_extract(url, ie=None):
+        extracted.append(url)
+        return {"url": url, "title": "t"}
+
+    monkeypatch.setattr(loader, "fetch_spotify", fake_fetch)
+    monkeypatch.setattr(loader, "extract_info", fake_extract)
+    monkeypatch.setattr(loader, "_loop", asyncio.new_event_loop())
+    loader._load_song("<https://open.spotify.com/track/x>")
+    loader._load_song("https://youtu.be/dQw4w9WgXcQ.")
+    assert fetched == ["https://open.spotify.com/track/x"]
+    assert extracted[0] == "https://youtu.be/dQw4w9WgXcQ"

@@ -30,6 +30,7 @@ from musicbot.linkutils import (
     get_ie,
     fetch_spotify,
     identify_url,
+    normalize_track,
     init as init_session,
     stop as stop_session,
 )
@@ -301,6 +302,7 @@ def _library_track_path(track: str) -> Path:
 
 
 def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
+    track = normalize_track(track)
     host = identify_url(track)
 
     if host == SiteTypes.NOT_URL:
