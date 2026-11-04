@@ -124,8 +124,7 @@ def test_config_rejects_a_non_bare_driver_naming_only_the_driver(
 ):
     with pytest.raises(ValueError) as exc:
         config_factory(
-            SECRETS_ENV
-            + "DATABASE_URL=postgresql+asyncpg>=1://u:secret@h/d\n"
+            SECRETS_ENV + "DATABASE_URL=postgresql+asyncpg>=1://u:secret@h/d\n"
         )
     msg = str(exc.value)
     assert "asyncpg>=1" in msg
