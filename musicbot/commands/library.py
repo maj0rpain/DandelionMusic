@@ -20,6 +20,7 @@ from musicbot.utils import (
     joining_command,
     play_check,
 )
+from musicbot.views import OwnedView
 
 PAGE_SIZE = 25
 
@@ -317,14 +318,13 @@ class LevelSnapshot(NamedTuple):
     enrichment: Optional[library_metadata.Enrichment]
 
 
-class LibraryView(discord.ui.View):
+class LibraryView(OwnedView):
     """Ownership and lifetime handling shared by the browser and the
     search results - both are single-user views on a message that
     outlives their 5-minute timeout."""
 
     def __init__(self, ctx, index: library.LibraryIndex):
-        super().__init__(timeout=300)
-        self.ctx = ctx
+        super().__init__(ctx, timeout=300)
         # the snapshot this view was built from: a `d!library refresh`
         # landing mid-session must not change what the already-shown
         # entries point at
@@ -353,17 +353,6 @@ class LibraryView(discord.ui.View):
         # the other's guard and let a second click queue the same album
         # twice.
         self._busy: int = 0
-        # whatever Context.send handed back, which is not always a
-        # Message: the prefix paths and the deferred search path give
-        # a Message/WebhookMessage, but answering an interaction
-        # directly returns an InteractionCallbackResponse (discord.py
-        # >= 2.5) that has no edit(). on_timeout() below discriminates
-        # on the type rather than on which path ran.
-        self.message = None
-        # the latest accepted interaction: exactly the clicks that
-        # restart discord.py's view timeout, so at on_timeout() it is
-        # under 5 minutes old and its followup token still valid
-        self._last_click: Optional[discord.Interaction] = None
 
     @contextmanager
     def busy(self):
@@ -374,30 +363,19 @@ class LibraryView(discord.ui.View):
         finally:
             self._busy -= 1
 
-    async def interaction_check(
-        self, interaction: discord.Interaction
-    ) -> bool:
-        if interaction.user.id != self.ctx.author.id:
-            await interaction.response.send_message(
-                "This belongs to someone else.", ephemeral=True
-            )
-            return False
-        if self._busy:
-            # (Why a click reaches this check during a redraw: see
-            # _busy.) Acknowledged silently rather than answered with an
-            # ephemeral complaint. The clicks the guard catches are the
-            # second half of a double-click, or clicks made after an
-            # accepted one while its draw waits behind an artwork
-            # upload (see LibraryBrowseView._enter_level()). Telling
-            # someone off for either reads as a malfunction. The one
-            # operation still slow enough to be worth explaining - a
-            # bulk queue - puts up its own ephemeral "Queueing..."
-            # message while it runs, so the user can already see why
-            # nothing else is responding.
-            await interaction.response.defer()
-            return False
-        self._last_click = interaction
-        return True
+    def accepts_click(self) -> bool:
+        # (Why a click reaches this check during a redraw: see
+        # _busy.) Acknowledged silently rather than answered with an
+        # ephemeral complaint. The clicks the guard catches are the
+        # second half of a double-click, or clicks made after an
+        # accepted one while its draw waits behind an artwork
+        # upload (see LibraryBrowseView._enter_level()). Telling
+        # someone off for either reads as a malfunction. The one
+        # operation still slow enough to be worth explaining - a
+        # bulk queue - puts up its own ephemeral "Queueing..."
+        # message while it runs, so the user can already see why
+        # nothing else is responding.
+        return not self._busy
 
     async def queue(
         self, interaction: discord.Interaction, triples, source: str
@@ -416,40 +394,8 @@ class LibraryView(discord.ui.View):
         # silently client-side (discord.py stops dispatching to a
         # timed-out view's items) and the message's Select/Buttons
         # stay visibly enabled forever.
-        for item in self.children:
-            item.disabled = True
-        try:
-            # A view sent after a defer goes out as a followup with its
-            # own id, so @original is only the deferred placeholder and
-            # editing it would leave the real components enabled
-            # forever - those have to be edited directly. Answering an
-            # interaction without deferring puts the view on the
-            # original response, and hands back an
-            # InteractionCallbackResponse rather than the message, so
-            # that case has to go through the interaction. Testing what
-            # we actually hold keeps this right whichever path ran.
-            #
-            # A bot-sent channel message (the prefix paths) is edited
-            # directly: its bot token never expires. Anything else
-            # goes through the last accepted click's followup when
-            # there is one, because the command's interaction token
-            # dies 15 minutes after the command while each click
-            # restarts the 5-minute timeout. Edited by id, never via
-            # edit_original_response: after a bulk queue that click's
-            # original response is the "Queueing..." placeholder.
-            click = self._last_click
-            if isinstance(self.message, discord.Message) and not isinstance(
-                self.message, discord.WebhookMessage
-            ):
-                await self.message.edit(view=self)
-            elif click is not None:
-                await click.followup.edit_message(click.message.id, view=self)
-            elif isinstance(self.message, discord.Message):
-                await self.message.edit(view=self)
-            elif self.ctx.interaction is not None:
-                await self.ctx.interaction.edit_original_response(view=self)
-        except discord.HTTPException:
-            pass
+        self.disable()
+        await self.refresh_message()
 
 
 class LibraryBrowseView(LibraryView):
