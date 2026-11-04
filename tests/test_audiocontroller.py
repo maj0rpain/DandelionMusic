@@ -1060,9 +1060,7 @@ def test_two_skips_before_the_end_hops_back_record_each_started_song_once(
     assert _history(controller) == ["first", "second"]
 
 
-def test_prev_while_playing_records_the_outgoing_song(
-    controller, monkeypatch
-):
+def test_prev_while_playing_records_the_outgoing_song(controller, monkeypatch):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
@@ -1188,16 +1186,9 @@ def test_each_repeat_of_a_single_track_loop_is_recorded(
 # alone: it is what d!restore reloads.
 
 
-def _quiet_disconnect(monkeypatch):
-    from config import config
-
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
-
-
 def test_a_second_disconnect_leaves_the_backup_holding_the_queue(
-    controller, monkeypatch, tmp_path
+    controller, no_disconnect_sound, monkeypatch, tmp_path
 ):
-    _quiet_disconnect(monkeypatch)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
@@ -1214,9 +1205,8 @@ def test_a_second_disconnect_leaves_the_backup_holding_the_queue(
 
 
 def test_a_disconnect_after_a_stop_leaves_the_stop_backup(
-    controller, monkeypatch, tmp_path
+    controller, no_disconnect_sound, monkeypatch, tmp_path
 ):
-    _quiet_disconnect(monkeypatch)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
@@ -1232,9 +1222,8 @@ def test_a_disconnect_after_a_stop_leaves_the_stop_backup(
 
 
 def test_disconnecting_a_new_idle_controller_keeps_an_existing_backup(
-    controller, monkeypatch, tmp_path
+    controller, no_disconnect_sound, monkeypatch, tmp_path
 ):
-    _quiet_disconnect(monkeypatch)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "kept", "also kept")
 
@@ -1288,9 +1277,8 @@ def test_a_queue_that_plays_to_its_end_leaves_an_empty_backup(
 
 
 def test_disconnecting_while_playing_leaves_the_backup_holding_the_queue(
-    controller, monkeypatch, tmp_path
+    controller, no_disconnect_sound, monkeypatch, tmp_path
 ):
-    _quiet_disconnect(monkeypatch)
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
