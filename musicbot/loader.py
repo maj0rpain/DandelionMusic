@@ -136,7 +136,6 @@ def _now() -> datetime:
     return datetime.now(timezone.utc)
 
 
-
 class LoaderNotRunning(RuntimeError):
     """A loader call was made with no extraction worker running."""
 
