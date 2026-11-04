@@ -218,6 +218,8 @@ def voice_ctx(
     command_channel=None,
     dj_role=None,
     admin=False,
+    owner=False,
+    roles=(),
 ):
     sett = types.SimpleNamespace(
         command_channel=command_channel,
@@ -225,10 +227,12 @@ def voice_ctx(
         dj_role=dj_role,
         vc_timeout=True,  # get_or_create() does not autojoin
     )
-    bot = make_bot({guild: "controller"}, settings={guild: sett})
+    bot = make_bot(
+        {guild: "controller"}, is_owner=owner, settings={guild: sett}
+    )
     author = types.SimpleNamespace(
         id=1,
-        roles=[],
+        roles=[types.SimpleNamespace(id=r) for r in roles],
         voice=(
             types.SimpleNamespace(channel=author_in) if author_in else None
         ),
@@ -318,6 +322,37 @@ class TestPlayCheck:
         ctx = voice_ctx(guild, guild.channel("b", humans=1))
         assert asyncio.run(play_check(ctx)) is True
         assert guild.events == []
+
+
+class TestVoiceCheckBypass:
+    def ctx(self, **kwargs):
+        guild = VoiceGuild()
+        guild.put_bot_in(guild.channel("a", humans=1))
+        return voice_ctx(guild, guild.channel("b", humans=1), **kwargs)
+
+    def test_refuses_a_member_when_no_dj_role_is_set(self):
+        ctx = self.ctx()
+        assert refusal(voice_check(ctx)) == config.USER_NOT_IN_VC_MESSAGE
+
+    def test_admits_an_admin(self):
+        assert asyncio.run(voice_check(self.ctx(admin=True))) is True
+
+    def test_admits_the_bot_owner(self):
+        assert asyncio.run(voice_check(self.ctx(owner=True))) is True
+
+    def test_admits_a_dj_role_holder(self):
+        ctx = self.ctx(dj_role=99, roles=[99])
+        assert asyncio.run(voice_check(ctx)) is True
+
+    def test_refuses_a_member_without_the_set_dj_role(self):
+        ctx = self.ctx(dj_role=99, roles=[5])
+        assert refusal(voice_check(ctx)) == config.USER_NOT_IN_VC_MESSAGE
+
+    def test_extra_owners_get_no_bypass(self, monkeypatch):
+        monkeypatch.setattr(config, "EXTRA_OWNERS", [1])
+        assert refusal(voice_check(self.ctx())) == (
+            config.USER_NOT_IN_VC_MESSAGE
+        )
 
 
 class TestJoinVoice:

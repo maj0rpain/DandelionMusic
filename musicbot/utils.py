@@ -228,12 +228,16 @@ async def voice_check(ctx: Context):
             # current channel doesn't have any user in it
             return True
 
-    try:
-        if await dj_check(ctx):
-            # DJs and admins can always run commands
-            return True
-    except CheckError:
-        pass
+    # Admins and the application owner always pass; a DJ passes only
+    # when the guild has set a DJ role and the member holds it. With no
+    # DJ role set, nobody else bypasses (EXTRA_OWNERS included).
+    if ctx.channel.permissions_for(ctx.author).administrator:
+        return True
+    if await ctx.bot.is_owner(ctx.author):
+        return True
+    dj_role = get_settings(ctx).dj_role
+    if dj_role and int(dj_role) in [r.id for r in ctx.author.roles]:
+        return True
 
     raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
 
