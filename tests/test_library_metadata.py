@@ -538,5 +538,10 @@ def test_playback_spotify_client_keeps_default_limits():
     api = linkutils.spotify_api
     if api is None:
         pytest.skip("no Spotify credentials configured")
-    assert api.requests_timeout == 5
-    assert api.retries == 3
+    import inspect
+
+    from spotipy import Spotify
+
+    params = inspect.signature(Spotify.__init__).parameters
+    for name in ("requests_timeout", "retries", "status_retries"):
+        assert getattr(api, name) == params[name].default, name
