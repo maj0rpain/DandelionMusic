@@ -121,6 +121,70 @@ def test_dockerfile_installs_db_drivers_without_dev():
         assert flag in run
 
 
+def _dockerfile_commands():
+    from pathlib import Path
+
+    text = (Path(__file__).parent.parent / "Dockerfile").read_text()
+    return [
+        c.strip()
+        for c in text.replace("\\\n", " ").splitlines()
+        if c.strip() and not c.strip().startswith("#")
+    ]
+
+
+def _index(commands, predicate):
+    return [i for i, c in enumerate(commands) if predicate(c)]
+
+
+def test_dockerfile_runs_as_a_non_root_user():
+    users = [
+        c.split()[1]
+        for c in _dockerfile_commands()
+        if c.split()[0] == "USER"
+    ]
+    assert users and users[-1].split(":")[0] not in ("root", "0")
+
+
+def test_dockerfile_copies_source_only_after_dependencies():
+    commands = _dockerfile_commands()
+    (sync,) = _index(commands, lambda c: "uv sync" in c)
+    (copy_all,) = _index(commands, lambda c: c.startswith("COPY . ."))
+    assert copy_all > sync
+    for i in _index(commands, lambda c: "apt-get" in c):
+        assert commands[i].startswith("RUN") and i < sync
+    early_copies = [
+        c.split()[1:-1]
+        for c in commands[:sync]
+        if c.startswith("COPY") and "--from=" not in c
+    ]
+    assert early_copies == [["pyproject.toml", "uv.lock"]]
+
+
+def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
+    import re
+
+    commands = _dockerfile_commands()
+    images = [c.split()[1] for c in commands if c.startswith("FROM")]
+    copied = []
+    for c in commands:
+        m = re.match(r"COPY .*--from=(\S+)", c)
+        if m:
+            copied.append(m.group(1))
+    for image in images + copied:
+        assert ":" in image and not image.endswith(":latest")
+    for image in copied:
+        assert re.search(r":(?:\w+-)?v?\d+\.\d+\.\d+$", image)
+    assert not any(re.search(r"curl.*\|\s*(ba)?sh", c) for c in commands)
+
+
+def test_dockerfile_apt_installs_are_minimal_and_clean():
+    for c in _dockerfile_commands():
+        if "apt-get install" not in c:
+            continue
+        assert "curl" not in c.split() and "unzip" not in c.split()
+        assert "rm -rf /var/lib/apt/lists/*" in c
+
+
 def test_extra_owners_defaults_to_empty(config_factory):
     """An unconfigured deployment must trust only the application
     owner(s) Discord reports - this replaced a hardcoded user id."""
