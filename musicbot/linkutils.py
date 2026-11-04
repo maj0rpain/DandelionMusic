@@ -30,13 +30,21 @@ from musicbot.truncation import Truncation, TruncationReason
 # nobody has a reason to tune them.
 # longest wait honoured for one Spotify 429 Retry-After header (seconds)
 RETRY_AFTER_MAX = 5
-# total time limit of one aiohttp request (seconds)
+# total time limit of one aiohttp or Discord API request (seconds)
 HTTP_TIMEOUT = 15
+# time limit of one Spotify API or token request (seconds)
+SPOTIFY_TIMEOUT = 5
 
 
 def spotify_session() -> requests.Session:
     """A requests session whose retries match spotipy's own defaults,
-    except that a Retry-After wait is capped at RETRY_AFTER_MAX."""
+    except that a Retry-After wait is capped at RETRY_AFTER_MAX.
+
+    Hand-copied from spotipy 2.26.0. connect, read, allowed_methods and
+    backoff_factor are copied from Spotify._build_session; total and
+    status are read from Spotify.max_retries and status_forcelist from
+    Spotify.default_retry_codes. retry_after_max is our one addition.
+    tests/test_worker_network_limits.py fails if spotipy drifts."""
     retry = Retry(
         total=Spotify.max_retries,
         connect=None,
@@ -61,11 +69,12 @@ def build_spotify_api(client_id, client_secret) -> Optional[Spotify]:
         session = spotify_session()
         return Spotify(
             requests_session=session,
+            requests_timeout=SPOTIFY_TIMEOUT,
             auth_manager=SpotifyClientCredentials(
                 client_id=client_id,
                 client_secret=client_secret,
                 requests_session=session,
-                requests_timeout=5,
+                requests_timeout=SPOTIFY_TIMEOUT,
                 cache_handler=MemoryCacheHandler(),
             ),
         )
@@ -98,9 +107,11 @@ url_regex = re.compile(
     r'"'
     r".,<>?«»“”‘’])))"
 )
+# the Spotify types the link and URI patterns accept, case-sensitive
+_SPOTIFY_TYPES = "track|playlist|album"
 spotify_regex = re.compile(
     r"^(?i:https?://open\.spotify\.com)/([^/]+/)?"
-    r"(?P<type>track|playlist|album)/(?P<code>\w+)"
+    rf"(?P<type>{_SPOTIFY_TYPES})/(?P<code>\w+)"
 )
 
 headers = {}
@@ -274,24 +285,25 @@ def fetch_playlist_with_api(
             truncation = Truncation(first_total, TruncationReason.API_ERROR)
 
     links = []
-    for track in tracks:
-        item = track.get("track", track)
-        if item is None:
+    for item in tracks:
+        track = item.get("track", item)
+        if track is None:
             # Spotify sends "track": null for removed/unavailable songs
             continue
         try:
-            links.append(item["external_urls"]["spotify"])
+            links.append(track["external_urls"]["spotify"])
         except KeyError as e:
             print(
-                f"Warning: Cannot extract URL from {track}:"
+                f"Warning: Cannot extract URL from {item}:"
                 f" field {e.args[0]!r} is missing",
                 file=sys.stderr,
             )
     return SpotifyTracks(links, truncation)
 
 
-_spotify_uri_regex = re.compile(r"(?i:spotify):(track|album|playlist):(\w+)")
+_spotify_uri_regex = re.compile(rf"(?i:spotify):({_SPOTIFY_TYPES}):(\w+)")
 _TRAILING_PUNCTUATION = ".,!?;:"
+_FILE_SCHEME = "file://"
 
 
 def _is_single_url(s: str) -> bool:
@@ -315,7 +327,8 @@ def normalize_track(text: str) -> str:
     """Cleans up user-typed track text before it is classified: strips
     whitespace, unwraps one <...> around a single URL (trailing
     punctuation may follow the wrapper or sit inside it), drops trailing
-    sentence punctuation after a single URL and rewrites spotify: URIs.
+    sentence punctuation after a single URL, rewrites spotify: URIs and
+    lower-cases a file: scheme written in any case.
     Anything else is returned unchanged apart from the strip."""
     text = text.strip()
     for candidate in (text, text.rstrip(_TRAILING_PUNCTUATION)):
@@ -327,6 +340,9 @@ def normalize_track(text: str) -> str:
         text = bare
     if m := _spotify_uri_regex.fullmatch(text):
         return f"https://open.spotify.com/{m.group(1)}/{m.group(2)}"
+    scheme_len = len(_FILE_SCHEME)
+    if text[:scheme_len].lower() == _FILE_SCHEME and _is_single_url(text):
+        return _FILE_SCHEME + text[scheme_len:]
     return text
 
 
@@ -348,7 +364,7 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     if spotify_regex.match(url):
         return SiteTypes.SPOTIFY
 
-    if url.startswith("file://"):
+    if url.startswith(_FILE_SCHEME):
         if not config.ENABLE_LOCAL_LIBRARY:
             return SiteTypes.UNKNOWN
         return SiteTypes.LOCAL_LIBRARY

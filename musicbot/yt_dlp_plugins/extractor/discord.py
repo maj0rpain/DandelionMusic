@@ -1,3 +1,4 @@
+import asyncio
 import re
 import atexit
 
@@ -17,15 +18,22 @@ def _get_client(loop):
     global _client
     if _client is not None:
         return _client
+    from musicbot import linkutils
+
     client = HTTPClient(loop)
     try:
-        loop.run_until_complete(client.static_login(config.BOT_TOKEN))
+        loop.run_until_complete(
+            asyncio.wait_for(
+                client.static_login(config.BOT_TOKEN),
+                timeout=linkutils.HTTP_TIMEOUT,
+            )
+        )
     except Exception as e:
         try:
             loop.run_until_complete(client.close())
         except Exception:
             pass
-        raise DownloadError(str(e)) from e
+        raise DownloadError(str(e) or type(e).__name__) from e
     _client = client
     atexit.register(lambda: loop.run_until_complete(client.close()))
     return client
@@ -38,6 +46,7 @@ class DiscordAttachmentsIE(InfoExtractor):
     )
 
     def _real_extract(self, url):
+        from musicbot import linkutils
         from musicbot.loader import _loop
 
         client = _get_client(_loop)
@@ -45,13 +54,16 @@ class DiscordAttachmentsIE(InfoExtractor):
         match = re.match(self._VALID_URL, url)
         try:
             resp = _loop.run_until_complete(
-                client.get_message(
-                    int(match.group("channel_id")),
-                    int(match.group("message_id")),
+                asyncio.wait_for(
+                    client.get_message(
+                        int(match.group("channel_id")),
+                        int(match.group("message_id")),
+                    ),
+                    timeout=linkutils.HTTP_TIMEOUT,
                 )
             )
         except Exception as e:
-            raise DownloadError(str(e)) from e
+            raise DownloadError(str(e) or type(e).__name__) from e
         uploader = resp["author"]["username"]
         entries = [
             {

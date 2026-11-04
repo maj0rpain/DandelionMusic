@@ -11,6 +11,7 @@ import types
 import pytest
 
 from musicbot.commands.music import Music
+from musicbot.loader import SongError
 from test_audiocontroller import (
     _backup,
     _backup_path,
@@ -125,32 +126,49 @@ def test_playnext_multi_track_playlist_is_appended(controller, stub_loader):
     )
 
 
-@pytest.mark.parametrize("failure", ["none", "error"])
-def test_unsupported_or_unloadable_playnext_leaves_everything_alone(
-    controller, stub_loader, tmp_path, failure
+def test_unloadable_playnext_leaves_everything_alone(
+    controller, stub_loader, tmp_path
 ):
     _queue(controller, "current", "a")
-    if failure == "none":
-        stub_loader.results["load_song"] = None
-    else:
 
-        async def load_song(track):
-            raise stub_loader.SongError("nope")
+    async def load_song(track):
+        raise stub_loader.SongError("nope")
 
-        stub_loader.load_song = load_song
+    stub_loader.load_song = load_song
 
     async def go():
-        if failure == "error":
-            with pytest.raises(stub_loader.SongError):
-                await controller.process_song("x", playnext=True)
-        else:
-            assert await controller.process_song("x", playnext=True) is None
+        with pytest.raises(stub_loader.SongError):
+            await controller.process_song("x", playnext=True)
 
     _while_playing(controller, go)
 
     assert _titles(controller) == ["current", "a"]
     assert not (_backup_path(controller, tmp_path)).exists()
     assert _preloaded(stub_loader) == []
+
+
+def play_ctx(controller, on_send=None):
+    """A fake context for Music._play_song and the list of its replies."""
+
+    class Timer:
+        async def start(self, *_):
+            pass
+
+    controller.timer = Timer()
+    sent = []
+
+    async def send(message=None, **kwargs):
+        sent.append(str(message))
+        if on_send is not None:
+            await on_send(sent)
+
+    ctx = types.SimpleNamespace(
+        audiocontroller=controller,
+        send=send,
+        author=None,
+        guild=controller.guild,
+    )
+    return ctx, sent
 
 
 def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
@@ -167,24 +185,11 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
 
     stub_loader.load_song = load_song
 
-    class Timer:
-        async def start(self, *_):
-            pass
-
-    controller.timer = Timer()
-    sent = []
-
-    async def send(message=None, **kwargs):
-        sent.append(message)
+    async def on_send(sent):
         if len(sent) == 1:
             await controller.process_song("plain")
 
-    ctx = types.SimpleNamespace(
-        audiocontroller=controller,
-        send=send,
-        author=None,
-        guild=controller.guild,
-    )
+    ctx, _ = play_ctx(controller, on_send)
     music = Music(None)
     monkeypatch.setattr(
         "musicbot.commands.music.utils.get_settings",
@@ -197,3 +202,22 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
     _while_playing(controller, go)
 
     assert _titles(controller) == ["current", "pn", "a", "plain"]
+
+
+def test_play_replies_with_the_load_error_and_leaves_the_queue_alone(
+    controller, stub_loader, tmp_path
+):
+    _queue(controller, "current", "a")
+
+    async def load_song(track):
+        raise SongError("nope")
+
+    stub_loader.load_song = load_song
+
+    ctx, sent = play_ctx(controller)
+
+    _while_playing(controller, lambda: Music(None)._play_song(ctx, "x"))
+
+    assert sent == ["nope"]
+    assert _titles(controller) == ["current", "a"]
+    assert not (tmp_path / "backup" / "playlist_1234.pickle").exists()

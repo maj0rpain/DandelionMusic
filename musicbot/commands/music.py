@@ -18,7 +18,6 @@ from musicbot.audiocontroller import (
 )
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
-from musicbot.playlists import PlaylistEntry
 from musicbot.linkutils import get_site_type, url_regex
 from musicbot.views import OwnedView
 
@@ -121,11 +120,23 @@ def active_only(ctx):
     return True
 
 
-@commands.check
 def playlists_enabled(ctx):
     if not config.ENABLE_PLAYLISTS:
         raise utils.CheckError(config.PLAYLISTS_ARE_DISABLED)
     return True
+
+
+def _saved_playlist_error_reply(e: playlists.SavedPlaylistError) -> str:
+    """The reply text for a saved-playlist failure."""
+    if isinstance(e, playlists.PlaylistNotFound):
+        return config.PLAYLIST_NOT_FOUND
+    if isinstance(e, playlists.InvalidPosition):
+        return f"Invalid position. Playlist has {e.size} songs."
+    if isinstance(e, playlists.PlaylistExists):
+        return config.PLAYLIST_ALREADY_EXISTS
+    if isinstance(e, playlists.OnlySongInPlaylist):
+        return "Can't remove the only song from playlist."
+    raise e
 
 
 def _playlist_ref(ctx, name: str) -> playlists.PlaylistRef:
@@ -144,9 +155,10 @@ class Music(commands.Cog):
 
     async def cog_check(self, ctx):
         # the playlist gate refuses before any voice or channel refusal
-        cmd = getattr(ctx, "command", None)
+        # a button's context (Context.from_interaction) has no command
+        cmd = ctx.command
         if cmd is not None and (cmd.root_parent or cmd) is self._playlist:
-            await playlists_enabled.predicate(ctx)
+            playlists_enabled(ctx)
         ctx.audiocontroller = utils.get_audiocontroller(ctx)
         return await utils.play_check(ctx)
 
@@ -170,6 +182,9 @@ class Music(commands.Cog):
     )
     @joining_command
     async def _play(self, ctx, *, track: str = None, file: Attachment = None):
+        await self._play_request(ctx, track, file, playnext=False)
+
+    async def _play_request(self, ctx, track, file, playnext):
         if track is None:
             track = _attachment_track(ctx, file)
         if track is None:
@@ -177,13 +192,13 @@ class Music(commands.Cog):
             return
 
         await ctx.defer()
-        await self._play_song(ctx, track)
+        await self._play_song(ctx, track, playnext=playnext)
 
     async def _play_song(
         self, ctx, track: Union[str, Iterable[str]], playnext=False
     ):
         # reset timer
-        await ctx.audiocontroller.timer.start(True)
+        await ctx.audiocontroller.start_idle_timer(True)
 
         try:
             song = await ctx.audiocontroller.process_song(
@@ -191,9 +206,6 @@ class Music(commands.Cog):
             )
         except SongError as e:
             await ctx.send(e)
-            return
-        if song is None:
-            await ctx.send(config.SONGINFO_UNSUPPORTED)
             return
 
         if isinstance(song, QueuedPlaylist):
@@ -222,14 +234,7 @@ class Music(commands.Cog):
     async def _play_next(
         self, ctx, *, track: str = None, file: Attachment = None
     ):
-        if track is None:
-            track = _attachment_track(ctx, file)
-        if track is None:
-            await ctx.send(config.PLAY_ARGS_MISSING)
-            return
-
-        await ctx.defer()
-        await self._play_song(ctx, track, playnext=True)
+        await self._play_request(ctx, track, file, playnext=True)
 
     @commands.hybrid_command(
         name="search",
@@ -492,7 +497,6 @@ class Music(commands.Cog):
         aliases=["pl"],
         invoke_without_command=True,
     )
-    @playlists_enabled
     async def _playlist(self, ctx):
         await ctx.send("Use subcommands to manage playlists.")
 
@@ -502,12 +506,11 @@ class Music(commands.Cog):
         description=config.HELP_SAVE_PLAYLIST_LONG,
         help=config.HELP_SAVE_PLAYLIST_SHORT,
     )
-    @playlists_enabled
     @commands.check(dj_check)
     async def _playlist_save(self, ctx, name: str):
         await ctx.defer()
         songs = [
-            PlaylistEntry(song.webpage_url, song.title)
+            playlists.PlaylistEntry(song.webpage_url, song.title)
             for song in ctx.audiocontroller.playlist.playque
         ]
         if not songs:
@@ -517,8 +520,8 @@ class Music(commands.Cog):
             await playlists.save(
                 ctx.bot.DbSession, _playlist_ref(ctx, name), songs
             )
-        except playlists.PlaylistExists:
-            await ctx.send(config.PLAYLIST_ALREADY_EXISTS)
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
             return
         await ctx.send(config.PLAYLIST_SAVED_MESSAGE)
 
@@ -530,7 +533,6 @@ class Music(commands.Cog):
     )
     @app_commands.autocomplete(name=_playlist_autocomplete)
     @joining_command
-    @playlists_enabled
     async def _playlist_load(
         self,
         ctx,
@@ -548,8 +550,7 @@ class Music(commands.Cog):
                 get_site_type(entry.url),
                 entry.url,
                 title=entry.title,
-                saved_playlist=contents.ref,
-                saved_url=entry.url,
+                saved_entry=playlists.SavedEntry(contents.ref, entry.url),
             )
             for entry in contents.entries
         )
@@ -561,7 +562,6 @@ class Music(commands.Cog):
         description=config.HELP_REMOVE_PLAYLIST_LONG,
         help=config.HELP_REMOVE_PLAYLIST_SHORT,
     )
-    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(name=_playlist_autocomplete)
     async def _playlist_remove(
@@ -575,8 +575,8 @@ class Music(commands.Cog):
                 ctx.bot.DbSession,
                 _playlist_ref(ctx, name),
             )
-        except playlists.PlaylistNotFound:
-            await ctx.send(config.PLAYLIST_NOT_FOUND)
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
             return
         await ctx.send(config.PLAYLIST_REMOVED)
 
@@ -586,7 +586,6 @@ class Music(commands.Cog):
         description=config.HELP_LIST_PLAYLISTS_LONG,
         help=config.HELP_LIST_PLAYLISTS_SHORT,
     )
-    @playlists_enabled
     async def _playlist_list(self, ctx):
         names = await playlists.list_names(
             ctx.bot.DbSession, str(ctx.guild.id)
@@ -604,7 +603,6 @@ class Music(commands.Cog):
         description=config.HELP_PLAYLIST_SHOW_LONG,
         help=config.HELP_PLAYLIST_SHOW_SHORT,
     )
-    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_show(
@@ -641,7 +639,6 @@ class Music(commands.Cog):
         description=config.HELP_ADD_TO_PLAYLIST_LONG,
         help=config.HELP_ADD_TO_PLAYLIST_SHORT,
     )
-    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_add_song(
@@ -656,18 +653,18 @@ class Music(commands.Cog):
         except SongError as e:
             await ctx.send(e)
             return
-        if song is None:
-            await ctx.send(config.SONGINFO_ERROR)
-            return
         songs = [song] if isinstance(song, Song) else song
         try:
             await playlists.add_songs(
                 ctx.bot.DbSession,
                 _playlist_ref(ctx, playlist),
-                [PlaylistEntry(s.webpage_url, s.title) for s in songs],
+                [
+                    playlists.PlaylistEntry(s.webpage_url, s.title)
+                    for s in songs
+                ],
             )
-        except playlists.PlaylistNotFound:
-            await ctx.send(config.PLAYLIST_NOT_FOUND)
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
             return
         if isinstance(song, PartialPlaylist):
             await ctx.send(song.truncation.notice(len(song)))
@@ -679,7 +676,6 @@ class Music(commands.Cog):
         description=config.HELP_REMOVE_FROM_PLAYLIST_LONG,
         help=config.HELP_REMOVE_FROM_PLAYLIST_SHORT,
     )
-    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_remove_song(
@@ -696,14 +692,8 @@ class Music(commands.Cog):
                 _playlist_ref(ctx, playlist),
                 position,
             )
-        except playlists.PlaylistNotFound:
-            await ctx.send(config.PLAYLIST_NOT_FOUND)
-            return
-        except playlists.InvalidPosition as e:
-            await ctx.send(f"Invalid position. Playlist has {e.size} songs.")
-            return
-        except playlists.OnlySongInPlaylist:
-            await ctx.send("Can't remove the only song from playlist.")
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
             return
         await ctx.send(config.PLAYLIST_UPDATED)
 
@@ -713,7 +703,6 @@ class Music(commands.Cog):
         description=config.HELP_MOVE_IN_PLAYLIST_LONG,
         help=config.HELP_MOVE_IN_PLAYLIST_SHORT,
     )
-    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_move_song(
@@ -732,11 +721,8 @@ class Music(commands.Cog):
                 source_position,
                 destination_position,
             )
-        except playlists.PlaylistNotFound:
-            await ctx.send(config.PLAYLIST_NOT_FOUND)
-            return
-        except playlists.InvalidPosition as e:
-            await ctx.send(f"Invalid position. Playlist has {e.size} songs.")
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
             return
         await ctx.send(config.PLAYLIST_UPDATED)
 

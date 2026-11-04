@@ -198,3 +198,24 @@ def test_the_index_and_the_loader_agree_on_a_symlinked_artist(lib, outside):
     assert "A" in index
     song = loader._load_song(library.song_uri("A", "B", "t.mp3"))
     assert song.url == str(lib / "A" / "B" / "t.mp3")
+
+
+def test_an_upper_case_scheme_loads(lib):
+    _file(lib / "A" / "B" / "t.mp3")
+    song = loader._load_song("FILE" + _uri(lib, "A/B/t.mp3")[4:])
+    assert song.host is SiteTypes.LOCAL_LIBRARY
+    assert song.url == str(lib / "A" / "B" / "t.mp3")
+
+
+def test_an_upper_case_scheme_is_unknown_with_the_library_disabled(
+    lib, monkeypatch
+):
+    _file(lib / "A" / "B" / "t.mp3")
+    monkeypatch.setattr(config, "ENABLE_LOCAL_LIBRARY", False)
+    with pytest.raises(loader.SongError) as e:
+        loader._load_song("FILE" + _uri(lib, "A/B/t.mp3")[4:])
+    assert str(e.value) == config.SONGINFO_UNSUPPORTED
+
+
+def test_an_upper_case_scheme_outside_the_root_is_refused(lib):
+    _refused("FILE:///etc/hosts")

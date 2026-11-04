@@ -1,19 +1,9 @@
-"""CachedLookup's remote-lookup policy, driven through a fake backend.
-
-Synchronous test functions running their coroutine through
-asyncio.run(): the dev group pins pytest with no asyncio_mode, so an
-async test would be collected, skipped with a warning, and silently
-pass.
-"""
+"""CachedLookup's remote-lookup policy, driven through a fake backend."""
 
 import asyncio
 
+from helpers import FakeClock, run
 from musicbot.cached_lookup import CachedLookup
-
-
-def run(coro):
-    # bounded, so a waiter left unresolved fails the test, not the run
-    return asyncio.run(asyncio.wait_for(coro, timeout=5))
 
 
 class FakeBackend:
@@ -48,14 +38,6 @@ def test_a_found_result_is_returned_and_cached():
 
     assert run(scenario()) == ["info", "info"]
     assert backend.calls == ["Radiohead"]
-
-
-class FakeClock:
-    def __init__(self):
-        self.now = 1000.0
-
-    def __call__(self):
-        return self.now
 
 
 def test_concurrent_gets_for_one_key_run_the_backend_once():

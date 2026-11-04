@@ -2,33 +2,9 @@
 contexts."""
 
 import asyncio
-import types
 
+from developer_fakes import FakeBot, FakeCtx
 from musicbot.commands.developer import Developer
-
-
-class FakeBot:
-    def __init__(self, guilds, owner_id=1):
-        self.guilds = guilds
-        self.owner_id = owner_id
-
-    def get_guild(self, id_):
-        return next((g for g in self.guilds if g.id == id_), None)
-
-    async def is_owner(self, user):
-        return user.id == self.owner_id
-
-
-class FakeCtx:
-    def __init__(self, bot, author_id=1):
-        self.bot = bot
-        self.author = types.SimpleNamespace(id=author_id)
-        self.sent = []
-        self.channel = types.SimpleNamespace(last_message=None)
-        self.me = object()
-
-    async def send(self, text):
-        self.sent.append(text)
 
 
 def execute(code):

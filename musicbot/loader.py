@@ -198,17 +198,16 @@ def _search_youtube(title: str, count: int = 1) -> Optional[dict]:
     return r["entries"]
 
 
-async def load_song(track: str) -> Union[Optional[Song], List[Song]]:
+async def load_song(track: str) -> Union[Song, List[Song]]:
     return await _load(LOAD_LANE, track)
 
 
-async def _load(lane: str, track: str) -> Union[Optional[Song], List[Song]]:
+async def _load(lane: str, track: str) -> Union[Song, List[Song]]:
     """Runs _load_song in the given lane and stamps the result."""
     result = await _run_sync(lane, _load_song, track)
     now = _now()
     for song in result if isinstance(result, list) else [result]:
-        if song is not None:
-            song.extracted_at = now
+        song.extracted_at = now
     return result
 
 
@@ -306,20 +305,22 @@ def _library_track_path(track: str) -> Path:
     return path
 
 
-def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
+def _load_song(track: str) -> Union[Song, List[Song]]:
     track = normalize_track(track)
     truncation = None
     host = identify_url(track)
 
     if host == SiteTypes.NOT_URL:
         data = _search_youtube(track)
+        if data is None:
+            raise SongError(config.SONGINFO_ERROR)
         if not data:
-            return None
+            raise SongError(config.SEARCH_NO_RESULTS)
         data = data[0]
         host = SiteTypes.YT_DLP
 
     elif host == SiteTypes.UNKNOWN:
-        return None
+        raise SongError(config.SONGINFO_UNSUPPORTED)
 
     elif host == SiteTypes.SPOTIFY:
         try:
@@ -366,6 +367,8 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
                 raise SongError(config.SONGINFO_ERROR)
 
     if isinstance(data, list):
+        if not data:
+            raise SongError(config.SONGINFO_ERROR)
         results = []
         for entry in data:
             entry.pop("webpage_url", None)
@@ -441,7 +444,7 @@ async def preload(song: Song) -> Preload:
         except Exception:
             print_exc(file=sys.stderr)
         else:
-            success = preloaded is not None
+            success = True
 
         if success:
             song.update(preloaded)
