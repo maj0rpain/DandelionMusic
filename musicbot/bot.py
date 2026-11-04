@@ -114,7 +114,7 @@ class MusicBot(commands.Bot):
         loader.init()
         return await super().start(*args, **kwargs)
 
-    async def _gather_per_guild(self, make_coro, what: str):
+    async def _gather_per_guild(self, make_coro, action: str):
         """Run make_coro(controller) for every controller; one guild's
         failure is logged and never stops the others."""
         controllers = list(self.sessions)
@@ -125,7 +125,7 @@ class MusicBot(commands.Bot):
         for controller, result in zip(controllers, results):
             if isinstance(result, BaseException):
                 print(
-                    f"{what} failed for guild {controller.guild.name}:",
+                    f"{action} failed for guild {controller.guild.name}:",
                     file=sys.stderr,
                     flush=True,
                 )

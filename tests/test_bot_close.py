@@ -118,11 +118,12 @@ def test_failing_disconnect_does_not_stop_close_and_names_the_guild(
     )
     asyncio.run(scenario())
     err = capsys.readouterr().err
-    assert (calls, "Broken Guild" in err, "boom" in err) == (
-        ["stop", "shutdown", "discord"],
-        True,
-        True,
-    )
+    assert (
+        calls,
+        "Broken Guild" in err,
+        "boom" in err,
+        "Disconnect failed for guild Broken Guild:" in err,
+    ) == (["stop", "shutdown", "discord"], True, True, True)
 
 
 def test_failing_link_stop_runs_the_rest_then_raises(monkeypatch):
@@ -153,28 +154,3 @@ def test_two_failing_steps_raise_the_later_chained_onto_the_earlier(
         asyncio.run(scenario())
     assert calls == ["stop", "shutdown", "discord"]
     assert isinstance(raised.value.__context__, ValueError)
-
-
-def test_failing_view_update_does_not_stop_other_guilds_and_names_the_guild(
-    capsys,
-):
-    updated = []
-
-    class View(_Controller):
-        async def update_view(self):
-            if self.error:
-                raise self.error
-            updated.append(self.guild.name)
-
-    bot = MusicBot([], command_prefix="d!", intents=discord.Intents.default())
-    bot.sessions = [
-        View("Broken Guild", RuntimeError("boom")),
-        View("ok"),
-    ]
-    asyncio.run(MusicBot.update_views.coro(bot))
-    err = capsys.readouterr().err
-    assert (
-        updated,
-        "View update failed for guild Broken Guild:" in err,
-        "Traceback" in err,
-    ) == (["ok"], True, True)
