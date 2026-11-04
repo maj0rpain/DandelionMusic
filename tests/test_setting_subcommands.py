@@ -8,7 +8,6 @@ or a DB. A failure is never announced as a success, and leaves the
 stored value unchanged.
 """
 
-import asyncio
 import types
 
 import discord
@@ -28,6 +27,7 @@ from setting_fakes import (
     stored_settings,
     stored_values,
 )
+from helpers import run
 
 THUMBS_UP = "\N{THUMBS UP SIGN}"
 
@@ -48,11 +48,11 @@ def fake_ctx(sent, sett, message=None):
     )
 
 
-def run(name, arg, sett, message=None):
+def invoke_setting(name, arg, sett, message=None):
     cog = General(None)
     sent = []
     ctx = fake_ctx(sent, sett, message)
-    asyncio.run(subcommand(cog, name).callback(cog, ctx, arg))
+    run(subcommand(cog, name).callback(cog, ctx, arg))
     return sent
 
 
@@ -102,7 +102,7 @@ def test_the_subcommands_are_exactly_the_described_settings():
 def test_a_setting_update_is_confirmed(name, arg, confirmation, stored):
     sett = stored_settings()
 
-    sent = run(name, arg, sett)
+    sent = invoke_setting(name, arg, sett)
 
     assert sent[-1] == f"Setting `{name}` updated to {confirmation}!"
     assert getattr(sett, name) == stored
@@ -119,7 +119,7 @@ def test_an_unknown_setting_is_reported(name, monkeypatch):
     monkeypatch.delitem(SETTINGS, name)
     sett = stored_settings()
 
-    sent = run(name, ARGS[name], sett)
+    sent = invoke_setting(name, ARGS[name], sett)
 
     assert_failed(sent, sett, f"`Error: Setting {name} could not be updated.`")
 
@@ -131,7 +131,7 @@ def test_an_invalid_emoji_is_reported():
     )
     sett = stored_settings()
 
-    sent = run(
+    sent = invoke_setting(
         "button_emote",
         "not-an-emoji",
         sett,
@@ -144,7 +144,7 @@ def test_an_invalid_emoji_is_reported():
 def test_an_out_of_range_volume_is_reported():
     sett = stored_settings()
 
-    sent = run("default_volume", 101, sett)
+    sent = invoke_setting("default_volume", 101, sett)
 
     assert_failed(sent, sett, "`Error: Value must be a number in range 0-100`")
 
@@ -153,7 +153,7 @@ def test_vc_timeout_is_refused_while_its_edit_is_disabled(monkeypatch):
     monkeypatch.setattr(config, "ALLOW_VC_TIMEOUT_EDIT", False)
     sett = stored_settings()
 
-    sent = run("vc_timeout", True, sett)
+    sent = invoke_setting("vc_timeout", True, sett)
 
     assert_failed(sent, sett, config.VC_TIMEOUT_EDIT_DISABLED)
     assert sent == [config.VC_TIMEOUT_EDIT_DISABLED]
@@ -218,7 +218,7 @@ def test_a_slash_subcommand_takes_its_value_by_parameter_name(
     sett = stored_settings()
     sent = []
 
-    asyncio.run(
+    run(
         subcommand(cog, name).callback(
             cog, fake_ctx(sent, sett), **{param: arg}
         )
@@ -304,7 +304,7 @@ def test_a_prefix_subcommand_converts_its_argument(
     sett = stored_settings()
     sent = []
 
-    asyncio.run(command.invoke(prefix_ctx(sent, sett, argument)))
+    run(command.invoke(prefix_ctx(sent, sett, argument)))
 
     assert sent[-1] == f"Setting `{name}` updated to {confirmation}!"
     assert getattr(sett, name) == stored
