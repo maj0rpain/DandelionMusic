@@ -101,7 +101,7 @@ class Button(commands.Cog):
                 return
             await audiocontroller.register_voice_channel(user_vc.channel)
             if not audiocontroller.command_channel and sett.command_channel:
-                audiocontroller.command_channel = serv.get_channel(
+                audiocontroller.command_channel = serv.get_channel_or_thread(
                     int(sett.command_channel)
                 )
             for url in links:

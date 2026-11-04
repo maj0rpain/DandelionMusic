@@ -8,7 +8,6 @@ import types
 import pytest
 
 from config import config
-from musicbot.commands import music
 from musicbot.commands.music import Music
 from musicbot.utils import CheckError
 
@@ -63,6 +62,11 @@ def test_autocomplete_offers_nothing_while_disabled(monkeypatch):
     assert result == []
 
 
-def test_save_has_no_inline_gate():
-    src = inspect.getsource(Music._playlist_save.callback)
-    assert "ENABLE_PLAYLISTS" not in src
+@pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
+def test_cog_check_gates_before_other_refusals(cmd, monkeypatch):
+    monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
+    # no guild, channel or author: any other refusal would break differently
+    ctx = types.SimpleNamespace(command=cmd)
+    with pytest.raises(CheckError) as exc:
+        asyncio.run(Music.cog_check(types.SimpleNamespace(), ctx))
+    assert str(exc.value) == config.PLAYLISTS_ARE_DISABLED
