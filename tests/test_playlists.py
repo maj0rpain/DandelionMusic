@@ -260,3 +260,152 @@ def test_no_public_function_takes_or_returns_the_row():
     ]
     assert leaking == []
     assert not hasattr(playlists, "entries")
+
+
+class _PausedSession:
+    """Proxies a session; right after its first statement returns, says
+    so on ``paused`` and waits for ``release``."""
+
+    def __init__(self, inner, paused, release):
+        self._inner = inner
+        self._paused = paused
+        self._release = release
+        self._first = True
+
+    async def __aenter__(self):
+        await self._inner.__aenter__()
+        return self
+
+    async def __aexit__(self, *exc):
+        return await self._inner.__aexit__(*exc)
+
+    async def execute(self, *args, **kwargs):
+        result = await self._inner.execute(*args, **kwargs)
+        if self._first:
+            self._first = False
+            self._paused.set()
+            await self._release.wait()
+        return result
+
+    def __getattr__(self, name):
+        return getattr(self._inner, name)
+
+
+class Gate:
+    """A session factory whose first session is paused (see above)."""
+
+    def __init__(self, factory):
+        self._factory = factory
+        self.paused = asyncio.Event()
+        self.release = asyncio.Event()
+        self._used = False
+
+    def __call__(self):
+        session = self._factory()
+        if self._used:
+            return session
+        self._used = True
+        return _PausedSession(session, self.paused, self.release)
+
+
+WAIT = 0.3
+
+
+async def overlap(factory, first, second):
+    """Starts ``first(gated_factory)``, pauses it mid-operation, starts
+    ``second(factory)`` and gives it a bounded wait, then releases the
+    first. Returns (second finished during the wait, first outcome,
+    second outcome); an outcome is the exception raised or None."""
+    gate = Gate(factory)
+    task1 = asyncio.ensure_future(first(gate))
+    await gate.paused.wait()
+    task2 = asyncio.ensure_future(second(factory))
+    done, _ = await asyncio.wait({task2}, timeout=WAIT)
+    gate.release.set()
+    outcomes = await asyncio.gather(task1, task2, return_exceptions=True)
+    return (
+        bool(done),
+        *[o if isinstance(o, BaseException) else None for o in outcomes],
+    )
+
+
+def test_set_title_overlapping_add_songs_keeps_both_changes():
+    async def test(factory):
+        await playlists.save(factory, MIX, [A])
+        await overlap(
+            factory,
+            lambda f: playlists.set_title(f, MIX, A.url, "New"),
+            lambda f: playlists.add_songs(f, MIX, [B]),
+        )
+        return await load(factory)
+
+    assert run(test) == [PlaylistEntry(A.url, "New"), B]
+
+
+def test_delete_overlapping_set_title_leaves_it_deleted():
+    async def test(factory):
+        await playlists.save(factory, MIX, [A])
+        _, first, second = await overlap(
+            factory,
+            lambda f: playlists.set_title(f, MIX, A.url, "New"),
+            lambda f: playlists.delete(f, MIX),
+        )
+        return first, second, await playlists.get(factory, MIX)
+
+    assert run(test) == (None, None, None)
+
+
+def test_delete_overlapping_add_songs_leaves_it_deleted():
+    async def test(factory):
+        await playlists.save(factory, MIX, [A])
+        _, first, second = await overlap(
+            factory,
+            lambda f: playlists.add_songs(f, MIX, [B]),
+            lambda f: playlists.delete(f, MIX),
+        )
+        return first, second, await playlists.get(factory, MIX)
+
+    assert run(test) == (None, None, None)
+
+
+def test_add_songs_overlapping_delete_reports_not_found():
+    async def test(factory):
+        await playlists.save(factory, MIX, [A])
+        _, first, second = await overlap(
+            factory,
+            lambda f: playlists.delete(f, MIX),
+            lambda f: playlists.add_songs(f, MIX, [B]),
+        )
+        return first, second, await playlists.get(factory, MIX)
+
+    first, second, left = run(test)
+    assert first is None
+    assert isinstance(second, playlists.PlaylistNotFound)
+    assert left is None
+
+
+def test_an_edit_to_another_playlist_does_not_wait():
+    other = PlaylistRef(GUILD, "other")
+
+    async def test(factory):
+        await playlists.save(factory, MIX, [A])
+        await playlists.save(factory, other, [A])
+        finished, first, second = await overlap(
+            factory,
+            lambda f: playlists.add_songs(f, MIX, [B]),
+            lambda f: playlists.add_songs(f, other, [C]),
+        )
+        return finished, first, second, await load(factory, "other")
+
+    assert run(test) == (True, None, None, [A, C])
+
+
+def test_a_failed_move_does_not_block_the_next_edit():
+    async def test(factory):
+        await playlists.save(factory, MIX, [A])
+        with pytest.raises(playlists.InvalidPosition):
+            await playlists.move_song(factory, MIX, 1, 5)
+        await asyncio.wait_for(playlists.add_songs(factory, MIX, [B]), 1)
+        return await load(factory)
+
+    assert run(test) == [A, B]
