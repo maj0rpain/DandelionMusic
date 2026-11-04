@@ -14,7 +14,7 @@ import types
 
 import pytest
 
-from controller_seam import StubLoader, controller_seam
+from controller_seam import FakeVoiceClient, StubLoader, controller_seam
 from musicbot.commands.music import Music
 
 
@@ -977,6 +977,51 @@ def test_a_failing_title_refresh_still_counts_as_a_successful_preload(
     assert titles == ["playing", "fresh title"]
 
 
+# an external disconnect is not a track end (#202)
+
+
+async def _fire_without_raising(after):
+    """Fires the after= callback from a plain thread and lets the loop
+    run the hop; fails if either the thread or the loop raised."""
+    loop = asyncio.get_running_loop()
+    raised = []
+    loop.set_exception_handler(lambda _loop, context: raised.append(context))
+    _, error = _in_thread(after, None)
+    await _settle()
+    assert error is None
+    assert raised == []
+
+
+async def _start_then_disconnect(controller):
+    """Starts the queue head with its backup written, then drops the
+    guild's voice client as discord.py's cleanup does and fires the
+    track's after= callback."""
+    controller._pickle_playlist()
+    after = await _start_and_end_first_track(controller)
+    controller.guild.voice_client = None
+    await _fire_without_raising(after)
+
+
+def _fresh_voice_client(controller):
+    controller.guild.voice_client = FakeVoiceClient()
+    return controller.guild.voice_client
+
+
+def test_an_external_disconnect_leaves_the_queue_history_and_backup(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    old = controller.guild.voice_client
+
+    asyncio.run(_start_then_disconnect(controller))
+
+    assert _titles(controller) == ["first", "second"]
+    assert _history(controller) == ["first"]
+    assert _backup(tmp_path) == ["first", "second"]
+    assert len(old.played) == 1
+
+
 # --- d!history: a song is recorded when it starts ---------------------
 
 
@@ -1169,6 +1214,88 @@ def test_each_repeat_of_a_single_track_loop_is_recorded(
     _run_playing(controller, scenario)
 
     assert _history(controller) == ["first", "first", "first"]
+
+
+def test_restore_after_an_external_disconnect_starts_the_cut_off_song(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first")
+
+    async def run():
+        await _start_then_disconnect(controller)
+        assert _titles(controller) == ["first"]
+        assert _backup(tmp_path) == ["first"]
+        await controller.udisconnect("test")
+        _fresh_voice_client(controller)
+        restored = await controller.restore()
+        await _settle()
+        return restored
+
+    ac = sys.modules[type(controller).__module__]
+    assert asyncio.run(run()) is ac.RestoreResult.RESTORED
+    assert _played(controller) == ["first"]
+
+
+def test_rejoining_before_the_timeout_plays_the_cut_off_song_again(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def run():
+        await _start_then_disconnect(controller)
+        _fresh_voice_client(controller)
+        await controller.ensure_playing()
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _played(controller) == ["first"]
+    assert _titles(controller) == ["first", "second"]
+
+
+def test_a_track_end_while_connected_is_unconnected_still_advances(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        voice_client = controller.guild.voice_client
+        voice_client.connected = False
+        _in_thread(_end_track(voice_client), None)
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _played(controller) == ["first", "second"]
+    assert _titles(controller) == ["second"]
+
+
+def test_the_teardown_hop_after_a_disconnect_keeps_the_backup(
+    controller, monkeypatch, tmp_path
+):
+    from config import config
+
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    old = controller.guild.voice_client
+
+    async def run():
+        after = await _start_and_end_first_track(controller)
+        await controller.udisconnect("test")
+        controller.guild.voice_client = None
+        await _fire_without_raising(after)
+
+    asyncio.run(run())
+
+    assert _backup(tmp_path) == ["first", "second"]
+    assert len(old.played) == 1
 
 
 def _gated_preload(stub_loader, title):
