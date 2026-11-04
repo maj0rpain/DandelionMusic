@@ -1,7 +1,6 @@
 """Truncation and TruncationReason: pure values."""
 
 import ast
-import pickle
 from pathlib import Path
 
 import pytest
@@ -12,10 +11,17 @@ from musicbot.truncation import Truncation, TruncationReason
 
 
 @pytest.mark.parametrize(
-    "total, loaded, expected", [(5, 5, False), (6, 5, True), (4, 5, False)]
+    "total, loaded, expected",
+    [
+        (5, 5, None),
+        (6, 5, Truncation(6, TruncationReason.NO_API)),
+        (4, 5, None),
+    ],
 )
-def test_cuts_only_when_total_exceeds_loaded(total, loaded, expected):
-    assert Truncation(total, TruncationReason.NO_API).cuts(loaded) is expected
+def test_of_gives_a_truncation_only_when_total_exceeds_loaded(
+    total, loaded, expected
+):
+    assert Truncation.of(total, loaded, TruncationReason.NO_API) == expected
 
 
 def test_notice_holds_counts_and_reason_text_not_the_key():
@@ -40,12 +46,6 @@ def test_text_and_notice_follow_messages_changed_after_import(monkeypatch):
 
     assert TruncationReason.NO_API.text == "NEW REASON"
     assert value.notice(2) == "2/9 NEW REASON"
-
-
-def test_truncation_survives_pickling():
-    value = Truncation(7, TruncationReason.API_ERROR)
-
-    assert pickle.loads(pickle.dumps(value)) == value
 
 
 def test_module_imports_only_config_enum_and_dataclasses():

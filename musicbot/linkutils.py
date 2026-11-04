@@ -172,7 +172,8 @@ class SpotifyPlaylistTypes(Enum):
 @dataclass
 class SpotifyTracks:
     """Links of a Spotify playlist or album. `truncation` is set when
-    the fetch may be partial and Spotify's track total is known."""
+    the playlist was cut short; it is `None` when every reported track
+    was fetched."""
 
     links: List[str]
     truncation: Optional[Truncation] = None
@@ -241,12 +242,13 @@ async def fetch_spotify_playlist(
     except ValueError:
         total = None
 
+    links = [item["content"] for item in results]
     truncation = (
-        Truncation(total, TruncationReason.NO_API)
+        Truncation.of(total, len(links), TruncationReason.NO_API)
         if total is not None
         else None
     )
-    return SpotifyTracks([item["content"] for item in results], truncation)
+    return SpotifyTracks(links, truncation)
 
 
 def fetch_playlist_with_api(
@@ -255,6 +257,7 @@ def fetch_playlist_with_api(
     tracks = []
     truncation = None
     pages = 0
+    api_failed = False
     first_total = None
     try:
         if list_type == SpotifyPlaylistTypes.ALBUM:
@@ -282,8 +285,7 @@ def fetch_playlist_with_api(
             file=sys.stderr,
         )
         print_exc(file=sys.stderr)
-        if first_total is not None:
-            truncation = Truncation(first_total, TruncationReason.API_ERROR)
+        api_failed = True
 
     links = []
     for item in tracks:
@@ -299,6 +301,10 @@ def fetch_playlist_with_api(
                 f" field {e.args[0]!r} is missing",
                 file=sys.stderr,
             )
+    if api_failed and first_total is not None:
+        truncation = Truncation.of(
+            first_total, len(links), TruncationReason.API_ERROR
+        )
     return SpotifyTracks(links, truncation)
 
 

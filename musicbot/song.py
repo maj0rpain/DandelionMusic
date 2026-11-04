@@ -108,5 +108,9 @@ class PartialPlaylist(list):
         super().__init__(songs)
         self.truncation = truncation
 
+    def notice(self) -> str:
+        """The truncation notice for the songs it holds."""
+        return self.truncation.notice(len(self))
+
     def __reduce__(self):
         return (type(self), (list(self), self.truncation))

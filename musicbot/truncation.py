@@ -20,15 +20,20 @@ class TruncationReason(Enum):
 
 @dataclass(frozen=True)
 class Truncation:
-    """A partly fetched Spotify playlist: `total` tracks exist, and
-    `reason` is why fewer may have been loaded."""
+    """A Spotify playlist that was cut short: `total` tracks exist, and
+    `reason` is why fewer were loaded. Built by `of`, only when tracks
+    were left out."""
 
     total: int
     reason: TruncationReason
 
-    def cuts(self, loaded: int) -> bool:
-        """Whether loading `loaded` tracks left some out."""
-        return self.total > loaded
+    @classmethod
+    def of(
+        cls, total: int, loaded: int, reason: TruncationReason
+    ) -> "Truncation | None":
+        """A truncation when loading `loaded` of `total` tracks left some
+        out, else `None`."""
+        return cls(total, reason) if total > loaded else None
 
     def notice(self, queued: int) -> str:
         """The "only N of M tracks" message for the user."""

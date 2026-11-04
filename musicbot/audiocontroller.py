@@ -44,9 +44,12 @@ class QueuedPlaylist:
     queued: int
     truncation: Optional[Truncation] = None
 
-    @property
-    def truncated(self) -> bool:
-        return self.truncation is not None
+    def notice(self) -> Optional[str]:
+        """The truncation notice for the queued tracks, or `None` when
+        nothing was cut."""
+        if self.truncation is None:
+            return None
+        return self.truncation.notice(self.queued)
 
 
 _not_provided = object()

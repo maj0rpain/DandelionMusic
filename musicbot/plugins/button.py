@@ -111,8 +111,10 @@ class Button(commands.Cog):
                 except loader.SongError as e:
                     await ctx.send(str(e))
                     continue
-                if isinstance(song, QueuedPlaylist) and song.truncated:
-                    await ctx.send(song.truncation.notice(song.queued))
+                if isinstance(song, QueuedPlaylist):
+                    notice = song.notice()
+                    if notice is not None:
+                        await ctx.send(notice)
 
 
 async def setup(bot: MusicBot):

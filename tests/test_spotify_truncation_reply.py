@@ -120,7 +120,7 @@ def test_plain_list_becomes_queued_playlist_without_truncation(
     result = _process(controller)
 
     assert isinstance(result, _queued_playlist_class(controller))
-    assert result.truncation is None and not result.truncated
+    assert result.truncation is None and result.notice() is None
 
 
 def _add(monkeypatch, loaded, add_songs):
