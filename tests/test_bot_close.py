@@ -5,6 +5,8 @@ event loop: other tasks keep running while the worker is joined.
 import asyncio
 import threading
 
+import pytest
+
 import discord
 from discord.ext import commands
 
@@ -65,3 +67,75 @@ def test_close_keeps_the_loop_running_while_the_loader_shuts_down(
         [True],
         [True],
     )
+
+
+class _Controller:
+    def __init__(self, name, error=None):
+        self.guild = type("G", (), {"name": name})()
+        self.error = error
+
+    async def udisconnect(self, reason):
+        if self.error:
+            raise self.error
+
+
+def _close(monkeypatch, controllers=(), stop_error=None, shutdown_error=None):
+    calls = []
+
+    async def stop():
+        calls.append("stop")
+        if stop_error:
+            raise stop_error
+
+    def shutdown():
+        calls.append("shutdown")
+        if shutdown_error:
+            raise shutdown_error
+
+    async def discord_close(self):
+        calls.append("discord")
+
+    monkeypatch.setattr(bot_module.loader, "shutdown", shutdown)
+    monkeypatch.setattr(bot_module.linkutils, "stop", stop)
+    monkeypatch.setattr(commands.Bot, "close", discord_close)
+
+    async def scenario():
+        bot = MusicBot(
+            [], command_prefix="d!", intents=discord.Intents.default()
+        )
+        bot.sessions = list(controllers)
+        await bot.close()
+
+    return calls, scenario
+
+
+def test_failing_disconnect_does_not_stop_close_and_names_the_guild(
+    monkeypatch, capsys
+):
+    calls, scenario = _close(
+        monkeypatch,
+        [_Controller("Broken Guild", RuntimeError("boom")), _Controller("ok")],
+    )
+    asyncio.run(scenario())
+    err = capsys.readouterr().err
+    assert (calls, "Broken Guild" in err, "boom" in err) == (
+        ["stop", "shutdown", "discord"],
+        True,
+        True,
+    )
+
+
+def test_failing_link_stop_runs_the_rest_then_raises(monkeypatch):
+    calls, scenario = _close(monkeypatch, stop_error=ValueError("stop"))
+    with pytest.raises(ValueError, match="stop"):
+        asyncio.run(scenario())
+    assert calls == ["stop", "shutdown", "discord"]
+
+
+def test_failing_loader_shutdown_still_closes_discord_then_raises(
+    monkeypatch,
+):
+    calls, scenario = _close(monkeypatch, shutdown_error=OSError("join"))
+    with pytest.raises(OSError, match="join"):
+        asyncio.run(scenario())
+    assert calls == ["stop", "shutdown", "discord"]

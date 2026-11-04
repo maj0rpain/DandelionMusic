@@ -1,4 +1,5 @@
 import re
+import sys
 import asyncio
 from traceback import print_exception
 from typing import List
@@ -109,19 +110,44 @@ class MusicBot(commands.Bot):
     async def close(self):
         print(config.SHUTDOWN_MESSAGE, flush=True)
 
-        await asyncio.gather(
+        controllers = list(self.sessions)
+        results = await asyncio.gather(
             *(
-                audiocontroller.udisconnect("bot shutdown")
-                for audiocontroller in self.sessions
-            )
+                controller.udisconnect("bot shutdown")
+                for controller in controllers
+            ),
+            return_exceptions=True,
         )
-        # this loop's aiohttp session (see linkutils.get_session);
-        # the worker closes its own when shutdown() stops it
-        await linkutils.stop()
-        # joining the worker blocks; do it off the loop so other tasks
-        # keep running until it has exited
-        await asyncio.to_thread(loader.shutdown)
-        return await super().close()
+        for controller, result in zip(controllers, results):
+            if isinstance(result, BaseException):
+                print(
+                    f"Disconnect failed for guild {controller.guild.name}:",
+                    file=sys.stderr,
+                    flush=True,
+                )
+                print_exception(result)
+
+        # every remaining step runs; a later step's exception propagates
+        # once the steps after it have run
+        failure = None
+        try:
+            # this loop's aiohttp session (see linkutils.get_session);
+            # the worker closes its own when shutdown() stops it
+            await linkutils.stop()
+        except Exception as e:
+            failure = e
+        try:
+            # joining the worker blocks; do it off the loop so other
+            # tasks keep running until it has exited
+            await asyncio.to_thread(loader.shutdown)
+        except Exception as e:
+            failure = e
+        try:
+            await super().close()
+        except Exception as e:
+            failure = e
+        if failure is not None:
+            raise failure
 
     async def on_ready(self):
         await self.sessions.load_settings(self.guilds)
