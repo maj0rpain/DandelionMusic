@@ -77,6 +77,14 @@ def test_untruncated_playlist_reply_is_queued_playlist():
     assert sent == [config.SONGINFO_PLAYLIST_QUEUED]
 
 
+def _process(controller):
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        return await controller.process_song("x")
+
+    return asyncio.run(run())
+
+
 def test_one_song_partial_playlist_is_reported_as_queued_playlist(
     controller, stub_loader
 ):
@@ -84,11 +92,7 @@ def test_one_song_partial_playlist_is_reported_as_queued_playlist(
     cut = Truncation(50, TruncationReason.API_ERROR)
     stub_loader.results["load_song"] = PartialPlaylist(songs, cut)
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        return await controller.process_song("x")
-
-    result = asyncio.run(run())
+    result = _process(controller)
 
     assert isinstance(result, _queued_playlist_class(controller))
     assert result.queued == 1
@@ -102,11 +106,7 @@ def test_multi_song_partial_playlist_keeps_its_truncation(
     cut = Truncation(50, TruncationReason.NO_API)
     stub_loader.results["load_song"] = PartialPlaylist(songs, cut)
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        return await controller.process_song("x")
-
-    result = asyncio.run(run())
+    result = _process(controller)
 
     assert isinstance(result, _queued_playlist_class(controller))
     assert result.queued == 3
@@ -118,11 +118,7 @@ def test_plain_list_becomes_queued_playlist_without_truncation(
 ):
     stub_loader.results["load_song"] = _songs(controller, "a", "b")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        return await controller.process_song("x")
-
-    result = asyncio.run(run())
+    result = _process(controller)
 
     assert isinstance(result, _queued_playlist_class(controller))
     assert result.truncation is None and not result.truncated
