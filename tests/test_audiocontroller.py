@@ -10,10 +10,12 @@ import asyncio
 import pickle
 import sys
 import threading
+import types
 
 import pytest
 
 from controller_seam import StubLoader, controller_seam
+from musicbot.commands.music import Music
 
 
 def test_controller_pickles_its_playlist_into_the_temp_backup_dir(
@@ -497,6 +499,10 @@ def test_queue_starts_the_first_track_when_idle(
     assert _preloaded(stub_loader) == ["a", "b"]
 
 
+async def _ret(value):
+    return value
+
+
 class _FakeMessage:
     """A sent message: records every view it is edited to."""
 
@@ -521,12 +527,9 @@ def test_attach_view_moves_the_buttons_onto_the_new_message(controller):
 
     async def run():
         old_message = _FakeMessage()
-        await controller.attach_view(lambda view: _return(old_message))
+        await controller.attach_view(lambda view: _ret(old_message))
         result = await controller.attach_view(send)
         return old_message, result
-
-    async def _return(message):
-        return message
 
     old_message, result = asyncio.run(run())
 
@@ -534,7 +537,7 @@ def test_attach_view_moves_the_buttons_onto_the_new_message(controller):
     assert len(sent) == 1 and isinstance(sent[0], discord.ui.View)
     assert result is new_message
     # the next attach_view takes the buttons off the new message
-    asyncio.run(controller.attach_view(lambda view: _return(_FakeMessage())))
+    asyncio.run(controller.attach_view(lambda view: _ret(_FakeMessage())))
     assert new_message.edits == [None]
 
 
@@ -895,43 +898,30 @@ def _queue_saved_playlist_song(controller, from_saved_playlist=True):
     """Queues one song behind a playing track, stored as "stale title"
     in a saved playlist and loaded as "fresh title"; lets the preload
     run, and returns the saved playlist's entries and the queue."""
-    ac = sys.modules[type(controller).__module__]
-    _queue(controller, "playing")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        engine, factory = await _saved_playlist_db(
-            ac,
-            "1234",
-            "mix",
-            [ac.playlists.PlaylistEntry(SAVED_URL, "stale title")],
+    async def queue_and_preload(ac, factory):
+        await controller.queue(
+            [
+                ac.Song(
+                    ac.SiteTypes.YT_DLP,
+                    SAVED_URL,
+                    title="fresh title",
+                    saved_playlist=(
+                        ac.playlists.PlaylistRef("1234", "mix")
+                        if from_saved_playlist
+                        else None
+                    ),
+                    saved_url=SAVED_URL if from_saved_playlist else None,
+                )
+            ]
         )
-        controller.bot.DbSession = factory
-        try:
-            controller.guild.voice_client.playing = True
-            await controller.queue(
-                [
-                    ac.Song(
-                        ac.SiteTypes.YT_DLP,
-                        SAVED_URL,
-                        title="fresh title",
-                        saved_playlist=(
-                            ac.playlists.PlaylistRef("1234", "mix")
-                            if from_saved_playlist
-                            else None
-                        ),
-                    )
-                ]
-            )
-            await _drain(controller)
-            contents = await ac.playlists.get(
-                factory, ac.playlists.PlaylistRef("1234", "mix")
-            )
-            return contents.entries, _titles(controller)
-        finally:
-            await engine.dispose()
+        await _drain(controller)
+        contents = await ac.playlists.get(
+            factory, ac.playlists.PlaylistRef("1234", "mix")
+        )
+        return contents.entries, _titles(controller)
 
-    return asyncio.run(run())
+    return _stored_titles_after_preloading(controller, queue_and_preload)
 
 
 def _entry(controller, title):
@@ -979,6 +969,408 @@ def test_a_failing_title_refresh_still_counts_as_a_successful_preload(
     entries, titles = _queue_saved_playlist_song(controller)
     assert entries == [_entry(controller, "stale title")]
     assert titles == ["playing", "fresh title"]
+
+
+def _gated_preload(stub_loader, title):
+    """Makes preload() of `title` wait on one future per call, in call
+    order; returns those futures. Other titles succeed at once."""
+    futures = []
+    original = stub_loader.preload
+
+    async def preload(song):
+        if song.title != title:
+            return await original(song)
+        stub_loader.calls.append(("preload", (song,)))
+        future = asyncio.get_running_loop().create_future()
+        futures.append(future)
+        return await future
+
+    stub_loader.preload = preload
+    return futures
+
+
+def test_a_background_preload_failing_after_the_song_became_head_skips_only_it(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "a", "b", "c")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        futures = _gated_preload(stub_loader, "b")
+        await controller.ensure_playing()
+        await _settle()
+        # the queue preload of "b" is pending; skipping makes "b" the
+        # head, and the player's own preload of it pends too
+        controller.skip()
+        await _settle()
+        assert len(futures) == 2
+        futures[0].set_result(stub_loader.Preload.FAILED)
+        await _settle()
+        futures[1].set_result(stub_loader.Preload.FAILED)
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _played(controller) == ["a", "c"]
+
+
+def test_a_failed_non_head_preload_still_removes_the_song(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "a", "b", "c")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        futures = _gated_preload(stub_loader, "b")
+        await controller.ensure_playing()
+        await _settle()
+        futures[0].set_result(stub_loader.Preload.FAILED)
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _titles(controller) == ["a", "c"]
+
+
+def _idle_timer_that_fires_at_once(controller, monkeypatch):
+    """Lets the idle timer fire straight away, and returns the list a
+    voice client disconnect() appends to: one entry per disconnect."""
+    from config import config
+
+    monkeypatch.setattr(config, "VC_TIMEOUT", 0)
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
+    controller.bot.sessions.settings(controller.guild).vc_timeout = True
+    voice_client = controller.guild.voice_client
+    disconnects = []
+    original = voice_client.disconnect
+
+    async def disconnect(*, force=False):
+        disconnects.append(force)
+        await original(force=force)
+
+    voice_client.disconnect = disconnect
+    return disconnects
+
+
+def _during_disconnect(controller, during):
+    """Makes the voice client's disconnect() run `during()` first."""
+    voice_client = controller.guild.voice_client
+    original = voice_client.disconnect
+
+    async def disconnect(*, force=False):
+        during()
+        await asyncio.sleep(0)
+        await original(force=force)
+
+    voice_client.disconnect = disconnect
+
+
+def test_a_track_end_hop_during_a_disconnect_starts_no_idle_timer(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "only")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        disconnects = _idle_timer_that_fires_at_once(controller, monkeypatch)
+        generation = controller._generation
+        _during_disconnect(
+            controller, lambda: controller._on_track_end(None, generation)
+        )
+        await controller.udisconnect("test")
+        await _settle()
+        return disconnects
+
+    # a timer started by the hop would disconnect a second time
+    assert len(asyncio.run(run())) == 1
+
+
+def test_a_disposed_controller_leaves_no_timer_running(
+    controller, monkeypatch
+):
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        disconnects = _idle_timer_that_fires_at_once(controller, monkeypatch)
+        _during_disconnect(
+            controller, lambda: controller.add_task(controller.timer.start())
+        )
+        await controller.dispose()
+        await _settle()
+        return disconnects
+
+    assert len(asyncio.run(run())) == 1
+
+
+def test_a_track_end_after_a_plain_stop_starts_the_idle_timer(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "only")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        _idle_timer_that_fires_at_once(controller, monkeypatch)
+        controller.stop()
+        await _settle()
+        return controller.guild.voice_client.disconnected
+
+    assert asyncio.run(run())
+
+
+def test_a_track_end_after_the_idle_timer_expired_starts_it_again(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "only")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        disconnects = _idle_timer_that_fires_at_once(controller, monkeypatch)
+        controller.guild.voice_client.playing = False
+        await controller.timer.start()
+        await _settle()
+        assert len(disconnects) == 1
+        controller._on_track_end(None, controller._generation)
+        await _settle()
+        return disconnects
+
+    assert len(asyncio.run(run())) == 2
+
+
+def _button(view, custom_id):
+    return next(c for c in view.children if c.custom_id == custom_id)
+
+
+def test_volume_down_lowers_the_volume_to_zero_from_five(controller):
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
+    controller.set_volume(5)
+
+    controller.volume_down()
+
+    assert controller.volume == 0
+
+
+def test_the_volume_down_button_is_disabled_at_zero_only(controller):
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
+
+    controller.set_volume(10)
+    assert not _button(controller.make_view(), "volume_down").disabled
+    controller.set_volume(0)
+    view = controller.make_view()
+    assert _button(view, "volume_down").disabled
+    assert not _button(view, "volume_up").disabled
+    controller.set_volume(100)
+    assert _button(controller.make_view(), "volume_up").disabled
+
+
+class _FakeCtx:
+    def __init__(self):
+        self.sent = []
+
+    async def send(self, *args, **kwargs):
+        self.sent.append((args, kwargs))
+
+
+def test_a_current_song_click_with_no_current_song_replies_queue_empty(
+    controller,
+):
+    from config import config
+
+    ctx = _FakeCtx()
+
+    asyncio.run(controller.current_song_callback(ctx))
+
+    assert ctx.sent == [((config.QUEUE_EMPTY,), {})]
+
+
+def test_a_current_song_click_while_a_track_plays_shows_the_song_info(
+    controller,
+):
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
+    ctx = _FakeCtx()
+
+    asyncio.run(controller.current_song_callback(ctx))
+
+    assert len(ctx.sent) == 1 and "embed" in ctx.sent[0][1]
+
+
+def _http_exception(status, code):
+    import discord
+
+    class _Response:
+        def __init__(self):
+            self.status = status
+            self.reason = "x"
+
+    return discord.HTTPException(_Response(), {"code": code, "message": "x"})
+
+
+class _FlakyMessage(_FakeMessage):
+    """Fails its first edit with `error`, then edits normally."""
+
+    def __init__(self, error):
+        super().__init__()
+        self.error = error
+        self.id = 1
+        self.channel = self
+
+    async def edit(self, *, view):
+        if self.error:
+            error, self.error = self.error, None
+            raise error
+        self.edits.append(view)
+
+    async def fetch_message(self, _id):
+        return self
+
+
+def test_the_retry_after_an_expired_token_edit_applies_the_view(controller):
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
+    message = _FlakyMessage(_http_exception(401, 50027))
+
+    async def run():
+        await controller.attach_view(lambda view: _ret(message))
+        controller.set_volume(0)  # the buttons now differ
+        await controller.update_view()
+
+    asyncio.run(run())
+
+    assert len(message.edits) == 1 and message.edits[0] is not None
+
+
+def test_a_refresh_after_a_failed_edit_applies_the_view_again(controller):
+    _queue(controller, "current")
+    voice = controller.guild.voice_client
+    message = _FlakyMessage(_http_exception(500, 0))
+
+    async def run():
+        await controller.attach_view(lambda view: _ret(message))
+        voice.playing = True
+        await controller.update_view()
+        await controller.update_view()
+
+    asyncio.run(run())
+
+    assert len(message.edits) == 1 and message.edits[0] is not None
+
+
+def _rewriting_preload(stub_loader, normalised):
+    """Makes every extraction rewrite the song's web page URL, as
+    yt-dlp does when it normalises it or resolves a Spotify entry."""
+
+    async def preload(song):
+        song.webpage_url = normalised
+        return stub_loader.Preload.EXTRACTED
+
+    stub_loader.preload = preload
+
+
+def _stored_titles_after_preloading(controller, run_in_db):
+    """Queues a playing track and a "stale title" saved playlist "mix"
+    (guild "1234"), awaits `run_in_db(ac, factory)` with the module and
+    the DB session factory, and returns what it returns."""
+    ac = sys.modules[type(controller).__module__]
+    _queue(controller, "playing")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        engine, factory = await _saved_playlist_db(
+            ac,
+            "1234",
+            "mix",
+            [ac.playlists.PlaylistEntry(SAVED_URL, "stale title")],
+        )
+        controller.bot.DbSession = factory
+        try:
+            controller.guild.voice_client.playing = True
+            return await run_in_db(ac, factory)
+        finally:
+            await engine.dispose()
+
+    return asyncio.run(run())
+
+
+def _stored_titles(ac, factory):
+    async def get():
+        contents = await ac.playlists.get(
+            factory, ac.playlists.PlaylistRef("1234", "mix")
+        )
+        return [entry.title for entry in contents.entries]
+
+    return get()
+
+
+def test_a_song_loaded_from_a_saved_playlist_keeps_its_title_refresh(
+    controller, stub_loader
+):
+    _rewriting_preload(stub_loader, "https://example.invalid/normalised")
+
+    async def load_and_preload(ac, factory):
+        async def noop(*args, **kwargs):
+            pass
+
+        ctx = types.SimpleNamespace(
+            bot=types.SimpleNamespace(DbSession=factory),
+            guild=controller.guild,
+            audiocontroller=controller,
+            defer=noop,
+            send=noop,
+        )
+        await Music._playlist_load.callback(Music(None), ctx, "mix")
+        await _drain(controller)
+        song = controller.playlist.playque[-1]
+        titles = []
+        for n in range(2):
+            # the stream URL expired: the song is extracted again
+            song.title = f"fresh title {n}"
+            assert await controller._preload(song)
+            titles.append(await _stored_titles(ac, factory))
+        return titles
+
+    assert _stored_titles_after_preloading(controller, load_and_preload) == [
+        ["fresh title 0"],
+        ["fresh title 1"],
+    ]
+
+
+def test_a_song_without_a_saved_url_refreshes_no_stored_title(
+    controller, stub_loader
+):
+    _rewriting_preload(stub_loader, SAVED_URL)
+
+    def make_song(ac):
+        song = ac.Song(
+            ac.SiteTypes.YT_DLP,
+            SAVED_URL,
+            saved_playlist=ac.playlists.PlaylistRef("1234", "mix"),
+        )
+        # as unpickled from a backup written before saved_url existed
+        song.__dict__.pop("saved_url", None)
+        return song
+
+    async def preload_once(ac, factory):
+        song = make_song(ac)
+        controller.playlist.add(song)
+        song.title = "fresh title 0"
+        assert await controller._preload(song)
+        return await _stored_titles(ac, factory)
+
+    assert _stored_titles_after_preloading(controller, preload_once) == [
+        "stale title"
+    ]
 
 
 # --- a pending start: the gap between committing to a track and

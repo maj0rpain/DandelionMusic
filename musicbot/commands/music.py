@@ -498,7 +498,7 @@ class Music(commands.Cog):
             return
 
         if value > 100 or value < 0:
-            await ctx.send("Error: Volume must be a number 1-100")
+            await ctx.send("Error: Volume must be a number 0-100")
             return
 
         if ctx.audiocontroller.volume >= value:
@@ -581,6 +581,7 @@ class Music(commands.Cog):
                 entry.url,
                 title=entry.title,
                 saved_playlist=contents.ref,
+                saved_url=entry.url,
             )
             for entry in contents.entries
         )

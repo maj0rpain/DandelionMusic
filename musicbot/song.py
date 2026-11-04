@@ -15,6 +15,9 @@ class Song:
     # class-level, so a Song unpickled from a queue backup written
     # before songs carried a PlaylistRef reads as having none
     saved_playlist: Optional[PlaylistRef] = None
+    # likewise: the saved entry's URL exactly as stored, which
+    # extraction never rewrites (unlike webpage_url)
+    saved_url: Optional[str] = None
 
     def __init__(
         self,
@@ -26,6 +29,7 @@ class Song:
         duration: Optional[int] = None,
         thumbnail: Optional[str] = None,
         saved_playlist: Optional[PlaylistRef] = None,
+        saved_url: Optional[str] = None,
     ):
         self.host = host
         self.webpage_url = webpage_url
@@ -35,6 +39,7 @@ class Song:
         self.duration = duration
         self.thumbnail = thumbnail
         self.saved_playlist = saved_playlist
+        self.saved_url = saved_url
 
     def format_output(self, playtype: str) -> discord.Embed:
         if self.host == SiteTypes.LOCAL_LIBRARY:

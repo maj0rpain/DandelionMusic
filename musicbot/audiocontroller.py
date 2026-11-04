@@ -149,6 +149,11 @@ class AudioController(object):
         # nothing was playing at all.
         self._playing = False
 
+        # True for the whole of udisconnect(): a track-end hop that
+        # lands meanwhile must not start the idle timer - see
+        # _advance().
+        self._disconnecting = False
+
         sett = bot.sessions.settings(guild)
         self._volume: int = sett.default_volume
 
@@ -205,19 +210,18 @@ class AudioController(object):
         self.set_volume(min(self.volume + 10, 100))
 
     def volume_down(self):
-        self.set_volume(max(self.volume - 10, 10))
+        self.set_volume(max(self.volume - 10, 0))
 
     async def register_voice_channel(self, channel: discord.VoiceChannel):
         await utils.connect_to(self.guild, channel)
 
     def make_view(self):
         if not self.is_active():
-            self._last_view = None
             return None
 
         is_empty = len(self.playlist) == 0
 
-        view = self._last_view = discord.ui.View(timeout=None)
+        view = discord.ui.View(timeout=None)
         view.add_item(
             MusicButton(
                 lambda _: self.prev_song(),
@@ -291,7 +295,7 @@ class AudioController(object):
                 lambda _: self.volume_down(),
                 custom_id="volume_down",
                 row=2,
-                disabled=self.volume == 10,
+                disabled=self.volume == 0,
                 emoji="🔉",
             )
         )
@@ -305,9 +309,12 @@ class AudioController(object):
             )
         )
 
-        return self._last_view
+        return view
 
     async def current_song_callback(self, ctx):
+        if self.current_song is None:
+            await ctx.send(config.QUEUE_EMPTY)
+            return
         await ctx.send(
             embed=self.current_song.format_output(config.SONGINFO_SONGINFO),
         )
@@ -328,7 +335,9 @@ class AudioController(object):
         """
         async with self.message_lock:
             await self.update_view(None)
-            res = await send(self.make_view())
+            view = self.make_view()
+            res = await send(view)
+            self._last_view = view
             if isinstance(res, discord.Interaction):
                 self._last_message = await res.original_response()
             else:
@@ -354,6 +363,7 @@ class AudioController(object):
             return
         try:
             await msg.edit(view=view)
+            self._last_view = view
         except discord.HTTPException as e:
             if e.code == 50027:  # Invalid Webhook Token
                 try:
@@ -555,7 +565,11 @@ class AudioController(object):
             self._pending = None
             # if self.pickle_file.exists():
             #     self.pickle_file.unlink()
-            if not self.timer.triggered and self.guild.voice_client:
+            if (
+                not self._disconnecting
+                and not self.timer.triggered
+                and self.guild.voice_client
+            ):
                 self.add_task(
                     self.timer.start(
                         not all(
@@ -855,6 +869,8 @@ class AudioController(object):
         await self.udisconnect(reason)
         for task in list(self._tasks):
             task.cancel()
+        # after the tasks: one of them may have started it
+        self.timer.cancel()
 
     async def _preload(self, song: Song) -> bool:
         """Preloads `song`; when that ran a fresh extraction, refreshes
@@ -867,12 +883,13 @@ class AudioController(object):
         if (
             result is loader.Preload.EXTRACTED
             and song.saved_playlist is not None
+            and song.saved_url is not None
         ):
             try:
                 await playlists.set_title(
                     self.bot.DbSession,
                     song.saved_playlist,
-                    song.webpage_url,
+                    song.saved_url,
                     song.title,
                 )
             except Exception:
@@ -885,8 +902,16 @@ class AudioController(object):
             islice(self.playlist.playque, 1, config.MAX_SONG_PRELOAD)
         ):
             if not await self._preload(song):
+                # Not the head: while this preload ran, the song may
+                # have become the current one, and play_song()'s own
+                # failed-preload skip is the only owner of the head.
+                # Removing it here too would make that skip drop the
+                # song behind it.
+                queue = self.playlist.playque
+                if queue and queue[0] is song:
+                    continue
                 try:
-                    self.playlist.playque.remove(song)
+                    queue.remove(song)
                     rerun_needed = True
                 except ValueError:
                     # already removed
@@ -951,6 +976,13 @@ class AudioController(object):
             await self.udisconnect("inactivity timeout")
 
     async def udisconnect(self, reason: str):
+        self._disconnecting = True
+        try:
+            return await self._udisconnect(reason)
+        finally:
+            self._disconnecting = False
+
+    async def _udisconnect(self, reason: str):
         # sampled before the teardown below wipes both - see the
         # no-connection branch
         had_session = self._playing or bool(self.playlist)
