@@ -6,7 +6,6 @@ copy.
 
 import asyncio
 import types
-from concurrent.futures import ThreadPoolExecutor
 
 import discord
 
@@ -36,14 +35,7 @@ def make_bot(controllers=None, is_owner=False, settings=None):
             await sessions.get_or_create(guild)
 
     sessions = GuildSessions(controllers.__getitem__, load)
-    try:
-        asyncio.get_running_loop()
-    except RuntimeError:
-        asyncio.run(seed())
-    else:
-        # called from a coroutine: seed on a loop of its own thread
-        with ThreadPoolExecutor(1) as pool:
-            pool.submit(asyncio.run, seed()).result()
+    asyncio.run(seed())
     return types.SimpleNamespace(sessions=sessions, is_owner=_is_owner)
 
 

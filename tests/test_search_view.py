@@ -22,7 +22,7 @@ from musicbot.bot import MusicBot
 from musicbot.commands.music import SearchView, SongButton
 from musicbot.utils import CheckError
 from discord_fakes import FakeInteraction
-from discord_fakes import VoiceGuild, http_error, make_bot, run
+from discord_fakes import VoiceGuild, http_error, run
 
 OWNER = 1
 OTHER = 2
@@ -50,8 +50,12 @@ class FakeContext:
         self.interaction = None
         self.guild = VoiceGuild()
         self.guild.put_bot_in(self.guild.channel("in voice"))
-        self.bot = make_bot(
-            settings={self.guild: SimpleNamespace(user_must_be_in_vc=False)}
+        self.bot = SimpleNamespace(
+            sessions=SimpleNamespace(
+                settings=lambda guild: SimpleNamespace(
+                    user_must_be_in_vc=False
+                )
+            )
         )
         self.sent = []
 
