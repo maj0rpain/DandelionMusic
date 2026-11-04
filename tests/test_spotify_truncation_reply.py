@@ -95,6 +95,24 @@ def test_one_song_partial_playlist_is_reported_as_queued_playlist(
     assert result.truncation == cut
 
 
+def test_multi_song_partial_playlist_keeps_its_truncation(
+    controller, stub_loader
+):
+    songs = _songs(controller, "a", "b", "c")
+    cut = Truncation(50, TruncationReason.NO_API)
+    stub_loader.results["load_song"] = PartialPlaylist(songs, cut)
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        return await controller.process_song("x")
+
+    result = asyncio.run(run())
+
+    assert isinstance(result, _queued_playlist_class(controller))
+    assert result.queued == 3
+    assert result.truncation == cut
+
+
 def test_plain_list_becomes_queued_playlist_without_truncation(
     controller, stub_loader
 ):
@@ -138,6 +156,15 @@ def test_playlist_add_reports_truncation_and_update(monkeypatch):
     assert len(sent) == 2
     assert sent[0] == _partial().truncation.notice(1)
     assert sent[1] == config.PLAYLIST_UPDATED
+
+
+def test_playlist_add_untruncated_sends_only_update(monkeypatch):
+    async def add_songs(*a):
+        pass
+
+    sent = _add(monkeypatch, [_song(), _song()], add_songs)
+
+    assert sent == [config.PLAYLIST_UPDATED]
 
 
 def test_playlist_add_to_missing_playlist_sends_only_not_found(monkeypatch):
