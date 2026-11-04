@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
-from musicbot import linkutils, utils
+from config import config
+from musicbot import linkutils, loader, utils
 from musicbot.bot import MusicBot
 
 
@@ -76,7 +77,9 @@ class Button(commands.Cog):
             reaction.emoji.name == button
             or str(reaction.emoji.id or "") == button
         ):
-            chan = serv.get_channel(reaction.channel_id)
+            chan = serv.get_channel_or_thread(reaction.channel_id)
+            if chan is None:
+                return
             message = await chan.fetch_message(reaction.message_id)
 
             links = self.get_links(message.content)
@@ -98,11 +101,17 @@ class Button(commands.Cog):
                 return
             await audiocontroller.register_voice_channel(user_vc.channel)
             if not audiocontroller.command_channel and sett.command_channel:
-                audiocontroller.command_channel = serv.get_channel(
+                audiocontroller.command_channel = serv.get_channel_or_thread(
                     int(sett.command_channel)
                 )
             for url in links:
-                await audiocontroller.process_song(url, user=member)
+                try:
+                    song = await audiocontroller.process_song(url, user=member)
+                except loader.SongError as e:
+                    await ctx.send(str(e))
+                    continue
+                if song is None:
+                    await ctx.send(config.SONGINFO_ERROR)
 
 
 async def setup(bot: MusicBot):

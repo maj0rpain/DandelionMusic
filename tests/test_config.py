@@ -196,3 +196,11 @@ class TestEnsureSqliteParent:
 
         src = inspect.getsource(MusicBot.__init__)
         assert "ensure_sqlite_parent(config.DATABASE)" in src
+
+
+@pytest.mark.parametrize("raw, expected", [(0, 1), (9, 9), (30, 9)])
+def test_search_results_is_clamped_to_the_keycap_range(
+    config_factory, raw, expected
+):
+    cfg = config_factory(f"SEARCH_RESULTS={raw}\n")
+    assert cfg.SEARCH_RESULTS == expected

@@ -155,6 +155,13 @@ def active_only(ctx):
     return True
 
 
+@commands.check
+def playlists_enabled(ctx):
+    if not config.ENABLE_PLAYLISTS:
+        raise utils.CheckError(config.PLAYLISTS_ARE_DISABLED)
+    return True
+
+
 def _playlist_ref(ctx, name: str) -> playlists.PlaylistRef:
     return playlists.PlaylistRef(str(ctx.guild.id), name)
 
@@ -170,6 +177,10 @@ class Music(commands.Cog):
         self.bot = bot
 
     async def cog_check(self, ctx):
+        # the playlist gate refuses before any voice or channel refusal
+        cmd = getattr(ctx, "command", None)
+        if cmd is not None and (cmd.root_parent or cmd) is self._playlist:
+            await playlists_enabled.predicate(ctx)
         ctx.audiocontroller = utils.get_audiocontroller(ctx)
         return await utils.play_check(ctx)
 
@@ -499,6 +510,8 @@ class Music(commands.Cog):
     async def _playlist_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
+        if not config.ENABLE_PLAYLISTS:
+            return []
         choices = await playlists.list_names(
             self.bot.DbSession, str(interaction.guild.id), prefix=current
         )
@@ -511,6 +524,7 @@ class Music(commands.Cog):
         aliases=["pl"],
         invoke_without_command=True,
     )
+    @playlists_enabled
     async def _playlist(self, ctx):
         await ctx.send("Use subcommands to manage playlists.")
 
@@ -520,12 +534,9 @@ class Music(commands.Cog):
         description=config.HELP_SAVE_PLAYLIST_LONG,
         help=config.HELP_SAVE_PLAYLIST_SHORT,
     )
+    @playlists_enabled
     @commands.check(dj_check)
     async def _playlist_save(self, ctx, name: str):
-        if not config.ENABLE_PLAYLISTS:
-            await ctx.send(config.PLAYLISTS_ARE_DISABLED)
-            return
-
         await ctx.defer()
         songs = [
             PlaylistEntry(song.webpage_url, song.title)
@@ -551,6 +562,7 @@ class Music(commands.Cog):
     )
     @app_commands.autocomplete(name=_playlist_autocomplete)
     @joins_voice
+    @playlists_enabled
     async def _playlist_load(
         self,
         ctx,
@@ -581,6 +593,7 @@ class Music(commands.Cog):
         description=config.HELP_REMOVE_PLAYLIST_LONG,
         help=config.HELP_REMOVE_PLAYLIST_SHORT,
     )
+    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(name=_playlist_autocomplete)
     async def _playlist_remove(
@@ -605,6 +618,7 @@ class Music(commands.Cog):
         description=config.HELP_LIST_PLAYLISTS_LONG,
         help=config.HELP_LIST_PLAYLISTS_SHORT,
     )
+    @playlists_enabled
     async def _playlist_list(self, ctx):
         names = await playlists.list_names(
             ctx.bot.DbSession, str(ctx.guild.id)
@@ -622,6 +636,7 @@ class Music(commands.Cog):
         description=config.HELP_PLAYLIST_SHOW_LONG,
         help=config.HELP_PLAYLIST_SHOW_SHORT,
     )
+    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_show(
@@ -658,6 +673,7 @@ class Music(commands.Cog):
         description=config.HELP_ADD_TO_PLAYLIST_LONG,
         help=config.HELP_ADD_TO_PLAYLIST_SHORT,
     )
+    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_add_song(
@@ -667,7 +683,11 @@ class Music(commands.Cog):
         track: str,
     ):
         await ctx.defer()
-        song = await loader.load_song(track)
+        try:
+            song = await loader.load_song(track)
+        except SongError as e:
+            await ctx.send(e)
+            return
         if song is None:
             await ctx.send(config.SONGINFO_ERROR)
             return
@@ -689,6 +709,7 @@ class Music(commands.Cog):
         description=config.HELP_REMOVE_FROM_PLAYLIST_LONG,
         help=config.HELP_REMOVE_FROM_PLAYLIST_SHORT,
     )
+    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_remove_song(
@@ -722,6 +743,7 @@ class Music(commands.Cog):
         description=config.HELP_MOVE_IN_PLAYLIST_LONG,
         help=config.HELP_MOVE_IN_PLAYLIST_SHORT,
     )
+    @playlists_enabled
     @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_move_song(

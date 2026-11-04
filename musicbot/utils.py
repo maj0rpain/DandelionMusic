@@ -185,18 +185,27 @@ def get_settings(ctx: Context) -> "GuildSettings":
     return sett
 
 
-async def dj_check(ctx: Context):
-    """Check if the user has DJ permissions"""
+async def _admin_or_owner(ctx: Context) -> bool:
     if ctx.channel.permissions_for(ctx.author).administrator:
         return True
-    owner = await ctx.bot.is_owner(ctx.author)
-    if owner:
+    return bool(await ctx.bot.is_owner(ctx.author))
+
+
+def _holds_dj_role(ctx: Context, sett) -> bool:
+    """True when a DJ role is set and the author holds it."""
+    return bool(
+        sett.dj_role and int(sett.dj_role) in [r.id for r in ctx.author.roles]
+    )
+
+
+async def dj_check(ctx: Context):
+    """Check if the user has DJ permissions"""
+    if await _admin_or_owner(ctx):
         return True
 
     sett = get_settings(ctx)
-    if sett.dj_role:
-        if int(sett.dj_role) not in [r.id for r in ctx.author.roles]:
-            raise CheckError(config.NOT_A_DJ)
+    if sett.dj_role and not _holds_dj_role(ctx, sett):
+        raise CheckError(config.NOT_A_DJ)
     return True
 
 
@@ -228,12 +237,13 @@ async def voice_check(ctx: Context):
             # current channel doesn't have any user in it
             return True
 
-    try:
-        if await dj_check(ctx):
-            # DJs and admins can always run commands
-            return True
-    except CheckError:
-        pass
+    # Admins and the application owner always pass; a DJ passes only
+    # when the guild has set a DJ role and the member holds it. With no
+    # DJ role set, nobody else bypasses (EXTRA_OWNERS included).
+    if await _admin_or_owner(ctx):
+        return True
+    if _holds_dj_role(ctx, get_settings(ctx)):
+        return True
 
     raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
 
