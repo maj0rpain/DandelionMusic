@@ -5,7 +5,12 @@ is a pure function of its input."""
 import pytest
 
 from musicbot.audiotags import AudioTags, _parse_year, nice_title
-from musicbot.linkutils import SiteTypes, get_urls, identify_url
+from musicbot.linkutils import (
+    SiteTypes,
+    get_urls,
+    identify_url,
+    normalize_track,
+)
 from musicbot.loader import _parse_expire
 
 
@@ -114,3 +119,90 @@ class TestGetUrls:
 
     def test_no_links(self):
         assert get_urls("nothing here") == []
+
+
+SPOTIFY_ID = "4cOdK2wGLETKBW3PvgPWqT"
+
+
+@pytest.mark.parametrize(
+    "text, expected",
+    [
+        ("  https://youtu.be/xyz  ", "https://youtu.be/xyz"),
+        ("<https://youtu.be/xyz>", "https://youtu.be/xyz"),
+        ("  <https://youtu.be/xyz> ", "https://youtu.be/xyz"),
+        ("https://youtu.be/xyz.", "https://youtu.be/xyz"),
+        ("https://youtu.be/xyz,", "https://youtu.be/xyz"),
+        ("https://youtu.be/xyz!", "https://youtu.be/xyz"),
+        ("https://youtu.be/xyz?", "https://youtu.be/xyz"),
+        ("https://youtu.be/xyz;", "https://youtu.be/xyz"),
+        ("https://youtu.be/xyz:", "https://youtu.be/xyz"),
+        (
+            f"spotify:track:{SPOTIFY_ID}",
+            f"https://open.spotify.com/track/{SPOTIFY_ID}",
+        ),
+        (
+            f"spotify:album:{SPOTIFY_ID}",
+            f"https://open.spotify.com/album/{SPOTIFY_ID}",
+        ),
+        (
+            f"spotify:playlist:{SPOTIFY_ID}",
+            f"https://open.spotify.com/playlist/{SPOTIFY_ID}",
+        ),
+        (
+            f"HTTPS://OPEN.SPOTIFY.COM/track/{SPOTIFY_ID}",
+            f"HTTPS://OPEN.SPOTIFY.COM/track/{SPOTIFY_ID}",
+        ),
+        (
+            f"https://open.spotify.com/TRACK/{SPOTIFY_ID}",
+            f"https://open.spotify.com/TRACK/{SPOTIFY_ID}",
+        ),
+        (
+            f"spotify:track:{SPOTIFY_ID}.",
+            f"https://open.spotify.com/track/{SPOTIFY_ID}",
+        ),
+        (
+            f"SPOTIFY:track:{SPOTIFY_ID}",
+            f"https://open.spotify.com/track/{SPOTIFY_ID}",
+        ),
+        (
+            f"Spotify:album:{SPOTIFY_ID}.",
+            f"https://open.spotify.com/album/{SPOTIFY_ID}",
+        ),
+        ("never gonna give you up.", "never gonna give you up."),
+        ("  never gonna give you up  ", "never gonna give you up"),
+        ("hello.", "hello."),
+        ("<never gonna give you up>", "<never gonna give you up>"),
+        ("<hello>", "<hello>"),
+        ("Re:Zero!", "Re:Zero!"),
+        ("ft:song.", "ft:song."),
+        ("mix:tape?", "mix:tape?"),
+        ("<Re:Zero>", "<Re:Zero>"),
+        ("<https://youtu.be/xyz>.", "https://youtu.be/xyz"),
+        ("<https://youtu.be/xyz.>", "https://youtu.be/xyz"),
+        ("<https://youtu.be/xyz.>!", "https://youtu.be/xyz"),
+        ("<Re:Zero>!", "<Re:Zero>!"),
+    ],
+)
+def test_normalize_track(text, expected):
+    assert normalize_track(text) == expected
+
+
+@pytest.mark.parametrize(
+    "text",
+    [
+        f"https://open.spotify.com/track/{SPOTIFY_ID}",
+        f"HTTPS://OPEN.SPOTIFY.COM/track/{SPOTIFY_ID}",
+        f"Https://Open.Spotify.Com/album/{SPOTIFY_ID}",
+    ],
+)
+def test_spotify_links_are_recognised_whatever_the_case_of_scheme_and_host(
+    text,
+):
+    assert identify_url(text) is SiteTypes.SPOTIFY
+
+
+def test_spotify_link_with_an_upper_case_type_segment_is_not_spotify():
+    assert (
+        identify_url(f"https://open.spotify.com/TRACK/{SPOTIFY_ID}")
+        is not SiteTypes.SPOTIFY
+    )

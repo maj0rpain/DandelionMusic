@@ -551,14 +551,40 @@ SAFE_MIGRATION_OPS = (
 )
 
 
+def _leaf_ops(op):
+    """Yields the leaf operations of a (possibly nested) op container."""
+    if isinstance(op, alembic_ops.OpContainer):
+        for child in op.ops:
+            yield from _leaf_ops(child)
+    else:
+        yield op
+
+
 def _find_unsafe_ops(op):
     """Yields any migration operation that isn't a known-additive
     schema change."""
-    if isinstance(op, alembic_ops.OpContainer):
-        for child in op.ops:
-            yield from _find_unsafe_ops(child)
-    elif not isinstance(op, SAFE_MIGRATION_OPS):
-        yield op
+    for leaf in _leaf_ops(op):
+        if not isinstance(leaf, SAFE_MIGRATION_OPS):
+            yield leaf
+
+
+def _include_name(name, type_, parent_names):
+    """Alembic hook: compare only the tables the bot defines, so a
+    database shared with another application is left alone (their
+    tables would otherwise show up as drop-table operations)."""
+    if type_ == "table":
+        return name in Base.metadata.tables
+    return True
+
+
+def _find_required_column_adds(op):
+    """Yields 'table.column' for each added column that is NOT NULL
+    with no server default."""
+    for leaf in _leaf_ops(op):
+        if isinstance(leaf, alembic_ops.AddColumnOp):
+            column = leaf.column
+            if not column.nullable and column.server_default is None:
+                yield f"{leaf.table_name}.{column.name}"
 
 
 def run_migrations(connection):
@@ -567,7 +593,9 @@ def run_migrations(connection):
     contains anything destructive (a dropped/renamed/altered table
     or column) instead of silently applying it - that needs a
     manual, reviewed migration."""
-    ctx = MigrationContext.configure(connection)
+    ctx = MigrationContext.configure(
+        connection, opts={"include_name": _include_name}
+    )
     upgrade_ops = produce_migrations(ctx, Base.metadata).upgrade_ops
 
     unsafe_ops = [type(op).__name__ for op in _find_unsafe_ops(upgrade_ops)]
@@ -578,6 +606,15 @@ def run_migrations(connection):
             f"({', '.join(unsafe_ops)}). This usually means a column "
             "or table was renamed or removed. Back up the database "
             "and apply the schema change manually, then restart."
+        )
+
+    required = list(_find_required_column_adds(upgrade_ops))
+    if required:
+        raise RuntimeError(
+            "Refusing to start: the code adds a NOT NULL column with no "
+            f"server default ({', '.join(required)}), which existing "
+            "rows cannot satisfy. Such a column needs a server default "
+            "or a manual migration."
         )
 
     code = render_python_code(upgrade_ops, migration_context=ctx)

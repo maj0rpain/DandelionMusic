@@ -138,7 +138,9 @@ def test_playnext_multi_track_playlist_is_appended(controller, stub_loader):
     )
 
     assert _titles(controller) == ["current", "a", "x", "y"]
-    assert result is sys.modules[type(controller).__module__].PLAYLIST
+    assert isinstance(
+        result, sys.modules[type(controller).__module__].QueuedPlaylist
+    )
 
 
 @pytest.mark.parametrize("failure", ["none", "error"])

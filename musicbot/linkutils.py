@@ -2,6 +2,7 @@ import re
 import sys
 import asyncio
 from enum import Enum, auto
+from dataclasses import dataclass
 from traceback import print_exc
 from urllib.parse import urlparse
 from multiprocessing import current_process
@@ -20,7 +21,6 @@ from yt_dlp.extractor.lazy_extractors import LazyLoadExtractor
 
 from config import config
 from musicbot import loader
-
 
 # Limits on the network calls the extraction worker makes. One guild's
 # call that blocks holds the worker for every guild, so none may block
@@ -95,7 +95,7 @@ url_regex = re.compile(
     r".,<>?«»“”‘’])))"
 )
 spotify_regex = re.compile(
-    r"^https?://open\.spotify\.com/([^/]+/)?"
+    r"^(?i:https?://open\.spotify\.com)/([^/]+/)?"
     r"(?P<type>track|playlist|album)/(?P<code>\w+)"
 )
 
@@ -152,6 +152,17 @@ class SpotifyPlaylistTypes(Enum):
     ALBUM = "album"
 
 
+@dataclass
+class SpotifyTracks:
+    """Links of a Spotify playlist or album. `total` is the number of
+    tracks Spotify reports when the fetch is known to be partial, else
+    None; `reason` is the config key of why it is partial."""
+
+    links: List[str]
+    total: Optional[int] = None
+    reason: Optional[str] = None
+
+
 async def get_soup(url: str) -> BeautifulSoup:
     async with get_session().get(url) as response:
         response.raise_for_status()
@@ -160,7 +171,9 @@ async def get_soup(url: str) -> BeautifulSoup:
     return BeautifulSoup(page, "html.parser")
 
 
-async def fetch_spotify(url: str) -> Optional[Union[dict, List[str]]]:
+async def fetch_spotify(
+    url: str,
+) -> Optional[Union[dict, SpotifyTracks]]:
     """Searches YouTube for Spotify song or loads Spotify playlist"""
     match = spotify_regex.match(url)
     # strip any extra parts
@@ -170,7 +183,7 @@ async def fetch_spotify(url: str) -> Optional[Union[dict, List[str]]]:
         return await fetch_spotify_playlist(url, url_type, match.group("code"))
 
     if spotify_api:
-        track_data = spotify_api.track(url)
+        track_data = spotify_api.track(match.group("code"))
         title = track_data["name"]
         artist = track_data["artists"][0]["name"]
     else:
@@ -199,22 +212,35 @@ async def fetch_spotify(url: str) -> Optional[Union[dict, List[str]]]:
 
 async def fetch_spotify_playlist(
     url: str, list_type: str, code: str
-) -> List[str]:
-    """Returns list of Spotify links"""
+) -> SpotifyTracks:
+    """Returns the Spotify links, and how many tracks are missing"""
 
     if spotify_api:
         return fetch_playlist_with_api(SpotifyPlaylistTypes(list_type), code)
 
     soup = await get_soup(url)
     results = soup.find_all(attrs={"name": "music:song", "content": True})
+    count_tag = soup.find(attrs={"name": "music:song_count", "content": True})
+    try:
+        total = int(count_tag["content"]) if count_tag else None
+    except ValueError:
+        total = None
 
-    return [item["content"] for item in results]
+    return SpotifyTracks(
+        [item["content"] for item in results],
+        total,
+        "SPOTIFY_TRUNCATED_NO_API",
+    )
 
 
 def fetch_playlist_with_api(
     list_type: SpotifyPlaylistTypes, code: str
-) -> List[str]:
+) -> SpotifyTracks:
     tracks = []
+    total = None
+    reason = None
+    pages = 0
+    first_total = None
     try:
         if list_type == SpotifyPlaylistTypes.ALBUM:
             results = spotify_api.album_tracks(code)
@@ -222,8 +248,10 @@ def fetch_playlist_with_api(
             results = spotify_api.playlist_items(code)
 
         if results:
+            first_total = results.get("total")
             while results:
                 tracks.extend(results["items"])
+                pages += 1
                 results = spotify_api.next(results)
         else:
             print(
@@ -232,11 +260,15 @@ def fetch_playlist_with_api(
                 file=sys.stderr,
             )
     except Exception:
+        if not pages:
+            raise
         print(
             f"ERROR: Spotify API returned error for {list_type} {code}:",
             file=sys.stderr,
         )
         print_exc(file=sys.stderr)
+        total = first_total
+        reason = "SPOTIFY_TRUNCATED_API_ERROR"
 
     links = []
     for track in tracks:
@@ -252,7 +284,47 @@ def fetch_playlist_with_api(
                 f" field {e.args[0]!r} is missing",
                 file=sys.stderr,
             )
-    return links
+    return SpotifyTracks(links, total, reason)
+
+
+_spotify_uri_regex = re.compile(r"(?i:spotify):(track|album|playlist):(\w+)")
+_TRAILING_PUNCTUATION = ".,!?;:"
+
+
+def _is_single_url(s: str) -> bool:
+    """True for one URL (with a scheme://) or a spotify: URI, not for
+    plain text that merely looks like word:word."""
+    return bool(url_regex.fullmatch(s)) and (
+        "://" in s or bool(_spotify_uri_regex.fullmatch(s))
+    )
+
+
+def _unwrapped_url(s: str) -> Optional[str]:
+    """The single URL inside a <...> wrapper, or None."""
+    if len(s) > 2 and s[0] == "<" and s[-1] == ">":
+        inner = s[1:-1]
+        if _is_single_url(inner.rstrip(_TRAILING_PUNCTUATION)):
+            return inner
+    return None
+
+
+def normalize_track(text: str) -> str:
+    """Cleans up user-typed track text before it is classified: strips
+    whitespace, unwraps one <...> around a single URL (trailing
+    punctuation may follow the wrapper or sit inside it), drops trailing
+    sentence punctuation after a single URL and rewrites spotify: URIs.
+    Anything else is returned unchanged apart from the strip."""
+    text = text.strip()
+    for candidate in (text, text.rstrip(_TRAILING_PUNCTUATION)):
+        if (inner := _unwrapped_url(candidate)) is not None:
+            text = inner
+            break
+    bare = text.rstrip(_TRAILING_PUNCTUATION)
+    if bare != text and _is_single_url(bare):
+        text = bare
+    if m := _spotify_uri_regex.fullmatch(text):
+        return f"https://open.spotify.com/{m.group(1)}/{m.group(2)}"
+    return text
 
 
 def get_urls(content: str) -> List[str]:

@@ -1,5 +1,6 @@
 import sys
 import asyncio
+from dataclasses import dataclass
 from itertools import islice
 from inspect import isawaitable
 from traceback import print_exc
@@ -8,7 +9,6 @@ from typing import (
     Coroutine,
     Iterable,
     List,
-    Literal,
     Optional,
     Union,
 )
@@ -17,7 +17,7 @@ import discord
 from config import config
 
 from musicbot import loader, playlists, utils
-from musicbot.song import Song
+from musicbot.song import PartialPlaylist, Song
 from musicbot.linkutils import SiteTypes
 from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
 from musicbot.utils import (
@@ -35,7 +35,20 @@ if TYPE_CHECKING:
     from musicbot.bot import MusicBot
 
 
-PLAYLIST = object()
+@dataclass
+class QueuedPlaylist:
+    """process_song()'s result for a multi-song load. `total` and
+    `reason` (a config key) say the playlist was only partly loaded."""
+
+    queued: int
+    total: Optional[int] = None
+    reason: Optional[str] = None
+
+    @property
+    def truncated(self) -> bool:
+        return self.total is not None and self.total > self.queued
+
+
 _not_provided = object()
 
 
@@ -739,7 +752,7 @@ class AudioController(object):
         track: str,
         user: Optional[discord.abc.User] = None,
         playnext=False,
-    ) -> Union[Optional[Song], Literal[PLAYLIST]]:
+    ) -> Union[Optional[Song], QueuedPlaylist]:
         """Adds the track to the playlist instance
         Starts playing if it is the first song.
 
@@ -783,7 +796,7 @@ class AudioController(object):
         else:
             added = list(loaded_song)
             count = len(loaded_song)
-            if count == 1:
+            if count == 1 and not isinstance(loaded_song, PartialPlaylist):
                 # special-case one-item playlists
                 loaded_song = loaded_song[0]
                 print(
@@ -799,7 +812,11 @@ class AudioController(object):
                     f"{user} queued a playlist ({count} track(s))"
                     f" via {track!r} in guild {self.guild.name!r}"
                 )
-                loaded_song = PLAYLIST
+                loaded_song = QueuedPlaylist(
+                    count,
+                    getattr(loaded_song, "total", None),
+                    getattr(loaded_song, "reason", None),
+                )
 
         await self.queue(added, playnext=playnext and len(added) == 1)
 

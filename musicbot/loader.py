@@ -13,23 +13,22 @@ from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context as mp_context
 from typing import List, Optional, Union
 
-from aiohttp import ClientError
-from requests.exceptions import RequestException
-from spotipy.exceptions import SpotifyBaseException
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 from config import config
 from musicbot.audiotags import nice_title, read_tags
-from musicbot.song import Song
+from musicbot.song import PartialPlaylist, Song
 from musicbot.utils import wrap_stdio
 from musicbot.linkutils import (
     YT_IE,
     ExtractorT,
     SiteTypes,
     get_ie,
+    SpotifyTracks,
     fetch_spotify,
     identify_url,
+    normalize_track,
     init as init_session,
     stop as stop_session,
 )
@@ -301,6 +300,8 @@ def _library_track_path(track: str) -> Path:
 
 
 def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
+    track = normalize_track(track)
+    partial = None
     host = identify_url(track)
 
     if host == SiteTypes.NOT_URL:
@@ -316,15 +317,11 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
     elif host == SiteTypes.SPOTIFY:
         try:
             data = _loop.run_until_complete(fetch_spotify(track))
-        except (
-            ClientError,
-            SpotifyBaseException,
-            RequestException,
-            TimeoutError,
-        ) as e:
+        except Exception as e:
             raise SongError(config.SONGINFO_ERROR) from e
-        if isinstance(data, list):
-            data = [{"url": url} for url in data]
+        if isinstance(data, SpotifyTracks):
+            partial = data
+            data = [{"url": url} for url in partial.links]
 
     elif host == SiteTypes.CUSTOM:
         data = {
@@ -371,6 +368,12 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
             )
             song.update(entry)
             results.append(song)
+        if (
+            partial is not None
+            and partial.total is not None
+            and partial.total > len(results)
+        ):
+            return PartialPlaylist(results, partial.total, partial.reason)
         return results
 
     song = Song(host, webpage_url=track)

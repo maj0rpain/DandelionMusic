@@ -75,7 +75,7 @@ class Config:
     # includes both the Postgres and MySQL drivers). A driver you name
     # by hand (dialect+driver://) must be async, and any other dialect
     # must name its async driver explicitly.
-    DATABASE_URL = os.getenv("HEROKU_DB") or "sqlite:///settings.db"
+    DATABASE_URL = "sqlite:///settings.db"
 
     ENABLE_BUTTON_PLUGIN = True
 
@@ -205,6 +205,10 @@ class Config:
         self._env_path = find_dotenv() or os.path.abspath(".env")
         load_dotenv(self._env_path)
 
+        # HEROKU_DB is an alias for DATABASE_URL; DATABASE_URL wins
+        if "HEROKU_DB" in os.environ and "DATABASE_URL" not in os.environ:
+            os.environ["DATABASE_URL"] = os.environ["HEROKU_DB"]
+
         # Check for deprecated environment variable with typo
         if "VC_TIMOUT_DEFAULT" in os.environ:
             # in env, we can't fix it easily
@@ -224,7 +228,11 @@ class Config:
 
         # Read .env directly to check for unknown variables
         for key, value in parse_env_file(self._env_path)[1].items():
-            if key not in current_cfg and not key.startswith("_"):
+            if (
+                key not in current_cfg
+                and key != "HEROKU_DB"
+                and not key.startswith("_")
+            ):
                 self.unknown_vars[key] = value
 
         for key, default in current_cfg.items():
@@ -265,22 +273,9 @@ class Config:
         in the Config class. These might be typos or variables
         that are no longer used.
         """
-        for name, value in self.unknown_vars.items():
-            # Mask sensitive values like tokens
-            masked_value = value
-            if (
-                "token" in name.lower()
-                or "key" in name.lower()
-                or "secret" in name.lower()
-                or "password" in name.lower()
-            ):
-                if len(value) > 8:
-                    masked_value = value[:4] + "..." + value[-4:]
-                else:
-                    masked_value = "********"
-
+        for name in self.unknown_vars:
             warnings.warn(
-                f"Unknown environment variable: {name}={masked_value}"
+                f"Unknown environment variable: {name}"
                 "\nThis variable is not defined in the Config class"
                 " and will be ignored."
             )

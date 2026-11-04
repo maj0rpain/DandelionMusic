@@ -1,3 +1,4 @@
+import asyncio
 import os
 import sys
 
@@ -28,6 +29,12 @@ def config_factory(tmp_path, monkeypatch):
     # upper-cases keys) meant PATH, SYSTEMROOT and TEMP as well - fine
     # while nothing under test shells out or uses tempfile, and a
     # baffling failure the moment something does.
+    # load_dotenv() puts the .env's values into os.environ, and
+    # Config.load() copies HEROKU_DB into DATABASE_URL. Setting both
+    # first makes monkeypatch restore them to unset afterwards instead
+    # of leaking them into later tests' subprocesses.
+    monkeypatch.setenv("DATABASE_URL", "")
+    monkeypatch.setenv("HEROKU_DB", "")
     for key in (
         *ConfigClass.as_dict(),
         "SPOTIPY_CLIENT_ID",
@@ -99,3 +106,13 @@ def controller(controller_and_stub):
 @pytest.fixture
 def stub_loader(controller_and_stub):
     return controller_and_stub[1]
+
+
+@pytest.fixture
+def worker_loop(monkeypatch):
+    from musicbot import loader
+
+    loop = asyncio.new_event_loop()
+    monkeypatch.setattr(loader, "_loop", loop)
+    yield loop
+    loop.close()
