@@ -33,10 +33,12 @@ def http_error():
     )
 
 
-class FakeMessage:
-    """Records every edit; raises from it while `fail` is set."""
+class FakeMessage(discord.Message):
+    """A bot-sent message. Records every edit; raises from it while
+    `fail` is set."""
 
     def __init__(self, fail=False):
+        # no state: discord.Message is only here for isinstance
         self.edits = []
         self.fail = fail
 
@@ -44,6 +46,30 @@ class FakeMessage:
         if self.fail:
             raise http_error()
         self.edits.append(kwargs)
+
+
+class FakeWebhookMessage(FakeMessage, discord.WebhookMessage):
+    """What a deferred slash command's send returns."""
+
+
+class FakeInteractionResponse(discord.InteractionCallbackResponse):
+    """What answering an interaction directly returns: no edit()."""
+
+    def __init__(self):
+        pass
+
+
+class FakeFollowup:
+    """Records message edits by id; raises while `fail` is set."""
+
+    def __init__(self, fail=False):
+        self.edits = []
+        self.fail = fail
+
+    async def edit_message(self, message_id, **kwargs):
+        if self.fail:
+            raise http_error()
+        self.edits.append((message_id, kwargs))
 
 
 class FakeContext:
@@ -106,13 +132,15 @@ class FakeCog:
 
 
 class FakeInteraction:
-    def __init__(self, user_id=OWNER, custom_id="x"):
+    def __init__(self, user_id=OWNER, custom_id="x", followup_fails=False):
         self.user = SimpleNamespace(id=user_id)
         self.guild = None
         self.data = {"custom_id": custom_id}
         self.ctx = FakeContext(user_id)
         self.messages = []
         self.deferred = False
+        self.message = SimpleNamespace(id=99)
+        self.followup = FakeFollowup(fail=followup_fails)
 
         async def send_message(*args, **kwargs):
             self.messages.append((args, kwargs))
@@ -336,3 +364,91 @@ def test_timeout_with_no_message_and_no_interaction_edits_nothing():
         return view
 
     assert buttons_disabled(run(go))
+
+
+# --- Claim ---
+
+
+def test_a_refused_pick_releases_the_claim_and_a_repick_queues():
+    async def go():
+        view, cog = make_view(message=FakeMessage())
+        cog.check_error = CheckError("Join a voice channel first.")
+        await click(view, 0)
+        cog.check_error = None
+        await click(view, 1)
+        return cog
+
+    assert run(go).played == [URLS[1]]
+
+
+# --- Refresh through the pick's click followup ---
+
+
+def refreshed_by_pick(message):
+    async def go():
+        view, cog = make_view(message=message)
+        inter = await click(view, 0)
+        return cog, inter
+
+    return run(go)
+
+
+def test_a_pick_with_no_message_refreshes_through_its_followup():
+    cog, inter = refreshed_by_pick(None)
+    assert cog.played == [URLS[0]]
+    assert [m for m, _ in inter.followup.edits] == [99]
+
+
+def test_a_pick_holding_a_webhook_message_refreshes_through_its_followup():
+    message = FakeWebhookMessage()
+    cog, inter = refreshed_by_pick(message)
+    assert message.edits == []
+    assert [m for m, _ in inter.followup.edits] == [99]
+
+
+def test_a_pick_holding_a_callback_response_refreshes_through_its_followup():
+    cog, inter = refreshed_by_pick(FakeInteractionResponse())
+    assert [m for m, _ in inter.followup.edits] == [99]
+
+
+def test_a_failing_followup_edit_still_queues_and_reports_no_error():
+    async def go():
+        view, cog = make_view(message=None)
+        inter = FakeInteraction(OWNER, followup_fails=True)
+        assert await view.interaction_check(inter)
+        await view.children[0].callback(inter)
+        return cog, inter
+
+    cog, inter = run(go)
+    assert cog.played == [URLS[0]]
+    assert inter.ctx.sent == []
+
+
+# --- Timeout through the command interaction ---
+
+
+def slash_timeout(message):
+    async def go():
+        view, _ = make_view(message=message)
+        edited = []
+
+        async def edit_original_response(**kwargs):
+            edited.append(kwargs)
+
+        view.ctx.interaction = SimpleNamespace(
+            edit_original_response=edit_original_response
+        )
+        await view.on_timeout()
+        return view, edited
+
+    return run(go)
+
+
+def test_timeout_with_no_message_and_no_click_edits_the_original_response():
+    view, edited = slash_timeout(None)
+    assert edited == [{"view": view}]
+
+
+def test_timeout_holding_a_callback_response_edits_the_original_response():
+    view, edited = slash_timeout(FakeInteractionResponse())
+    assert edited == [{"view": view}]
