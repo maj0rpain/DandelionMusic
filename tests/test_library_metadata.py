@@ -658,7 +658,7 @@ def test_spotify_enrichment_is_disabled_without_a_client(no_spotify):
 
 
 def test_the_import_built_enrichment_client_follows_spotify_api():
-    api = linkutils.spotify_api
+    api = library_metadata.spotify_api
     client = library_metadata._enrichment_client
     if api is None:
         assert client is None
@@ -666,6 +666,8 @@ def test_the_import_built_enrichment_client_follows_spotify_api():
         assert client is not api
         assert client.auth_manager is api.auth_manager
         assert client.requests_timeout == 3
+        assert client.retries == 0
+        assert client.status_retries == 0
 
 
 def test_a_failed_spotify_artist_search_is_logged(
