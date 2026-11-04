@@ -534,6 +534,15 @@ class AudioController(object):
             # a newer track has already started: it is not this
             # callback's to end
             return
+        if self.guild.voice_client is None:
+            # discord.py tore the connection down from outside and
+            # stopped the player on its way: the track was cut off,
+            # not finished. Leave the queue, history and backup as
+            # they are - udisconnect() ends the session, and the cut
+            # off track restarts from the head of the queue. Only
+            # `is None`: is_connected() is briefly False during a
+            # move or reconnect, when a real track end must advance.
+            return
 
         self._advance(teardown=teardown)
 
