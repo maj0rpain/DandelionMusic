@@ -44,9 +44,7 @@ def test_add_song_replies_with_the_song_error_and_saves_nothing(monkeypatch):
 
     monkeypatch.setattr(music_module.loader, "load_song", load_song)
     monkeypatch.setattr(music_module.playlists, "add_songs", add_songs)
-    group = next(
-        c for c in Music(None).get_commands() if c.name == "playlist"
-    )
+    group = next(c for c in Music(None).get_commands() if c.name == "playlist")
     command = group.get_command("add_song")
     ctx = FakeCtx()
     asyncio.run(command.callback(Music(None), ctx, "mine", "bad link"))
@@ -59,7 +57,9 @@ def _wrappers(error):
     invoke = commands.CommandInvokeError(error)
     yield invoke
     yield commands.HybridCommandError(
-        app_commands.CommandInvokeError(types.SimpleNamespace(name="play"), error)
+        app_commands.CommandInvokeError(
+            types.SimpleNamespace(name="play"), error
+        )
     )
 
 
