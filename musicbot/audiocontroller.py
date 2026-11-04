@@ -18,6 +18,7 @@ from config import config
 
 from musicbot import loader, playlists, utils
 from musicbot.song import PartialPlaylist, Song
+from musicbot.truncation import Truncation
 from musicbot.linkutils import SiteTypes
 from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
 from musicbot.utils import (
@@ -37,16 +38,15 @@ if TYPE_CHECKING:
 
 @dataclass
 class QueuedPlaylist:
-    """process_song()'s result for a multi-song load. `total` and
-    `reason` (a config key) say the playlist was only partly loaded."""
+    """process_song()'s result for a multi-song load. `truncation` is
+    set when the playlist was only partly loaded."""
 
     queued: int
-    total: Optional[int] = None
-    reason: Optional[str] = None
+    truncation: Optional[Truncation] = None
 
     @property
     def truncated(self) -> bool:
-        return self.total is not None and self.total > self.queued
+        return self.truncation is not None
 
 
 _not_provided = object()
@@ -833,8 +833,11 @@ class AudioController(object):
                 )
                 loaded_song = QueuedPlaylist(
                     count,
-                    getattr(loaded_song, "total", None),
-                    getattr(loaded_song, "reason", None),
+                    (
+                        loaded_song.truncation
+                        if isinstance(loaded_song, PartialPlaylist)
+                        else None
+                    ),
                 )
 
         await self.queue(added, playnext=playnext and len(added) == 1)
