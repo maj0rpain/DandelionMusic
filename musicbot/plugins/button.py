@@ -107,9 +107,7 @@ class Button(commands.Cog):
                 )
             for url in links:
                 try:
-                    song = await audiocontroller.process_song(
-                        url, user=member
-                    )
+                    song = await audiocontroller.process_song(url, user=member)
                 except loader.SongError as e:
                     await ctx.send(str(e))
                     continue
