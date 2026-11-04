@@ -1,9 +1,7 @@
 import sys
 import atexit
 import asyncio
-import threading
 from enum import Enum
-from inspect import getmodule
 from pathlib import Path
 from traceback import print_exc
 from datetime import datetime, timedelta, timezone
@@ -145,7 +143,6 @@ def _now() -> datetime:
 
 
 _preloading = {}
-_site_locks = {}
 
 
 class LoaderNotRunning(RuntimeError):
@@ -177,18 +174,10 @@ class Preload(Enum):
 def extract_info(url: str, ie: Optional[ExtractorT] = None) -> Optional[dict]:
     if ie is None:
         ie = get_ie(url)
-    # cache by module (effectively means by site)
-    # extractor *may* be lazy
-    module = getmodule(getattr(ie, "real_class", ie))
     try:
-        lock = _site_locks[module]
-    except KeyError:
-        lock = _site_locks[module] = threading.Lock()
-    with lock:
-        try:
-            return _downloader.extract_info(url, False, ie.ie_key())
-        except DownloadError:
-            return None
+        return _downloader.extract_info(url, False, ie.ie_key())
+    except DownloadError:
+        return None
 
 
 async def search_youtube(title: str, count: int = 1) -> Optional[dict]:
