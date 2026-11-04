@@ -6,8 +6,8 @@ from enum import Enum
 from inspect import getmodule
 from pathlib import Path
 from traceback import print_exc
-from urllib.parse import urlparse
 from datetime import datetime, timedelta, timezone
+from urllib.parse import unquote_to_bytes, urlparse
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context as mp_context
@@ -262,6 +262,39 @@ def _load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
     return songs
 
 
+def _library_track_path(track: str) -> Path:
+    """The playable path of a local-library URI, or SongError.
+
+    Containment is lexical, on the path as written, not on its
+    resolved target. Symlinks under the library root are trusted as
+    the owner's own extension of the library (an artist folder linked
+    in from another disk), and the kernel follows them when the file is
+    opened; the indexer follows them the same way. To keep this a real
+    boundary - identify_url sends any user-typed file:// URI here - a
+    `.` or `..` segment is refused (`Artist/../../x` would otherwise
+    climb out through a symlinked folder), as is any depth other than
+    the index's own Artist/Album/file. The `.` check runs on the
+    decoded URI string because building a Path silently drops `.`.
+    """
+    if not config.MUSIC_LIBRARY_PATH:
+        raise SongError(config.LIBRARY_FILE_MISSING)
+    root = Path(config.MUSIC_LIBRARY_PATH).resolve()
+    path = Path.from_uri(track)
+    # Decoded exactly as Path.from_uri decodes it: urlparse would split
+    # a raw `?` or `#` off as query/fragment, which from_uri keeps in
+    # the path.
+    decoded = unquote_to_bytes(track[len("file:") :])
+    if any(seg in (b".", b"..") for seg in decoded.split(b"/")):
+        raise SongError(config.LIBRARY_FILE_MISSING)
+    if (
+        not path.is_relative_to(root)
+        or len(path.relative_to(root).parts) != 3
+        or not path.is_file()
+    ):
+        raise SongError(config.LIBRARY_FILE_MISSING)
+    return path
+
+
 def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
     host = identify_url(track)
 
@@ -291,22 +324,10 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
         }
 
     elif host == SiteTypes.LOCAL_LIBRARY:
-        path = Path.from_uri(track)
-        root = (
-            Path(config.MUSIC_LIBRARY_PATH).resolve()
-            if config.MUSIC_LIBRARY_PATH
-            else None
-        )
-        resolved = path.resolve()
-        if (
-            root is None
-            or not resolved.is_relative_to(root)
-            or not resolved.is_file()
-        ):
-            raise SongError(config.LIBRARY_FILE_MISSING)
-        tags = read_tags(resolved)
+        path = _library_track_path(track)
+        tags = read_tags(path)
         data = {
-            "url": str(resolved),
+            "url": str(path),
             "webpage_url": track,
             "title": nice_title(tags, fallback=path.stem),
             "uploader": tags.artist,
