@@ -51,13 +51,16 @@ class TestGetEnvVar:
 @pytest.mark.parametrize(
     "url, expected",
     [
-        ("sqlite:///settings.db", "sqlite+aiosqlite:///settings.db"),
-        ("postgres://h/d", "postgresql+asyncpg://h/d"),
-        ("mysql://h/d", "mysql+aiomysql://h/d"),
-        ("weird+driver://h/d", "weird+driver://h/d"),
-        ("postgresql://h/d", "postgresql+asyncpg://h/d"),
-        ("postgres+asyncpg://h/d", "postgresql+asyncpg://h/d"),
-        ("mysql+aiomysql://h/d", "mysql+aiomysql://h/d"),
+        (
+            "sqlite:///settings.db",
+            ("sqlite+aiosqlite:///settings.db", "aiosqlite"),
+        ),
+        ("postgres://h/d", ("postgresql+asyncpg://h/d", "asyncpg")),
+        ("mysql://h/d", ("mysql+aiomysql://h/d", "aiomysql")),
+        ("weird+driver://h/d", ("weird+driver://h/d", "driver")),
+        ("postgresql://h/d", ("postgresql+asyncpg://h/d", "asyncpg")),
+        ("postgres+asyncpg://h/d", ("postgresql+asyncpg://h/d", "asyncpg")),
+        ("mysql+aiomysql://h/d", ("mysql+aiomysql://h/d", "aiomysql")),
     ],
 )
 def test_alchemize_url(url, expected):
@@ -107,6 +110,25 @@ def test_config_keeps_the_rest_of_the_url_when_naming_the_driver(
 def test_config_load_rejects_an_unmappable_url(config_factory):
     with pytest.raises(ValueError):
         config_factory(SECRETS_ENV + "DATABASE_URL=mariadb://u:p@h/db\n")
+
+
+def test_config_rejects_a_driver_requirement_rejects(config_factory):
+    with pytest.raises(ValueError):
+        config_factory(
+            SECRETS_ENV + "DATABASE_URL=postgresql+bad name://h/d\n"
+        )
+
+
+def test_config_rejects_a_non_bare_driver_naming_only_the_driver(
+    config_factory,
+):
+    with pytest.raises(ValueError) as exc:
+        config_factory(
+            SECRETS_ENV + "DATABASE_URL=postgresql+asyncpg>=1://u:secret@h/d\n"
+        )
+    msg = str(exc.value)
+    assert "asyncpg>=1" in msg
+    assert "secret" not in msg
 
 
 def _dockerfile_commands():
@@ -289,6 +311,60 @@ def test_database_url_wins_over_heroku_db(config_factory):
 def test_heroku_db_is_not_reported_as_unknown(config_factory):
     config = config_factory(SECRETS_ENV + "HEROKU_DB=sqlite:///x.db\n")
     assert "HEROKU_DB" not in config.unknown_vars
+
+
+def test_spotipy_aliases_are_not_reported_as_unknown(config_factory):
+    config = config_factory(
+        SECRETS_ENV
+        + "SPOTIPY_CLIENT_ID=cid\nSPOTIPY_CLIENT_SECRET=csecret\n"
+        + "MY_TYPO=1\n"
+    )
+    assert set(config.unknown_vars) == {"MY_TYPO"}
+
+
+def test_spotipy_alias_applies_when_canonical_is_unset(config_factory):
+    config = config_factory(
+        "BOT_TOKEN=t\nLASTFM_API_KEY=k\nGUILD_WHITELIST=[111]\n"
+        "SPOTIPY_CLIENT_ID=cid\nSPOTIPY_CLIENT_SECRET=csecret\n"
+    )
+    assert (config.SPOTIFY_ID, config.SPOTIFY_SECRET) == ("cid", "csecret")
+
+
+def test_heroku_db_applies_when_database_url_is_empty(config_factory):
+    config = config_factory(
+        SECRETS_ENV + "DATABASE_URL=\nHEROKU_DB=postgresql://u:p@h/db\n"
+    )
+    assert config.DATABASE == "postgresql+asyncpg://u:p@h/db"
+
+
+def test_spotipy_alias_applies_when_canonical_is_empty(config_factory):
+    config = config_factory(
+        "BOT_TOKEN=t\nLASTFM_API_KEY=k\nGUILD_WHITELIST=[111]\n"
+        "SPOTIFY_ID=\nSPOTIPY_CLIENT_ID=cid\n"
+        "SPOTIPY_CLIENT_SECRET=csecret\n"
+    )
+    assert (config.SPOTIFY_ID, config.SPOTIFY_SECRET) == ("cid", "csecret")
+
+
+def test_canonical_spotify_variable_wins_over_alias(config_factory):
+    config = config_factory(
+        SECRETS_ENV + "SPOTIFY_ID=real\nSPOTIPY_CLIENT_ID=alias\n"
+    )
+    assert config.SPOTIFY_ID == "real"
+
+
+def test_empty_heroku_db_changes_nothing(config_factory):
+    config = config_factory(SECRETS_ENV + "HEROKU_DB=\n")
+    assert config.DATABASE.startswith("sqlite+aiosqlite:")
+    with pytest.raises(ValueError):
+        config_factory(SECRETS_ENV + "DATABASE_URL=\nHEROKU_DB=\n")
+
+
+def test_aliases_do_not_write_the_environment(config_factory):
+    import os
+
+    config_factory(SECRETS_ENV + "HEROKU_DB=sqlite:///x.db\n")
+    assert os.environ.get("DATABASE_URL", "") == ""
 
 
 def test_unknown_var_warning_names_it_without_its_value(config_factory):
