@@ -291,6 +291,14 @@ _spotify_uri_regex = re.compile(r"spotify:(track|album|playlist):(\w+)")
 _TRAILING_PUNCTUATION = ".,!?;:"
 
 
+def _is_single_url(s: str) -> bool:
+    """True for one URL (with a scheme://) or a spotify: URI, not for
+    plain text that merely looks like word:word."""
+    return bool(url_regex.fullmatch(s)) and (
+        "://" in s or bool(_spotify_uri_regex.fullmatch(s))
+    )
+
+
 def normalize_track(text: str) -> str:
     """Cleans up user-typed track text before it is classified: strips
     whitespace, unwraps one <...> around a single URL, drops trailing
@@ -301,11 +309,11 @@ def normalize_track(text: str) -> str:
         len(text) > 2
         and text[0] == "<"
         and text[-1] == ">"
-        and url_regex.fullmatch(text[1:-1])
+        and _is_single_url(text[1:-1])
     ):
         text = text[1:-1]
     bare = text.rstrip(_TRAILING_PUNCTUATION)
-    if bare != text and url_regex.fullmatch(bare):
+    if bare != text and _is_single_url(bare):
         text = bare
     if m := _spotify_uri_regex.fullmatch(text):
         return f"https://open.spotify.com/{m.group(1)}/{m.group(2)}"
