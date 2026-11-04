@@ -130,7 +130,9 @@ def test_rule_b_names_module_line_and_shadowed_shared_module():
     shared = {"shared": "class FakeThing:\n    pass\n"}
     test_src = "def test_x():\n    class FakeThing:\n        pass\n"
     found = shadowing_names("test_x.py", test_src, _shared_fakes(shared))
-    assert found == ["test_x.py:2: FakeThing shadows the shared fake in shared"]
+    assert found == [
+        "test_x.py:2: FakeThing shadows the shared fake in shared"
+    ]
 
 
 def test_rule_b_ignores_private_and_non_fake_shared_names():
