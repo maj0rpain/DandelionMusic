@@ -31,6 +31,7 @@ from musicbot.commands.music import Music
 from controller_seam import FakeVoiceClient, StubLoader, controller_seam
 from db_seam import in_memory_db
 from discord_fakes import PLAYER_BUTTONS
+from helpers import run
 
 
 MIX = playlists.PlaylistRef("1234", "mix")
@@ -93,9 +94,7 @@ def test_controller_starts_at_the_guild_default_volume(controller):
 
 def test_stub_loader_records_preload_calls(controller, stub_loader):
     song = object()
-    assert (
-        asyncio.run(stub_loader.preload(song)) is stub_loader.Preload.EXTRACTED
-    )
+    assert run(stub_loader.preload(song)) is stub_loader.Preload.EXTRACTED
     assert stub_loader.calls == [("preload", (song,))]
 
 
@@ -495,7 +494,7 @@ def test_attach_view_moves_the_buttons_onto_the_new_message(controller):
     assert len(sent) == 1 and isinstance(sent[0], discord.ui.View)
     assert result is new_message
     # the next attach_view takes the buttons off the new message
-    asyncio.run(controller.attach_view(lambda view: _resolved(_FakeMessage())))
+    run(controller.attach_view(lambda view: _resolved(_FakeMessage())))
     assert new_message.edits == [None]
 
 
@@ -518,7 +517,7 @@ def test_attach_view_records_an_interactions_original_response(controller):
     async def send(view):
         return interaction
 
-    result = asyncio.run(controller.attach_view(send))
+    result = run(controller.attach_view(send))
 
     assert result is interaction
     # the buttons the next attach_view takes off are the response's
@@ -526,7 +525,7 @@ def test_attach_view_records_an_interactions_original_response(controller):
     async def send_plain(view):
         return _FakeMessage()
 
-    asyncio.run(controller.attach_view(send_plain))
+    run(controller.attach_view(send_plain))
     assert response.edits == [None]
 
 
@@ -638,7 +637,7 @@ def test_the_after_callback_only_hands_the_track_end_to_the_loop(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
-    after = asyncio.run(_start_and_end_first_track(controller))
+    after = run(_start_and_end_first_track(controller))
     seen = _record_threads(controller, monkeypatch)
     fake_loop = controller.bot.loop = _RecordingLoop()
 
@@ -813,8 +812,8 @@ def test_the_after_callback_drops_the_track_end_once_the_loop_is_closed(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
-    # asyncio.run() closes its loop on the way out, as bot shutdown does
-    after = asyncio.run(_start_and_end_first_track(controller))
+    # run() closes its loop on the way out, as bot shutdown does
+    after = run(_start_and_end_first_track(controller))
     assert controller.bot.loop.is_closed()
 
     _, error = _in_thread(after, None)
@@ -1406,7 +1405,7 @@ def test_a_current_song_click_with_no_current_song_replies_queue_empty(
 
     ctx = _FakeChannel()
 
-    asyncio.run(controller.current_song_callback(ctx))
+    run(controller.current_song_callback(ctx))
 
     assert ctx.sent == [((config.QUEUE_EMPTY,), {})]
 
@@ -1418,7 +1417,7 @@ def test_a_current_song_click_while_a_track_plays_shows_the_song_info(
     controller.guild.voice_client.playing = True
     ctx = _FakeChannel()
 
-    asyncio.run(controller.current_song_callback(ctx))
+    run(controller.current_song_callback(ctx))
 
     assert len(ctx.sent) == 1 and "embed" in ctx.sent[0][1]
 
@@ -2098,24 +2097,24 @@ def test_the_player_view_buttons_are_the_player_buttons_in_order(controller):
 
 
 def test_start_idle_timer_starts_the_timer(controller):
-    async def run():
+    async def scenario():
         await controller.start_idle_timer(True)
         return controller.timer._task
 
-    assert asyncio.run(run()) is not None
+    assert run(scenario()) is not None
 
 
 def test_start_idle_timer_starts_none_while_disconnecting(controller):
-    async def run():
+    async def scenario():
         controller._disconnecting = True
         await controller.start_idle_timer(True)
         return controller.timer._task
 
-    assert asyncio.run(run()) is None
+    assert run(scenario()) is None
 
 
 def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
-    async def run():
+    async def scenario():
         controller.bot.loop = asyncio.get_running_loop()
         controller.guild.voice_client.playing = True
         reached = asyncio.Event()
@@ -2134,4 +2133,4 @@ def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
         await _settle()
         return controller.timer._task
 
-    assert asyncio.run(run()) is None
+    assert run(scenario()) is None

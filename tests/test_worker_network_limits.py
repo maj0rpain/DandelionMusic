@@ -7,7 +7,6 @@ Spotify session is driven against a local server that always answers
 get_session()'s timeout is read off the session it returns.
 """
 
-import asyncio
 import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
@@ -21,6 +20,7 @@ from spotipy.exceptions import SpotifyException, SpotifyOauthError
 from config import config
 from musicbot import linkutils, loader
 from musicbot.loader import SongError
+from helpers import run
 
 TRACK = "https://open.spotify.com/track/abc123"
 
@@ -147,10 +147,10 @@ def test_build_spotify_api_returns_none_when_construction_fails(
 
 
 def test_every_http_session_has_the_total_timeout():
-    async def run():
+    async def scenario():
         try:
             return linkutils.get_session().timeout.total
         finally:
             await linkutils.stop()
 
-    assert asyncio.run(run()) == linkutils.HTTP_TIMEOUT
+    assert run(scenario()) == linkutils.HTTP_TIMEOUT
