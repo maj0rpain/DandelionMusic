@@ -149,6 +149,38 @@ def test_the_click_is_deferred_before_the_check_runs():
     assert deferred_at_check == [True]
 
 
+def test_an_action_failure_is_reraised_by_the_default_on_failure():
+    inter = FakeInteraction()
+    error = RuntimeError("boom")
+
+    def action(ctx):
+        raise error
+
+    try:
+        run(MusicButton(action, check=admit).callback(inter))
+    except RuntimeError as e:
+        assert e is error
+    else:
+        raise AssertionError("not re-raised")
+    assert inter.followups == []
+
+
+def test_a_check_error_from_the_action_is_reraised_not_refused():
+    inter = FakeInteraction()
+    error = CheckError("from the action")
+
+    def action(ctx):
+        raise error
+
+    try:
+        run(MusicButton(action, check=admit).callback(inter))
+    except CheckError as e:
+        assert e is error
+    else:
+        raise AssertionError("not re-raised")
+    assert inter.followups == []
+
+
 def test_a_refused_check_is_an_ephemeral_followup():
     inter = FakeInteraction()
     ran = []

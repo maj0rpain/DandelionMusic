@@ -79,7 +79,14 @@ class FakeContext:
         self.author = SimpleNamespace(id=user_id)
         self.interaction = None
         self.guild = SimpleNamespace(voice_client=SimpleNamespace())
+
+        async def on_command_error(ctx, error):
+            # the bot's real handler, with no bot behind it: it uses
+            # nothing of self
+            await MusicBot.on_command_error(None, ctx, error)
+
         self.bot = SimpleNamespace(
+            on_command_error=on_command_error,
             sessions=SimpleNamespace(
                 settings=lambda guild: SimpleNamespace(
                     user_must_be_in_vc=False
@@ -121,6 +128,7 @@ class FakeCog:
     def __init__(self):
         self.played = []
         self.check_error = None
+        self.play_error = None
 
     async def cog_check(self, ctx):
         if self.check_error is not None:
@@ -128,11 +136,19 @@ class FakeCog:
         return True
 
     async def _play_song(self, ctx, track):
+        if self.play_error is not None:
+            raise self.play_error
         self.played.append(track)
 
 
 class FakeInteraction:
-    def __init__(self, user_id=OWNER, custom_id="x", followup_fails=False):
+    def __init__(
+        self,
+        user_id=OWNER,
+        custom_id="x",
+        followup_fails=False,
+        defer_fails=False,
+    ):
         self.user = SimpleNamespace(id=user_id)
         self.guild = None
         self.data = {"custom_id": custom_id}
@@ -146,6 +162,8 @@ class FakeInteraction:
             self.messages.append((args, kwargs))
 
         async def defer(**kwargs):
+            if defer_fails:
+                raise http_error()
             self.deferred = True
 
         self.response = SimpleNamespace(send_message=send_message, defer=defer)
@@ -153,14 +171,8 @@ class FakeInteraction:
         async def get_context(inter):
             return self.ctx
 
-        async def on_command_error(ctx, error):
-            # the bot's real handler, with no bot behind it: it uses
-            # nothing of self
-            await MusicBot.on_command_error(None, ctx, error)
-
         self.client = SimpleNamespace(
             get_context=get_context,
-            on_command_error=on_command_error,
             sessions=SimpleNamespace(controller=lambda guild: None),
         )
 
@@ -322,6 +334,37 @@ def test_a_pick_failing_after_the_claim_is_used_up_and_reported():
     assert view.is_finished()
     assert buttons_disabled(view)
     assert message.edits == [{"view": view}]
+
+
+def test_a_failed_defer_uses_up_the_pick_and_is_reported_once():
+    async def go():
+        message = FakeMessage()
+        view, cog = make_view(message=message)
+        inter = FakeInteraction(OWNER, defer_fails=True)
+        assert await view.interaction_check(inter)
+        await view.children[0].callback(inter)
+        return view, cog, message, inter
+
+    view, cog, message, inter = run(go)
+    assert len(inter.ctx.sent) == 1
+    assert cog.played == []
+    assert view.is_finished()
+    assert message.edits == [{"view": view}]
+
+
+def test_a_play_failing_after_the_pick_was_used_up_edits_once_and_reports():
+    async def go():
+        message = FakeMessage()
+        view, cog = make_view(message=message)
+        cog.play_error = discord.ClientException("play failed")
+        inter = await click(view, 0)
+        return view, message, inter
+
+    view, message, inter = run(go)
+    assert message.edits == [{"view": view}]
+    assert [(str(a[0]), k) for a, k in inter.ctx.sent] == [
+        ("play failed", {})
+    ]
 
 
 def test_a_failed_message_edit_still_queues_the_pick():

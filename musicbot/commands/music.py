@@ -108,18 +108,14 @@ class SongButton(MusicButton):
         # the claim so the owner can fix it and pick again
         self.view.release_pick()
 
-    async def callback(self, inter: discord.Interaction):
-        try:
-            await super().callback(inter)
-        except Exception as e:
-            # anything but a refusal (a failed defer, a failed
-            # action) uses up the pick: the stale message must
-            # not invite clicks that are silently refused
-            await self.view.use_up_pick()
-            # reported as d!play's failures are, which also logs it;
-            # not re-raised, so View.on_error does not log it again
-            ctx = await inter.client.get_context(inter)
-            await inter.client.on_command_error(ctx, e)
+    async def on_failure(self, ctx, error):
+        # anything but a refusal (a failed defer, a failed action)
+        # uses up the pick: the stale message must not invite clicks
+        # that are silently refused
+        await self.view.use_up_pick()
+        # reported as d!play's failures are, which also logs it; not
+        # re-raised, so View.on_error does not log it again
+        await ctx.bot.on_command_error(ctx, error)
 
 
 @commands.check
