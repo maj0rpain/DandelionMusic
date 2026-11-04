@@ -70,6 +70,11 @@ QUERY_ECHO_LIMIT = 100
 NAME_TITLE_LIMIT = 252
 
 
+# A select option label holds 100 UTF-16 code units, and the "\u2026" _trim
+# appends takes one, leaving 99 for the name.
+SELECT_LABEL_LIMIT = 99
+
+
 def _trim(text: str, limit: int) -> str:
     """Cuts to `limit` UTF-16 code units plus an ellipsis. A character
     that would straddle the limit is dropped whole. A lone surrogate
@@ -165,7 +170,7 @@ class LibrarySelect(_BrowseItem, discord.ui.Select):
             placeholder="Choose...",
             options=[
                 discord.SelectOption(
-                    label=label[:100],
+                    label=_trim(label, SELECT_LABEL_LIMIT),
                     value=str(i),
                     emoji=KIND_EMOJI[kind],
                 )
@@ -709,10 +714,7 @@ class LibraryBrowseView(LibraryView):
             self.add_item(item)
 
     async def turn_page(self, interaction: discord.Interaction, delta: int):
-        """Applies a page delta. The double-click guard (see _busy) is
-        held by a cursor move's draw (a level's first draw or a page
-        turn) and a bulk queue, but not by the enrichment edit - see
-        _enter_level(). The draw and its undo are in _draw_or_undo().
+        """Applies a page delta under the double-click guard (see _busy).
 
         The guard matters on its own account: the button stays
         clickable until the edit lands and discord.py dispatches every
@@ -921,7 +923,7 @@ class SearchSelect(discord.ui.Select):
             placeholder="Choose...",
             options=[
                 discord.SelectOption(
-                    label=result.label[:100],
+                    label=_trim(result.label, SELECT_LABEL_LIMIT),
                     value=str(i),
                     emoji=KIND_EMOJI[result.kind],
                 )
