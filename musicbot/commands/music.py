@@ -596,8 +596,7 @@ class Music(commands.Cog):
                 get_site_type(entry.url),
                 entry.url,
                 title=entry.title,
-                saved_playlist=contents.ref,
-                saved_url=entry.url,
+                saved_entry=playlists.SavedEntry(contents.ref, entry.url),
             )
             for entry in contents.entries
         )

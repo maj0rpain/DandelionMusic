@@ -42,6 +42,15 @@ class PlaylistRef:
 
 
 @dataclass(frozen=True)
+class SavedEntry:
+    """Which saved playlist a queued song came from, and that entry's
+    URL exactly as stored (extraction never rewrites it)."""
+
+    ref: PlaylistRef
+    url: str
+
+
+@dataclass(frozen=True)
 class PlaylistContents:
     """A saved playlist as ``get`` loads it: its ref and its entries."""
 
