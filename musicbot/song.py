@@ -15,6 +15,9 @@ class Song:
     # class-level, so a Song unpickled from a queue backup written
     # before songs carried a PlaylistRef reads as having none
     saved_playlist: Optional[PlaylistRef] = None
+    # when the loader extracted this song's stream url; class-level for
+    # the same reason - a song from an old backup reads as unstamped
+    extracted_at: Optional[datetime.datetime] = None
 
     def __init__(
         self,

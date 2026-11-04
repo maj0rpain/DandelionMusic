@@ -39,3 +39,21 @@ def test_a_song_pickled_in_the_old_shape_loads_with_no_saved_playlist():
 
     assert restored.title == "old track"
     assert restored.saved_playlist is None
+
+
+def test_a_song_pickled_in_the_old_shape_loads_with_no_extraction_stamp():
+    old = Song.__new__(Song)
+    old.__dict__.update(
+        host=SiteTypes.YT_DLP,
+        webpage_url=URL,
+        url="https://stream.invalid/a",
+        title="old track",
+        uploader=None,
+        duration=None,
+        thumbnail=None,
+        saved_playlist=None,
+    )
+
+    restored = pickle.loads(pickle.dumps(old))
+
+    assert restored.extracted_at is None
