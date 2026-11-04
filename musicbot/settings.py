@@ -117,23 +117,23 @@ def _name_or_none(found) -> Optional[str]:
     return found.name if found else None
 
 
-def _show_channel_or_thread(ctx: "Context", stored: str) -> Optional[str]:
+def _resolve_channel_or_thread(ctx: "Context", stored: str) -> Optional[str]:
     return _name_or_none(ctx.guild.get_channel_or_thread(int(stored)))
 
 
-def _show_channel(ctx: "Context", stored: str) -> Optional[str]:
+def _resolve_channel(ctx: "Context", stored: str) -> Optional[str]:
     return _name_or_none(ctx.guild.get_channel(int(stored)))
 
 
-def _show_role(ctx: "Context", stored: str) -> Optional[str]:
+def _resolve_role(ctx: "Context", stored: str) -> Optional[str]:
     return _name_or_none(ctx.guild.get_role(int(stored)))
 
 
-def _show_emoji(ctx: "Context", stored: str):
+def _resolve_emoji(ctx: "Context", stored: str):
     return get_emoji(ctx.bot, stored)
 
 
-def _show_raw(ctx: "Context", stored: Any):
+def _resolve_raw(ctx: "Context", stored: Any):
     return stored
 
 
@@ -173,13 +173,13 @@ class SettingDescriptor:
     # Discord value -> stored value; may be async and may raise
     # ConversionError
     converter: Callable[["Context", Any], Any]
-    # (ctx, stored value) -> what the settings embed shows,
-    # or None when the stored value no longer resolves
-    display: Callable[["Context", Any], Any]
-    # shown instead when display returns None
-    invalid: Optional[str]
+    # (ctx, stored value) -> what the stored value refers to now,
+    # or None when it no longer resolves
+    resolve: Callable[["Context", Any], Any] = _resolve_raw
+    # shown instead when resolve returns None
+    invalid: Optional[str] = None
     # Discord value -> how the success confirmation shows it
-    confirm: Callable[[Any], Any]
+    confirm: Callable[[Any], Any] = _confirm_raw
     # returns the refusal message while the setting may not be
     # edited, None otherwise
     edit_gate: Optional[Callable[[], Optional[str]]] = None
@@ -188,7 +188,7 @@ class SettingDescriptor:
         "The settings embed's value for this setting"
         if not stored:
             return SettingsEmbed.FIELD_EMPTY
-        shown = self.display(ctx, stored)
+        shown = self.resolve(ctx, stored)
         return self.invalid if shown is None else shown
 
 
@@ -201,7 +201,7 @@ SETTINGS: Dict[str, SettingDescriptor] = {
             param_type=Union[Thread, VoiceChannel, TextChannel],
             param_name="channel",
             converter=convert_object,
-            display=_show_channel_or_thread,
+            resolve=_resolve_channel_or_thread,
             invalid=SettingsEmbed.INVALID_CHANNEL,
             confirm=_confirm_mention,
         ),
@@ -211,7 +211,7 @@ SETTINGS: Dict[str, SettingDescriptor] = {
             param_type=VoiceChannel,
             param_name="channel",
             converter=convert_object,
-            display=_show_channel,
+            resolve=_resolve_channel,
             invalid=SettingsEmbed.INVALID_VOICE_CHANNEL,
             confirm=_confirm_mention,
         ),
@@ -221,7 +221,7 @@ SETTINGS: Dict[str, SettingDescriptor] = {
             param_type=Role,
             param_name="role",
             converter=convert_object,
-            display=_show_role,
+            resolve=_resolve_role,
             invalid=SettingsEmbed.INVALID_ROLE,
             confirm=_confirm_name,
         ),
@@ -231,9 +231,6 @@ SETTINGS: Dict[str, SettingDescriptor] = {
             param_type=bool,
             param_name="value",
             converter=convert_bool,
-            display=_show_raw,
-            invalid=None,
-            confirm=_confirm_raw,
         ),
         SettingDescriptor(
             name="button_emote",
@@ -241,9 +238,8 @@ SETTINGS: Dict[str, SettingDescriptor] = {
             param_type=str,
             param_name="emoji",
             converter=convert_emoji,
-            display=_show_emoji,
+            resolve=_resolve_emoji,
             invalid=SettingsEmbed.INVALID_EMOJI,
-            confirm=_confirm_raw,
         ),
         SettingDescriptor(
             name="default_volume",
@@ -251,9 +247,6 @@ SETTINGS: Dict[str, SettingDescriptor] = {
             param_type=int,
             param_name="value",
             converter=convert_volume,
-            display=_show_raw,
-            invalid=None,
-            confirm=_confirm_raw,
         ),
         SettingDescriptor(
             name="vc_timeout",
@@ -261,9 +254,6 @@ SETTINGS: Dict[str, SettingDescriptor] = {
             param_type=bool,
             param_name="value",
             converter=convert_bool,
-            display=_show_raw,
-            invalid=None,
-            confirm=_confirm_raw,
             edit_gate=_vc_timeout_gate,
         ),
         SettingDescriptor(
@@ -272,9 +262,6 @@ SETTINGS: Dict[str, SettingDescriptor] = {
             param_type=bool,
             param_name="value",
             converter=convert_bool,
-            display=_show_raw,
-            invalid=None,
-            confirm=_confirm_raw,
         ),
     )
 }
