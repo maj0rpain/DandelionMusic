@@ -724,7 +724,11 @@ def test_a_track_ended_by_an_error_logs_the_error_and_advances_once(
         controller, capsys, monkeypatch, RuntimeError("boom")
     )
 
-    assert "Playback error in guild 1234: RuntimeError('boom')" in err
+    expected = (
+        f"Playback error in guild {controller.guild.id}: "
+        "RuntimeError('boom')"
+    )
+    assert expected in err
     assert _played(controller) == ["first", "second"]
     assert _titles(controller) == ["second", "third"]
 
