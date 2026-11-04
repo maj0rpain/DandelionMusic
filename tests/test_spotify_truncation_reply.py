@@ -26,12 +26,11 @@ def _ctx(controller=None, sent=None):
     async def defer(**kwargs):
         pass
 
-    class Timer:
-        async def start(self, *a):
-            pass
+    async def start_idle_timer(*a):
+        pass
 
     if controller is not None:
-        controller.timer = Timer()
+        controller.start_idle_timer = start_idle_timer
     ctx = types.SimpleNamespace(
         audiocontroller=controller,
         send=send,

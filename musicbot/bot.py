@@ -239,7 +239,7 @@ class MusicBot(commands.Bot):
                 await asyncio.sleep(VC_CONNECT_TIMEOUT)
             if guild.voice_client:
                 is_playing = guild.voice_client.is_playing()
-                await audiocontroller.timer.start(is_playing)
+                await audiocontroller.start_idle_timer(is_playing)
                 if is_playing:
                     # bot was moved, restore playback
                     await asyncio.sleep(1)
@@ -253,7 +253,9 @@ class MusicBot(commands.Bot):
             and all(m.bot for m in before.channel.members)
         ):
             # all users left
-            await audiocontroller.timer.start(guild.voice_client.is_playing())
+            await audiocontroller.start_idle_timer(
+                guild.voice_client.is_playing()
+            )
 
     @tasks.loop(seconds=1)
     async def update_views(self):

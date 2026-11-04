@@ -443,7 +443,7 @@ class AudioController(object):
         if client:
             if client.is_playing():
                 client.pause()
-                self.add_task(self.timer.start(True))
+                self.add_task(self.start_idle_timer(True))
                 return PauseState.PAUSED
             elif client.is_paused():
                 client.resume()
@@ -586,13 +586,9 @@ class AudioController(object):
             self._pending = None
             # if self.pickle_file.exists():
             #     self.pickle_file.unlink()
-            if (
-                not self._disconnecting
-                and not self.timer.triggered
-                and self.guild.voice_client
-            ):
+            if not self.timer.triggered and self.guild.voice_client:
                 self.add_task(
-                    self.timer.start(
+                    self.start_idle_timer(
                         not all(
                             m.bot
                             for m in self.guild.voice_client.channel.members
@@ -1005,6 +1001,14 @@ class AudioController(object):
             or all(m.bot for m in self.guild.voice_client.channel.members)
         ):
             await self.udisconnect("inactivity timeout")
+
+    async def start_idle_timer(self, restart: bool = False):
+        """Starts the idle timer, unless a disconnect is in flight.
+        The check runs when this coroutine does, not when it was
+        scheduled. Loop only."""
+        if self._disconnecting:
+            return
+        await self.timer.start(restart)
 
     async def udisconnect(self, reason: str):
         self._disconnecting = True
