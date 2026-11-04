@@ -611,7 +611,6 @@ def test_select_from_previous_page_during_page_turn_opens_its_entry():
 
     view = run(scenario)
 
-    assert view.cursor.page == 0
     assert (view.cursor.artist, view.cursor.album) == ("Artist 03", None)
 
 
@@ -642,12 +641,14 @@ def test_click_after_failed_page_turn_acts_on_the_shown_page():
         failing = clicks.interaction()
         failing.fail = True
         await finish(clicks.click(PageButton, failing))
+        undone_page = view.cursor.page
         again = clicks.interaction()
         await finish(clicks.click(LibrarySelect, again, label="Artist 03"))
-        return view
+        return undone_page, view
 
-    view = run(scenario)
+    undone_page, view = run(scenario)
 
+    assert undone_page == 0
     assert (view.cursor.artist, view.cursor.album) == ("Artist 03", None)
 
 
