@@ -12,6 +12,7 @@ import pytest
 
 from config import config
 from musicbot import playlists
+from musicbot.commands import music
 from musicbot.commands.music import Music
 from musicbot.linkutils import SiteTypes
 from musicbot.song import Song
@@ -30,6 +31,10 @@ def _fail_with(error):
 
 
 def _run_playlist_command(monkeypatch, command, function, error, *args):
+    async def load_song(track):
+        return _song()
+
+    monkeypatch.setattr(music.loader, "load_song", load_song)
     monkeypatch.setattr(playlists, function, _fail_with(error))
     ctx, sent = play_ctx()
     asyncio.run(command.callback(Music(None), ctx, *args))
@@ -42,8 +47,9 @@ def _run_playlist_command(monkeypatch, command, function, error, *args):
         (Music._playlist_remove, "delete", ("p",)),
         (Music._playlist_remove_song, "remove_song", ("p", 1)),
         (Music._playlist_move_song, "move_song", ("p", 1, 2)),
+        (Music._playlist_add_song, "add_songs", ("p", "t")),
     ],
-    ids=["remove", "remove_song", "move_song"],
+    ids=["remove", "remove_song", "move_song", "add_song"],
 )
 def test_playlist_commands_on_a_missing_playlist_reply_not_found(
     monkeypatch, command, function, args

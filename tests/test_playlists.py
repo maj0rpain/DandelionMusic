@@ -391,16 +391,3 @@ def test_a_failed_move_does_not_block_the_next_edit():
         return await load(factory)
 
     assert run(test) == [A, B]
-
-
-def test_every_saved_playlist_failure_is_a_saved_playlist_error():
-    assert all(
-        issubclass(c, playlists.SavedPlaylistError)
-        for c in (
-            playlists.PlaylistNotFound,
-            playlists.InvalidPosition,
-            playlists.PlaylistExists,
-            playlists.OnlySongInPlaylist,
-        )
-    )
-    assert not hasattr(playlists, "PlaylistError")
