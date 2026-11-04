@@ -29,7 +29,7 @@ from musicbot import loader
 # nobody has a reason to tune them.
 # longest wait honoured for one Spotify 429 Retry-After header (seconds)
 RETRY_AFTER_MAX = 5
-# total time limit of one aiohttp request (seconds)
+# total time limit of one aiohttp or Discord API request (seconds)
 HTTP_TIMEOUT = 15
 # time limit of one Spotify API or token request (seconds)
 SPOTIFY_TIMEOUT = 5
