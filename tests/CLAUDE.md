@@ -12,6 +12,10 @@ Only the parts that need no Discord connection: config loading, `Playlist`, save
 
 `tests/setting_fakes.py` holds the fakes the setting test modules share (`fake_bot`, `FakeDbSession`, `fake_channel`, ...); import them from there, never from another test module.
 
+## Discord fakes
+
+`tests/discord_fakes.py` holds the shared Discord stand-ins - the click `FakeInteraction`, `make_bot`, and the voice fakes (`VoiceGuild`, `FakeVoiceChannel`, `FakeVoiceClient`) - plus `http_error`, a 5 s-bounded `run(coro)` and `PLAYER_BUTTONS`, the player view's button ids. Import them rather than writing a per-file copy.
+
 ## Subprocess probes
 
 `tests/test_import_inert.py` runs fresh-interpreter subprocesses to check that importing `musicbot` changes no process-global state, that the entrypoint wraps stdout/stderr before `bot.run()`, that `MusicBot` can be built with no current event loop, and the loader's `init()`/`shutdown()` lifecycle and its crash recovery (a worker killed with `os._exit` is replaced and the next no-network `load_song` succeeds) - both start a real extraction worker.

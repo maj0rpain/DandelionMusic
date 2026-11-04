@@ -15,6 +15,7 @@ import types
 import pytest
 
 from controller_seam import FakeVoiceClient, StubLoader, controller_seam
+from discord_fakes import PLAYER_BUTTONS
 from musicbot.commands.music import Music
 
 
@@ -2212,3 +2213,12 @@ def test_disconnecting_while_playing_leaves_the_backup_holding_the_queue(
     asyncio.run(run())
 
     assert _backup(tmp_path) == ["first", "second"]
+
+
+def test_the_player_view_buttons_are_the_player_buttons_in_order(controller):
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
+
+    ids = [c.custom_id for c in controller.make_view().children]
+
+    assert ids == PLAYER_BUTTONS
