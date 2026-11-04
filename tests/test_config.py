@@ -19,6 +19,10 @@ SECRETS_ENV = (
     "LASTFM_API_KEY=real-lastfm-key\n"
     "GUILD_WHITELIST=[111]\n"
 )
+# The tests of the Spotipy aliases need the Spotify secret unset.
+SECRETS_ENV_WITHOUT_SPOTIFY = (
+    "BOT_TOKEN=t\nLASTFM_API_KEY=k\nGUILD_WHITELIST=[111]\n"
+)
 
 
 class TestGetEnvVar:
@@ -112,7 +116,9 @@ def test_config_load_rejects_an_unmappable_url(config_factory):
         config_factory(SECRETS_ENV + "DATABASE_URL=mariadb://u:p@h/db\n")
 
 
-def test_config_rejects_a_driver_requirement_rejects(config_factory):
+def test_config_rejects_a_driver_that_is_not_a_valid_requirement(
+    config_factory,
+):
     with pytest.raises(ValueError):
         config_factory(
             SECRETS_ENV + "DATABASE_URL=postgresql+bad name://h/d\n"
@@ -140,12 +146,16 @@ def _dockerfile_commands():
     ]
 
 
+def _uv_sync_index(commands):
+    (index,) = _indices_where(
+        commands, lambda c: c.startswith("RUN") and "uv sync" in c
+    )
+    return index
+
+
 def test_dockerfile_installs_db_drivers_without_dev():
-    (run,) = [
-        c
-        for c in _dockerfile_commands()
-        if c.startswith("RUN") and "uv sync" in c
-    ]
+    commands = _dockerfile_commands()
+    run = commands[_uv_sync_index(commands)]
     for flag in (
         "--frozen",
         "--no-cache",
@@ -169,7 +179,7 @@ def test_dockerfile_runs_as_a_non_root_user():
 
 def test_dockerfile_copies_source_only_after_dependencies():
     commands = _dockerfile_commands()
-    (sync,) = _indices_where(commands, lambda c: "uv sync" in c)
+    sync = _uv_sync_index(commands)
     (copy_all,) = _indices_where(commands, lambda c: c.startswith("COPY . ."))
     assert copy_all > sync
     early_copies = [
@@ -178,6 +188,14 @@ def test_dockerfile_copies_source_only_after_dependencies():
         if c.startswith("COPY") and "--from=" not in c
     ]
     assert early_copies == [["pyproject.toml", "uv.lock"]]
+
+
+def _image_tag(image):
+    """The tag of an image reference; a digest counts as pinned."""
+    if "@" in image:
+        return image.split("@", 1)[1]
+    last = image.rsplit("/", 1)[-1]
+    return last.split(":", 1)[1] if ":" in last else None
 
 
 def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
@@ -191,9 +209,8 @@ def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
         if m:
             copied.append(m.group(1))
     for image in images + copied:
-        # A tag is a ":" after the last "/"; a registry port does not count.
-        assert ":" in image.rsplit("/", 1)[-1]
-        assert not image.endswith(":latest")
+        tag = _image_tag(image)
+        assert tag and tag != "latest", f"{image!r} is not pinned"
     for image in copied:
         assert re.search(r":(?:\w+-)?v?\d+\.\d+\.\d+$", image)
     assert not any(re.search(r"curl.*\|\s*(ba)?sh", c) for c in commands)
@@ -201,7 +218,7 @@ def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
 
 def test_dockerfile_apt_installs_are_minimal_and_clean():
     commands = _dockerfile_commands()
-    (sync,) = _indices_where(commands, lambda c: "uv sync" in c)
+    sync = _uv_sync_index(commands)
     for i in _indices_where(commands, lambda c: "apt-get" in c):
         assert commands[i].startswith("RUN") and i < sync
     for c in commands:
@@ -220,14 +237,6 @@ def _compose_services():
 
 def test_compose_bgutil_provider_publishes_no_host_port():
     assert "ports" not in _compose_services()["bgutil-provider"]
-
-
-def _image_tag(image):
-    """The tag of an image reference; a digest counts as pinned."""
-    if "@" in image:
-        return image.split("@", 1)[1]
-    last = image.rsplit("/", 1)[-1]
-    return last.split(":", 1)[1] if ":" in last else None
 
 
 def test_compose_pulled_images_are_pinned():
@@ -367,8 +376,8 @@ def test_spotipy_aliases_are_not_reported_as_unknown(config_factory):
 
 def test_spotipy_alias_applies_when_canonical_is_unset(config_factory):
     config = config_factory(
-        "BOT_TOKEN=t\nLASTFM_API_KEY=k\nGUILD_WHITELIST=[111]\n"
-        "SPOTIPY_CLIENT_ID=cid\nSPOTIPY_CLIENT_SECRET=csecret\n"
+        SECRETS_ENV_WITHOUT_SPOTIFY
+        + "SPOTIPY_CLIENT_ID=cid\nSPOTIPY_CLIENT_SECRET=csecret\n"
     )
     assert (config.SPOTIFY_ID, config.SPOTIFY_SECRET) == ("cid", "csecret")
 
@@ -382,9 +391,9 @@ def test_heroku_db_applies_when_database_url_is_empty(config_factory):
 
 def test_spotipy_alias_applies_when_canonical_is_empty(config_factory):
     config = config_factory(
-        "BOT_TOKEN=t\nLASTFM_API_KEY=k\nGUILD_WHITELIST=[111]\n"
-        "SPOTIFY_ID=\nSPOTIPY_CLIENT_ID=cid\n"
-        "SPOTIPY_CLIENT_SECRET=csecret\n"
+        SECRETS_ENV_WITHOUT_SPOTIFY
+        + "SPOTIFY_ID=\nSPOTIPY_CLIENT_ID=cid\n"
+        + "SPOTIPY_CLIENT_SECRET=csecret\n"
     )
     assert (config.SPOTIFY_ID, config.SPOTIFY_SECRET) == ("cid", "csecret")
 

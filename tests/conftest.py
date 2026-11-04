@@ -6,6 +6,8 @@ import pytest
 
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
+pytest_plugins = ["pytester"]
+
 from config.config import ENV_ALIASES  # noqa: E402
 from config.config import Config as ConfigClass  # noqa: E402
 
@@ -30,12 +32,6 @@ def config_factory(tmp_path, monkeypatch):
     # upper-cases keys) meant PATH, SYSTEMROOT and TEMP as well - fine
     # while nothing under test shells out or uses tempfile, and a
     # baffling failure the moment something does.
-    # load_dotenv() puts the .env's values into os.environ. Setting
-    # DATABASE_URL and HEROKU_DB first makes monkeypatch restore them to
-    # unset afterwards instead of leaking them into later tests'
-    # subprocesses.
-    monkeypatch.setenv("DATABASE_URL", "")
-    monkeypatch.setenv("HEROKU_DB", "")
     for key in (
         *ConfigClass.as_dict(),
         *ENV_ALIASES,
@@ -55,17 +51,23 @@ def config_factory(tmp_path, monkeypatch):
     # __init__ binds the name `config` to the Config *instance*, which
     # shadows the submodule of the same name.
     config_module = sys.modules["config.config"]
-    from dotenv import load_dotenv as real_load_dotenv
+    from dotenv import dotenv_values
 
     env_path = tmp_path / ".env"
     monkeypatch.setattr(
         config_module, "find_dotenv", lambda *a, **kw: str(env_path)
     )
-    monkeypatch.setattr(
-        config_module,
-        "load_dotenv",
-        lambda *a, **kw: real_load_dotenv(env_path, override=True),
-    )
+
+    def load_dotenv(*a, **kw):
+        # Through monkeypatch.setenv, not the real load_dotenv: that
+        # writes os.environ behind monkeypatch's back, so only the keys
+        # registered beforehand were restored and every other key the
+        # .env held, known to Config or not, leaked into later tests.
+        for key, value in dotenv_values(env_path).items():
+            if value is not None:
+                monkeypatch.setenv(key, value)
+
+    monkeypatch.setattr(config_module, "load_dotenv", load_dotenv)
 
     def build(env: str = "") -> ConfigClass:
         env_path.write_text(env, encoding="utf-8")
