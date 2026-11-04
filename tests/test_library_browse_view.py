@@ -168,17 +168,23 @@ class Clicks:
         option labelled `label`."""
         item = next(i for i in self.shown if isinstance(i, kind))
         if label is not None:
-            pick(item, interaction, label)
+            pick_data(item, interaction, label)
         before = len(self.tasks)
         self.store.dispatch_view(item.type.value, item.custom_id, interaction)
         return self.tasks[-1] if len(self.tasks) > before else None
 
 
-def pick(select, interaction, label):
-    """Picks the option of `select` labelled `label`, as discord.py
-    does before it calls the select's callback."""
+def pick_data(select, interaction, label):
+    """Sets the data of a click on the option of `select` labelled
+    `label`; dispatch_view refreshes the select's state from it."""
     value = next(o.value for o in select.options if o.label == label)
     interaction.data = {"values": [value]}
+
+
+def pick(select, interaction, label):
+    """Picks the option of `select` labelled `label`, as discord.py
+    does before it calls the select's callback directly."""
+    pick_data(select, interaction, label)
     select._refresh_state(interaction, interaction.data)
 
 
@@ -380,6 +386,10 @@ class EditClick(NamedTuple):
     clicking: FakeInteraction
     log: list
 
+    @property
+    def who(self):
+        return [who for who, _ in self.log]
+
 
 def _click_during_enrichment_edit(click, index=INDEX, artist="Radiohead"):
     """Holds the artist level's enrichment edit in flight and
@@ -417,7 +427,7 @@ def test_back_click_during_enrichment_edit_is_accepted():
     assert result.moved_to == (None, None)
     assert result.clicking.deferred == 1
     assert len(result.entering.edits) == 2
-    assert [who for who, _ in result.log[:3]] == [
+    assert result.who[:3] == [
         result.entering,
         result.entering,
         result.clicking,
@@ -429,17 +439,16 @@ def test_select_click_during_enrichment_edit_is_accepted():
     result = _click_during_enrichment_edit(
         lambda clicks, i: clicks.click(LibrarySelect, i, label="OK Computer")
     )
-    log = result.log
 
     assert result.handler is not None
     assert result.moved_to == ("Radiohead", "OK Computer")
     assert len(result.entering.edits) == 2
-    assert [who for who, _ in log[:3]] == [
+    assert result.who[:3] == [
         result.entering,
         result.entering,
         result.clicking,
     ]
-    assert log[2][1]["embed"].title != log[1][1]["embed"].title
+    assert result.log[2][1]["embed"].title != result.log[1][1]["embed"].title
 
 
 def test_queue_click_during_enrichment_edit_queues_the_level(monkeypatch):
@@ -464,7 +473,8 @@ def test_queue_click_during_enrichment_edit_queues_the_level(monkeypatch):
     ]
 
 
-PAGED_INDEX = {
+# one artist, thirty albums: two pages of the artist level's Select
+PAGED_ALBUMS = {
     "Artist": {f"Album {n:02}": [make_song("Song")] for n in range(30)}
 }
 
@@ -472,7 +482,7 @@ PAGED_INDEX = {
 def test_page_click_during_enrichment_edit_turns_the_page_once():
     result = _click_during_enrichment_edit(
         lambda clicks, i: clicks.click(PageButton, i),
-        index=PAGED_INDEX,
+        index=PAGED_ALBUMS,
         artist="Artist",
     )
 
@@ -678,33 +688,17 @@ def test_leaving_a_level_lets_its_enrichment_finish_undrawn():
     assert len(entering.edits) == 1
 
 
-def _descend_past_kept_components():
-    """A view descended into Radiohead, with the root level's
-    components kept from before the descend landed."""
-
-    async def scenario():
-        view = make_view()
-        stub_enrichment(view)
-        clicks = Clicks(view)
-        kept = list(clicks.shown)
-        await finish(
-            clicks.click(
-                LibrarySelect, clicks.interaction(), label="Radiohead"
-            )
-        )
-        return view, clicks, kept
-
-    return scenario
-
-
-async def _view_at_paged_artist():
-    view = make_view(PAGED_INDEX)
-    stub_enrichment(view, {})
+async def _descended(index, label):
+    """A view on `index` descended into `label`, with the components
+    from before the descend landed kept."""
+    view = make_view(index)
+    stub_enrichment(view)
     clicks = Clicks(view)
+    kept = list(clicks.shown)
     await finish(
-        clicks.click(LibrarySelect, clicks.interaction(), label="Artist")
+        clicks.click(LibrarySelect, clicks.interaction(), label=label)
     )
-    return view, clicks
+    return view, clicks, kept
 
 
 @pytest.mark.parametrize(
@@ -721,7 +715,7 @@ def test_component_from_an_earlier_scope_is_acknowledged_and_ignored(
     monkeypatch.setattr(library_commands, "queue_songs", queue_songs)
 
     async def scenario():
-        view, clicks = await _view_at_paged_artist()
+        view, clicks, _ = await _descended(PAGED_ALBUMS, "Artist")
         kept = next(i for i in clicks.shown if isinstance(i, kind))
         await finish(
             clicks.click(LibrarySelect, clicks.interaction(), label="Album 00")
@@ -752,7 +746,7 @@ def test_every_browse_component_is_built_on_the_stale_guard_base():
         view.cursor.descend("Kid A")
         view.build_items()
         views.append(list(view.children))
-        paged = make_view(PAGED_INDEX)
+        paged = make_view(PAGED_ALBUMS)
         paged.cursor.descend("Artist")
         paged.build_items()
         views.append(list(paged.children))
@@ -769,7 +763,7 @@ def test_every_browse_component_is_built_on_the_stale_guard_base():
 
 def test_stranger_on_a_stale_scope_component_is_told_it_is_not_theirs():
     async def scenario():
-        view, clicks, kept = await _descend_past_kept_components()()
+        view, clicks, kept = await _descended(INDEX, "Radiohead")
         select = next(i for i in kept if isinstance(i, LibrarySelect))
         replies = []
 
@@ -781,7 +775,7 @@ def test_stranger_on_a_stale_scope_component_is_told_it_is_not_theirs():
         stranger.response = SimpleNamespace(
             send_message=send_message, defer=stranger.response.defer
         )
-        stranger.data = {"values": ["1"]}
+        pick_data(select, stranger, "The Beatles")
         # discord.py drops a replaced component's custom_id once its
         # edit lands; put it back to reach the guard through dispatch
         clicks.store._views[MESSAGE_ID][
@@ -967,7 +961,7 @@ def has_lone_surrogate(text):
         text.encode("utf-16-le")
     except UnicodeEncodeError:
         return True
-    return "\ufffd" in text
+    return False
 
 
 @pytest.mark.parametrize("level", ["artist", "album"])
