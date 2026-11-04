@@ -499,6 +499,10 @@ def test_queue_starts_the_first_track_when_idle(
     assert _preloaded(stub_loader) == ["a", "b"]
 
 
+async def _ret(value):
+    return value
+
+
 class _FakeMessage:
     """A sent message: records every view it is edited to."""
 
@@ -523,12 +527,9 @@ def test_attach_view_moves_the_buttons_onto_the_new_message(controller):
 
     async def run():
         old_message = _FakeMessage()
-        await controller.attach_view(lambda view: _return(old_message))
+        await controller.attach_view(lambda view: _ret(old_message))
         result = await controller.attach_view(send)
         return old_message, result
-
-    async def _return(message):
-        return message
 
     old_message, result = asyncio.run(run())
 
@@ -536,7 +537,7 @@ def test_attach_view_moves_the_buttons_onto_the_new_message(controller):
     assert len(sent) == 1 and isinstance(sent[0], discord.ui.View)
     assert result is new_message
     # the next attach_view takes the buttons off the new message
-    asyncio.run(controller.attach_view(lambda view: _return(_FakeMessage())))
+    asyncio.run(controller.attach_view(lambda view: _ret(_FakeMessage())))
     assert new_message.edits == [None]
 
 
@@ -897,44 +898,30 @@ def _queue_saved_playlist_song(controller, from_saved_playlist=True):
     """Queues one song behind a playing track, stored as "stale title"
     in a saved playlist and loaded as "fresh title"; lets the preload
     run, and returns the saved playlist's entries and the queue."""
-    ac = sys.modules[type(controller).__module__]
-    _queue(controller, "playing")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        engine, factory = await _saved_playlist_db(
-            ac,
-            "1234",
-            "mix",
-            [ac.playlists.PlaylistEntry(SAVED_URL, "stale title")],
+    async def queue_and_preload(ac, factory):
+        await controller.queue(
+            [
+                ac.Song(
+                    ac.SiteTypes.YT_DLP,
+                    SAVED_URL,
+                    title="fresh title",
+                    saved_playlist=(
+                        ac.playlists.PlaylistRef("1234", "mix")
+                        if from_saved_playlist
+                        else None
+                    ),
+                    saved_url=SAVED_URL if from_saved_playlist else None,
+                )
+            ]
         )
-        controller.bot.DbSession = factory
-        try:
-            controller.guild.voice_client.playing = True
-            await controller.queue(
-                [
-                    ac.Song(
-                        ac.SiteTypes.YT_DLP,
-                        SAVED_URL,
-                        title="fresh title",
-                        saved_playlist=(
-                            ac.playlists.PlaylistRef("1234", "mix")
-                            if from_saved_playlist
-                            else None
-                        ),
-                        saved_url=SAVED_URL if from_saved_playlist else None,
-                    )
-                ]
-            )
-            await _drain(controller)
-            contents = await ac.playlists.get(
-                factory, ac.playlists.PlaylistRef("1234", "mix")
-            )
-            return contents.entries, _titles(controller)
-        finally:
-            await engine.dispose()
+        await _drain(controller)
+        contents = await ac.playlists.get(
+            factory, ac.playlists.PlaylistRef("1234", "mix")
+        )
+        return contents.entries, _titles(controller)
 
-    return asyncio.run(run())
+    return _stored_titles_after_preloading(controller, queue_and_preload)
 
 
 def _entry(controller, title):
@@ -984,7 +971,7 @@ def test_a_failing_title_refresh_still_counts_as_a_successful_preload(
     assert titles == ["playing", "fresh title"]
 
 
-def _gated_preload(stub_loader, title, outcomes):
+def _gated_preload(stub_loader, title):
     """Makes preload() of `title` wait on one future per call, in call
     order; returns those futures. Other titles succeed at once."""
     futures = []
@@ -1010,7 +997,7 @@ def test_a_background_preload_failing_after_the_song_became_head_skips_only_it(
 
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
-        futures = _gated_preload(stub_loader, "b", None)
+        futures = _gated_preload(stub_loader, "b")
         await controller.ensure_playing()
         await _settle()
         # the queue preload of "b" is pending; skipping makes "b" the
@@ -1036,7 +1023,7 @@ def test_a_failed_non_head_preload_still_removes_the_song(
 
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
-        futures = _gated_preload(stub_loader, "b", None)
+        futures = _gated_preload(stub_loader, "b")
         await controller.ensure_playing()
         await _settle()
         futures[0].set_result(stub_loader.Preload.FAILED)
@@ -1047,11 +1034,28 @@ def test_a_failed_non_head_preload_still_removes_the_song(
     assert _titles(controller) == ["a", "c"]
 
 
-def _announce_disconnect_with(controller, monkeypatch, during):
-    """Makes the voice client's disconnect() run `during()` first."""
+def _idle_timer_that_fires_at_once(controller, monkeypatch):
+    """Lets the idle timer fire straight away, and returns the list a
+    voice client disconnect() appends to: one entry per disconnect."""
     from config import config
 
+    monkeypatch.setattr(config, "VC_TIMEOUT", 0)
     monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
+    controller.bot.sessions.settings(controller.guild).vc_timeout = True
+    voice_client = controller.guild.voice_client
+    disconnects = []
+    original = voice_client.disconnect
+
+    async def disconnect(*, force=False):
+        disconnects.append(force)
+        await original(force=force)
+
+    voice_client.disconnect = disconnect
+    return disconnects
+
+
+def _during_disconnect(controller, during):
+    """Makes the voice client's disconnect() run `during()` first."""
     voice_client = controller.guild.voice_client
     original = voice_client.disconnect
 
@@ -1073,17 +1077,17 @@ def test_a_track_end_hop_during_a_disconnect_starts_no_idle_timer(
         controller.bot.loop = asyncio.get_running_loop()
         await controller.ensure_playing()
         await _settle()
+        disconnects = _idle_timer_that_fires_at_once(controller, monkeypatch)
         generation = controller._generation
-        _announce_disconnect_with(
-            controller,
-            monkeypatch,
-            lambda: controller._on_track_end(None, generation),
+        _during_disconnect(
+            controller, lambda: controller._on_track_end(None, generation)
         )
         await controller.udisconnect("test")
         await _settle()
-        return controller.timer._task
+        return disconnects
 
-    assert asyncio.run(run()) is None
+    # a timer started by the hop would disconnect a second time
+    assert len(asyncio.run(run())) == 1
 
 
 def test_a_disposed_controller_leaves_no_timer_running(
@@ -1091,16 +1095,15 @@ def test_a_disposed_controller_leaves_no_timer_running(
 ):
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
-        _announce_disconnect_with(
-            controller,
-            monkeypatch,
-            lambda: controller.add_task(controller.timer.start()),
+        disconnects = _idle_timer_that_fires_at_once(controller, monkeypatch)
+        _during_disconnect(
+            controller, lambda: controller.add_task(controller.timer.start())
         )
         await controller.dispose()
         await _settle()
-        return controller.timer._task
+        return disconnects
 
-    assert asyncio.run(run()) is None
+    assert len(asyncio.run(run())) == 1
 
 
 def test_a_track_end_after_a_plain_stop_starts_the_idle_timer(
@@ -1113,38 +1116,34 @@ def test_a_track_end_after_a_plain_stop_starts_the_idle_timer(
         controller.bot.loop = asyncio.get_running_loop()
         await controller.ensure_playing()
         await _settle()
+        _idle_timer_that_fires_at_once(controller, monkeypatch)
         controller.stop()
         await _settle()
-        return controller.timer._task
+        return controller.guild.voice_client.disconnected
 
-    assert asyncio.run(run()) is not None
+    assert asyncio.run(run())
 
 
 def test_a_track_end_after_the_idle_timer_expired_starts_it_again(
     controller, monkeypatch
 ):
-    from config import config
-
     _fake_ffmpeg(monkeypatch)
-    monkeypatch.setattr(config, "VC_TIMEOUT", 0)
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
-    controller.bot.sessions.settings(controller.guild).vc_timeout = True
     _queue(controller, "only")
 
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
         await controller.ensure_playing()
         await _settle()
+        disconnects = _idle_timer_that_fires_at_once(controller, monkeypatch)
         controller.guild.voice_client.playing = False
         await controller.timer.start()
         await _settle()
-        assert controller.guild.voice_client.disconnected
-        assert controller.timer._task is None
+        assert len(disconnects) == 1
         controller._on_track_end(None, controller._generation)
-        await asyncio.sleep(0)
-        return controller.timer._task
+        await _settle()
+        return disconnects
 
-    assert asyncio.run(run()) is not None
+    assert len(asyncio.run(run())) == 2
 
 
 def _button(view, custom_id):
@@ -1237,10 +1236,6 @@ class _FlakyMessage(_FakeMessage):
         return self
 
 
-async def _ret(value):
-    return value
-
-
 def test_the_retry_after_an_expired_token_edit_applies_the_view(controller):
     _queue(controller, "current")
     controller.guild.voice_client.playing = True
@@ -1285,10 +1280,10 @@ def _rewriting_preload(stub_loader, normalised):
     stub_loader.preload = preload
 
 
-def _stored_titles_after_preloading(controller, make_song, preloads=1):
-    """Queues the song `make_song(ac)` behind a playing track with
-    "stale title" stored, preloads it `preloads` times, and returns
-    the stored titles."""
+def _stored_titles_after_preloading(controller, run_in_db):
+    """Queues a playing track and a "stale title" saved playlist "mix"
+    (guild "1234"), awaits `run_in_db(ac, factory)` with the module and
+    the DB session factory, and returns what it returns."""
     ac = sys.modules[type(controller).__module__]
     _queue(controller, "playing")
 
@@ -1303,37 +1298,29 @@ def _stored_titles_after_preloading(controller, make_song, preloads=1):
         controller.bot.DbSession = factory
         try:
             controller.guild.voice_client.playing = True
-            song = make_song(ac)
-            controller.playlist.add(song)
-            for n in range(preloads):
-                song.title = f"fresh title {n}"
-                assert await controller._preload(song)
-            contents = await ac.playlists.get(
-                factory, ac.playlists.PlaylistRef("1234", "mix")
-            )
-            return [entry.title for entry in contents.entries]
+            return await run_in_db(ac, factory)
         finally:
             await engine.dispose()
 
     return asyncio.run(run())
 
 
+def _stored_titles(ac, factory):
+    async def get():
+        contents = await ac.playlists.get(
+            factory, ac.playlists.PlaylistRef("1234", "mix")
+        )
+        return [entry.title for entry in contents.entries]
+
+    return get()
+
+
 def test_a_song_loaded_from_a_saved_playlist_keeps_its_title_refresh(
     controller, stub_loader
 ):
-    ac = sys.modules[type(controller).__module__]
-    _queue(controller, "playing")
     _rewriting_preload(stub_loader, "https://example.invalid/normalised")
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        engine, factory = await _saved_playlist_db(
-            ac,
-            "1234",
-            "mix",
-            [ac.playlists.PlaylistEntry(SAVED_URL, "stale title")],
-        )
-
+    async def load_and_preload(ac, factory):
         async def noop(*args, **kwargs):
             pass
 
@@ -1344,26 +1331,21 @@ def test_a_song_loaded_from_a_saved_playlist_keeps_its_title_refresh(
             defer=noop,
             send=noop,
         )
-        controller.bot.DbSession = factory
-        try:
-            controller.guild.voice_client.playing = True
-            await Music._playlist_load.callback(Music(None), ctx, "mix")
-            await _drain(controller)
-            song = controller.playlist.playque[-1]
-            titles = []
-            for n in range(2):
-                # the stream URL expired: the song is extracted again
-                song.title = f"fresh title {n}"
-                assert await controller._preload(song)
-                contents = await ac.playlists.get(
-                    factory, ac.playlists.PlaylistRef("1234", "mix")
-                )
-                titles.append([e.title for e in contents.entries])
-            return titles
-        finally:
-            await engine.dispose()
+        await Music._playlist_load.callback(Music(None), ctx, "mix")
+        await _drain(controller)
+        song = controller.playlist.playque[-1]
+        titles = []
+        for n in range(2):
+            # the stream URL expired: the song is extracted again
+            song.title = f"fresh title {n}"
+            assert await controller._preload(song)
+            titles.append(await _stored_titles(ac, factory))
+        return titles
 
-    assert asyncio.run(run()) == [["fresh title 0"], ["fresh title 1"]]
+    assert _stored_titles_after_preloading(controller, load_and_preload) == [
+        ["fresh title 0"],
+        ["fresh title 1"],
+    ]
 
 
 def test_a_song_without_a_saved_url_refreshes_no_stored_title(
@@ -1381,7 +1363,14 @@ def test_a_song_without_a_saved_url_refreshes_no_stored_title(
         song.__dict__.pop("saved_url", None)
         return song
 
-    assert _stored_titles_after_preloading(controller, make_song) == [
+    async def preload_once(ac, factory):
+        song = make_song(ac)
+        controller.playlist.add(song)
+        song.title = "fresh title 0"
+        assert await controller._preload(song)
+        return await _stored_titles(ac, factory)
+
+    assert _stored_titles_after_preloading(controller, preload_once) == [
         "stale title"
     ]
 
