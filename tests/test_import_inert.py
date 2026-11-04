@@ -60,9 +60,8 @@ LIFECYCLE_PROBE = """
 import asyncio
 import json
 import multiprocessing
-import sys
 
-from musicbot import loader, utils
+from musicbot import loader
 
 
 def worker_state_is_set():
@@ -116,10 +115,7 @@ if __name__ == "__main__":
     before_init = calls_without_worker()
     loader.shutdown()  # safe without a prior init()
     loader.init()
-    stdio_after_init = {
-        "stdout": isinstance(sys.stdout, utils.OutputWrapper),
-        "stderr": isinstance(sys.stderr, utils.OutputWrapper),
-    }
+    stdio_after_init = worker_stdio_is_wrapped()
     worker_ready = loader._executor.submit(worker_state_is_set).result()
     worker_stdio = loader._executor.submit(worker_stdio_is_wrapped).result()
     children_after_init = len(multiprocessing.active_children())
