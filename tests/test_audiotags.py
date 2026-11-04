@@ -1,5 +1,6 @@
 import shutil
 import wave
+from functools import partial
 from pathlib import Path
 
 import pytest
@@ -172,8 +173,10 @@ def _write_id3(path: Path, values: dict, pictures) -> None:
     tags.save(path)
 
 
-def _write_id3_in_file(path: Path, values: dict, pictures) -> None:
-    audio = (WAVE if path.suffix == ".wav" else AIFF)(path)
+def _write_id3_in_file(
+    audio_class, path: Path, values: dict, pictures
+) -> None:
+    audio = audio_class(path)
     audio.add_tags()
     _add_id3(audio.tags, values, pictures)
     audio.save()
@@ -184,8 +187,8 @@ WRITERS = {
     ".flac": _write_flac,
     ".m4a": _write_mp4,
     ".mp3": _write_id3,
-    ".wav": _write_id3_in_file,
-    ".aiff": _write_id3_in_file,
+    ".wav": partial(_write_id3_in_file, WAVE),
+    ".aiff": partial(_write_id3_in_file, AIFF),
 }
 
 
