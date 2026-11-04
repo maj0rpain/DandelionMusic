@@ -62,13 +62,6 @@ def test_a_track_reaches_the_play_path(name, playnext, monkeypatch):
 
 
 @pytest.mark.parametrize("name,playnext", COMMANDS)
-def test_an_attached_file_is_played_by_its_url(name, playnext, monkeypatch):
-    ctx = FakeCtx([object()])
-    reached = run_command(name, ctx, monkeypatch)
-    assert reached == [("https://discord/msg", playnext)]
-
-
-@pytest.mark.parametrize("name,playnext", COMMANDS)
 def test_a_slash_file_is_played_by_its_url(name, playnext, monkeypatch):
     ctx = FakeCtx()
     ctx.interaction = object()

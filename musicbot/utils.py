@@ -192,7 +192,10 @@ async def _admin_or_owner(ctx: Context) -> bool:
 
 
 def _holds_role(ctx: Context, role_id) -> bool:
-    """True when the author holds the role with this id."""
+    """True when the author holds the role with this id. A missing id
+    (no role set) is held by nobody."""
+    if not role_id:
+        return False
     return int(role_id) in [r.id for r in ctx.author.roles]
 
 
@@ -240,8 +243,7 @@ async def voice_check(ctx: Context):
     # DJ role set, nobody else bypasses (EXTRA_OWNERS included).
     if await _admin_or_owner(ctx):
         return True
-    dj_role = get_settings(ctx).dj_role
-    if dj_role and _holds_role(ctx, dj_role):
+    if _holds_role(ctx, get_settings(ctx).dj_role):
         return True
 
     raise CheckError(config.USER_NOT_IN_VC_MESSAGE)

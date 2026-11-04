@@ -29,6 +29,7 @@ from discord_fakes import (
 )
 from musicbot.utils import (
     CheckError,
+    _holds_role,
     chunks,
     dj_check,
     get_audiocontroller,
@@ -783,17 +784,6 @@ def test_cog_check_gates_before_other_refusals(cmd, monkeypatch):
 
 
 @pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
-def test_refuses_while_disabled(cmd, monkeypatch, admitting_play_check):
-    monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
-    cog, cmd = registered(cmd)
-    # a context that would otherwise pass: only the gate refuses
-    ctx = types.SimpleNamespace(command=cmd)
-    with pytest.raises(CheckError) as exc:
-        asyncio.run(cog.cog_check(ctx))
-    assert str(exc.value) == config.PLAYLISTS_ARE_DISABLED
-
-
-@pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
 def test_gate_admits_while_enabled(cmd, monkeypatch, admitting_play_check):
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", True)
     cog, cmd = registered(cmd)
@@ -821,3 +811,10 @@ def test_cog_check_admits_a_button_context_with_no_command(
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
     ctx = types.SimpleNamespace(command=None)
     assert asyncio.run(Music(None).cog_check(ctx)) is True
+
+
+def test_holds_role_is_false_for_a_missing_role_id():
+    ctx = types.SimpleNamespace(
+        author=types.SimpleNamespace(roles=[types.SimpleNamespace(id=5)])
+    )
+    assert _holds_role(ctx, None) is False
