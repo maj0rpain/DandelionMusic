@@ -33,6 +33,7 @@ from musicbot.commands.library import (
 )
 from musicbot.library import LibrarySong
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
+from discord_fakes import http_error, run
 
 
 def make_song(title):
@@ -60,12 +61,6 @@ INDEX = {
 COVER = Enrichment(
     stats=None, art=ArtInfo(url=None, data=b"\x89PNG", extension="png")
 )
-
-
-def http_error():
-    return discord.HTTPException(
-        SimpleNamespace(status=500, reason="Server Error"), "boom"
-    )
 
 
 AUTHOR_ID = 1
@@ -146,12 +141,6 @@ def make_view(index=INDEX):
     return LibraryBrowseView(ctx, index)
 
 
-def run(coro_fn):
-    # bounded, so a click left waiting forever fails the test rather
-    # than hanging the run
-    return asyncio.run(asyncio.wait_for(coro_fn(), 5))
-
-
 class Clicks:
     """Dispatches clicks the way discord.py does: through a real
     ViewStore, with the view registered under one message id as the
@@ -211,7 +200,7 @@ def test_failed_render_keeps_previous_components_live(capsys):
         result = await view.render(interaction, sync_attachments=True)
         return view, before, attached, result
 
-    view, before, attached, result = run(scenario)
+    view, before, attached, result = run(scenario())
 
     assert result is False
     assert view.children == before
@@ -230,7 +219,7 @@ def test_render_syncs_a_changed_attachment():
         result = await view.render(interaction, sync_attachments=True)
         return view, interaction, result
 
-    view, interaction, result = run(scenario)
+    view, interaction, result = run(scenario())
 
     assert result is True
     # the artist level: Select, Queue this Artist, Back
@@ -252,7 +241,7 @@ def test_render_without_sync_leaves_attachments_alone():
         result = await view.render(interaction)
         return view, interaction, result
 
-    view, interaction, result = run(scenario)
+    view, interaction, result = run(scenario())
 
     assert result is True
     assert len(view.children) == 3
@@ -273,7 +262,7 @@ def test_failed_descend_is_undone():
         await view.descend(interaction, "Artist 27")
         return view, resolved
 
-    view, resolved = run(scenario)
+    view, resolved = run(scenario())
 
     assert level_of(view) == (None, None)
     assert view.cursor.page == 1
@@ -291,7 +280,7 @@ def test_failed_back_is_undone():
         await view.go_back(interaction)
         return view, resolved
 
-    view, resolved = run(scenario)
+    view, resolved = run(scenario())
 
     assert level_of(view) == ("Radiohead", "OK Computer")
     assert resolved == []
@@ -316,7 +305,7 @@ def test_failed_enrichment_edit_is_healed_by_next_page_turn():
         await view.turn_page(page_turn, 0)
         return enrichment, page_turn
 
-    enrichment, page_turn = run(scenario)
+    enrichment, page_turn = run(scenario())
 
     assert enrichment is COVER
     assert [f.filename for f in page_turn.edits[-1]["attachments"]] == [
@@ -416,7 +405,7 @@ def _click_during_enrichment_edit(click, index=INDEX, artist="Radiohead"):
             view, moved_to, page, handler, entering, clicking, log
         )
 
-    return run(scenario)
+    return run(scenario())
 
 
 def test_back_click_during_enrichment_edit_is_accepted():
@@ -529,7 +518,9 @@ def test_enrichment_resolving_after_moving_on_is_not_drawn():
             redraws,
         )
 
-    accepted, resolved_while_pending, entering, paging, redraws = run(scenario)
+    accepted, resolved_while_pending, entering, paging, redraws = run(
+        scenario()
+    )
 
     assert accepted is True
     assert resolved_while_pending is True
@@ -554,7 +545,7 @@ def test_second_select_click_during_first_draw_is_turned_away():
         await finish(entry, handler)
         return handler, second, view
 
-    handler, second, view = run(scenario)
+    handler, second, view = run(scenario())
 
     assert handler is not None
     assert second.deferred == 1
@@ -576,7 +567,7 @@ def test_second_click_during_page_turn_is_turned_away():
         await finish(turn, handler)
         return handler, second, view
 
-    handler, second, view = run(scenario)
+    handler, second, view = run(scenario())
 
     assert handler is not None
     assert second.deferred == 1
@@ -609,7 +600,7 @@ def test_select_from_previous_page_during_page_turn_opens_its_entry():
         await previous.callback(picking)
         return view
 
-    view = run(scenario)
+    view = run(scenario())
 
     assert level_of(view) == ("Artist 03", None)
 
@@ -626,7 +617,7 @@ def test_click_after_failed_first_draw_acts_on_the_shown_level():
         await finish(clicks.click(LibrarySelect, again, label="The Beatles"))
         return undone, view
 
-    undone, view = run(scenario)
+    undone, view = run(scenario())
 
     assert undone == (None, None)
     assert level_of(view) == ("The Beatles", None)
@@ -644,7 +635,7 @@ def test_click_after_failed_page_turn_acts_on_the_shown_page():
         await finish(clicks.click(LibrarySelect, again, label="Artist 03"))
         return undone_page, view
 
-    undone_page, view = run(scenario)
+    undone_page, view = run(scenario())
 
     assert undone_page == 0
     assert level_of(view) == ("Artist 03", None)
@@ -661,7 +652,7 @@ def test_click_after_failed_enrichment_edit_acts_on_the_shown_level():
         await finish(clicks.click(BackButton, again))
         return view
 
-    view = run(scenario)
+    view = run(scenario())
 
     assert level_of(view) == (None, None)
 
@@ -681,7 +672,7 @@ def test_leaving_a_level_lets_its_enrichment_finish_undrawn():
         await entry
         return finished, entering
 
-    finished, entering = run(scenario)
+    finished, entering = run(scenario())
 
     assert ("Radiohead", None) in finished
     assert len(entering.edits) == 1
@@ -742,7 +733,7 @@ def test_component_from_an_earlier_scope_is_acknowledged_and_ignored(
         await kept.callback(picking)
         return view, where, picking
 
-    view, where, picking = run(scenario)
+    view, where, picking = run(scenario())
 
     assert picking.deferred == 1
     assert (view.cursor.artist, view.cursor.album, view.cursor.page) == where
@@ -767,7 +758,7 @@ def test_every_browse_component_is_built_on_the_stale_guard_base():
         views.append(list(paged.children))
         return views
 
-    views = run(scenario)
+    views = run(scenario())
 
     items = [item for children in views for item in children]
     assert any(isinstance(i, PageButton) for i in items)
@@ -804,7 +795,7 @@ def test_stranger_on_a_stale_scope_component_is_told_it_is_not_theirs():
         await finish(clicks.tasks[-1])
         return view, replies, stranger
 
-    view, replies, stranger = run(scenario)
+    view, replies, stranger = run(scenario())
 
     assert replies == ["This belongs to someone else."]
     assert stranger.deferred == 0
@@ -840,7 +831,7 @@ def test_descend_edit_reset_is_undone_and_next_pick_opens_it():
         await view.descend(FakeInteraction(), "The Beatles")
         return view, resolved, raised, cursor
 
-    view, resolved, raised, cursor = run(scenario)
+    view, resolved, raised, cursor = run(scenario())
 
     assert isinstance(raised, aiohttp.ClientOSError)
     assert cursor == (None, None)
@@ -859,7 +850,7 @@ def test_back_edit_reset_is_undone():
         raised = await attempt(view.go_back(interaction))
         return view, resolved, raised
 
-    view, resolved, raised = run(scenario)
+    view, resolved, raised = run(scenario())
 
     assert isinstance(raised, aiohttp.ClientOSError)
     assert level_of(view) == ("Radiohead", "OK Computer")
@@ -875,7 +866,7 @@ def test_page_turn_edit_reset_is_undone():
         await view.turn_page(FakeInteraction(), 1)
         return view, raised, page
 
-    view, raised, page = run(scenario)
+    view, raised, page = run(scenario())
 
     assert isinstance(raised, aiohttp.ClientOSError)
     assert page == 0
@@ -892,7 +883,7 @@ def test_descend_cancelled_edit_is_undone():
         raised = await attempt(view.descend(interaction, "Radiohead"))
         return view, resolved, raised
 
-    view, resolved, raised = run(scenario)
+    view, resolved, raised = run(scenario())
 
     assert isinstance(raised, asyncio.CancelledError)
     assert level_of(view) == (None, None)
@@ -908,7 +899,7 @@ def test_failed_clamped_page_turn_is_undone():
         await view.turn_page(failing, 5)
         return last, view.cursor.page
 
-    last, page = run(scenario)
+    last, page = run(scenario())
 
     assert last == 1
     assert page == 1
@@ -928,7 +919,7 @@ def test_enrichment_in_flight_still_lands_after_failed_page_turn():
         await entry
         return entering
 
-    entering = run(scenario)
+    entering = run(scenario())
 
     assert carries_enrichment(entering.edits[-1])
 
@@ -960,7 +951,7 @@ def test_failed_defer_leaves_cursor_unchanged(click, error):
         after = (*level_of(view), view.cursor.page)
         return before, after, raised, resolved
 
-    before, after, raised, resolved = run(scenario)
+    before, after, raised, resolved = run(scenario())
 
     assert isinstance(raised, (aiohttp.ClientOSError, discord.NotFound))
     assert after == before
@@ -1118,7 +1109,7 @@ def test_timeout_after_a_click_edits_by_id_through_its_followup():
         await view.on_timeout()
         return view, click
 
-    view, click = run(go)
+    view, click = run(go())
     assert click.followup.edits == [(MESSAGE_ID, {"view": view})]
     assert click.original_edits == []
     assert all(item.disabled for item in view.children)
@@ -1142,7 +1133,7 @@ def test_timeout_after_a_bulk_queue_click_edits_the_view_not_the_placeholder(
         await view.on_timeout()
         return view, click
 
-    view, click = run(go)
+    view, click = run(go())
     assert click.followup.edits == [(MESSAGE_ID, {"view": view})]
     assert all("view" not in edit for edit in click.original_edits)
 
@@ -1156,7 +1147,7 @@ def test_timeout_uses_the_later_of_two_accepted_clicks():
         await view.on_timeout()
         return first, second
 
-    first, second = run(go)
+    first, second = run(go())
     assert first.followup.edits == []
     assert len(second.followup.edits) == 1
 
@@ -1170,7 +1161,7 @@ def test_timeout_never_uses_a_non_owner_click():
         await view.on_timeout()
         return owner, stranger
 
-    owner, stranger = run(go)
+    owner, stranger = run(go())
     assert stranger.followup.edits == []
     assert len(owner.followup.edits) == 1
 
@@ -1185,7 +1176,7 @@ def test_timeout_never_uses_a_click_turned_away_as_busy():
         await view.on_timeout()
         return owner, busy
 
-    owner, busy = run(go)
+    owner, busy = run(go())
     assert busy.followup.edits == []
     assert len(owner.followup.edits) == 1
 
@@ -1199,7 +1190,7 @@ def test_timeout_edits_a_webhook_message_view_through_the_click_followup():
         await view.on_timeout()
         return message, click, view
 
-    message, click, view = run(go)
+    message, click, view = run(go())
     assert message.edits == []
     assert click.followup.edits == [(MESSAGE_ID, {"view": view})]
 
@@ -1211,7 +1202,7 @@ def test_timeout_without_a_click_edits_a_webhook_message_directly():
         await view.on_timeout()
         return message, view
 
-    message, view = run(go)
+    message, view = run(go())
     assert message.edits == [{"view": view}]
 
 
@@ -1222,7 +1213,7 @@ def test_timeout_without_a_click_edits_the_original_response():
         await view.on_timeout()
         return command, view
 
-    command, view = run(go)
+    command, view = run(go())
     assert command.original_edits == [{"view": view}]
 
 
@@ -1235,7 +1226,7 @@ def test_timeout_after_a_click_still_edits_a_prefix_message_directly():
         await view.on_timeout()
         return message, click, view
 
-    message, click, view = run(go)
+    message, click, view = run(go())
     assert message.edits == [{"view": view}]
     assert click.followup.edits == []
 
@@ -1247,4 +1238,4 @@ def test_timeout_swallows_a_failed_followup_edit():
         await view.on_timeout()
         return view
 
-    assert all(item.disabled for item in run(go).children)
+    assert all(item.disabled for item in run(go()).children)

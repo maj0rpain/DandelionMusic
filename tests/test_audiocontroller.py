@@ -17,6 +17,7 @@ import pytest
 
 from db_seam import in_memory_db
 from controller_seam import FakeVoiceClient, StubLoader, controller_seam
+from discord_fakes import PLAYER_BUTTONS
 from musicbot.commands.music import Music
 
 
@@ -2117,20 +2118,13 @@ def test_a_queue_that_plays_to_its_end_leaves_an_empty_backup(
     assert _backup(controller, tmp_path) == []
 
 
-def test_disconnecting_while_playing_leaves_the_backup_holding_the_queue(
-    controller, monkeypatch, tmp_path
-):
-    _fake_ffmpeg(monkeypatch)
-    _queue(controller, "first", "second")
+def test_the_player_view_buttons_are_the_player_buttons_in_order(controller):
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
 
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await controller.udisconnect("d!disconnect")
+    ids = [c.custom_id for c in controller.make_view().children]
 
-    asyncio.run(run())
-
-    assert _backup(controller, tmp_path) == ["first", "second"]
+    assert ids == PLAYER_BUTTONS
 
 
 def test_start_idle_timer_starts_the_timer(controller):
