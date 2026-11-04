@@ -162,7 +162,10 @@ class Preload(Enum):
 
     FAILED: an extraction was needed and failed.
     CURRENT: nothing needed extracting - the song has no webpage_url,
-    its stream url has not expired, or another caller's in-flight
+    is a local-library or custom-link song, has a stream url not within
+    EXPIRY_MARGIN of its expire= (or the link is its own stream), has a
+    stream url with no expire= extracted less than
+    UNKNOWN_EXPIRY_MAX_AGE ago, or another caller's in-flight
     extraction of it succeeded.
     EXTRACTED: this call ran an extraction and updated the song.
     """
