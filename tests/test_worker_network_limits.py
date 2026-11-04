@@ -12,6 +12,7 @@ import threading
 import time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 
+import aiohttp
 import pytest
 import requests
 from spotipy.exceptions import SpotifyException, SpotifyOauthError
@@ -46,8 +47,9 @@ class _FailingApi:
         SpotifyOauthError("token request failed"),
         requests.exceptions.RetryError("too many 429 responses"),
         TimeoutError(),
+        aiohttp.ClientConnectionError("connection dropped"),
     ],
-    ids=["api", "oauth", "token-retry", "timeout"],
+    ids=["api", "oauth", "token-retry", "timeout", "aiohttp"],
 )
 def test_a_failed_spotify_lookup_is_a_could_not_load_error(
     monkeypatch, worker_loop, exc
@@ -106,6 +108,12 @@ def test_build_spotify_api_gives_both_clients_the_capped_session():
         assert retry.status == 3
         assert retry.retry_after_max == 5
         assert 429 in retry.status_forcelist
+
+
+def test_build_spotify_api_bounds_the_token_request():
+    api = linkutils.build_spotify_api("id", "secret")
+    assert api.auth_manager.requests_timeout == 5
+    assert api.requests_timeout == 5
 
 
 def test_build_spotify_api_without_credentials_is_none():

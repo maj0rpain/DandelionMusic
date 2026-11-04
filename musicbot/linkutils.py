@@ -62,6 +62,7 @@ def build_spotify_api(client_id, client_secret) -> Optional[Spotify]:
                 client_id=client_id,
                 client_secret=client_secret,
                 requests_session=session,
+                requests_timeout=5,
             ),
         )
     except Exception:

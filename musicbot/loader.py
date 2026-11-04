@@ -12,7 +12,7 @@ from concurrent.futures import ProcessPoolExecutor
 from multiprocessing import get_context as mp_context
 from typing import List, Optional, Union
 
-from aiohttp import ClientResponseError
+from aiohttp import ClientError
 from requests.exceptions import RequestException
 from spotipy.exceptions import SpotifyBaseException
 from yt_dlp import YoutubeDL
@@ -263,7 +263,7 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
         try:
             data = _loop.run_until_complete(fetch_spotify(track))
         except (
-            ClientResponseError,
+            ClientError,
             SpotifyBaseException,
             RequestException,
             TimeoutError,
