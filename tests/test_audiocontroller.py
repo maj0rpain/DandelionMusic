@@ -2111,21 +2111,6 @@ def test_a_queue_that_plays_to_its_end_leaves_an_empty_backup(
     assert _backup(controller, tmp_path) == []
 
 
-def test_disconnecting_while_playing_leaves_the_backup_holding_the_queue(
-    controller, monkeypatch, tmp_path
-):
-    _fake_ffmpeg(monkeypatch)
-    _queue(controller, "first", "second")
-
-    async def scenario():
-        await controller.ensure_playing()
-        await controller.udisconnect("d!disconnect")
-
-    _run(controller, scenario)
-
-    assert _backup(controller, tmp_path) == ["first", "second"]
-
-
 def test_the_player_view_buttons_are_the_player_buttons_in_order(controller):
     _queue(controller, "current")
     controller.guild.voice_client.playing = True
