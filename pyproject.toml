@@ -15,10 +15,12 @@ dependencies = [
     "mutagen==1.47.0",
     "packaging~=26.3",
     "python-dotenv~=1.2.3",
+    "requests==2.34.2",
     "setuptools==84.0.0",
     "spotipy==2.26.0",
     "sqlalchemy[asyncio]~=2.0.52",
     "tomli==2.4.1",
+    "urllib3==2.7.0",
     "wheel==0.48.0",
     "yt-dlp[default]~=2026.8.19",
 ]
