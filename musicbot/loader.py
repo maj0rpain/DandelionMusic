@@ -9,6 +9,7 @@ from traceback import print_exc
 from urllib.parse import urlparse
 from datetime import datetime, timezone
 from concurrent.futures import ProcessPoolExecutor
+from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context as mp_context
 from typing import List, Optional, Union
 
@@ -117,7 +118,7 @@ def init():
         return
     wrap_stdio()
     _context.Process = LoaderProcess
-    _executor = ProcessPoolExecutor(1, _context, initializer=_init_worker)
+    _executor = _new_pool()
     # wake it up to spawn the process immediately
     _executor.submit(_noop).result()
 
@@ -384,13 +385,47 @@ async def preload(song: Song) -> Preload:
     return Preload.EXTRACTED if success else Preload.FAILED
 
 
-async def _run_sync(f, *args):
-    # run_in_executor(None, ...) would pick asyncio's default thread pool
-    # and run extraction in this process, with no worker state set up
-    executor = _executor
-    if executor is None:
+def _new_pool() -> ProcessPoolExecutor:
+    return ProcessPoolExecutor(1, _context, initializer=_init_worker)
+
+
+def _replace_broken(broken: ProcessPoolExecutor) -> None:
+    """Swaps in a fresh pool for `broken`, unless another call already
+    did (one crash fails every call queued in the single-worker pool,
+    and they all share one rebuild) or shutdown() ran. Loop-only, which
+    is what makes the identity check race-free. The new pool starts
+    lazily: warming it up here would block the event loop on a spawn."""
+    global _executor
+    if _executor is not broken:
+        return
+    print(
+        "loader: the extraction worker died, starting a new one",
+        file=sys.stderr,
+    )
+    _executor = _new_pool()
+    broken.shutdown(wait=False)
+
+
+def _require_running() -> ProcessPoolExecutor:
+    if _executor is None:
         raise LoaderNotRunning(
             "the loader is not running: loader.init() has not been called"
             " or loader.shutdown() already ran"
         )
-    return await asyncio.get_running_loop().run_in_executor(executor, f, *args)
+    return _executor
+
+
+async def _run_sync(f, *args):
+    # run_in_executor(None, ...) would pick asyncio's default thread pool
+    # and run extraction in this process, with no worker state set up
+    loop = asyncio.get_running_loop()
+    for _ in (1, 2):
+        executor = _require_running()
+        try:
+            return await loop.run_in_executor(executor, f, *args)
+        except BrokenProcessPool:
+            _replace_broken(executor)
+    # the retry broke too; if shutdown() ran meanwhile, this raises
+    # LoaderNotRunning instead
+    _require_running()
+    raise SongError(config.LOADER_CRASHED) from None
