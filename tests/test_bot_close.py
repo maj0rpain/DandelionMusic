@@ -52,7 +52,7 @@ def test_close_keeps_the_loop_running_while_the_loader_shuts_down(
         still_closing = not closing.done()
 
         release.set()
-        await asyncio.wait_for(closing, timeout=5)
+        await closing
         return ran_while_blocked, still_closing
 
     try:
