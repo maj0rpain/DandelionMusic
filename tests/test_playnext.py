@@ -5,13 +5,13 @@ Queue order is what the user sees in d!queue: titles by index.
 """
 
 import asyncio
-import pickle
 import sys
 import types
 
 import pytest
 
 from musicbot.commands.music import Music
+from test_audiocontroller import _backup, _queue, _settle, _titles
 
 
 def _song(controller, title):
@@ -24,27 +24,8 @@ def _song(controller, title):
     )
 
 
-def _queue(controller, *titles):
-    for title in titles:
-        controller.playlist.add(_song(controller, title))
-
-
-def _titles(controller):
-    return [s.title for s in controller.playlist.playque]
-
-
-def _backup(tmp_path):
-    with open(tmp_path / "backup" / "playlist_1234.pickle", "rb") as f:
-        return [s.title for s in pickle.load(f).playque]
-
-
 def _preloaded(stub_loader):
     return [a[0].title for n, a in stub_loader.calls if n == "preload"]
-
-
-async def _settle():
-    for _ in range(10):
-        await asyncio.sleep(0)
 
 
 def _run(controller, coro_fn):
@@ -234,3 +215,12 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
     _run(controller, go)
 
     assert _titles(controller) == ["current", "pn", "a", "plain"]
+
+
+def test_queue_with_playnext_keeps_the_order_of_several_songs(controller):
+    _queue(controller, "current", "a")
+    songs = [_song(controller, "x"), _song(controller, "y")]
+
+    _run(controller, lambda: controller.queue(songs, playnext=True))
+
+    assert _titles(controller) == ["current", "x", "y", "a"]
