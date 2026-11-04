@@ -450,9 +450,7 @@ class LibraryView(discord.ui.View):
             ):
                 await self.message.edit(view=self)
             elif click is not None:
-                await click.followup.edit_message(
-                    click.message.id, view=self
-                )
+                await click.followup.edit_message(click.message.id, view=self)
             elif isinstance(self.message, discord.Message):
                 await self.message.edit(view=self)
             elif self.ctx.interaction is not None:

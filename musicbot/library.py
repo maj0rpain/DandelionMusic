@@ -84,8 +84,9 @@ def build_index() -> LibraryIndex:
     root = (
         Path(config.MUSIC_LIBRARY_PATH) if config.MUSIC_LIBRARY_PATH else None
     )
+    root_is_dir = root is not None and root.is_dir()
 
-    if root is not None and root.is_dir():
+    if root is not None and root_is_dir:
         for artist_dir in _safe_iterdir(root):
             if not artist_dir.is_dir():
                 continue
@@ -109,7 +110,7 @@ def build_index() -> LibraryIndex:
                 new_index[artist_dir.name] = albums
 
     new_root: Optional[Path] = None
-    if root is not None and root.is_dir():
+    if root is not None and root_is_dir:
         try:
             new_root = root.resolve()
         except OSError:
