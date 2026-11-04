@@ -21,7 +21,8 @@ from config import config
 from musicbot.audiocontroller import MusicButton
 from musicbot.bot import Context
 from musicbot.utils import CheckError, join_voice
-from discord_fakes import FakeInteraction, VoiceGuild, make_bot, run
+from discord_fakes import FakeInteraction, VoiceGuild, make_bot
+from helpers import run
 
 DJ_ROLE = 99
 
@@ -53,7 +54,7 @@ class FakeContext(Context):
         self.interaction = None
 
 
-def click(custom_id="x"):
+def click_interaction(custom_id="x"):
     """A click's interaction, and its context."""
     ctx = FakeContext()
     inter = FakeInteraction(ctx, custom_id)
@@ -74,7 +75,7 @@ def sent_texts_and_kwargs(sent):
 
 
 def test_the_click_is_deferred_before_the_check_runs():
-    inter, ctx = click()
+    inter, ctx = click_interaction()
     deferred_at_check = []
 
     async def check(ctx):
@@ -94,7 +95,7 @@ def test_the_click_is_deferred_before_the_check_runs():
     ids=["action failure", "check error from the action"],
 )
 def test_an_action_failure_is_reraised_not_refused(error):
-    inter, ctx = click()
+    inter, ctx = click_interaction()
 
     def action(ctx):
         raise error
@@ -109,7 +110,7 @@ def test_an_action_failure_is_reraised_not_refused(error):
 
 
 def test_a_refused_check_is_an_ephemeral_followup():
-    inter, ctx = click()
+    inter, ctx = click_interaction()
     ran = []
 
     run(MusicButton(ran.append, check=refuse).callback(inter))
@@ -121,7 +122,7 @@ def test_a_refused_check_is_an_ephemeral_followup():
 
 
 def test_a_refused_dj_check_on_a_controller_button_is_an_ephemeral_followup():
-    inter, ctx = click(custom_id="next")
+    inter, ctx = click_interaction(custom_id="next")
     ran = []
 
     run(MusicButton(ran.append, check=admit).callback(inter))
@@ -131,7 +132,7 @@ def test_a_refused_dj_check_on_a_controller_button_is_an_ephemeral_followup():
 
 
 def test_an_admitted_click_runs_the_buttons_action():
-    inter, ctx = click()
+    inter, ctx = click_interaction()
     ran = []
 
     run(MusicButton(ran.append, check=admit).callback(inter))
@@ -139,7 +140,7 @@ def test_an_admitted_click_runs_the_buttons_action():
 
 
 def test_a_refused_dj_only_click_does_not_join_voice():
-    inter, ctx = click(custom_id="next")
+    inter, ctx = click_interaction(custom_id="next")
 
     run(MusicButton(lambda ctx: None, check=admit).callback(inter))
     assert sent_texts_and_kwargs(inter.followups) == [
@@ -157,7 +158,7 @@ class PickButton(MusicButton):
 
 
 def test_an_admitted_click_on_a_pick_joins_before_its_action():
-    inter, ctx = click()
+    inter, ctx = click_interaction()
 
     def action(ctx):
         ctx.guild.events.append("action")
@@ -169,7 +170,7 @@ def test_an_admitted_click_on_a_pick_joins_before_its_action():
 def test_a_failed_join_is_an_ephemeral_followup_and_skips_the_action(
     capsys,
 ):
-    inter, ctx = click()
+    inter, ctx = click_interaction()
     ctx.guild.fail = discord.ClientException("x")
     ran = []
 

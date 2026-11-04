@@ -15,10 +15,10 @@ import types
 
 import pytest
 
-from db_seam import in_memory_db
-from controller_seam import FakeVoiceClient, StubLoader, controller_seam
-from discord_fakes import PLAYER_BUTTONS
 from musicbot.commands.music import Music
+from controller_seam import FakeVoiceClient, StubLoader, controller_seam
+from db_seam import in_memory_db
+from discord_fakes import PLAYER_BUTTONS
 
 
 async def _settle():

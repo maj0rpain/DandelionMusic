@@ -16,11 +16,13 @@ Only the parts that need no Discord connection: config loading, `Playlist`, save
 
 ## Discord fakes
 
-`tests/discord_fakes.py` holds the shared Discord stand-ins - the click `FakeInteraction`, `make_bot`, and the voice fakes (`VoiceGuild`, `FakeVoiceChannel`, `FakeVoiceClient`) - plus `http_error`, a 5 s-bounded `run(coro)` and `PLAYER_BUTTONS`, the player view's button ids. Import them rather than writing a per-file copy.
+`tests/discord_fakes.py` holds the shared Discord stand-ins - the click `FakeInteraction`, `make_bot`, and the voice fakes (`VoiceGuild`, `FakeVoiceChannel`, `FakeVoiceClient`) - plus `http_error` and `PLAYER_BUTTONS`, the player view's button ids. Import them rather than writing a per-file copy. A file-local fake whose shape differs from a shared fake takes a distinct, descriptive name (`EditingInteraction`, `CountingVoiceChannel`), never the shared fake's name.
 
 ## Shared helpers
 
-`tests/helpers.py` holds `run()` (a coroutine run through `asyncio.run` with a 5 s bound) and `FakeClock`. Import them with `from helpers import ...`.
+`tests/helpers.py` holds `run()`, the suite's one bounded coroutine runner (a coroutine run through `asyncio.run` with a 5 s bound), and `FakeClock`. Import them with `from helpers import ...`; never define a per-file `run(coro)`.
+
+Import each local test-helper module (`discord_fakes`, `helpers`, `developer_fakes`, `setting_fakes`, `controller_seam`, `db_seam`) in a single `from <module> import ...` statement, in one final block after the third-party, `config` and `musicbot` imports. The one exception: where the import depends on setup code (a `sys.path` or monkeypatch prelude), the helper block, still one block, goes directly after that setup code.
 
 ## Subprocess probes
 

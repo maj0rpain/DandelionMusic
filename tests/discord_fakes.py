@@ -1,5 +1,5 @@
 """Shared Discord stand-ins for the tests: the click FakeInteraction,
-make_bot, the voice fakes, http_error, a bounded run(coro) and the
+make_bot, the voice fakes, http_error and the
 player view's button ids. Import them rather than writing a per-file
 copy.
 """
@@ -135,15 +135,6 @@ def http_error():
     return discord.HTTPException(
         types.SimpleNamespace(status=500, reason="Server Error"), "boom"
     )
-
-
-def run(coro):
-    """Runs a coroutine, failing instead of hanging after 5 seconds."""
-
-    async def bounded():
-        return await asyncio.wait_for(coro, 5)
-
-    return asyncio.run(bounded())
 
 
 # The player view's button ids, in its order. Hand-written because
