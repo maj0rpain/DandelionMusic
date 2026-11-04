@@ -243,11 +243,7 @@ async def fetch_spotify_playlist(
         total = None
 
     links = [item["content"] for item in results]
-    truncation = (
-        Truncation.of(total, len(links), TruncationReason.NO_API)
-        if total is not None
-        else None
-    )
+    truncation = Truncation.of(total, len(links), TruncationReason.NO_API)
     return SpotifyTracks(links, truncation)
 
 
@@ -301,7 +297,7 @@ def fetch_playlist_with_api(
                 f" field {e.args[0]!r} is missing",
                 file=sys.stderr,
             )
-    if api_failed and first_total is not None:
+    if api_failed:
         truncation = Truncation.of(
             first_total, len(links), TruncationReason.API_ERROR
         )

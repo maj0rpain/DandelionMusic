@@ -29,10 +29,13 @@ class Truncation:
 
     @classmethod
     def of(
-        cls, total: int, loaded: int, reason: TruncationReason
+        cls, total: int | None, loaded: int, reason: TruncationReason
     ) -> "Truncation | None":
         """A truncation when loading `loaded` of `total` tracks left some
-        out, else `None`."""
+        out, else `None`. No reported total (`None`) means no
+        truncation."""
+        if total is None:
+            return None
         return cls(total, reason) if total > loaded else None
 
     def notice(self, queued: int) -> str:

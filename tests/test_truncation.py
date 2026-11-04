@@ -16,6 +16,7 @@ from musicbot.truncation import Truncation, TruncationReason
         (5, 5, None),
         (6, 5, Truncation(6, TruncationReason.NO_API)),
         (4, 5, None),
+        (None, 5, None),
     ],
 )
 def test_of_gives_a_truncation_only_when_total_exceeds_loaded(
