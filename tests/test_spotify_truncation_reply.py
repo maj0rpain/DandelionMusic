@@ -6,15 +6,24 @@ network or Discord is involved.
 """
 
 import asyncio
+import sys
 import types
 
-import pytest
 
 from config import config
 from musicbot import playlists
+from musicbot.audiocontroller import QueuedPlaylist
+from musicbot.commands import music
 from musicbot.commands.music import Music
-from musicbot.song import PartialPlaylist
+from musicbot.linkutils import SiteTypes
+from musicbot.song import PartialPlaylist, Song
+from musicbot.truncation import Truncation, TruncationReason
 from test_audiocontroller import _songs
+
+
+def _queued_playlist_class(controller):
+    # the controller fixture loads its own copy of the module
+    return sys.modules[type(controller).__module__].QueuedPlaylist
 
 
 def _ctx(controller=None, sent=None):
@@ -52,57 +61,70 @@ class ProcessController:
 
 
 def test_truncated_playlist_reply_holds_numbers_and_reason_text():
-    from musicbot.audiocontroller import QueuedPlaylist
-
-    result = QueuedPlaylist(30, 50, "SPOTIFY_TRUNCATED_NO_API")
-    ctx, sent = _ctx(ProcessController(result))
+    cut = Truncation(50, TruncationReason.NO_API)
+    ctx, sent = _ctx(ProcessController(QueuedPlaylist(30, cut)))
 
     asyncio.run(Music(None)._play_song(ctx, "t"))
 
-    [text] = sent
-    assert "30" in text and "50" in text
-    assert config.SPOTIFY_TRUNCATED_NO_API in text
-    assert "SPOTIFY_TRUNCATED_NO_API" not in text
+    assert sent == [cut.notice(30)]
 
 
-@pytest.mark.parametrize("total", [None, 30])
-def test_untruncated_playlist_reply_is_queued_playlist(total):
-    from musicbot.audiocontroller import QueuedPlaylist
-
-    ctx, sent = _ctx(ProcessController(QueuedPlaylist(30, total, None)))
+def test_untruncated_playlist_reply_is_queued_playlist():
+    ctx, sent = _ctx(ProcessController(QueuedPlaylist(30)))
 
     asyncio.run(Music(None)._play_song(ctx, "t"))
 
     assert sent == [config.SONGINFO_PLAYLIST_QUEUED]
 
 
-def test_one_song_partial_playlist_is_reported_as_queued_playlist(
-    controller, stub_loader
-):
-    from musicbot.audiocontroller import QueuedPlaylist
-
-    songs = _songs(controller, "a")
-    stub_loader.results["load_song"] = PartialPlaylist(
-        songs, 50, "SPOTIFY_TRUNCATED_API_ERROR"
-    )
-
+def _process(controller):
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
         return await controller.process_song("x")
 
-    result = asyncio.run(run())
+    return asyncio.run(run())
 
-    assert isinstance(result, QueuedPlaylist)
-    assert (result.queued, result.total, result.reason) == (
-        1,
-        50,
-        "SPOTIFY_TRUNCATED_API_ERROR",
-    )
+
+def test_one_song_partial_playlist_is_reported_as_queued_playlist(
+    controller, stub_loader
+):
+    songs = _songs(controller, "a")
+    cut = Truncation(50, TruncationReason.API_ERROR)
+    stub_loader.results["load_song"] = PartialPlaylist(songs, cut)
+
+    result = _process(controller)
+
+    assert isinstance(result, _queued_playlist_class(controller))
+    assert result.queued == 1
+    assert result.truncation == cut
+
+
+def test_multi_song_partial_playlist_keeps_its_truncation(
+    controller, stub_loader
+):
+    songs = _songs(controller, "a", "b", "c")
+    cut = Truncation(50, TruncationReason.NO_API)
+    stub_loader.results["load_song"] = PartialPlaylist(songs, cut)
+
+    result = _process(controller)
+
+    assert isinstance(result, _queued_playlist_class(controller))
+    assert result.queued == 3
+    assert result.truncation == cut
+
+
+def test_plain_list_becomes_queued_playlist_without_truncation(
+    controller, stub_loader
+):
+    stub_loader.results["load_song"] = _songs(controller, "a", "b")
+
+    result = _process(controller)
+
+    assert isinstance(result, _queued_playlist_class(controller))
+    assert result.truncation is None and not result.truncated
 
 
 def _add(monkeypatch, loaded, add_songs):
-    from musicbot.commands import music
-
     async def load_song(track):
         return loaded
 
@@ -114,17 +136,10 @@ def _add(monkeypatch, loaded, add_songs):
 
 
 def _partial():
-    return PartialPlaylist(
-        [_song()],
-        50,
-        "SPOTIFY_TRUNCATED_NO_API",
-    )
+    return PartialPlaylist([_song()], Truncation(50, TruncationReason.NO_API))
 
 
 def _song():
-    from musicbot.song import Song
-    from musicbot.linkutils import SiteTypes
-
     return Song(SiteTypes.YT_DLP, "https://example.invalid/a", title="a")
 
 
@@ -135,9 +150,17 @@ def test_playlist_add_reports_truncation_and_update(monkeypatch):
     sent = _add(monkeypatch, _partial(), add_songs)
 
     assert len(sent) == 2
-    assert "1" in sent[0] and "50" in sent[0]
-    assert config.SPOTIFY_TRUNCATED_NO_API in sent[0]
+    assert sent[0] == _partial().truncation.notice(1)
     assert sent[1] == config.PLAYLIST_UPDATED
+
+
+def test_playlist_add_untruncated_sends_only_update(monkeypatch):
+    async def add_songs(*a):
+        pass
+
+    sent = _add(monkeypatch, [_song(), _song()], add_songs)
+
+    assert sent == [config.PLAYLIST_UPDATED]
 
 
 def test_playlist_add_to_missing_playlist_sends_only_not_found(monkeypatch):
