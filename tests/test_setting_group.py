@@ -17,11 +17,12 @@ from discord.ext.commands.view import StringView
 from config import config
 from musicbot.commands.general import General, _unmatched_word
 from musicbot.utils import CheckError
-from test_settings_update_failure import (
+from setting_fakes import (
     FakeDbSession,
     FakeMessage,
     fake_author,
     fake_bot,
+    fake_channel,
     setting_group,
     stored_settings,
     stored_values,
@@ -49,11 +50,7 @@ def build_ctx(text, sett, is_dj=True):
         _state=None,
         attachments=[],
         guild=guild,
-        channel=types.SimpleNamespace(
-            permissions_for=lambda member: types.SimpleNamespace(
-                administrator=is_dj
-            )
-        ),
+        channel=fake_channel(is_dj),
         author=fake_author(),
     )
     ctx = RecordingContext(
@@ -85,7 +82,7 @@ def invoke(text, is_dj=True, sett=None):
 
 
 @pytest.fixture(autouse=True)
-def fresh_db():
+def reset_commit_count():
     FakeDbSession.commits = 0
 
 

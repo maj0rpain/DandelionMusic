@@ -10,13 +10,11 @@ import types
 import sqlalchemy
 
 from config import config
-from musicbot.settings import SETTINGS, GuildSettings
+from musicbot.settings import SETTINGS, GuildSettings, default_settings
 
 
 def test_each_setting_defaults_to_its_documented_value():
-    defaults = {name: d.default for name, d in SETTINGS.items()}
-
-    assert defaults == {
+    assert default_settings() == {
         "command_channel": None,
         "start_voice_channel": None,
         "dj_role": None,

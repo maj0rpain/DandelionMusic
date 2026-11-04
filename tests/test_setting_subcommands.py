@@ -13,73 +13,27 @@ import types
 
 import discord
 import pytest
-import sqlalchemy
 from discord import AppCommandOptionType, ChannelType
 from discord.ext.commands.view import StringView
 
 from config import config
 from musicbot.commands.general import General, _setting_subcommand
-from musicbot.settings import SETTINGS, GuildSettings
+from musicbot.settings import SETTINGS
+from setting_fakes import (
+    FakeMessage,
+    fake_author,
+    fake_bot,
+    fake_channel,
+    setting_group,
+    stored_settings,
+    stored_values,
+)
 
 THUMBS_UP = "\N{THUMBS UP SIGN}"
 
 
-def setting_group(cog):
-    return next(c for c in cog.get_commands() if c.name == "setting")
-
-
 def subcommand(cog, name):
     return setting_group(cog).get_command(name)
-
-
-class FakeDbSession:
-    commits = 0  # across every session; a test that counts resets it
-
-    async def __aenter__(self):
-        return self
-
-    async def __aexit__(self, *exc):
-        return False
-
-    def add(self, obj):
-        pass
-
-    async def commit(self):
-        FakeDbSession.commits += 1
-
-
-class FakeMessage:
-    def __init__(self, reaction_error=None):
-        self.reaction_error = reaction_error
-
-    async def add_reaction(self, emoji):
-        if self.reaction_error is not None:
-            raise self.reaction_error
-
-
-async def _allowed(ctx):
-    return True
-
-
-async def _not_owner(user):
-    return False
-
-
-def fake_bot(sett):
-    "A bot whose checks pass and whose guild settings are `sett`"
-    return types.SimpleNamespace(
-        sessions=types.SimpleNamespace(settings=lambda guild: sett),
-        DbSession=FakeDbSession,
-        emojis=[],
-        can_run=_allowed,
-        is_owner=_not_owner,
-        _before_invoke=None,
-        _after_invoke=None,
-    )
-
-
-def fake_author():
-    return types.SimpleNamespace(id=1, roles=[])
 
 
 def fake_ctx(sent, sett, message=None):
@@ -94,25 +48,6 @@ def fake_ctx(sent, sett, message=None):
     )
 
 
-def stored_settings():
-    "A guild's settings, every one holding a known, non-default value"
-    return GuildSettings(
-        guild_id="1",
-        command_channel="11",
-        start_voice_channel="12",
-        dj_role="13",
-        user_must_be_in_vc=False,
-        button_emote="\N{SPARKLES}",
-        default_volume=40,
-        vc_timeout=False,
-        announce_songs=False,
-    )
-
-
-def stored_values(sett):
-    return {name: getattr(sett, name) for name in SETTINGS}
-
-
 def run(name, arg, sett, message=None):
     cog = General(None)
     sent = []
@@ -122,7 +57,10 @@ def run(name, arg, sett, message=None):
 
 
 @pytest.fixture(autouse=True)
-def editable(monkeypatch):
+def every_setting_editable(monkeypatch):
+    """Opens every setting's edit gate: `ALLOW_VC_TIMEOUT_EDIT` for
+    `vc_timeout`, and `ENABLE_BUTTON_PLUGIN` for `button_emote`
+    (`convert_emoji` refuses without it)."""
     monkeypatch.setattr(config, "ALLOW_VC_TIMEOUT_EDIT", True)
     monkeypatch.setattr(config, "ENABLE_BUTTON_PLUGIN", True)
 
@@ -143,10 +81,9 @@ ARGS = {
 
 
 def test_the_subcommands_are_exactly_the_described_settings():
-    columns = set(sqlalchemy.inspect(GuildSettings).columns.keys())
     names = {c.name for c in setting_group(General(None)).commands}
 
-    assert set(SETTINGS) == columns - {"guild_id"} == names
+    assert set(SETTINGS) == names
 
 
 @pytest.mark.parametrize(
@@ -319,11 +256,7 @@ def prefix_ctx(sent, sett, argument):
     ctx.guild.get_thread = lambda thread_id: None
     ctx.guild.get_role = roles.get
     ctx.guild.voice_channels = [channels[VOICE_ID]]
-    ctx.channel = types.SimpleNamespace(
-        permissions_for=lambda member: types.SimpleNamespace(
-            administrator=True
-        )
-    )
+    ctx.channel = fake_channel(True)
     ctx.author = fake_author()
     ctx.message = types.SimpleNamespace(attachments=[])
     ctx.view = StringView(argument)

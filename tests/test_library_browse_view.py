@@ -944,9 +944,17 @@ def utf16_units(text):
     return len(text.encode("utf-16-le")) // 2
 
 
+def has_lone_surrogate(text):
+    try:
+        text.encode("utf-16-le")
+    except UnicodeEncodeError:
+        return True
+    return "\ufffd" in text
+
+
 @pytest.mark.parametrize("level", ["artist", "album"])
-def test_long_name_title_fits_embed_title_limit(level):
-    name = "x" * 255
+@pytest.mark.parametrize("name", ["x" * 255, "x" + "\U0001f600" * 255])
+def test_long_name_title_fits_embed_title_limit(level, name):
     index = {name: {"Album": [make_song("S")]}}
     if level == "album":
         index = {"Artist": {name: [make_song("S")]}}
@@ -960,6 +968,33 @@ def test_long_name_title_fits_embed_title_limit(level):
     assert len(title) <= 256
     assert utf16_units(title) <= 256
     assert title.endswith("…")
+    assert not has_lone_surrogate(title)
+
+
+def test_trim_drops_whole_char_when_budget_ends_in_surrogate_pair():
+    text = "x" + "\U0001f600" * 10
+
+    result = library_commands._trim(text, 4)
+
+    assert result == "x\U0001f600\u2026"
+
+
+def test_trim_cuts_bmp_text_at_the_limit():
+    assert library_commands._trim("abcdef", 4) == "abcd\u2026"
+
+
+def test_trim_returns_text_within_budget_unchanged():
+    assert library_commands._trim("abcd", 4) == "abcd"
+    assert library_commands._trim("\U0001f600\U0001f600", 4) == (
+        "\U0001f600\U0001f600"
+    )
+
+
+def test_trim_counts_a_lone_surrogate_as_one_unit():
+    lone = "\udc80"  # an undecodable filename byte (surrogateescape)
+
+    assert library_commands._trim("ab" + lone, 3) == "ab" + lone
+    assert library_commands._trim("ab" + lone + "cd", 3) == ("ab" + lone + "…")
 
 
 def test_footer_breadcrumb_is_not_trimmed():

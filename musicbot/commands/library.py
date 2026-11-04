@@ -64,14 +64,21 @@ QUERY_ECHO_LIMIT = 100
 
 
 # An embed title holds 256 UTF-16 code units: the icon is two of them,
-# the space one and the "\u2026" one, leaving 252 for the name.
+# the space one and the "\u2026" one, leaving 252 for the name. _trim
+# measures in UTF-16 units too, so a non-BMP name counts double.
 NAME_TITLE_LIMIT = 252
 
 
 def _trim(text: str, limit: int) -> str:
-    if len(text) <= limit:
-        return text
-    return text[:limit] + "\u2026"
+    """Cuts to `limit` UTF-16 code units plus an ellipsis. A character
+    that would straddle the limit is dropped whole. A lone surrogate
+    (an undecodable filename byte) counts as one unit."""
+    units = 0
+    for end, char in enumerate(text):
+        units += 2 if ord(char) > 0xFFFF else 1
+        if units > limit:
+            return text[:end] + "…"
+    return text
 
 
 def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
