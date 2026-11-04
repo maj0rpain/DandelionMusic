@@ -991,6 +991,13 @@ def test_trim_returns_text_within_budget_unchanged():
     )
 
 
+def test_trim_counts_a_lone_surrogate_as_one_unit():
+    lone = "\udc80"  # an undecodable filename byte (surrogateescape)
+
+    assert library_commands._trim("ab" + lone, 3) == "ab" + lone
+    assert library_commands._trim("ab" + lone + "cd", 3) == ("ab" + lone + "…")
+
+
 def test_footer_breadcrumb_is_not_trimmed():
     name = "x" * 255
     view = make_view({name: {"Album": [make_song("S")]}})

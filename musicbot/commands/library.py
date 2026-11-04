@@ -69,20 +69,15 @@ QUERY_ECHO_LIMIT = 100
 NAME_TITLE_LIMIT = 252
 
 
-def _utf16_units(text: str) -> int:
-    return len(text.encode("utf-16-le")) // 2
-
-
 def _trim(text: str, limit: int) -> str:
     """Cuts to `limit` UTF-16 code units plus an ellipsis. A character
-    that would straddle the limit is dropped whole."""
-    if _utf16_units(text) <= limit:
-        return text
+    that would straddle the limit is dropped whole. A lone surrogate
+    (an undecodable filename byte) counts as one unit."""
     units = 0
     for end, char in enumerate(text):
         units += 2 if ord(char) > 0xFFFF else 1
         if units > limit:
-            return text[:end] + "\u2026"
+            return text[:end] + "…"
     return text
 
 
