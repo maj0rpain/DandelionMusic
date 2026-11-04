@@ -1251,9 +1251,7 @@ def test_the_retry_after_an_expired_token_edit_applies_the_view(controller):
     assert len(message.edits) == 1 and message.edits[0] is not None
 
 
-def test_a_refresh_after_a_failed_edit_applies_the_view_again(
-    controller, capsys
-):
+def test_a_refresh_after_a_failed_edit_applies_the_view_again(controller):
     _queue(controller, "current")
     voice = controller.guild.voice_client
     message = _FlakyMessage(_http_exception(500, 0))
