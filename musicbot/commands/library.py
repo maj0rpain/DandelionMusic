@@ -20,6 +20,7 @@ from musicbot.utils import (
     joining_command,
     play_check,
 )
+from musicbot.views import OwnedView
 
 PAGE_SIZE = 25
 
@@ -124,20 +125,33 @@ def _fmt_years(stats: library.LevelStats) -> Optional[str]:
     return str(stats.year_min)
 
 
-async def _is_stale(item, interaction: discord.Interaction) -> bool:
-    """A click on a component built for a scope the cursor has left is
-    acknowledged silently and must do nothing. Keyed on the scope, not
-    on level_revision, so components a failed draw restores still act.
-    Checked at the start of callback(), after the view's ownership and
-    double-click checks - never in a per-item interaction_check, which
-    discord.py runs before the view's."""
-    if item.scope == item.browse_view.cursor.screen().scope:
-        return False
-    await interaction.response.defer()
-    return True
+class _BrowseItem:
+    """Mixin for every component of a LibraryBrowseView: owns the stale
+    guard, so a component gets it just by subclassing. List it first in
+    the bases, so its callback() wins in the MRO; implement on_click()."""
+
+    def __init__(self, browse_view: "LibraryBrowseView", **kwargs):
+        super().__init__(**kwargs)
+        self.browse_view = browse_view
+        self.scope: Tuple[Optional[str], Optional[str]] = browse_view.scope
+
+    async def callback(self, interaction: discord.Interaction):
+        """A click on a component built for a scope the cursor has left is
+        acknowledged silently and must do nothing. Keyed on the scope, not
+        on level_revision, so components a failed draw restores still act.
+        Checked at the start of callback(), after the view's ownership and
+        double-click checks - never in a per-item interaction_check, which
+        discord.py runs before the view's."""
+        if self.scope != self.browse_view.scope:
+            await interaction.response.defer()
+            return
+        await self.on_click(interaction)
+
+    async def on_click(self, interaction: discord.Interaction):
+        raise NotImplementedError
 
 
-class LibrarySelect(discord.ui.Select):
+class LibrarySelect(_BrowseItem, discord.ui.Select):
     def __init__(
         self,
         entries: List[str],
@@ -146,11 +160,8 @@ class LibrarySelect(discord.ui.Select):
         browse_view: "LibraryBrowseView",
     ):
         self._entries = entries
-        self.browse_view = browse_view
-        self.scope: Tuple[Optional[str], Optional[str]] = (
-            browse_view.cursor.screen().scope
-        )
         super().__init__(
+            browse_view,
             placeholder="Choose...",
             options=[
                 discord.SelectOption(
@@ -162,9 +173,7 @@ class LibrarySelect(discord.ui.Select):
             ],
         )
 
-    async def callback(self, interaction: discord.Interaction):
-        if await _is_stale(self, interaction):
-            return
+    async def on_click(self, interaction: discord.Interaction):
         index = int(self.values[0])
         chosen = self._entries[index]
         # the option's own label, not the underlying entry (a raw
@@ -173,53 +182,44 @@ class LibrarySelect(discord.ui.Select):
         await self.browse_view.descend(interaction, chosen, label)
 
 
-class BackButton(discord.ui.Button):
+class BackButton(_BrowseItem, discord.ui.Button):
     def __init__(self, browse_view: "LibraryBrowseView"):
-        super().__init__(label="Back", style=discord.ButtonStyle.grey, row=1)
-        self.browse_view = browse_view
-        self.scope: Tuple[Optional[str], Optional[str]] = (
-            browse_view.cursor.screen().scope
+        super().__init__(
+            browse_view, label="Back", style=discord.ButtonStyle.grey, row=1
         )
 
-    async def callback(self, interaction: discord.Interaction):
-        if await _is_stale(self, interaction):
-            return
+    async def on_click(self, interaction: discord.Interaction):
         await self.browse_view.go_back(interaction)
 
 
-class PageButton(discord.ui.Button):
+class PageButton(_BrowseItem, discord.ui.Button):
     def __init__(
         self, browse_view: "LibraryBrowseView", delta: int, label: str
     ):
-        super().__init__(label=label, style=discord.ButtonStyle.blurple, row=2)
-        self.browse_view = browse_view
         self.delta = delta
-        self.scope: Tuple[Optional[str], Optional[str]] = (
-            browse_view.cursor.screen().scope
+        super().__init__(
+            browse_view,
+            label=label,
+            style=discord.ButtonStyle.blurple,
+            row=2,
         )
 
-    async def callback(self, interaction: discord.Interaction):
-        if await _is_stale(self, interaction):
-            return
+    async def on_click(self, interaction: discord.Interaction):
         await self.browse_view.turn_page(interaction, self.delta)
 
 
-class QueueLevelButton(discord.ui.Button):
+class QueueLevelButton(_BrowseItem, discord.ui.Button):
     def __init__(self, browse_view: "LibraryBrowseView"):
         label = (
             "Queue this Album"
             if browse_view.cursor.at_album_level
             else "Queue this Artist"
         )
-        super().__init__(label=label, style=discord.ButtonStyle.green, row=1)
-        self.browse_view = browse_view
-        self.scope: Tuple[Optional[str], Optional[str]] = (
-            browse_view.cursor.screen().scope
+        super().__init__(
+            browse_view, label=label, style=discord.ButtonStyle.green, row=1
         )
 
-    async def callback(self, interaction: discord.Interaction):
-        if await _is_stale(self, interaction):
-            return
+    async def on_click(self, interaction: discord.Interaction):
         await self.browse_view.queue_current_level(interaction)
 
 
@@ -317,14 +317,13 @@ class LevelSnapshot(NamedTuple):
     enrichment: Optional[library_metadata.Enrichment]
 
 
-class LibraryView(discord.ui.View):
-    """Ownership and lifetime handling shared by the browser and the
-    search results - both are single-user views on a message that
-    outlives their 5-minute timeout."""
+class LibraryView(OwnedView):
+    """An OwnedView over one library index snapshot, with a
+    double-click guard (`_busy`) for the browser's slow redraws.
+    Ownership, timeout and message refresh come from OwnedView."""
 
     def __init__(self, ctx, index: library.LibraryIndex):
-        super().__init__(timeout=300)
-        self.ctx = ctx
+        super().__init__(ctx, timeout=300)
         # the snapshot this view was built from: a `d!library refresh`
         # landing mid-session must not change what the already-shown
         # entries point at
@@ -353,17 +352,6 @@ class LibraryView(discord.ui.View):
         # the other's guard and let a second click queue the same album
         # twice.
         self._busy: int = 0
-        # whatever Context.send handed back, which is not always a
-        # Message: the prefix paths and the deferred search path give
-        # a Message/WebhookMessage, but answering an interaction
-        # directly returns an InteractionCallbackResponse (discord.py
-        # >= 2.5) that has no edit(). on_timeout() below discriminates
-        # on the type rather than on which path ran.
-        self.message = None
-        # the latest accepted interaction: exactly the clicks that
-        # restart discord.py's view timeout, so at on_timeout() it is
-        # under 5 minutes old and its followup token still valid
-        self._last_click: Optional[discord.Interaction] = None
 
     @contextmanager
     def busy(self):
@@ -374,30 +362,19 @@ class LibraryView(discord.ui.View):
         finally:
             self._busy -= 1
 
-    async def interaction_check(
-        self, interaction: discord.Interaction
-    ) -> bool:
-        if interaction.user.id != self.ctx.author.id:
-            await interaction.response.send_message(
-                "This belongs to someone else.", ephemeral=True
-            )
-            return False
-        if self._busy:
-            # (Why a click reaches this check during a redraw: see
-            # _busy.) Acknowledged silently rather than answered with an
-            # ephemeral complaint. The clicks the guard catches are the
-            # second half of a double-click, or clicks made after an
-            # accepted one while its draw waits behind an artwork
-            # upload (see LibraryBrowseView._enter_level()). Telling
-            # someone off for either reads as a malfunction. The one
-            # operation still slow enough to be worth explaining - a
-            # bulk queue - puts up its own ephemeral "Queueing..."
-            # message while it runs, so the user can already see why
-            # nothing else is responding.
-            await interaction.response.defer()
-            return False
-        self._last_click = interaction
-        return True
+    def accepts_click(self) -> bool:
+        # (Why a click reaches this check during a redraw: see
+        # _busy.) Acknowledged silently rather than answered with an
+        # ephemeral complaint. The clicks the guard catches are the
+        # second half of a double-click, or clicks made after an
+        # accepted one while its draw waits behind an artwork
+        # upload (see LibraryBrowseView._enter_level()). Telling
+        # someone off for either reads as a malfunction. The one
+        # operation still slow enough to be worth explaining - a
+        # bulk queue - puts up its own ephemeral "Queueing..."
+        # message while it runs, so the user can already see why
+        # nothing else is responding.
+        return not self._busy
 
     async def queue(
         self, interaction: discord.Interaction, triples, source: str
@@ -410,46 +387,6 @@ class LibraryView(discord.ui.View):
         same album or discography twice over."""
         with self.busy():
             await queue_songs(self.ctx, interaction, triples, source)
-
-    async def on_timeout(self):
-        # Without this, a click after the 5-minute timeout just fails
-        # silently client-side (discord.py stops dispatching to a
-        # timed-out view's items) and the message's Select/Buttons
-        # stay visibly enabled forever.
-        for item in self.children:
-            item.disabled = True
-        try:
-            # A view sent after a defer goes out as a followup with its
-            # own id, so @original is only the deferred placeholder and
-            # editing it would leave the real components enabled
-            # forever - those have to be edited directly. Answering an
-            # interaction without deferring puts the view on the
-            # original response, and hands back an
-            # InteractionCallbackResponse rather than the message, so
-            # that case has to go through the interaction. Testing what
-            # we actually hold keeps this right whichever path ran.
-            #
-            # A bot-sent channel message (the prefix paths) is edited
-            # directly: its bot token never expires. Anything else
-            # goes through the last accepted click's followup when
-            # there is one, because the command's interaction token
-            # dies 15 minutes after the command while each click
-            # restarts the 5-minute timeout. Edited by id, never via
-            # edit_original_response: after a bulk queue that click's
-            # original response is the "Queueing..." placeholder.
-            click = self._last_click
-            if isinstance(self.message, discord.Message) and not isinstance(
-                self.message, discord.WebhookMessage
-            ):
-                await self.message.edit(view=self)
-            elif click is not None:
-                await click.followup.edit_message(click.message.id, view=self)
-            elif isinstance(self.message, discord.Message):
-                await self.message.edit(view=self)
-            elif self.ctx.interaction is not None:
-                await self.ctx.interaction.edit_original_response(view=self)
-        except discord.HTTPException:
-            pass
 
 
 class LibraryBrowseView(LibraryView):
@@ -470,6 +407,11 @@ class LibraryBrowseView(LibraryView):
         # serialises the message edits themselves - see render()
         self._render_lock = asyncio.Lock()
         self.build_items()
+
+    @property
+    def scope(self) -> Tuple[Optional[str], Optional[str]]:
+        """The (artist, album) pair of the level shown now."""
+        return self.cursor.screen().scope
 
     async def _resolve_enrichment(
         self,
@@ -1172,8 +1114,8 @@ class Library(commands.Cog):
         # a plain text message from a prefix command can't be ephemeral
         if ctx.interaction is not None:
             kwargs["ephemeral"] = True
-        # whatever this hands back, LibraryView.on_timeout() knows what
-        # to do with it - see the note on LibraryView.message
+        # whatever this hands back, OwnedView.refresh_message() knows
+        # what to do with it - see the note on OwnedView.message
         view.message = await ctx.send(**kwargs)
 
 
