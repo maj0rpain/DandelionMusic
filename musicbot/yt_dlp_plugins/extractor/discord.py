@@ -1,10 +1,42 @@
 import asyncio
 import re
+import atexit
 
+from discord.http import HTTPClient
 from yt_dlp.utils import DownloadError
 from yt_dlp.extractor.common import InfoExtractor
 
 from config import config
+
+
+# The extractor's own discord.py client, created lazily on the loader's
+# worker loop and logged in once; None until a login has succeeded.
+_client = None
+
+
+def _get_client(loop):
+    global _client
+    if _client is not None:
+        return _client
+    from musicbot import linkutils
+
+    client = HTTPClient(loop)
+    try:
+        loop.run_until_complete(
+            asyncio.wait_for(
+                client.static_login(config.BOT_TOKEN),
+                timeout=linkutils.HTTP_TIMEOUT,
+            )
+        )
+    except Exception as e:
+        try:
+            loop.run_until_complete(client.close())
+        except Exception:
+            pass
+        raise DownloadError(str(e) or type(e).__name__) from e
+    _client = client
+    atexit.register(lambda: loop.run_until_complete(client.close()))
+    return client
 
 
 class DiscordAttachmentsIE(InfoExtractor):
@@ -15,23 +47,20 @@ class DiscordAttachmentsIE(InfoExtractor):
 
     def _real_extract(self, url):
         from musicbot import linkutils
-        from musicbot.__main__ import bot
         from musicbot.loader import _loop
 
+        client = _get_client(_loop)
+
         match = re.match(self._VALID_URL, url)
-
-        async def fetch():
-            if bot.http.token is None:
-                await bot.http.static_login(config.BOT_TOKEN)
-            return await bot.http.get_message(
-                int(match.group("channel_id")),
-                int(match.group("message_id")),
-            )
-
         try:
-            # one limit for the login and the fetch together
             resp = _loop.run_until_complete(
-                asyncio.wait_for(fetch(), timeout=linkutils.HTTP_TIMEOUT)
+                asyncio.wait_for(
+                    client.get_message(
+                        int(match.group("channel_id")),
+                        int(match.group("message_id")),
+                    ),
+                    timeout=linkutils.HTTP_TIMEOUT,
+                )
             )
         except Exception as e:
             raise DownloadError(str(e) or type(e).__name__) from e

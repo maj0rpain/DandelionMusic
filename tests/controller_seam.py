@@ -190,12 +190,16 @@ def _musicbot_modules():
 
 @contextlib.contextmanager
 def controller_seam(workdir: Path) -> Iterator[Tuple[object, StubLoader]]:
-    """Yields (controller, stub loader), run from `workdir`."""
+    """Yields (controller, stub loader), run from `workdir`, with
+    config.ANNOUNCE_DISCONNECT off while the seam is open."""
     stub = StubLoader()
     saved_modules = _musicbot_modules()
     package = saved_modules.get("musicbot")
     saved_attrs = dict(vars(package)) if package is not None else None
     old_cwd = os.getcwd()
+    from config import config
+
+    old_announce = config.ANNOUNCE_DISCONNECT
 
     workdir.mkdir(parents=True, exist_ok=True)
     try:
@@ -204,6 +208,7 @@ def controller_seam(workdir: Path) -> Iterator[Tuple[object, StubLoader]]:
         if package is not None:
             package.loader = stub
         os.chdir(workdir)
+        config.ANNOUNCE_DISCONNECT = False
         audiocontroller = importlib.import_module("musicbot.audiocontroller")
 
         voice_client = FakeVoiceClient()
@@ -212,6 +217,7 @@ def controller_seam(workdir: Path) -> Iterator[Tuple[object, StubLoader]]:
         bot.sessions.add_settings(guild, FakeSettings())
         yield audiocontroller.AudioController(bot, guild), stub
     finally:
+        config.ANNOUNCE_DISCONNECT = old_announce
         os.chdir(old_cwd)
         for name in _musicbot_modules():
             del sys.modules[name]
