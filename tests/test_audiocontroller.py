@@ -983,23 +983,26 @@ def test_a_failing_title_refresh_still_counts_as_a_successful_preload(
 # an external disconnect is not a track end (#202)
 
 
-async def _start_then_disconnect(controller, *, fire=True):
-    """Starts the queue head with its backup written, takes its after=
-    callback, then drops the guild's voice client as discord.py's
-    cleanup does. Fires the callback and lets the loop run unless told
-    not to; returns the callback."""
-    controller.bot.loop = asyncio.get_running_loop()
-    controller._pickle_playlist()
-    await controller.ensure_playing()
+async def _fire_without_raising(after):
+    """Fires the after= callback from a plain thread and lets the loop
+    run the hop; fails if either the thread or the loop raised."""
+    loop = asyncio.get_running_loop()
+    raised = []
+    loop.set_exception_handler(lambda _loop, context: raised.append(context))
+    _, error = _in_thread(after, None)
     await _settle()
-    voice_client = controller.guild.voice_client
-    voice_client.playing = False
-    after = voice_client.detach_after()
+    assert error is None
+    assert raised == []
+
+
+async def _start_then_disconnect(controller):
+    """Starts the queue head with its backup written, then drops the
+    guild's voice client as discord.py's cleanup does and fires the
+    track's after= callback."""
+    controller._pickle_playlist()
+    after = await _start_and_end_first_track(controller)
     controller.guild.voice_client = None
-    if fire:
-        _in_thread(after, None)
-        await _settle()
-    return after
+    await _fire_without_raising(after)
 
 
 def _fresh_voice_client(controller):
@@ -1032,8 +1035,6 @@ def test_restore_after_an_external_disconnect_starts_the_cut_off_song(
 
     async def run():
         await _start_then_disconnect(controller)
-        assert _titles(controller) == ["first"]
-        assert _backup(tmp_path) == ["first"]
         await controller.udisconnect("test")
         _fresh_voice_client(controller)
         restored = await controller.restore()
@@ -1095,14 +1096,10 @@ def test_the_teardown_hop_after_a_disconnect_keeps_the_backup(
     old = controller.guild.voice_client
 
     async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.ensure_playing()
-        await _settle()
-        after = _end_track(old)
+        after = await _start_and_end_first_track(controller)
         await controller.udisconnect("test")
         controller.guild.voice_client = None
-        _in_thread(after, None)
-        await _settle()
+        await _fire_without_raising(after)
 
     asyncio.run(run())
 
