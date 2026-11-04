@@ -59,20 +59,7 @@ def test_response_not_done_returns_original_response():
 
 
 def test_no_interaction_view_path_uses_parent_send(monkeypatch):
-    ctx = object.__new__(Context)
-    ctx.interaction = None
-    ctx.guild = object()
-    ctx.channel = object()
-    parent = AsyncMock(return_value="sent")
-    monkeypatch.setattr(commands.Context, "send", parent)
-
-    async def attach_view(send):
-        return await send("VIEW")
-
-    controller = SimpleNamespace(command_channel=None, attach_view=attach_view)
-    ctx.bot = SimpleNamespace(
-        sessions=SimpleNamespace(controller=lambda g: controller)
-    )
+    ctx, parent, _ = make_send_ctx(monkeypatch, None)
     assert asyncio.run(ctx.send("x")) == "sent"
     parent.assert_awaited_once_with("x", view="VIEW")
 
