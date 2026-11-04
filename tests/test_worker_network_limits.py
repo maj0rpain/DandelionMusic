@@ -116,6 +116,15 @@ def test_build_spotify_api_bounds_the_token_request():
     assert api.requests_timeout == 5
 
 
+def test_build_spotify_api_writes_no_token_cache_file(tmp_path, monkeypatch):
+    monkeypatch.chdir(tmp_path)
+    api = linkutils.build_spotify_api("id", "secret")
+    token = {"access_token": "t", "expires_at": 9999999999}
+    api.auth_manager.cache_handler.save_token_to_cache(token)
+    assert api.auth_manager.cache_handler.get_cached_token() == token
+    assert list(tmp_path.iterdir()) == []
+
+
 def test_build_spotify_api_without_credentials_is_none():
     assert linkutils.build_spotify_api(None, None) is None
 

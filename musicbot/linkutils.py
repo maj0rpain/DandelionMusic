@@ -14,6 +14,7 @@ from urllib3.util.retry import Retry
 from spotipy import Spotify
 from bs4 import BeautifulSoup
 from aiohttp import ClientSession, ClientTimeout
+from spotipy.cache_handler import MemoryCacheHandler
 from spotipy.oauth2 import SpotifyClientCredentials
 from yt_dlp.extractor import gen_extractor_classes
 from yt_dlp.extractor.common import InfoExtractor
@@ -63,6 +64,7 @@ def build_spotify_api(client_id, client_secret) -> Optional[Spotify]:
                 client_secret=client_secret,
                 requests_session=session,
                 requests_timeout=5,
+                cache_handler=MemoryCacheHandler(),
             ),
         )
     except Exception:
