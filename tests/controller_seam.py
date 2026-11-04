@@ -111,7 +111,11 @@ class FakeVoiceClient:
         self.played = []
         self.channel = FakeChannel()
         self.disconnected = False
+        self.connected = True
         self._after = None
+
+    def is_connected(self):
+        return self.connected
 
     def is_playing(self):
         return self.playing

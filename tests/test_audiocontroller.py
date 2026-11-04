@@ -978,3 +978,133 @@ def test_a_failing_title_refresh_still_counts_as_a_successful_preload(
     entries, titles = _queue_saved_playlist_song(controller)
     assert entries == [_entry(controller, "stale title")]
     assert titles == ["playing", "fresh title"]
+
+
+# an external disconnect is not a track end (#202)
+
+
+async def _start_then_disconnect(controller, *, fire=True):
+    """Starts the queue head with its backup written, takes its after=
+    callback, then drops the guild's voice client as discord.py's
+    cleanup does. Fires the callback and lets the loop run unless told
+    not to; returns the callback."""
+    controller.bot.loop = asyncio.get_running_loop()
+    controller._pickle_playlist()
+    await controller.ensure_playing()
+    await _settle()
+    voice_client = controller.guild.voice_client
+    voice_client.playing = False
+    after = voice_client.detach_after()
+    controller.guild.voice_client = None
+    if fire:
+        _in_thread(after, None)
+        await _settle()
+    return after
+
+
+def _fresh_voice_client(controller):
+    from controller_seam import FakeVoiceClient
+
+    controller.guild.voice_client = FakeVoiceClient()
+    return controller.guild.voice_client
+
+
+def test_an_external_disconnect_leaves_the_queue_history_and_backup(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    old = controller.guild.voice_client
+
+    asyncio.run(_start_then_disconnect(controller))
+
+    assert _titles(controller) == ["first", "second"]
+    assert list(controller.playlist.trackname_history) == []
+    assert _backup(tmp_path) == ["first", "second"]
+    assert len(old.played) == 1
+
+
+def test_restore_after_an_external_disconnect_starts_the_cut_off_song(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first")
+
+    async def run():
+        await _start_then_disconnect(controller)
+        assert _titles(controller) == ["first"]
+        assert _backup(tmp_path) == ["first"]
+        await controller.udisconnect("test")
+        _fresh_voice_client(controller)
+        restored = await controller.restore()
+        await _settle()
+        return restored
+
+    ac = sys.modules[type(controller).__module__]
+    assert asyncio.run(run()) is ac.RestoreResult.RESTORED
+    assert _played(controller) == ["first"]
+
+
+def test_rejoining_before_the_timeout_plays_the_cut_off_song_again(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def run():
+        await _start_then_disconnect(controller)
+        _fresh_voice_client(controller)
+        await controller.ensure_playing()
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _played(controller) == ["first"]
+    assert _titles(controller) == ["first", "second"]
+
+
+def test_a_track_end_while_connected_is_unconnected_still_advances(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        voice_client = controller.guild.voice_client
+        voice_client.connected = False
+        _in_thread(_end_track(voice_client), None)
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _played(controller) == ["first", "second"]
+    assert _titles(controller) == ["second"]
+
+
+def test_the_teardown_hop_after_a_disconnect_keeps_the_backup(
+    controller, monkeypatch, tmp_path
+):
+    from config import config
+
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", False)
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    old = controller.guild.voice_client
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await _settle()
+        after = _end_track(old)
+        await controller.udisconnect("test")
+        controller.guild.voice_client = None
+        _in_thread(after, None)
+        await _settle()
+
+    asyncio.run(run())
+
+    assert _backup(tmp_path) == ["first", "second"]
+    assert len(old.played) == 1
