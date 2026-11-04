@@ -396,10 +396,7 @@ def test_spotify_album_detail_failure_is_retried_in_full(
     assert (stats.popularity, stats.release_date) == (77, "2000")
 
 
-LASTFM_CALLS = {
-    "artist": lambda tmp_path: artist(tmp_path),
-    "album": lambda tmp_path: album(tmp_path),
-}
+LASTFM_CALLS = {"artist": artist, "album": album}
 
 
 @pytest.mark.parametrize("kind", ["artist", "album"])
