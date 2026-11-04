@@ -70,10 +70,11 @@ class Config:
     MAX_HISTORY_LENGTH = 10
     MAX_TRACKNAME_HISTORY_LENGTH = 15
 
-    # If database is not one of sqlite, postgres or MySQL
-    # you need to provide the url in SQL Alchemy-supported format.
-    # Must be async-compatible
-    # CHANGE ONLY IF YOU KNOW WHAT YOU'RE DOING
+    # Database URL in SQLAlchemy format. sqlite://, postgresql:// and
+    # mysql:// URLs get an async driver automatically (the Docker image
+    # includes both the Postgres and MySQL drivers). A driver you name
+    # by hand (dialect+driver://) must be async, and any other dialect
+    # must name its async driver explicitly.
     DATABASE_URL = os.getenv("HEROKU_DB") or "sqlite:///settings.db"
 
     ENABLE_BUTTON_PLUGIN = True
@@ -155,7 +156,9 @@ class Config:
         self.DATABASE = alchemize_url(self.DATABASE_URL)
         driver_name = self.DATABASE.partition("+")[2].partition(":")[0]
         db_req = Requirement(driver_name)
-        self.DATABASE = self.DATABASE.replace(driver_name, db_req.name, 1)
+        dialect, _, rest = self.DATABASE.partition("+")
+        rest = rest.partition("://")[2]
+        self.DATABASE = f"{dialect}+{db_req.name}://{rest}"
         self.DATABASE_LIBRARY_NAME = db_req.name
 
         # Convert EMBED_COLOR to integer if it's a string
