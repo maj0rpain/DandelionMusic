@@ -138,12 +138,12 @@ class MusicBot(commands.Bot):
         # once the steps after it have run
         async def stop_link():
             # this loop's aiohttp session (see linkutils.get_session);
-            # the worker closes its own when shutdown() stops it
+            # each lane's worker closes its own when shutdown() stops it
             await linkutils.stop()
 
         async def stop_loader():
-            # joining the worker blocks; do it off the loop so other
-            # tasks keep running until it has exited
+            # joining the lanes' workers blocks; do it off the loop so other
+            # tasks keep running until they have exited
             await asyncio.to_thread(loader.shutdown)
 
         failure = None

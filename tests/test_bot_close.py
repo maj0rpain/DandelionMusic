@@ -1,5 +1,5 @@
-"""MusicBot.close() waits for the extraction worker to exit, off the
-event loop: other tasks keep running while the worker is joined.
+"""MusicBot.close() waits for both extraction lanes' workers to exit, off
+the event loop: other tasks keep running while the workers are joined.
 """
 
 import asyncio
