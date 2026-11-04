@@ -15,7 +15,7 @@ from musicbot import playlists
 from musicbot.commands.music import Music
 from musicbot.linkutils import SiteTypes
 from musicbot.song import Song
-from test_spotify_truncation_reply import _ctx
+from controller_helpers import play_ctx
 
 
 def _song():
@@ -31,7 +31,7 @@ def _fail_with(error):
 
 def _run_playlist_command(monkeypatch, command, function, error, *args):
     monkeypatch.setattr(playlists, function, _fail_with(error))
-    ctx, sent = _ctx()
+    ctx, sent = play_ctx()
     asyncio.run(command.callback(Music(None), ctx, *args))
     return sent
 
@@ -93,7 +93,7 @@ def test_save_with_an_existing_name_replies_already_exists(monkeypatch):
     controller = types.SimpleNamespace(
         playlist=types.SimpleNamespace(playque=[_song()])
     )
-    ctx, sent = _ctx(controller)
+    ctx, sent = play_ctx(controller)
 
     asyncio.run(Music._playlist_save.callback(Music(None), ctx, "p"))
 

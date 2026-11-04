@@ -8,6 +8,7 @@ import asyncio
 import inspect
 import pickle
 import sys
+import types
 
 
 async def _settle():
@@ -102,3 +103,55 @@ def _preloaded(stub_loader, since=0):
         for name, args in stub_loader.calls[since:]
         if name == "preload"
     ]
+
+
+class ProcessController:
+    """A guild-less controller whose `process_song` returns `result`, or
+    raises it when it is an exception instance."""
+
+    def __init__(self, result):
+        self.result = result
+
+    async def process_song(self, track, user=None, playnext=False):
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
+
+
+def play_ctx(controller=None, on_send=None):
+    """A fake context for Music._play_song and the list of its replies.
+
+    Works with no controller, a real controller or a `ProcessController`.
+    """
+
+    class Timer:
+        async def start(self, *_):
+            pass
+
+    sent = []
+
+    async def send(message=None, **kwargs):
+        sent.append(str(message))
+        if on_send is not None:
+            await on_send(sent)
+
+    async def defer(**kwargs):
+        pass
+
+    async def start_idle_timer(*a):
+        pass
+
+    guild = types.SimpleNamespace(id=1)
+    if controller is not None:
+        controller.start_idle_timer = start_idle_timer
+        controller.timer = Timer()
+        guild = getattr(controller, "guild", None) or guild
+    ctx = types.SimpleNamespace(
+        audiocontroller=controller,
+        send=send,
+        defer=defer,
+        author=None,
+        guild=guild,
+        bot=types.SimpleNamespace(DbSession=None),
+    )
+    return ctx, sent

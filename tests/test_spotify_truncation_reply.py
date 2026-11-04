@@ -7,7 +7,6 @@ network or Discord is involved.
 
 import asyncio
 import sys
-import types
 
 
 from config import config
@@ -18,7 +17,7 @@ from musicbot.commands.music import Music
 from musicbot.linkutils import SiteTypes
 from musicbot.song import PartialPlaylist, Song
 from musicbot.truncation import Truncation, TruncationReason
-from controller_helpers import _songs
+from controller_helpers import ProcessController, _songs, play_ctx
 
 
 def _queued_playlist_class(controller):
@@ -26,42 +25,9 @@ def _queued_playlist_class(controller):
     return sys.modules[type(controller).__module__].QueuedPlaylist
 
 
-def _ctx(controller=None, sent=None):
-    sent = sent if sent is not None else []
-
-    async def send(message=None, **kwargs):
-        sent.append(message)
-
-    async def defer(**kwargs):
-        pass
-
-    async def start_idle_timer(*a):
-        pass
-
-    if controller is not None:
-        controller.start_idle_timer = start_idle_timer
-    ctx = types.SimpleNamespace(
-        audiocontroller=controller,
-        send=send,
-        defer=defer,
-        author=None,
-        guild=types.SimpleNamespace(id=1),
-        bot=types.SimpleNamespace(DbSession=None),
-    )
-    return ctx, sent
-
-
-class ProcessController:
-    def __init__(self, result):
-        self.result = result
-
-    async def process_song(self, track, user=None, playnext=False):
-        return self.result
-
-
 def test_truncated_playlist_reply_holds_numbers_and_reason_text():
     cut = Truncation(50, TruncationReason.NO_API)
-    ctx, sent = _ctx(ProcessController(QueuedPlaylist(30, cut)))
+    ctx, sent = play_ctx(ProcessController(QueuedPlaylist(30, cut)))
 
     asyncio.run(Music(None)._play_song(ctx, "t"))
 
@@ -69,7 +35,7 @@ def test_truncated_playlist_reply_holds_numbers_and_reason_text():
 
 
 def test_untruncated_playlist_reply_is_queued_playlist():
-    ctx, sent = _ctx(ProcessController(QueuedPlaylist(30)))
+    ctx, sent = play_ctx(ProcessController(QueuedPlaylist(30)))
 
     asyncio.run(Music(None)._play_song(ctx, "t"))
 
@@ -129,7 +95,7 @@ def _add(monkeypatch, loaded, add_songs):
 
     monkeypatch.setattr(music.loader, "load_song", load_song)
     monkeypatch.setattr(playlists, "add_songs", add_songs)
-    ctx, sent = _ctx()
+    ctx, sent = play_ctx()
     asyncio.run(Music._playlist_add_song.callback(Music(None), ctx, "p", "t"))
     return sent
 
