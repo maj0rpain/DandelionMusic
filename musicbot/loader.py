@@ -115,13 +115,12 @@ def _noop():
 
 
 def init():
-    """Sets up the loader for the bot's process: wraps stdout/stderr,
-    installs LoaderProcess and starts the single extraction worker.
+    """Sets up the loader for the bot's process: installs LoaderProcess
+    and starts the single extraction worker.
     A second call does nothing."""
     global _executor
     if _executor is not None:
         return
-    wrap_stdio()
     _context.Process = LoaderProcess
     _executor = _new_pool()
     # wake it up to spawn the process immediately

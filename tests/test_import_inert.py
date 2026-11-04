@@ -60,14 +60,26 @@ LIFECYCLE_PROBE = """
 import asyncio
 import json
 import multiprocessing
+import sys
 
-from musicbot import loader
+from musicbot import loader, utils
 
 
 def worker_state_is_set():
     from musicbot import loader
 
     return loader._loop is not None and loader._downloader is not None
+
+
+def worker_stdio_is_wrapped():
+    import sys
+
+    from musicbot import utils
+
+    return {
+        "stdout": isinstance(sys.stdout, utils.OutputWrapper),
+        "stderr": isinstance(sys.stderr, utils.OutputWrapper),
+    }
 
 
 async def _observe_call(call):
@@ -104,7 +116,12 @@ if __name__ == "__main__":
     before_init = calls_without_worker()
     loader.shutdown()  # safe without a prior init()
     loader.init()
+    stdio_after_init = {
+        "stdout": isinstance(sys.stdout, utils.OutputWrapper),
+        "stderr": isinstance(sys.stderr, utils.OutputWrapper),
+    }
     worker_ready = loader._executor.submit(worker_state_is_set).result()
+    worker_stdio = loader._executor.submit(worker_stdio_is_wrapped).result()
     children_after_init = len(multiprocessing.active_children())
     loader.init()
     children_after_second_init = len(multiprocessing.active_children())
@@ -120,6 +137,8 @@ if __name__ == "__main__":
         "after_shutdown": after_shutdown,
         "run_sync_reaches_worker": run_sync_reaches_worker,
         "worker_ready": worker_ready,
+        "stdio_after_init": stdio_after_init,
+        "worker_stdio": worker_stdio,
         "children_after_init": children_after_init,
         "children_after_second_init": children_after_second_init,
         "children_after_shutdown": children_after_shutdown,
@@ -336,6 +355,14 @@ def test_music_bot_can_be_built_with_no_current_event_loop(tmp_path):
 
 def test_loader_lifecycle_init_readies_the_worker(lifecycle):
     assert lifecycle["worker_ready"] is True
+
+
+def test_loader_lifecycle_init_leaves_stdout_and_stderr_unwrapped(lifecycle):
+    assert lifecycle["stdio_after_init"] == {"stdout": False, "stderr": False}
+
+
+def test_loader_lifecycle_worker_wraps_its_own_stdout_and_stderr(lifecycle):
+    assert lifecycle["worker_stdio"] == {"stdout": True, "stderr": True}
 
 
 def test_loader_lifecycle_second_init_spawns_no_second_worker(lifecycle):
