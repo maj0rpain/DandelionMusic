@@ -11,11 +11,11 @@ import json
 import typing
 
 import pytest
-from db_seam import in_memory_db
 
 from musicbot import playlists, settings
 from musicbot.playlists import PlaylistEntry, PlaylistRef
 from musicbot.settings import SavedPlaylist
+from db_seam import in_memory_db
 
 GUILD = "123"
 MIX = PlaylistRef(GUILD, "mix")

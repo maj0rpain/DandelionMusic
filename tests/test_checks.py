@@ -20,13 +20,6 @@ from musicbot.commands.library import Library, queue_songs
 from musicbot.audiocontroller import MusicButton
 from musicbot.commands.music import Music, SearchView, SongButton
 from musicbot import utils
-from discord_fakes import (
-    PLAYER_BUTTONS,
-    FakeInteraction,
-    VoiceGuild,
-    make_bot,
-    run,
-)
 from musicbot.utils import (
     CheckError,
     chunks,
@@ -39,6 +32,8 @@ from musicbot.utils import (
     play_check,
     voice_check,
 )
+from discord_fakes import PLAYER_BUTTONS, FakeInteraction, VoiceGuild, make_bot
+from helpers import run
 
 
 def make_ctx(bot, guild=None, author_id=1):

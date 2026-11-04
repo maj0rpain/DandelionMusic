@@ -17,7 +17,6 @@ from sqlalchemy.pool import NullPool
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
-from developer_fakes import FakeBot, FakeCtx
 from config import config
 from musicbot.commands import developer
 from musicbot.commands.developer import Developer
@@ -30,6 +29,8 @@ from musicbot.settings import (
     remove_from_guild_whitelist,
     run_migrations,
 )
+from developer_fakes import FakeBot, FakeCtx
+from helpers import run
 
 
 @pytest.fixture
@@ -56,10 +57,6 @@ def bot(tmp_path):
 
     asyncio.run(setup())
     return stub
-
-
-def run(coro):
-    return asyncio.run(coro)
 
 
 class TestAddAndRemove:
