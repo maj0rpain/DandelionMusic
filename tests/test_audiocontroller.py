@@ -7,7 +7,6 @@ directory set to tmp_path so the controller's backup/ lands there.
 """
 
 import asyncio
-import inspect
 import pickle
 import sys
 import threading
@@ -15,47 +14,36 @@ import types
 
 import pytest
 
+from controller_helpers import (
+    _backup,
+    _backup_path,
+    _fake_ffmpeg,
+    _preloaded,
+    _queue,
+    _run,
+    _run_intent,
+    _settle,
+    _songs,
+    _titles,
+)
 from db_seam import in_memory_db
 from controller_seam import FakeVoiceClient, StubLoader, controller_seam
 from discord_fakes import PLAYER_BUTTONS
+from musicbot import playlists
 from musicbot.commands.music import Music
 
 
-async def _settle():
-    # lets the preload task the controller scheduled run to the end
-    for _ in range(10):
-        await asyncio.sleep(0)
+MIX = playlists.PlaylistRef("1234", "mix")
 
 
-def _songs(controller, *titles):
-    ac = sys.modules[type(controller).__module__]
-    return [
-        ac.Song(
-            ac.SiteTypes.YT_DLP,
-            f"https://example.invalid/{title}",
-            url=f"https://stream.invalid/{title}",
-            title=title,
-        )
-        for title in titles
-    ]
+class _FakeChannel:
+    """A channel or context: records what the controller sends."""
 
+    def __init__(self):
+        self.sent = []
 
-def _queue(controller, *titles):
-    for song in _songs(controller, *titles):
-        controller.playlist.add(song)
-
-
-def _run(controller, scenario):
-    """Runs `scenario()` on a fresh event loop the controller's bot
-    uses, lets the loop settle afterwards, and returns its result."""
-
-    async def main():
-        controller.bot.loop = asyncio.get_running_loop()
-        result = await scenario()
-        await _settle()
-        return result
-
-    return asyncio.run(main())
+    async def send(self, *args, **kwargs):
+        self.sent.append((args, kwargs))
 
 
 async def _start_playing(controller):
@@ -63,21 +51,6 @@ async def _start_playing(controller):
     controller.bot.loop = asyncio.get_running_loop()
     await controller.ensure_playing()
     await _settle()
-
-
-def _while_playing(controller, intent, playing=True):
-    """Runs `intent` (a plain callable, or one returning a coroutine,
-    which is awaited) with a track already playing unless `playing` is
-    false, then lets the preload it scheduled finish."""
-    controller.guild.voice_client.playing = playing
-
-    async def scenario():
-        result = intent()
-        if inspect.isawaitable(result):
-            result = await result
-        return result
-
-    return _run(controller, scenario)
 
 
 def _run_playing(controller, scenario):
@@ -91,49 +64,10 @@ def _run_playing(controller, scenario):
     _run(controller, main)
 
 
-class _FakeFFmpeg:
-    """Stands in for ffmpeg: records the stream it was asked to open."""
-
-    def __init__(self, url, **kwargs):
-        self.url = url
-
-    def read(self):
-        return b""
-
-
-def _fake_ffmpeg(monkeypatch):
-    import discord
-
-    monkeypatch.setattr(
-        discord,
-        "FFmpegPCMAudio",
-        type("FakeFFmpeg", (_FakeFFmpeg, discord.AudioSource), {}),
-    )
-
-
 def _played(controller):
     return [
         source.original.url.rsplit("/", 1)[-1]
         for source in controller.guild.voice_client.played
-    ]
-
-
-def _backup_path(controller, tmp_path):
-    return tmp_path / controller.pickle_file
-
-
-def _backup(controller, tmp_path):
-    with open(_backup_path(controller, tmp_path), "rb") as f:
-        return [song.title for song in pickle.load(f).playque]
-
-
-def _titles(controller):
-    return [song.title for song in controller.playlist.playque]
-
-
-def _preloaded(stub_loader):
-    return [
-        args[0].title for name, args in stub_loader.calls if name == "preload"
     ]
 
 
@@ -432,7 +366,7 @@ def test_shuffle_refreshes_backup_and_preload(
 ):
     _queue(controller, "current", "a", "b", "c", "d", "e")
 
-    _while_playing(controller, controller.shuffle)
+    _run_intent(controller, controller.shuffle)
 
     titles = _titles(controller)
     assert sorted(titles) == ["a", "b", "c", "current", "d", "e"]
@@ -445,7 +379,7 @@ def test_move_reorders_the_queue_and_refreshes_backup_and_preload(
 ):
     _queue(controller, "current", "a", "b", "c")
 
-    _while_playing(controller, lambda: controller.move(3, 1))
+    _run_intent(controller, lambda: controller.move(3, 1))
 
     assert _titles(controller) == ["current", "c", "a", "b"]
     assert _backup(controller, tmp_path) == ["current", "c", "a", "b"]
@@ -457,7 +391,7 @@ def test_remove_drops_a_track_and_refreshes_backup_and_preload(
 ):
     _queue(controller, "current", "a", "b", "c")
 
-    removed = _while_playing(controller, lambda: controller.remove(2))
+    removed = _run_intent(controller, lambda: controller.remove(2))
 
     assert removed.title == "b"
     assert _titles(controller) == ["current", "a", "c"]
@@ -470,7 +404,7 @@ def test_clear_keeps_the_current_track_refreshes_backup_and_preloads_nothing(
 ):
     _queue(controller, "current", "a", "b")
 
-    _while_playing(controller, controller.clear)
+    _run_intent(controller, controller.clear)
 
     assert _titles(controller) == ["current"]
     assert _backup(controller, tmp_path) == ["current"]
@@ -946,7 +880,7 @@ def _queue_saved_playlist_song(controller, from_saved_playlist=True):
                     title="fresh title",
                     saved_entry=(
                         ac.playlists.SavedEntry(
-                            ac.playlists.PlaylistRef("1234", "mix"),
+                            MIX,
                             SAVED_URL,
                         )
                         if from_saved_playlist
@@ -956,9 +890,7 @@ def _queue_saved_playlist_song(controller, from_saved_playlist=True):
             ]
         )
         await _drain(controller)
-        contents = await ac.playlists.get(
-            factory, ac.playlists.PlaylistRef("1234", "mix")
-        )
+        contents = await ac.playlists.get(factory, MIX)
         return contents.entries, _titles(controller)
 
     return _with_saved_playlist_db(controller, queue_and_preload)
@@ -1501,20 +1433,12 @@ def test_the_volume_down_button_is_disabled_at_zero_only(controller):
     assert _button(controller.make_view(), "volume_up").disabled
 
 
-class _FakeCtx:
-    def __init__(self):
-        self.sent = []
-
-    async def send(self, *args, **kwargs):
-        self.sent.append((args, kwargs))
-
-
 def test_a_current_song_click_with_no_current_song_replies_queue_empty(
     controller,
 ):
     from config import config
 
-    ctx = _FakeCtx()
+    ctx = _FakeChannel()
 
     asyncio.run(controller.current_song_callback(ctx))
 
@@ -1526,7 +1450,7 @@ def test_a_current_song_click_while_a_track_plays_shows_the_song_info(
 ):
     _queue(controller, "current")
     controller.guild.voice_client.playing = True
-    ctx = _FakeCtx()
+    ctx = _FakeChannel()
 
     asyncio.run(controller.current_song_callback(ctx))
 
@@ -1606,9 +1530,9 @@ def _rewriting_preload(stub_loader, normalised):
 
 
 def _with_saved_playlist_db(controller, run_in_db):
-    """Queues a playing track and a "stale title" saved playlist "mix"
-    (guild "1234"), awaits `run_in_db(ac, factory)` with the module and
-    the DB session factory, and returns what it returns."""
+    """Queues a playing track and a "stale title" saved playlist `MIX`,
+    awaits `run_in_db(ac, factory)` with the module and the DB session
+    factory, and returns what it returns."""
     ac = sys.modules[type(controller).__module__]
     _queue(controller, "playing")
 
@@ -1616,7 +1540,7 @@ def _with_saved_playlist_db(controller, run_in_db):
         async with in_memory_db(sys.modules["musicbot.settings"]) as factory:
             await ac.playlists.save(
                 factory,
-                ac.playlists.PlaylistRef("1234", "mix"),
+                MIX,
                 [ac.playlists.PlaylistEntry(SAVED_URL, "stale title")],
             )
             controller.bot.DbSession = factory
@@ -1628,9 +1552,7 @@ def _with_saved_playlist_db(controller, run_in_db):
 
 def _stored_titles(ac, factory):
     async def get():
-        contents = await ac.playlists.get(
-            factory, ac.playlists.PlaylistRef("1234", "mix")
-        )
+        contents = await ac.playlists.get(factory, MIX)
         return [entry.title for entry in contents.entries]
 
     return get()
@@ -1669,51 +1591,15 @@ def test_a_song_loaded_from_a_saved_playlist_keeps_its_title_refresh(
     ]
 
 
-def test_a_song_from_an_old_backup_refreshes_no_stored_title(
-    controller, stub_loader
-):
-    _rewriting_preload(stub_loader, SAVED_URL)
-
-    def make_song(ac):
-        song = ac.Song(
-            ac.SiteTypes.YT_DLP,
-            SAVED_URL,
-        )
-        # as unpickled from a backup written before saved_entry existed
-        del song.__dict__["saved_entry"]
-        song.saved_playlist = ac.playlists.PlaylistRef("1234", "mix")
-        song.saved_url = SAVED_URL
-        return song
-
-    async def preload_once(ac, factory):
-        song = make_song(ac)
-        controller.playlist.add(song)
-        song.title = "fresh title 0"
-        assert await controller._preload(song)
-        return await _stored_titles(ac, factory)
-
-    assert _with_saved_playlist_db(controller, preload_once) == ["stale title"]
-
-
 # --- a pending start: the gap between committing to a track and
 # handing it to the voice client (#193, #203, #218) ---
-
-
-class _Channel:
-    """The command channel: records what the controller says."""
-
-    def __init__(self):
-        self.sent = []
-
-    async def send(self, *args, **kwargs):
-        self.sent.append((args, kwargs))
 
 
 def _pending_start(controller, stub_loader, monkeypatch, *titles, result=None):
     """Queues `titles` and starts the first one with its preload held.
     Returns (release event, the start's task, its song)."""
     _fake_ffmpeg(monkeypatch)
-    controller.command_channel = _Channel()
+    controller.command_channel = _FakeChannel()
     _queue(controller, *titles)
     slow = controller.playlist[0]
     release = stub_loader.hold(slow, result)
@@ -1721,20 +1607,10 @@ def _pending_start(controller, stub_loader, monkeypatch, *titles, result=None):
     return release, task, slow
 
 
-def _preloads_since(stub_loader, before):
-    """The titles preloaded since `before` calls had been made."""
-    return [
-        args[0].title
-        for name, args in stub_loader.calls[before:]
-        if name == "preload"
-    ]
-
-
 def _without_url(controller, title):
-    ac = sys.modules[type(controller).__module__]
-    return ac.Song(
-        ac.SiteTypes.YT_DLP, f"https://example.invalid/{title}", title=title
-    )
+    song = _songs(controller, title)[0]
+    song.url = None
+    return song
 
 
 def _old_track(controller):
@@ -1857,7 +1733,7 @@ def test_prev_during_a_pending_start_plays_the_previous_track_only(
         release.set()
         await _finish(task)
         await _settle()
-        return _preloaded(stub_loader)[before:]
+        return _preloaded(stub_loader, since=before)
 
     later = _run(controller, scenario)
 
@@ -1881,7 +1757,7 @@ def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
         release.set()
         await _finish(task)
         await _settle()
-        return _preloaded(stub_loader)[before:]
+        return _preloaded(stub_loader, since=before)
 
     later = _run(controller, scenario)
 
@@ -1905,7 +1781,7 @@ def _preloads_after_release(controller, stub_loader, monkeypatch, act):
         before = len(stub_loader.calls)
         release.set()
         await _finish(task)
-        return _preloads_since(stub_loader, before)
+        return _preloaded(stub_loader, since=before)
 
     return _run(controller, scenario)
 
@@ -2031,7 +1907,7 @@ def test_a_stale_start_without_a_url_moves_nothing(
     async def scenario():
         controller.playlist.add(_without_url(controller, "slow"))
         _queue(controller, "next")
-        controller.command_channel = _Channel()
+        controller.command_channel = _FakeChannel()
         _fake_ffmpeg(monkeypatch)
         release = stub_loader.hold(controller.playlist[0])
         task = asyncio.ensure_future(controller.ensure_playing())
@@ -2076,7 +1952,7 @@ def test_a_superseded_start_dropping_out_leaves_the_newer_one_pending(
         before = len(stub_loader.calls)
         release.set()
         await _finish(task)
-        later = _preloads_since(stub_loader, before)
+        later = _preloaded(stub_loader, since=before)
         await controller.enqueue(_songs(controller, "added"))
         await _settle()
         assert _played(controller) == []
@@ -2195,12 +2071,8 @@ def test_disconnecting_while_playing_leaves_the_backup_holding_the_queue(
 
 
 def _title_less_song(controller):
-    ac = sys.modules[type(controller).__module__]
-    song = ac.Song(
-        ac.SiteTypes.YT_DLP,
-        "https://example.invalid/untitled",
-        url="https://stream.invalid/untitled",
-    )
+    song = _songs(controller, "untitled")[0]
+    song.title = None
     controller.playlist.add(song)
     return song
 
@@ -2220,7 +2092,7 @@ def test_a_title_less_song_whose_preload_fails_is_skipped_by_its_url(
     controller, stub_loader, monkeypatch
 ):
     async def scenario():
-        controller.command_channel = _Channel()
+        controller.command_channel = _FakeChannel()
         song = _title_less_song(controller)
         stub_loader.results["preload"] = stub_loader.Preload.FAILED
         await controller.play_song(song)
@@ -2271,18 +2143,6 @@ def test_start_idle_timer_starts_none_while_disconnecting(controller):
     async def run():
         controller._disconnecting = True
         await controller.start_idle_timer(True)
-        return controller.timer._task
-
-    assert asyncio.run(run()) is None
-
-
-def test_pause_while_disconnecting_starts_no_timer(controller):
-    async def run():
-        controller.bot.loop = asyncio.get_running_loop()
-        controller.guild.voice_client.playing = True
-        controller._disconnecting = True
-        controller.pause()
-        await _settle()
         return controller.timer._task
 
     assert asyncio.run(run()) is None

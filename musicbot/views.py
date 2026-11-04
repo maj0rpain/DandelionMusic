@@ -22,10 +22,11 @@ class OwnedView(discord.ui.View):
         # under the view's timeout old and its followup token still valid
         self._last_click: Optional[discord.Interaction] = None
 
-    def accepts_click(self) -> bool:
-        """Subclass hook: False defers the click silently and refuses
-        it. Runs after the owner check, before the click's first
-        await."""
+    def claim_click(self) -> bool:
+        """Claims the click: False defers it silently and refuses it;
+        True accepts it, and an override may record the claim. Called
+        exactly once per click the owner check admits, after the owner
+        check and before the click's first await."""
         return True
 
     async def interaction_check(
@@ -36,7 +37,7 @@ class OwnedView(discord.ui.View):
                 "This belongs to someone else.", ephemeral=True
             )
             return False
-        if not self.accepts_click():
+        if not self.claim_click():
             await interaction.response.defer()
             return False
         self._last_click = interaction
