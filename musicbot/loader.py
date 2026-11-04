@@ -62,6 +62,10 @@ _pools: Dict[str, ProcessPoolExecutor] = {}
 # (`from musicbot.loader import _loop`)
 _loop: Optional[asyncio.AbstractEventLoop] = None
 _downloader: Optional[YoutubeDL] = None
+# empty at import, filled at run time: _preloading by preload() in the
+# bot's process, _site_locks by extract_info() in the worker
+_preloading = {}
+_site_locks = {}
 
 
 def _new_downloader() -> YoutubeDL:
@@ -101,17 +105,6 @@ def _init_worker():
 
 def _teardown_worker():
     _loop.run_until_complete(stop_session())
-    _loop.run_until_complete(_close_bot_session())
-
-
-async def _close_bot_session():
-    # close the session musicbot/yt_dlp_plugins/extractor/discord.py
-    # opens when it logs in - only if it ever ran in this process:
-    # importing musicbot.__main__ here would build a whole bot
-    main = sys.modules.get("musicbot.__main__")
-    bot = getattr(main, "bot", None)
-    if bot is not None:
-        await bot.http.close()
 
 
 def _noop():
@@ -119,13 +112,12 @@ def _noop():
 
 
 def init():
-    """Sets up the loader for the bot's process: wraps stdout/stderr,
+    """Sets up the loader for the bot's process:
     installs LoaderProcess and starts both extraction lanes' workers,
     warming them up concurrently. A second call does nothing. If a
     warm-up raises, init() raises it with both pools left in _pools."""
     if _pools:
         return
-    wrap_stdio()
     _context.Process = LoaderProcess
     for lane in _LANES:
         _pools[lane] = _new_pool()
@@ -153,9 +145,6 @@ UNKNOWN_EXPIRY_MAX_AGE = timedelta(minutes=10)
 def _now() -> datetime:
     """The loader's clock seam: tests monkeypatch it."""
     return datetime.now(timezone.utc)
-
-
-_preloading = {}
 
 
 class LoaderNotRunning(RuntimeError):
@@ -318,7 +307,7 @@ def _library_track_path(track: str) -> Path:
 
 def _load_song(track: str) -> Union[Song, List[Song]]:
     track = normalize_track(track)
-    partial = None
+    truncation = None
     host = identify_url(track)
 
     if host == SiteTypes.NOT_URL:
@@ -339,8 +328,8 @@ def _load_song(track: str) -> Union[Song, List[Song]]:
         except Exception as e:
             raise SongError(config.SONGINFO_ERROR) from e
         if isinstance(data, SpotifyTracks):
-            partial = data
-            data = [{"url": url} for url in partial.links]
+            truncation = data.truncation
+            data = [{"url": url} for url in data.links]
 
     elif host == SiteTypes.CUSTOM:
         data = {
@@ -389,12 +378,8 @@ def _load_song(track: str) -> Union[Song, List[Song]]:
             )
             song.update(entry)
             results.append(song)
-        if (
-            partial is not None
-            and partial.total is not None
-            and partial.total > len(results)
-        ):
-            return PartialPlaylist(results, partial.total, partial.reason)
+        if truncation is not None and truncation.cuts(len(results)):
+            return PartialPlaylist(results, truncation)
         return results
 
     song = Song(host, webpage_url=track)

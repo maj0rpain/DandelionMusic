@@ -2,6 +2,7 @@ import discord
 from discord.ext import commands
 from musicbot import linkutils, loader, utils
 from musicbot.bot import MusicBot
+from musicbot.audiocontroller import QueuedPlaylist
 
 
 SUPPORTED_SITES = (
@@ -105,10 +106,14 @@ class Button(commands.Cog):
                 )
             for url in links:
                 try:
-                    await audiocontroller.process_song(url, user=member)
+                    song = await audiocontroller.process_song(
+                        url, user=member
+                    )
                 except loader.SongError as e:
                     await ctx.send(str(e))
                     continue
+                if isinstance(song, QueuedPlaylist) and song.truncated:
+                    await ctx.send(song.truncation.notice(song.queued))
 
 
 async def setup(bot: MusicBot):

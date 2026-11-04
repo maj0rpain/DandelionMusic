@@ -33,10 +33,12 @@ def http_error():
     )
 
 
-class FakeMessage:
-    """Records every edit; raises from it while `fail` is set."""
+class FakeMessage(discord.Message):
+    """A bot-sent message. Records every edit; raises from it while
+    `fail` is set."""
 
     def __init__(self, fail=False):
+        # no state: discord.Message is only here for isinstance
         self.edits = []
         self.fail = fail
 
@@ -46,6 +48,30 @@ class FakeMessage:
         self.edits.append(kwargs)
 
 
+class FakeWebhookMessage(FakeMessage, discord.WebhookMessage):
+    """What a deferred slash command's send returns."""
+
+
+class FakeInteractionResponse(discord.InteractionCallbackResponse):
+    """What answering an interaction directly returns: no edit()."""
+
+    def __init__(self):
+        pass
+
+
+class FakeFollowup:
+    """Records message edits by id; raises while `fail` is set."""
+
+    def __init__(self, fail=False):
+        self.edits = []
+        self.fail = fail
+
+    async def edit_message(self, message_id, **kwargs):
+        if self.fail:
+            raise http_error()
+        self.edits.append((message_id, kwargs))
+
+
 class FakeContext:
     """The bot is already in voice, so a pick needs no join."""
 
@@ -53,12 +79,19 @@ class FakeContext:
         self.author = SimpleNamespace(id=user_id)
         self.interaction = None
         self.guild = SimpleNamespace(voice_client=SimpleNamespace())
+
+        async def on_command_error(ctx, error):
+            # the bot's real handler, with no bot behind it: it uses
+            # nothing of self
+            await MusicBot.on_command_error(None, ctx, error)
+
         self.bot = SimpleNamespace(
+            on_command_error=on_command_error,
             sessions=SimpleNamespace(
                 settings=lambda guild: SimpleNamespace(
                     user_must_be_in_vc=False
                 )
-            )
+            ),
         )
         self.sent = []
 
@@ -95,6 +128,7 @@ class FakeCog:
     def __init__(self):
         self.played = []
         self.check_error = None
+        self.play_error = None
 
     async def cog_check(self, ctx):
         if self.check_error is not None:
@@ -102,22 +136,34 @@ class FakeCog:
         return True
 
     async def _play_song(self, ctx, track):
+        if self.play_error is not None:
+            raise self.play_error
         self.played.append(track)
 
 
 class FakeInteraction:
-    def __init__(self, user_id=OWNER, custom_id="x"):
+    def __init__(
+        self,
+        user_id=OWNER,
+        custom_id="x",
+        followup_fails=False,
+        defer_fails=False,
+    ):
         self.user = SimpleNamespace(id=user_id)
         self.guild = None
         self.data = {"custom_id": custom_id}
         self.ctx = FakeContext(user_id)
         self.messages = []
         self.deferred = False
+        self.message = SimpleNamespace(id=99)
+        self.followup = FakeFollowup(fail=followup_fails)
 
         async def send_message(*args, **kwargs):
             self.messages.append((args, kwargs))
 
         async def defer(**kwargs):
+            if defer_fails:
+                raise http_error()
             self.deferred = True
 
         self.response = SimpleNamespace(send_message=send_message, defer=defer)
@@ -125,14 +171,8 @@ class FakeInteraction:
         async def get_context(inter):
             return self.ctx
 
-        async def on_command_error(ctx, error):
-            # the bot's real handler, with no bot behind it: it uses
-            # nothing of self
-            await MusicBot.on_command_error(None, ctx, error)
-
         self.client = SimpleNamespace(
             get_context=get_context,
-            on_command_error=on_command_error,
             sessions=SimpleNamespace(controller=lambda guild: None),
         )
 
@@ -158,10 +198,12 @@ def run(coro_fn):
     return asyncio.run(coro_fn())
 
 
-async def click(view, index, user_id=OWNER):
+async def click(view, index, user_id=OWNER, inter=None):
     """What discord.py does with a click: the view's check, then the
-    item's callback only when the check admits it."""
-    inter = FakeInteraction(user_id)
+    item's callback only when the check admits it. Pass a prebuilt
+    interaction to click with one set up to fail."""
+    if inter is None:
+        inter = FakeInteraction(user_id)
     if await view.interaction_check(inter):
         await view.children[index].callback(inter)
     return inter
@@ -239,17 +281,17 @@ def test_a_pick_failing_the_play_check_is_refused_and_can_be_retried():
             buttons_enabled(view),
         )
         cog.check_error = None
-        retry_admitted = await view.interaction_check(FakeInteraction())
-        return state, retry_admitted
+        await click(view, 1)
+        return state, list(cog.played)
 
-    (played, sent, finished, enabled), retry_admitted = run(go)
+    (played, sent, finished, enabled), retried = run(go)
     assert played == []
     assert [(str(a[0]), k) for a, k in sent] == [
         ("Join a voice channel first.", {"ephemeral": True})
     ]
     assert not finished
     assert enabled
-    assert retry_admitted is True
+    assert retried == [URLS[1]]
 
 
 def test_a_pick_whose_join_fails_is_refused_and_can_be_retried():
@@ -257,8 +299,7 @@ def test_a_pick_whose_join_fails_is_refused_and_can_be_retried():
         view, cog = make_view(message=FakeMessage())
         inter = FakeInteraction()
         inter.ctx.bot_out_of_voice(connect_error=asyncio.TimeoutError())
-        assert await view.interaction_check(inter)
-        await view.children[0].callback(inter)
+        await click(view, 0, inter=inter)
         state = (
             list(cog.played),
             inter.ctx.sent,
@@ -294,6 +335,34 @@ def test_a_pick_failing_after_the_claim_is_used_up_and_reported():
     assert view.is_finished()
     assert buttons_disabled(view)
     assert message.edits == [{"view": view}]
+
+
+def test_a_failed_defer_uses_up_the_pick_and_is_reported_once():
+    async def go():
+        message = FakeMessage()
+        view, cog = make_view(message=message)
+        inter = FakeInteraction(OWNER, defer_fails=True)
+        await click(view, 0, inter=inter)
+        return view, cog, message, inter
+
+    view, cog, message, inter = run(go)
+    assert len(inter.ctx.sent) == 1
+    assert cog.played == []
+    assert view.is_finished()
+    assert message.edits == [{"view": view}]
+
+
+def test_a_play_failing_after_the_pick_was_used_up_edits_once_and_reports():
+    async def go():
+        message = FakeMessage()
+        view, cog = make_view(message=message)
+        cog.play_error = discord.ClientException("play failed")
+        inter = await click(view, 0)
+        return view, message, inter
+
+    view, message, inter = run(go)
+    assert message.edits == [{"view": view}]
+    assert [(str(a[0]), k) for a, k in inter.ctx.sent] == [("play failed", {})]
 
 
 def test_a_failed_message_edit_still_queues_the_pick():
@@ -336,3 +405,75 @@ def test_timeout_with_no_message_and_no_interaction_edits_nothing():
         return view
 
     assert buttons_disabled(run(go))
+
+
+# --- Refresh through the pick's click followup ---
+
+
+def refreshed_by_pick(message):
+    async def go():
+        view, cog = make_view(message=message)
+        inter = await click(view, 0)
+        return cog, inter
+
+    return run(go)
+
+
+def test_a_pick_with_no_message_refreshes_through_its_followup():
+    cog, inter = refreshed_by_pick(None)
+    assert cog.played == [URLS[0]]
+    assert [m for m, _ in inter.followup.edits] == [99]
+
+
+def test_a_pick_holding_a_webhook_message_refreshes_through_its_followup():
+    message = FakeWebhookMessage()
+    cog, inter = refreshed_by_pick(message)
+    assert message.edits == []
+    assert [m for m, _ in inter.followup.edits] == [99]
+
+
+def test_a_pick_holding_a_callback_response_refreshes_through_its_followup():
+    cog, inter = refreshed_by_pick(FakeInteractionResponse())
+    assert [m for m, _ in inter.followup.edits] == [99]
+
+
+def test_a_failing_followup_edit_still_queues_and_reports_no_error():
+    async def go():
+        view, cog = make_view(message=None)
+        inter = FakeInteraction(OWNER, followup_fails=True)
+        await click(view, 0, inter=inter)
+        return cog, inter
+
+    cog, inter = run(go)
+    assert cog.played == [URLS[0]]
+    assert inter.ctx.sent == []
+
+
+# --- Timeout through the command interaction ---
+
+
+def slash_timeout(message):
+    async def go():
+        view, _ = make_view(message=message)
+        edited = []
+
+        async def edit_original_response(**kwargs):
+            edited.append(kwargs)
+
+        view.ctx.interaction = SimpleNamespace(
+            edit_original_response=edit_original_response
+        )
+        await view.on_timeout()
+        return view, edited
+
+    return run(go)
+
+
+def test_timeout_with_no_message_and_no_click_edits_the_original_response():
+    view, edited = slash_timeout(None)
+    assert edited == [{"view": view}]
+
+
+def test_timeout_holding_a_callback_response_edits_the_original_response():
+    view, edited = slash_timeout(FakeInteractionResponse())
+    assert edited == [{"view": view}]

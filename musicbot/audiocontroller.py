@@ -18,6 +18,7 @@ from config import config
 
 from musicbot import loader, playlists, utils
 from musicbot.song import PartialPlaylist, Song
+from musicbot.truncation import Truncation
 from musicbot.linkutils import SiteTypes
 from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
 from musicbot.utils import (
@@ -37,16 +38,15 @@ if TYPE_CHECKING:
 
 @dataclass
 class QueuedPlaylist:
-    """process_song()'s result for a multi-song load. `total` and
-    `reason` (a config key) say the playlist was only partly loaded."""
+    """process_song()'s result for a multi-song load. `truncation` is
+    set when the playlist was only partly loaded."""
 
     queued: int
-    total: Optional[int] = None
-    reason: Optional[str] = None
+    truncation: Optional[Truncation] = None
 
     @property
     def truncated(self) -> bool:
-        return self.total is not None and self.total > self.queued
+        return self.truncation is not None
 
 
 _not_provided = object()
@@ -70,41 +70,54 @@ class MusicButton(discord.ui.Button):
         click like a failed check."""
 
     async def callback(self, inter: discord.Interaction):
-        # Acknowledge first: a join can be slow, and it must not push
-        # the response past Discord's 3-second deadline. Refusals
-        # then go out as ephemeral followups. join() runs only once
-        # every check has passed, so a refused click never makes the
-        # bot join.
-        await inter.response.defer()
+        # Build ctx first, then acknowledge: get_context makes no HTTP
+        # call for an interaction (Context.from_interaction awaits
+        # nothing), so awaiting it ahead of the defer cannot delay the
+        # response, and a failure at any later step still has a ctx to
+        # report through. Acknowledge before the checks and the join:
+        # a join can be slow, and it must not push the response past
+        # Discord's 3-second deadline. Refusals then go out as
+        # ephemeral followups. join() runs only once every check has
+        # passed, so a refused click never makes the bot join.
         ctx = await inter.client.get_context(inter)
         try:
-            await self._check(ctx)
-            if inter.data.get("custom_id") in [
-                "prev",
-                "pause",
-                "next",
-                "loop",
-                "shuffle",
-                "stop",
-                "volume_down",
-                "volume_up",
-            ]:
-                await dj_check(ctx)
-            await self.join(ctx)
-        except CheckError as e:
-            self.on_refused()
-            await ctx.send(e, ephemeral=True)
-            return
-        res = self._callback(ctx)
-        if isawaitable(res):
-            await res
+            await inter.response.defer()
+            try:
+                await self._check(ctx)
+                if inter.data.get("custom_id") in [
+                    "prev",
+                    "pause",
+                    "next",
+                    "loop",
+                    "shuffle",
+                    "stop",
+                    "volume_down",
+                    "volume_up",
+                ]:
+                    await dj_check(ctx)
+                await self.join(ctx)
+            except CheckError as e:
+                self.on_refused()
+                await ctx.send(e, ephemeral=True)
+                return
+            res = self._callback(ctx)
+            if isawaitable(res):
+                await res
 
-        controller = inter.client.sessions.controller(inter.guild)
-        if controller:
-            if inter.data.get("custom_id") in ["next", "prev"]:
-                await ctx.send(f"{inter.user} Skipped a Song")
-            else:
-                await controller.update_view()
+            controller = inter.client.sessions.controller(inter.guild)
+            if controller:
+                if inter.data.get("custom_id") in ["next", "prev"]:
+                    await ctx.send(f"{inter.user} Skipped a Song")
+                else:
+                    await controller.update_view()
+        except Exception as e:
+            await self.on_failure(ctx, e)
+
+    async def on_failure(self, ctx, error):
+        """Called for any failure that is not a refusal: a failed
+        defer, or an exception (a CheckError included) from the
+        action or the controller update. Re-raises by default."""
+        raise error
 
     def on_refused(self):
         """Called for every CheckError that refuses a click (its
@@ -813,8 +826,11 @@ class AudioController(object):
                 )
                 loaded_song = QueuedPlaylist(
                     count,
-                    getattr(loaded_song, "total", None),
-                    getattr(loaded_song, "reason", None),
+                    (
+                        loaded_song.truncation
+                        if isinstance(loaded_song, PartialPlaylist)
+                        else None
+                    ),
                 )
 
         await self.queue(added, playnext=playnext and len(added) == 1)
