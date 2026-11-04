@@ -128,7 +128,7 @@ def shutdown():
     global _executor
     executor, _executor = _executor, None
     if executor is not None:
-        executor.shutdown()
+        executor.shutdown(wait=True, cancel_futures=True)
 
 
 _preloading = {}
