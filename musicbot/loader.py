@@ -1,3 +1,4 @@
+import os
 import sys
 import atexit
 import asyncio
@@ -15,6 +16,7 @@ from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 from config import config
+from musicbot import library
 from musicbot.audiotags import nice_title, read_tags
 from musicbot.song import PartialPlaylist, Song
 from musicbot.utils import wrap_stdio
@@ -283,22 +285,32 @@ def _library_track_path(track: str) -> Path:
     boundary - identify_url sends any user-typed file:// URI here - a
     `.` or `..` segment is refused (`Artist/../../x` would otherwise
     climb out through a symlinked folder), as is any depth other than
-    the index's own Artist/Album/file. The `.` check runs on the
-    decoded URI string because building a Path silently drops `.`.
+    the index's own Artist/Album/file (library.LAYOUT_DEPTH).
+
+    The URI is decoded exactly once, by hand, and both the `.` check and
+    the containment checks run on that value: building a Path silently
+    drops `.`, and urlparse would split a raw `?` or `#` off as
+    query/fragment. After `file:` only an empty or `localhost`
+    authority is accepted; any other authority is refused.
     """
     if not config.MUSIC_LIBRARY_PATH:
         raise SongError(config.LIBRARY_FILE_MISSING)
-    root = Path(config.MUSIC_LIBRARY_PATH).resolve()
-    path = Path.from_uri(track)
-    # Decoded exactly as Path.from_uri decodes it: urlparse would split
-    # a raw `?` or `#` off as query/fragment, which from_uri keeps in
-    # the path.
-    decoded = unquote_to_bytes(track[len("file:") :])
+    rest = track[len("file:") :]
+    if rest.startswith("///"):
+        rest = rest[2:]
+    elif rest.startswith("//localhost/"):
+        rest = rest[len("//localhost") :]
+    else:
+        raise SongError(config.LIBRARY_FILE_MISSING)
+    decoded = unquote_to_bytes(rest)
     if any(seg in (b".", b"..") for seg in decoded.split(b"/")):
         raise SongError(config.LIBRARY_FILE_MISSING)
+    path = Path(os.fsdecode(decoded))
+    root = library.library_root()
     if (
-        not path.is_relative_to(root)
-        or len(path.relative_to(root).parts) != 3
+        not path.is_absolute()
+        or not path.is_relative_to(root)
+        or len(path.relative_to(root).parts) != library.LAYOUT_DEPTH
         or not path.is_file()
     ):
         raise SongError(config.LIBRARY_FILE_MISSING)

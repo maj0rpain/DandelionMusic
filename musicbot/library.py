@@ -373,11 +373,21 @@ async def search_async(
     )
 
 
-def song_path(artist: str, album: str, filename: str) -> Path:
+# A track sits at Artist/Album/file under the library root.
+LAYOUT_DEPTH = 3
+
+
+def library_root() -> Path:
+    """The root build_index stored, else the resolved
+    config.MUSIC_LIBRARY_PATH."""
     root = _root
     if root is None:
         root = Path(config.MUSIC_LIBRARY_PATH).resolve()
-    return root / artist / album / filename
+    return root
+
+
+def song_path(artist: str, album: str, filename: str) -> Path:
+    return library_root() / artist / album / filename
 
 
 def song_uri(artist: str, album: str, filename: str) -> str:
