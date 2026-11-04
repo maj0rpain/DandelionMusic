@@ -166,6 +166,21 @@ class MusicBot(commands.Bot):
         await self.sessions.discard(guild)
 
     async def on_command_error(self, ctx, error):
+        # A SongError is a user-facing message; it may arrive wrapped in
+        # a command-invoke error and the hybrid/app-command wrapper.
+        inner = error
+        while isinstance(
+            inner,
+            (
+                commands.CommandInvokeError,
+                commands.HybridCommandError,
+                app_commands.CommandInvokeError,
+            ),
+        ):
+            inner = inner.original
+        if isinstance(inner, loader.SongError):
+            await ctx.send(inner)
+            return
         await ctx.send(error)
         if not isinstance(error, (CheckError, NotOwner)):
             print_exception(error)

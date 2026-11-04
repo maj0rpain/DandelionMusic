@@ -666,7 +666,11 @@ class Music(commands.Cog):
         track: str,
     ):
         await ctx.defer()
-        song = await loader.load_song(track)
+        try:
+            song = await loader.load_song(track)
+        except SongError as e:
+            await ctx.send(e)
+            return
         if song is None:
             await ctx.send(config.SONGINFO_ERROR)
             return
