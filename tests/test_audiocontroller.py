@@ -1733,7 +1733,11 @@ def _pending_start(
 
 def _preloads_since(stub_loader, before):
     """The titles preloaded since `before` calls had been made."""
-    return [c[1][0].title for c in stub_loader.calls[before:]]
+    return [
+        args[0].title
+        for name, args in stub_loader.calls[before:]
+        if name == "preload"
+    ]
 
 
 def _old_track(controller):
