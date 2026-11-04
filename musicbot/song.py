@@ -42,14 +42,22 @@ class Song:
         self.thumbnail = thumbnail
         self.saved_entry = saved_entry
 
+    @property
+    def display_name(self) -> str:
+        """The title, else the webpage URL: how a song is named to a
+        user or in history."""
+        return self.title or self.webpage_url
+
     def format_output(self, playtype: str) -> discord.Embed:
         if self.host == SiteTypes.LOCAL_LIBRARY:
             # file:// isn't a scheme Discord renders as a clickable
             # link in embed markdown - show plain title text instead of
             # a dead-looking [title](file://...) link.
-            description = self.title
+            description = self.display_name
         else:
-            description = "[{}]({})".format(self.title, self.webpage_url)
+            description = "[{}]({})".format(
+                self.display_name, self.webpage_url
+            )
         embed = discord.Embed(
             title=playtype,
             description=description,

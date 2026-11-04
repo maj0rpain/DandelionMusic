@@ -210,7 +210,7 @@ def test_ensure_playing_starts_the_head_of_the_queue_when_idle(
         "https://stream.invalid/first track"
     ]
     assert _titles(controller) == ["first track", "second track"]
-    # ensure_playing() writes no backup: that is queue()'s job
+    # ensure_playing() writes no backup: that is enqueue()'s job
     assert not _backup_path(controller, tmp_path).exists()
     # play_song preloads the track it starts, then the queue behind it
     assert _preloaded(stub_loader) == ["first track", "second track"]
@@ -427,6 +427,19 @@ def test_set_volume_sets_the_playing_source_volume(
     assert stub_loader.calls == []
 
 
+def test_shuffle_refreshes_backup_and_preload(
+    controller, stub_loader, tmp_path
+):
+    _queue(controller, "current", "a", "b", "c", "d", "e")
+
+    _while_playing(controller, controller.shuffle)
+
+    titles = _titles(controller)
+    assert sorted(titles) == ["a", "b", "c", "current", "d", "e"]
+    assert _backup(controller, tmp_path) == titles
+    assert _preloaded(stub_loader) == titles[1:]
+
+
 def test_move_reorders_the_queue_and_refreshes_backup_and_preload(
     controller, stub_loader, tmp_path
 ):
@@ -464,7 +477,7 @@ def test_clear_keeps_the_current_track_refreshes_backup_and_preloads_nothing(
     assert stub_loader.calls == []
 
 
-def test_queue_appends_while_playing_and_refreshes_backup_and_preload(
+def test_enqueue_appends_while_playing_and_refreshes_backup_and_preload(
     controller, stub_loader, tmp_path
 ):
     _queue(controller, "current")
@@ -472,7 +485,7 @@ def test_queue_appends_while_playing_and_refreshes_backup_and_preload(
 
     async def scenario():
         controller.guild.voice_client.playing = True
-        await controller.queue(songs)
+        await controller.enqueue(songs)
 
     _run(controller, scenario)
 
@@ -482,14 +495,14 @@ def test_queue_appends_while_playing_and_refreshes_backup_and_preload(
     assert _preloaded(stub_loader) == ["a", "b"]
 
 
-def test_queue_starts_the_first_track_when_idle(
+def test_enqueue_starts_the_first_track_when_idle(
     controller, stub_loader, monkeypatch, tmp_path
 ):
     _fake_ffmpeg(monkeypatch)
     songs = _songs(controller, "a", "b")
 
     async def scenario():
-        await controller.queue(songs)
+        await controller.enqueue(songs)
 
     _run(controller, scenario)
 
@@ -806,24 +819,28 @@ def test_a_track_end_from_a_replaced_track_drops_its_pending_pick(
     assert _played(controller) == ["first", "second", "third"]
 
 
-def test_a_stop_skips_the_backup_after_the_hop(controller, monkeypatch):
+def test_a_stop_skips_the_backup_after_the_hop(
+    controller, monkeypatch, tmp_path
+):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
+    backup = tmp_path / "backup" / "playlist_1234.pickle"
 
     async def scenario():
         await controller.ensure_playing()
         controller.stop()
         # stop() snapshots the queue itself; what follows is the hop
+        snapshot = backup.read_bytes() if backup.exists() else None
         seen = _record_threads(controller, monkeypatch)
         await _settle()
-        return seen
+        return snapshot, seen
 
-    seen = _run(controller, scenario)
+    snapshot, seen = _run(controller, scenario)
 
-    # the hop ran - it consumed stop()'s flag and advanced the
-    # emptied queue - and wrote no backup
-    assert not controller._stopping
-    assert [name for name, _ in seen] == ["next"]
+    # the hop ran - it advanced the emptied queue - and wrote no backup
+    assert "next" in [name for name, _ in seen]
+    after = backup.read_bytes() if backup.exists() else None
+    assert after == snapshot
     assert controller.guild.voice_client.stopped == 1
 
 
@@ -877,7 +894,7 @@ def _queue_saved_playlist_song(controller, from_saved_playlist=True):
     run, and returns the saved playlist's entries and the queue."""
 
     async def queue_and_preload(ac, factory):
-        await controller.queue(
+        await controller.enqueue(
             [
                 ac.Song(
                     ac.SiteTypes.YT_DLP,
@@ -1696,7 +1713,7 @@ def test_queueing_during_a_pending_start_starts_nothing_new(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
         await _settle()
-        await controller.queue(_songs(controller, "added"))
+        await controller.enqueue(_songs(controller, "added"))
         release.set()
         await _finish(task)
 
@@ -1957,7 +1974,7 @@ def test_a_current_failed_preload_with_nothing_after_it_ends_the_start(
         await _settle()
         release.set()
         await _finish(task)
-        await controller.queue(_songs(controller, "later"))
+        await controller.enqueue(_songs(controller, "later"))
 
     _run(controller, scenario)
 
@@ -1993,7 +2010,7 @@ def test_a_current_start_without_a_url_ends_the_start(
         controller.playlist.add(_without_url(controller, "slow"))
         _fake_ffmpeg(monkeypatch)
         await controller.ensure_playing()
-        await controller.queue(_songs(controller, "later"))
+        await controller.enqueue(_songs(controller, "later"))
 
     _run(controller, scenario)
 
@@ -2015,8 +2032,8 @@ def test_a_superseded_start_dropping_out_leaves_the_newer_one_pending(
         before = len(stub_loader.calls)
         release.set()
         await _finish(task)
-        later = _preloaded(stub_loader)[before:]
-        await controller.queue(_songs(controller, "added"))
+        later = _preloads_since(stub_loader, before)
+        await controller.enqueue(_songs(controller, "added"))
         await _settle()
         assert _played(controller) == []
         newer.set()
@@ -2116,6 +2133,77 @@ def test_a_queue_that_plays_to_its_end_leaves_an_empty_backup(
     _run(controller, scenario)
 
     assert _backup(controller, tmp_path) == []
+
+
+def test_disconnecting_while_playing_leaves_the_backup_holding_the_queue(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def scenario():
+        await controller.ensure_playing()
+        await controller.udisconnect("d!disconnect")
+
+    _run(controller, scenario)
+
+    assert _backup(controller, tmp_path) == ["first", "second"]
+
+
+def _title_less_song(controller):
+    ac = sys.modules[type(controller).__module__]
+    song = ac.Song(
+        ac.SiteTypes.YT_DLP,
+        "https://example.invalid/untitled",
+        url="https://stream.invalid/untitled",
+    )
+    controller.playlist.add(song)
+    return song
+
+
+def test_a_title_less_song_is_in_the_history_by_its_webpage_url(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    song = _title_less_song(controller)
+
+    _run_playing(controller, _nothing)
+
+    assert song.webpage_url in controller.track_history()
+
+
+def test_a_title_less_song_whose_preload_fails_is_skipped_by_its_url(
+    controller, stub_loader, monkeypatch
+):
+    async def scenario():
+        controller.command_channel = _Channel()
+        song = _title_less_song(controller)
+        stub_loader.results["preload"] = stub_loader.Preload.FAILED
+        await controller.play_song(song)
+        return song
+
+    song = _run(controller, scenario)
+
+    ((args, _),) = controller.command_channel.sent
+    assert f"(Skipped: {song.webpage_url})" in args[0]
+
+
+def test_remove_names_a_title_less_song_by_its_webpage_url(controller):
+    _queue(controller, "current")
+    song = _title_less_song(controller)
+    sent = []
+
+    async def send(text):
+        sent.append(text)
+
+    ctx = types.SimpleNamespace(audiocontroller=controller, send=send)
+
+    async def scenario():
+        await Music._remove.callback(Music(None), ctx, 2)
+
+    _run(controller, scenario)
+
+    assert sent == [f"Removed #2: {song.webpage_url}"]
 
 
 def test_the_player_view_buttons_are_the_player_buttons_in_order(controller):
