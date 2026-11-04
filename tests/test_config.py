@@ -197,6 +197,51 @@ def test_compose_bgutil_provider_publishes_no_host_port():
     assert "ports" not in services["bgutil-provider"]
 
 
+def _compose_services():
+    import yaml
+
+    text = (REPO_ROOT / "docker-compose.yaml").read_text()
+    return yaml.safe_load(text)["services"]
+
+
+def _image_tag(image):
+    """The tag of an image reference; a digest counts as pinned."""
+    if "@" in image:
+        return image.split("@", 1)[1]
+    last = image.rsplit("/", 1)[-1]
+    return last.split(":", 1)[1] if ":" in last else None
+
+
+def test_compose_pulled_images_are_pinned():
+    for name, service in _compose_services().items():
+        if "image" not in service or "build" in service:
+            continue
+        tag = _image_tag(service["image"])
+        assert (
+            tag and tag != "latest"
+        ), f"{name}: image {service['image']!r} is not pinned"
+
+
+def test_compose_bgutil_provider_tag_matches_the_pinned_plugin():
+    import tomllib
+
+    meta = tomllib.loads((REPO_ROOT / "pyproject.toml").read_text())
+    deps = meta["project"]["dependencies"]
+    found = [
+        d
+        for d in deps
+        if d.replace("_", "-").lower().startswith("bgutil-ytdlp-pot-provider")
+    ]
+    assert (
+        len(found) == 1 and "==" in found[0]
+    ), f"expected bgutil-ytdlp-pot-provider==X, found {found!r}"
+    version = found[0].split("==", 1)[1].split(";")[0].strip()
+    image = _compose_services()["bgutil-provider"]["image"]
+    assert (
+        _image_tag(image) == version
+    ), f"{image!r} does not match the plugin pin {version!r}"
+
+
 def test_extra_owners_defaults_to_empty(config_factory):
     """An unconfigured deployment must trust only the application
     owner(s) Discord reports - this replaced a hardcoded user id."""
