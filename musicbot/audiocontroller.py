@@ -56,8 +56,9 @@ class MusicButton(discord.ui.Button):
     """A button running `callback` once `check` admits the click.
     A player button never touches voice: its default check,
     player_check(), refuses it while the bot is out of voice. A
-    joining button (a search pick) overrides join() to join voice
-    (connect, or move the bot) before its action."""
+    pick acting in a joining command's name (a search pick) overrides
+    join() to join voice (connect, or move the bot) before its
+    action."""
 
     def __init__(self, callback, check=player_check, **kwargs):
         super().__init__(**kwargs)
