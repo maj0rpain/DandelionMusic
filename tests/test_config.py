@@ -171,7 +171,9 @@ def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
         if m:
             copied.append(m.group(1))
     for image in images + copied:
-        assert ":" in image and not image.endswith(":latest")
+        # A tag is a ":" after the last "/"; a registry port does not count.
+        assert ":" in image.rsplit("/", 1)[-1]
+        assert not image.endswith(":latest")
     for image in copied:
         assert re.search(r":(?:\w+-)?v?\d+\.\d+\.\d+$", image)
     assert not any(re.search(r"curl.*\|\s*(ba)?sh", c) for c in commands)
