@@ -1,4 +1,3 @@
-import asyncio
 import atexit
 import sys
 
@@ -6,7 +5,6 @@ import pytest
 from yt_dlp.utils import DownloadError
 
 from config import config
-from musicbot import loader
 from musicbot.yt_dlp_plugins.extractor import discord as extractor
 
 URL = "https://discord.com/channels/1/22/333"
@@ -46,22 +44,19 @@ class FakeHTTPClient:
 
 
 @pytest.fixture
-def exit_handlers(monkeypatch):
+def exit_handlers(monkeypatch, worker_loop):
     FakeHTTPClient.instances = []
     FakeHTTPClient.login_error = None
     FakeHTTPClient.fetch_error = None
-    loop = asyncio.new_event_loop()
     handlers = []
     monkeypatch.setattr(extractor, "HTTPClient", FakeHTTPClient)
     monkeypatch.setattr(extractor, "_client", None)
-    monkeypatch.setattr(loader, "_loop", loop)
     monkeypatch.setattr(config, "BOT_TOKEN", "tok")
     monkeypatch.setattr(
         atexit, "register", lambda f, *a, **k: handlers.append(f)
     )
     monkeypatch.delitem(sys.modules, "musicbot.__main__", raising=False)
     yield handlers
-    loop.close()
 
 
 def extract():
