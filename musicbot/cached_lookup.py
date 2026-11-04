@@ -36,9 +36,15 @@ class CachedLookup(Generic[K, V]):
       `None` without touching the backend.
     - `backend`: `async (key) -> V | None`. A `None` is a real "no
       match" and is cached like any other result.
-    - `label`: names the backend in log lines.
+    - `label`: prefixes every log line, so include the caller's own
+      module prefix in it.
     - `timeout`: seconds a backend call may take.
     - `cooldown`: seconds a key is refused after a transient failure.
+      A transient failure is deliberately not cached as a result, but
+      retrying it on every lookup would make a persistently broken
+      backend (bad credentials, an outage, an unreachable host) pay
+      its full timeout again for each new key, so the key's retries
+      are suppressed for this long.
     - `clock`: monotonic seconds, injectable for tests.
     """
 
@@ -77,8 +83,11 @@ class CachedLookup(Generic[K, V]):
         del self._cooldown_until[key]
         return False
 
+    def _start_cooldown(self, key: K) -> None:
+        self._cooldown_until[key] = self._clock() + self._cooldown
+
     def _log(self, message: str) -> None:
-        print(f"library_metadata: {self._label} {message}", file=sys.stderr)
+        print(f"{self._label} {message}", file=sys.stderr)
 
     async def get(self, key: K) -> Optional[V]:
         if not self._enabled():
@@ -107,10 +116,10 @@ class CachedLookup(Generic[K, V]):
                 )
             except asyncio.TimeoutError:
                 self._log(f"timed out for {key}")
-                self._cooldown_until[key] = self._clock() + self._cooldown
+                self._start_cooldown(key)
             except Exception as e:
                 self._log(f"failed for {key}: {e}")
-                self._cooldown_until[key] = self._clock() + self._cooldown
+                self._start_cooldown(key)
             else:
                 if result is None:
                     self._log(f"found no match for {key}")
