@@ -11,25 +11,26 @@ import types
 import pytest
 
 from musicbot.commands.music import Music
-from test_audiocontroller import _backup, _queue, _settle, _titles
+from test_audiocontroller import (
+    _backup,
+    _fake_ffmpeg,
+    _queue,
+    _settle,
+    _songs,
+    _titles,
+)
 
 
 def _song(controller, title):
-    ac = sys.modules[type(controller).__module__]
-    return ac.Song(
-        ac.SiteTypes.YT_DLP,
-        f"https://example.invalid/{title}",
-        url=f"https://stream.invalid/{title}",
-        title=title,
-    )
+    return _songs(controller, title)[0]
 
 
 def _preloaded(stub_loader):
     return [a[0].title for n, a in stub_loader.calls if n == "preload"]
 
 
-def _run(controller, coro_fn):
-    controller.guild.voice_client.playing = True
+def _run(controller, coro_fn, playing=True):
+    controller.guild.voice_client.playing = playing
 
     async def run():
         controller.bot.loop = asyncio.get_running_loop()
@@ -102,17 +103,14 @@ def test_playnext_with_only_the_current_track(controller, stub_loader):
 def test_playnext_on_an_empty_queue_starts_the_track(
     controller, stub_loader, monkeypatch
 ):
-    from test_audiocontroller import _fake_ffmpeg
-
     _fake_ffmpeg(monkeypatch)
     stub_loader.results["load_song"] = _song(controller, "x")
 
-    async def go():
-        controller.bot.loop = asyncio.get_running_loop()
-        await controller.process_song("x", playnext=True)
-        await _settle()
-
-    asyncio.run(go())
+    _run(
+        controller,
+        lambda: controller.process_song("x", playnext=True),
+        playing=False,
+    )
 
     assert _titles(controller) == ["x"]
     played = controller.guild.voice_client.played
