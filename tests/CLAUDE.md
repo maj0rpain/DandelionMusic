@@ -10,7 +10,7 @@ Only the parts that need no Discord connection: config loading, `Playlist`, save
 
 `tests/controller_seam.py` builds an `AudioController` over a stub `musicbot.loader`, a fake bot/guild/voice client and a `tmp_path` cwd. While it is open, it forces `config.ANNOUNCE_DISCONNECT` off. Use it through the `controller` and `stub_loader` fixtures rather than building a controller by hand.
 
-`tests/controller_helpers.py` holds the controller helpers the test modules share (`_settle`, `_songs`, `_queue`, `_run`, `_run_intent`, `_backup`, `_preloaded`, `_titles`, ...) and the `Music._play_song` fakes `play_ctx` and `ProcessController`; import them from there, never from another test module.
+`tests/controller_helpers.py` holds the controller helpers the test modules share (`_settle`, `_songs`, `_queue`, `_run`, `_run_while_playing`, `_song`, `_backup`, `_preloaded`, `_titles`, ...) `play_ctx`, the fake command context for `Music` callbacks (`controller=None` is the playlist-command case), and `ProcessController`, a guild-less controller whose `process_song` returns or raises a set result; import them from there, never from another test module.
 
 `tests/db_seam.py` holds `in_memory_db(settings)`, an async context manager yielding a sessionmaker over a fresh in-memory sqlite database migrated by `settings.run_migrations`; the saved-playlists and AudioController tests share it.
 

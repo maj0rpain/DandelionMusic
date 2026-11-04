@@ -21,14 +21,11 @@ from controller_helpers import (
     _preloaded,
     _queue,
     _settle,
-    _songs,
     _titles,
-    _run_intent,
+    _run,
+    _run_while_playing,
+    _song,
 )
-
-
-def _song(controller, title):
-    return _songs(controller, title)[0]
 
 
 def _suspended_loads(controller, stub_loader):
@@ -63,7 +60,7 @@ def test_interleaved_playnext_and_plain_keep_their_slots(
             await _settle()
         await asyncio.gather(pn, plain)
 
-    _run_intent(controller, go)
+    _run_while_playing(controller, go)
 
     assert _titles(controller) == ["current", "pn", "a", "b", "plain"]
 
@@ -74,7 +71,7 @@ def test_playnext_goes_to_index_1_and_refreshes_backup_and_preload_once(
     _queue(controller, "current", "a", "b")
     stub_loader.results["load_song"] = _song(controller, "x")
 
-    _run_intent(
+    _run_while_playing(
         controller, lambda: controller.process_song("x", playnext=True)
     )
 
@@ -90,11 +87,7 @@ def test_playnext_on_an_empty_queue_starts_the_track(
     _fake_ffmpeg(monkeypatch)
     stub_loader.results["load_song"] = _song(controller, "x")
 
-    _run_intent(
-        controller,
-        lambda: controller.process_song("x", playnext=True),
-        playing=False,
-    )
+    _run(controller, lambda: controller.process_song("x", playnext=True))
 
     assert _titles(controller) == ["x"]
     played = controller.guild.voice_client.played
@@ -106,7 +99,7 @@ def test_playnext_one_item_playlist_goes_next(controller, stub_loader):
     _queue(controller, "current", "a")
     stub_loader.results["load_song"] = [_song(controller, "x")]
 
-    _run_intent(
+    _run_while_playing(
         controller, lambda: controller.process_song("x", playnext=True)
     )
 
@@ -120,7 +113,7 @@ def test_playnext_multi_track_playlist_is_appended(controller, stub_loader):
         _song(controller, "y"),
     ]
 
-    result = _run_intent(
+    result = _run_while_playing(
         controller, lambda: controller.process_song("x", playnext=True)
     )
 
@@ -144,7 +137,7 @@ def test_unloadable_playnext_leaves_everything_alone(
         with pytest.raises(stub_loader.SongError):
             await controller.process_song("x", playnext=True)
 
-    _run_intent(controller, go)
+    _run_while_playing(controller, go)
 
     assert _titles(controller) == ["current", "a"]
     assert not (_backup_path(controller, tmp_path)).exists()
@@ -170,6 +163,11 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
             await controller.process_song("plain")
 
     ctx, _ = play_ctx(controller, on_send)
+
+    async def start_idle_timer(restart=False):
+        pass
+
+    monkeypatch.setattr(controller, "start_idle_timer", start_idle_timer)
     music = Music(None)
     monkeypatch.setattr(
         "musicbot.commands.music.utils.get_settings",
@@ -179,7 +177,7 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
     async def go():
         await music._play_song(ctx, "pn", playnext=True)
 
-    _run_intent(controller, go)
+    _run_while_playing(controller, go)
 
     assert _titles(controller) == ["current", "pn", "a", "plain"]
 
