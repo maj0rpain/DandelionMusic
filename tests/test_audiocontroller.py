@@ -844,9 +844,7 @@ def test_a_stop_skips_the_backup_after_the_hop(controller, monkeypatch):
 
     seen = asyncio.run(run())
 
-    # the hop ran - it consumed stop()'s flag and advanced the
-    # emptied queue - and wrote no backup
-    assert not controller._stopping
+    # the hop ran - it advanced the emptied queue - and wrote no backup
     assert [name for name, _ in seen] == ["next"]
     assert controller.guild.voice_client.stopped == 1
 

@@ -137,7 +137,6 @@ class AudioController(object):
     """
 
     def __init__(self, bot: "MusicBot", guild: discord.Guild):
-        self._stopping = False
         self.bot = bot
         self.playlist = Playlist()
         self.pickle_file = Path("backup") / f"playlist_{guild.id}.pickle"
@@ -148,9 +147,9 @@ class AudioController(object):
         # generation it was started as; a start whose generation is no
         # longer current has been overtaken.
         self._generation = 0
-        # the generation of the start under way, or None - see
-        # is_idle()
-        self._pending: Optional[int] = None
+        # whether a start is under way (claimed, not yet handed to the
+        # voice client) - see is_idle()
+        self._start_pending = False
         self.guild = guild
 
         # True from the moment playback starts until the queue runs
@@ -411,7 +410,7 @@ class AudioController(object):
         the voice client reads idle and current_song reads None, yet a
         second start would make discord.py refuse play(). Every "start
         if idle" path asks this. Loop only."""
-        return not self.is_active() and self._pending is None
+        return not self.is_active() and not self._start_pending
 
     def _claim_start(self) -> int:
         """Commits to a start: bumps the generation, which
@@ -420,16 +419,16 @@ class AudioController(object):
         a skip picked for an earlier track's end is not this one's
         next. Loop only."""
         self._generation += 1
-        self._pending = self._generation
+        self._start_pending = True
         self._next_song = None
         return self._generation
 
     def _invalidate_start(self):
         """Drops a pending start, if any, so that it plays nothing
         once its preload returns. Loop only."""
-        if self._pending is not None:
+        if self._start_pending:
             self._generation += 1
-            self._pending = None
+            self._start_pending = False
 
     def track_history(self):
         history_string = config.INFO_HISTORY_TITLE
@@ -547,11 +546,12 @@ class AudioController(object):
 
     def _on_track_end(self, error, generation: int):
         """Runs on the loop once the track play_song() started as
-        `generation` has ended, and advances the queue."""
+        `generation` has ended, and advances the queue - unless a newer
+        start has overtaken it, or discord.py has already torn the
+        voice connection down (then the cut-off track stays at the
+        head of the queue)."""
         _require_loop()
 
-        # the teardown callback of a stop() - one-shot, see stop()
-        teardown, self._stopping = self._stopping, False
         if generation != self._generation:
             # a newer track has already started: it is not this
             # callback's to end
@@ -566,9 +566,9 @@ class AudioController(object):
             # move or reconnect, when a real track end must advance.
             return
 
-        self._advance(teardown=teardown)
+        self._advance()
 
-    def _advance(self, forced=False, *, teardown=False):
+    def _advance(self, forced=False):
         """Moves the queue on past the finished track and starts the
         next one, or the idle timer when there is none. Loop only."""
         if self._next_song:
@@ -577,16 +577,12 @@ class AudioController(object):
         else:
             next_song = self.playlist.next(forced)
 
-        if not teardown:
-            # a teardown sees the queue stop() just emptied - keep
-            # stop()'s snapshot instead
-            self._pickle_playlist()
+        self._pickle_playlist()
 
         if next_song is None:
             # nothing left to advance to - the next song to start is a
             # fresh one, and play_song() should say so
             self._playing = False
-            self._pending = None
             # if self.pickle_file.exists():
             #     self.pickle_file.unlink()
             if (
@@ -619,7 +615,7 @@ class AudioController(object):
             generation = self._claim_start()
 
         preloaded = await self._preload(song)
-        if self._overtaken(generation):
+        if self._drop_if_overtaken(generation):
             return
 
         if not preloaded:
@@ -628,7 +624,7 @@ class AudioController(object):
                     f"{config.SONGINFO_ERROR}\n"
                     f"(Skipped: {song.title or song.webpage_url})"
                 )
-                if self._overtaken(generation):
+                if self._drop_if_overtaken(generation):
                     return
             self.next_song(forced=True)
             return
@@ -660,7 +656,7 @@ class AudioController(object):
         self._playing = True
         # no longer pending once it reaches play(); the generation
         # token that guards the start is _claim_start()'s
-        self._pending = None
+        self._start_pending = False
         try:
             self.guild.voice_client.play(
                 discord.PCMVolumeTransformer(
@@ -704,14 +700,17 @@ class AudioController(object):
 
         self._schedule_preload()
 
-    def _overtaken(self, generation: int) -> bool:
+    def _drop_if_overtaken(self, generation: int) -> bool:
+        """True when the start claimed as `generation` must be dropped:
+        a newer start superseded it, or the voice client is gone - in
+        which case this also releases that start's pending mark."""
         if generation != self._generation:
             # a newer start owns the pending mark
             return True
         if self.guild.voice_client is None:
             # abandoned while still the current start: release its mark
             # so the bot is not left busy
-            self._pending = None
+            self._start_pending = False
             return True
         return False
 
@@ -976,9 +975,9 @@ class AudioController(object):
         if not self.is_active():
             return
 
-        # only stopping an active voice client runs an `after`
-        # callback; its _on_track_end() consumes this - see there
-        self._stopping = True
+        # stopping an active voice client runs an `after` callback;
+        # its _advance() finds the queue empty and idle, so
+        # _pickle_playlist() keeps this snapshot
         self.guild.voice_client.stop()
 
     def prev_song(self) -> bool:
@@ -1005,7 +1004,7 @@ class AudioController(object):
         if sett.vc_timeout and (
             (
                 not self.guild.voice_client.is_playing()
-                and self._pending is None
+                and not self._start_pending
             )
             or all(m.bot for m in self.guild.voice_client.channel.members)
         ):
