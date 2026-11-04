@@ -1,10 +1,11 @@
 """What a MusicButton click does - the player-controller buttons and
 the d!search result buttons alike.
 
-The click is acknowledged before any check runs: a joining button's
-join hook can join voice, and a slow join must not push the response
-past Discord's 3-second deadline. Refusals then reach the clicking
-user as an ephemeral followup, through the bot's real Context.send.
+The click is acknowledged before any check runs: a pick acting in a
+joining command's name can join voice through its join hook, and a slow
+join must not push the response past Discord's 3-second deadline.
+Refusals then reach the clicking user as an ephemeral followup, through
+the bot's real Context.send.
 
 Each test runs its coroutine through asyncio.run(): constructing a
 discord.ui.Button item needs no loop, but the callbacks are async and
@@ -147,21 +148,21 @@ def test_a_refused_dj_only_click_does_not_join_voice():
     assert ctx.guild.events == []
 
 
-class JoiningButton(MusicButton):
-    """A joining button, as a search pick is: it
-    overrides the join hook to join voice."""
+class PickButton(MusicButton):
+    """A pick acting in a joining command's name, as a search pick
+    does: it overrides the join hook to join voice."""
 
     async def join(self, ctx):
         await join_voice(ctx)
 
 
-def test_an_admitted_click_on_a_joining_button_joins_before_its_action():
+def test_an_admitted_click_on_a_pick_joins_before_its_action():
     inter, ctx = click()
 
     def action(ctx):
         ctx.guild.events.append("action")
 
-    run(JoiningButton(action, check=admit).callback(inter))
+    run(PickButton(action, check=admit).callback(inter))
     assert ctx.guild.events == [("connect", "lobby"), "action"]
 
 
@@ -172,7 +173,7 @@ def test_a_failed_join_is_an_ephemeral_followup_and_skips_the_action(
     ctx.guild.fail = discord.ClientException("x")
     ran = []
 
-    run(JoiningButton(ran.append, check=admit).callback(inter))
+    run(PickButton(ran.append, check=admit).callback(inter))
     assert sent_texts_and_kwargs(inter.followups) == [
         (config.VOICE_CONNECT_FAILED, {"ephemeral": True})
     ]
