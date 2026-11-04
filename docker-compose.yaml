@@ -73,8 +73,6 @@ services:
     container_name: bgutil-provider
     image: brainicism/bgutil-ytdlp-pot-provider:latest
     restart: unless-stopped
-    ports:
-      - "4416:4416"
     networks:
       - bridge
 volumes:

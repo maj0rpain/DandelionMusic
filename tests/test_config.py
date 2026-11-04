@@ -185,6 +185,16 @@ def test_dockerfile_apt_installs_are_minimal_and_clean():
         assert "rm -rf /var/lib/apt/lists/*" in c
 
 
+def test_compose_bgutil_provider_publishes_no_host_port():
+    from pathlib import Path
+
+    import yaml
+
+    text = (Path(__file__).parent.parent / "docker-compose.yaml").read_text()
+    services = yaml.safe_load(text)["services"]
+    assert "ports" not in services["bgutil-provider"]
+
+
 def test_extra_owners_defaults_to_empty(config_factory):
     """An unconfigured deployment must trust only the application
     owner(s) Discord reports - this replaced a hardcoded user id."""
