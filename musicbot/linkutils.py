@@ -22,6 +22,7 @@ from yt_dlp.extractor.lazy_extractors import LazyLoadExtractor
 
 from config import config
 from musicbot import loader
+from musicbot.truncation import Truncation, TruncationReason
 
 # Limits on the network calls the extraction workers make. A call that
 # blocks holds its lane's worker (load or preload) for every guild using
@@ -158,13 +159,11 @@ class SpotifyPlaylistTypes(Enum):
 
 @dataclass
 class SpotifyTracks:
-    """Links of a Spotify playlist or album. `total` is the number of
-    tracks Spotify reports when the fetch is known to be partial, else
-    None; `reason` is the config key of why it is partial."""
+    """Links of a Spotify playlist or album. `truncation` is set when
+    the fetch may be partial and Spotify's track total is known."""
 
     links: List[str]
-    total: Optional[int] = None
-    reason: Optional[str] = None
+    truncation: Optional[Truncation] = None
 
 
 async def get_soup(url: str) -> BeautifulSoup:
@@ -230,19 +229,19 @@ async def fetch_spotify_playlist(
     except ValueError:
         total = None
 
-    return SpotifyTracks(
-        [item["content"] for item in results],
-        total,
-        "SPOTIFY_TRUNCATED_NO_API",
+    truncation = (
+        Truncation(total, TruncationReason.NO_API)
+        if total is not None
+        else None
     )
+    return SpotifyTracks([item["content"] for item in results], truncation)
 
 
 def fetch_playlist_with_api(
     list_type: SpotifyPlaylistTypes, code: str
 ) -> SpotifyTracks:
     tracks = []
-    total = None
-    reason = None
+    truncation = None
     pages = 0
     first_total = None
     try:
@@ -271,8 +270,8 @@ def fetch_playlist_with_api(
             file=sys.stderr,
         )
         print_exc(file=sys.stderr)
-        total = first_total
-        reason = "SPOTIFY_TRUNCATED_API_ERROR"
+        if first_total is not None:
+            truncation = Truncation(first_total, TruncationReason.API_ERROR)
 
     links = []
     for track in tracks:
@@ -288,7 +287,7 @@ def fetch_playlist_with_api(
                 f" field {e.args[0]!r} is missing",
                 file=sys.stderr,
             )
-    return SpotifyTracks(links, total, reason)
+    return SpotifyTracks(links, truncation)
 
 
 _spotify_uri_regex = re.compile(r"(?i:spotify):(track|album|playlist):(\w+)")

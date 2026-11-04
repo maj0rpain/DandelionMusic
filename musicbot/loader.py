@@ -319,7 +319,7 @@ def _library_track_path(track: str) -> Path:
 
 def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
     track = normalize_track(track)
-    partial = None
+    truncation = None
     host = identify_url(track)
 
     if host == SiteTypes.NOT_URL:
@@ -338,8 +338,8 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
         except Exception as e:
             raise SongError(config.SONGINFO_ERROR) from e
         if isinstance(data, SpotifyTracks):
-            partial = data
-            data = [{"url": url} for url in partial.links]
+            truncation = data.truncation
+            data = [{"url": url} for url in data.links]
 
     elif host == SiteTypes.CUSTOM:
         data = {
@@ -386,12 +386,8 @@ def _load_song(track: str) -> Union[Optional[Song], List[Song]]:
             )
             song.update(entry)
             results.append(song)
-        if (
-            partial is not None
-            and partial.total is not None
-            and partial.total > len(results)
-        ):
-            return PartialPlaylist(results, partial.total, partial.reason)
+        if truncation is not None and truncation.cuts(len(results)):
+            return PartialPlaylist(results, truncation)
         return results
 
     song = Song(host, webpage_url=track)

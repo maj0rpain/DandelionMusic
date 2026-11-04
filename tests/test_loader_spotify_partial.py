@@ -9,6 +9,7 @@ from config import config
 from musicbot import loader
 from musicbot.linkutils import SpotifyTracks
 from musicbot.loader import PartialPlaylist, SongError
+from musicbot.truncation import Truncation, TruncationReason
 
 URL = "https://open.spotify.com/playlist/p"
 
@@ -30,22 +31,23 @@ def _links(n):
 
 
 def test_known_larger_total_gives_partial_playlist(monkeypatch, worker_loop):
-    _fetch(
-        monkeypatch, SpotifyTracks(_links(3), 5, "SPOTIFY_TRUNCATED_NO_API")
-    )
+    cut = Truncation(5, TruncationReason.NO_API)
+    _fetch(monkeypatch, SpotifyTracks(_links(3), cut))
 
     result = loader._load_song(URL)
 
     assert isinstance(result, PartialPlaylist)
     assert len(result) == 3
-    assert (result.total, result.reason) == (5, "SPOTIFY_TRUNCATED_NO_API")
+    assert result.truncation == cut
 
 
-@pytest.mark.parametrize("total", [None, 3])
+@pytest.mark.parametrize(
+    "truncation", [None, Truncation(3, TruncationReason.NO_API)]
+)
 def test_unknown_or_complete_total_gives_plain_list(
-    monkeypatch, worker_loop, total
+    monkeypatch, worker_loop, truncation
 ):
-    _fetch(monkeypatch, SpotifyTracks(_links(3), total, None))
+    _fetch(monkeypatch, SpotifyTracks(_links(3), truncation))
 
     result = loader._load_song(URL)
 
@@ -55,7 +57,9 @@ def test_unknown_or_complete_total_gives_plain_list(
 def test_no_links_is_could_not_load_whatever_the_total(
     monkeypatch, worker_loop
 ):
-    _fetch(monkeypatch, SpotifyTracks([], 50, "SPOTIFY_TRUNCATED_NO_API"))
+    _fetch(
+        monkeypatch, SpotifyTracks([], Truncation(50, TruncationReason.NO_API))
+    )
 
     with pytest.raises(SongError) as info:
         loader._load_song(URL)
@@ -73,13 +77,14 @@ def test_any_fetch_exception_is_could_not_load(monkeypatch, worker_loop):
 
 
 def test_partial_playlist_survives_pickling():
-    partial = PartialPlaylist(["a", "b"], 9, "SPOTIFY_TRUNCATED_API_ERROR")
+    cut = Truncation(9, TruncationReason.API_ERROR)
+    partial = PartialPlaylist(["a", "b"], cut)
 
     copy = pickle.loads(pickle.dumps(partial))
 
     assert isinstance(copy, PartialPlaylist)
     assert list(copy) == ["a", "b"]
-    assert (copy.total, copy.reason) == (9, "SPOTIFY_TRUNCATED_API_ERROR")
+    assert copy.truncation == cut
 
 
 def test_load_song_classifies_and_loads_the_cleaned_text(

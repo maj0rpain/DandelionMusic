@@ -6,6 +6,7 @@ import discord
 
 from config import config
 from musicbot.linkutils import SiteTypes
+from musicbot.truncation import Truncation
 
 if TYPE_CHECKING:
     from musicbot.playlists import PlaylistRef
@@ -94,14 +95,13 @@ class Song:
 
 
 class PartialPlaylist(list):
-    """Songs of a playlist that could only be partly fetched: `total`
-    tracks exist, `reason` is the config key of why fewer were loaded.
-    Module-level so it pickles across the worker process boundary."""
+    """Songs of a playlist that was cut short; `truncation` says by how
+    much and why. Module-level so it pickles across the worker process
+    boundary."""
 
-    def __init__(self, songs=(), total=None, reason=None):
+    def __init__(self, songs, truncation: Truncation):
         super().__init__(songs)
-        self.total = total
-        self.reason = reason
+        self.truncation = truncation
 
     def __reduce__(self):
-        return (type(self), (list(self), self.total, self.reason))
+        return (type(self), (list(self), self.truncation))

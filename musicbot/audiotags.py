@@ -1,7 +1,7 @@
 import re
 import sys
 from pathlib import Path
-from typing import Dict, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, NamedTuple, Optional, Tuple
 
 from mutagen import File as MutagenFile
 from mutagen.aiff import AIFF
@@ -82,14 +82,6 @@ _ASF_KEYS = {
 }
 
 
-def _key_map(audio) -> Dict[str, str]:
-    if isinstance(audio, (WAVE, AIFF)):
-        return _ID3_KEYS
-    if isinstance(audio, ASF):
-        return _ASF_KEYS
-    return _EASY_KEYS
-
-
 def _first_str(audio, key: str) -> Optional[str]:
     """The first value under `key` as a str, or None. ID3 frames and
     ASF attributes are objects, not strs, so they are converted."""
@@ -117,7 +109,7 @@ def read_tags(path: Path) -> AudioTags:
         return _EMPTY_TAGS
 
     try:
-        keys = _key_map(audio)
+        keys = _format_of(audio).keys
         title = _first_str(audio, keys["title"])
         artist = _first_str(audio, keys["artist"])
         album = _first_str(audio, keys["album"])
@@ -182,11 +174,60 @@ def _front_cover(pictures):
     """Picks the front cover out of a file's embedded pictures. Taking
     the first one blindly shows a 32x32 "file icon" (picture type 1) or
     a back cover as the album art in files that store one of those
-    first; falls back to the first picture when none is marked."""
+    first; falls back to the first picture when none is marked.
+    Returns (data, mime), or None when there are no pictures."""
     for picture in pictures:
         if picture.type == PictureType.COVER_FRONT:
-            return picture
-    return pictures[0] if pictures else None
+            return picture.data, picture.mime
+    if pictures:
+        return pictures[0].data, pictures[0].mime
+    return None
+
+
+def _id3_cover(audio):
+    return _front_cover(audio.tags.getall("APIC") if audio.tags else [])
+
+
+def _flac_cover(audio):
+    return _front_cover(audio.pictures)
+
+
+def _mp4_cover(audio):
+    covr = audio.tags.get("covr") if audio.tags else None
+    if not covr:
+        return None
+    cover = covr[0]
+    mime = (
+        "image/png" if cover.imageformat == cover.FORMAT_PNG else "image/jpeg"
+    )
+    return bytes(cover), mime
+
+
+def _no_cover(audio):
+    return None
+
+
+class _Format(NamedTuple):
+    types: tuple  # matched with isinstance
+    keys: Dict[str, str]  # tag field -> key in the parsed file
+    cover: Callable  # audio -> (data, mime) or None
+
+
+# The one place a format is described, walked in order with isinstance
+# by both readers (the order matters where one class subclasses
+# another). The last row matches anything and is the fallback.
+_FORMATS = (
+    _Format((WAVE, AIFF), _ID3_KEYS, _id3_cover),
+    _Format((MP3,), _EASY_KEYS, _id3_cover),
+    _Format((FLAC,), _EASY_KEYS, _flac_cover),
+    _Format((MP4,), _EASY_KEYS, _mp4_cover),
+    _Format((ASF,), _ASF_KEYS, _no_cover),
+    _Format((object,), _EASY_KEYS, _no_cover),
+)
+
+
+def _format_of(audio) -> _Format:
+    return next(row for row in _FORMATS if isinstance(audio, row.types))
 
 
 def read_artwork(
@@ -206,29 +247,8 @@ def read_artwork(
         )
         return None
 
-    data: Optional[bytes] = None
-    mime: Optional[str] = None
-
     try:
-        if isinstance(audio, (MP3, WAVE, AIFF)):
-            apics = audio.tags.getall("APIC") if audio.tags else []
-            picture = _front_cover(apics)
-            if picture is not None:
-                data, mime = picture.data, picture.mime
-        elif isinstance(audio, FLAC):
-            picture = _front_cover(audio.pictures)
-            if picture is not None:
-                data, mime = picture.data, picture.mime
-        elif isinstance(audio, MP4):
-            covr = audio.tags.get("covr") if audio.tags else None
-            if covr:
-                cover = covr[0]
-                mime = (
-                    "image/png"
-                    if cover.imageformat == cover.FORMAT_PNG
-                    else "image/jpeg"
-                )
-                data = bytes(cover)
+        found = _format_of(audio).cover(audio)
     except Exception as e:
         print(
             f"audiotags: failed to extract artwork from {path}: {e}",
@@ -236,6 +256,7 @@ def read_artwork(
         )
         return None
 
+    data, mime = found if found is not None else (None, None)
     if not data or not mime or len(data) > max_bytes:
         return None
 
