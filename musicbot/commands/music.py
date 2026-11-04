@@ -217,6 +217,9 @@ class Music(commands.Cog):
     )
     @joining_command
     async def _play(self, ctx, *, track: str = None, file: Attachment = None):
+        await self._play_request(ctx, track, file, playnext=False)
+
+    async def _play_request(self, ctx, track, file, playnext):
         if track is None:
             track = _attachment_track(ctx, file)
         if track is None:
@@ -224,7 +227,7 @@ class Music(commands.Cog):
             return
 
         await ctx.defer()
-        await self._play_song(ctx, track)
+        await self._play_song(ctx, track, playnext=playnext)
 
     async def _play_song(
         self, ctx, track: Union[str, Iterable[str]], playnext=False
@@ -269,14 +272,7 @@ class Music(commands.Cog):
     async def _play_next(
         self, ctx, *, track: str = None, file: Attachment = None
     ):
-        if track is None:
-            track = _attachment_track(ctx, file)
-        if track is None:
-            await ctx.send(config.PLAY_ARGS_MISSING)
-            return
-
-        await ctx.defer()
-        await self._play_song(ctx, track, playnext=True)
+        await self._play_request(ctx, track, file, playnext=True)
 
     @commands.hybrid_command(
         name="search",
