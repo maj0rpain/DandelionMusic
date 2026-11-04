@@ -3,7 +3,7 @@ import io
 import sys
 from contextlib import contextmanager
 from traceback import print_exc
-from typing import List, NamedTuple, Optional, Tuple
+from typing import Callable, List, NamedTuple, Optional, Tuple
 
 import discord
 from discord import app_commands
@@ -659,6 +659,10 @@ class LibraryBrowseView(LibraryView):
         attachment key describing two different levels on one
         message.
 
+        A cursor move whose first draw fails here is undone by its
+        caller (see _first_draw()) on a False return and on any
+        exception alike.
+
         Returns True when the edit lands. When it raises
         discord.HTTPException (a 429 that outlives its retries, a
         5xx) this puts the previous components back, logs the failure
@@ -751,22 +755,58 @@ class LibraryBrowseView(LibraryView):
         click in its own task, so without it a double-click applies the
         delta twice. The cursor clamps the result - see
         BrowseCursor.page_by() for why an unclamped page is silently
-        destructive."""
+        destructive.
+
+        The turn is undone when its draw does not land, for any
+        reason (a False render, any exception from the edit or from
+        the defer): the page goes back to the one the message still
+        shows. It is restored by page_by(saved - page), never by
+        page_by(-delta), because the clamp may have absorbed part of
+        the delta. level_revision and _enrichment are not touched, so
+        an enrichment in flight for this level still lands."""
+        saved = self.cursor.page
         self.cursor.page_by(delta)
-        with self.busy():
-            # deferred before render() for the reason given there: a
-            # render can have to wait for one already in flight
-            await interaction.response.defer()
-            # Syncs attachments even though a page turn cannot change
-            # them, so that this heals a level whose enrichment edit
-            # failed. That edit assigns _enrichment before sending, so
-            # a failure (a 429 that outlives its retries, a 5xx) leaves
-            # the embed asking for attachment://cover.<ext> while the
-            # message carries no such file - and every later page turn
-            # would redraw that broken reference. Costs nothing when
-            # nothing has changed: render() compares the key first and
-            # omits the field.
-            await self.render(interaction, sync_attachments=True)
+        await self._first_draw(
+            interaction,
+            lambda: self.cursor.page_by(saved - self.cursor.page),
+        )
+
+    async def _first_draw(
+        self,
+        interaction: discord.Interaction,
+        undo: Callable[[], None],
+    ) -> bool:
+        """A cursor move's first draw: under busy(), defers the
+        interaction and renders the new position. When the draw does
+        not land - render() returned False, or the defer or the
+        render raised anything at all, cancellation included - calls
+        `undo`, which puts the cursor back to what the message still
+        shows, and then re-raises the exception, if there was one.
+        Returns whether the draw landed.
+
+        Every cursor-moving click goes through here, so none can
+        forget the undo."""
+        landed = False
+        try:
+            with self.busy():
+                # deferred before render() for the reason given there:
+                # a render can have to wait for one already in flight
+                await interaction.response.defer()
+                # Syncs attachments even though a page turn cannot
+                # change them, so that this heals a level whose
+                # enrichment edit failed. That edit assigns
+                # _enrichment before sending, so a failure (a 429 that
+                # outlives its retries, a 5xx) leaves the embed asking
+                # for attachment://cover.<ext> while the message
+                # carries no such file - and every later page turn
+                # would redraw that broken reference. Costs nothing
+                # when nothing has changed: render() compares the key
+                # first and omits the field.
+                landed = await self.render(interaction, sync_attachments=True)
+        finally:
+            if not landed:
+                undo()
+        return landed
 
     async def descend(
         self,
@@ -880,14 +920,15 @@ class LibraryBrowseView(LibraryView):
         move. When the first draw fails the message still shows that
         level, with render() having put its components back, so the
         move is undone and no enrichment is resolved for a level
-        nobody can see."""
+        nobody can see. That holds for any failed first draw, not only
+        a False render: an exception from the edit or from the defer
+        (cancellation included) undoes the move too, and propagates."""
         nav = self.cursor.level_revision
         self._enrichment = None
-        with self.busy():
-            await interaction.response.defer()
-            if not await self.render(interaction, sync_attachments=True):
-                self._undo_level_change(previous)
-                return
+        if not await self._first_draw(
+            interaction, lambda: self._undo_level_change(previous)
+        ):
+            return
 
         try:
             enrichment = await self._resolve_enrichment()
