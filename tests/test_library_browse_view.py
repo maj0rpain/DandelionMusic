@@ -18,7 +18,9 @@ import asyncio
 from types import SimpleNamespace
 from typing import NamedTuple, Optional
 
+import aiohttp
 import discord
+import pytest
 
 from musicbot.commands import library as library_commands
 from musicbot.commands.library import (
@@ -83,6 +85,10 @@ class FakeInteraction:
         self.edits = []
         self.fail = False
         self.fail_on = set()
+        # what a failing edit / defer() raises; an HTTPException by
+        # default for the edit, nothing for defer()
+        self.edit_error = None
+        self.defer_error = None
         self.log = log
         self.clicks = clicks
         self.message = SimpleNamespace(id=MESSAGE_ID)
@@ -95,6 +101,8 @@ class FakeInteraction:
         self.in_flight = None
 
         async def defer():
+            if self.defer_error is not None:
+                raise self.defer_error
             self.deferred += 1
 
         self.response = SimpleNamespace(defer=defer)
@@ -114,7 +122,7 @@ class FakeInteraction:
             self.in_flight.set()
             await self._gate.wait()
         if self.fail or attempt in self.fail_on:
-            raise http_error()
+            raise self.edit_error or http_error()
         self.edits.append(kwargs)
         if self.clicks is not None:
             self.clicks.landed(kwargs["view"])
@@ -603,6 +611,7 @@ def test_select_from_previous_page_during_page_turn_opens_its_entry():
 
     view = run(scenario)
 
+    assert view.cursor.page == 0
     assert (view.cursor.artist, view.cursor.album) == ("Artist 03", None)
 
 
@@ -748,3 +757,181 @@ def test_stranger_on_a_stale_scope_component_is_told_it_is_not_theirs():
     assert replies == ["This belongs to someone else."]
     assert stranger.deferred == 0
     assert (view.cursor.artist, view.cursor.album) == ("Radiohead", None)
+
+
+def reset_error():
+    return aiohttp.ClientOSError(104, "Connection reset by peer")
+
+
+def not_found():
+    return discord.NotFound(
+        SimpleNamespace(status=404, reason="Not Found"), "expired"
+    )
+
+
+async def attempt(coro):
+    """Awaits `coro`; returns the exception it raised, or None."""
+    try:
+        await coro
+    except BaseException as e:
+        return e
+    return None
+
+
+def test_descend_edit_reset_is_undone_and_next_pick_opens_it():
+    async def scenario():
+        view = make_view()
+        resolved = stub_enrichment(view)
+        interaction = FakeInteraction()
+        interaction.fail = True
+        interaction.edit_error = reset_error()
+        raised = await attempt(view.descend(interaction, "Radiohead"))
+        cursor = (view.cursor.artist, view.cursor.album)
+        await view.descend(FakeInteraction(), "The Beatles")
+        return view, resolved, raised, cursor
+
+    view, resolved, raised, cursor = run(scenario)
+
+    assert isinstance(raised, aiohttp.ClientOSError)
+    assert cursor == (None, None)
+    assert (view.cursor.artist, view.cursor.album) == ("The Beatles", None)
+    assert resolved == [None]
+
+
+def test_back_edit_reset_is_undone():
+    async def scenario():
+        view = make_view()
+        resolved = stub_enrichment(view)
+        await view.descend(FakeInteraction(), "Radiohead")
+        await view.descend(FakeInteraction(), "OK Computer")
+        resolved.clear()
+        interaction = FakeInteraction()
+        interaction.fail = True
+        interaction.edit_error = reset_error()
+        raised = await attempt(view.go_back(interaction))
+        return view, resolved, raised
+
+    view, resolved, raised = run(scenario)
+
+    assert isinstance(raised, aiohttp.ClientOSError)
+    assert (view.cursor.artist, view.cursor.album) == (
+        "Radiohead",
+        "OK Computer",
+    )
+    assert resolved == []
+
+
+def test_failed_page_turn_http_error_is_undone(capsys):
+    async def scenario():
+        view = make_view(PAGED)
+        failing = FakeInteraction()
+        failing.fail = True
+        await view.turn_page(failing, 1)
+        page = view.cursor.page
+        await view.turn_page(FakeInteraction(), 1)
+        return page, view.cursor.page
+
+    page, after_next = run(scenario)
+
+    assert page == 0
+    assert after_next == 1
+    assert "library: render failed:" in capsys.readouterr().err
+
+
+def test_page_turn_edit_reset_is_undone():
+    async def scenario():
+        view = make_view(PAGED)
+        interaction = FakeInteraction()
+        interaction.fail = True
+        interaction.edit_error = reset_error()
+        raised = await attempt(view.turn_page(interaction, 1))
+        return view, raised
+
+    view, raised = run(scenario)
+
+    assert isinstance(raised, aiohttp.ClientOSError)
+    assert view.cursor.page == 0
+
+
+def test_descend_cancelled_edit_is_undone():
+    async def scenario():
+        view = make_view()
+        resolved = stub_enrichment(view)
+        interaction = FakeInteraction()
+        interaction.fail = True
+        interaction.edit_error = asyncio.CancelledError()
+        raised = await attempt(view.descend(interaction, "Radiohead"))
+        return view, resolved, raised
+
+    view, resolved, raised = run(scenario)
+
+    assert isinstance(raised, asyncio.CancelledError)
+    assert (view.cursor.artist, view.cursor.album) == (None, None)
+    assert resolved == []
+
+
+def test_failed_clamped_page_turn_is_undone():
+    async def scenario():
+        view = make_view(PAGED)
+        await view.turn_page(FakeInteraction(), 1)
+        last = view.cursor.page
+        failing = FakeInteraction()
+        failing.fail = True
+        await view.turn_page(failing, 5)
+        return last, view.cursor.page
+
+    last, page = run(scenario)
+
+    assert last == 1
+    assert page == 1
+
+
+def test_enrichment_in_flight_still_lands_after_failed_page_turn():
+    async def scenario():
+        view = make_view()
+        gate = asyncio.Event()
+        stub_enrichment_by_level(
+            view, {("Radiohead", None): Gated(gate, COVER)}
+        )
+        entering = FakeInteraction()
+        entry = asyncio.create_task(view.descend(entering, "Radiohead"))
+        await settle()
+        failing = FakeInteraction()
+        failing.fail = True
+        await view.turn_page(failing, 1)
+        gate.set()
+        await entry
+        return entering
+
+    entering = run(scenario)
+
+    assert carries_enrichment(entering.edits[-1])
+
+
+@pytest.mark.parametrize("error", [reset_error, not_found])
+@pytest.mark.parametrize("click", ["descend", "back", "page"])
+def test_failed_defer_leaves_cursor_unchanged(click, error):
+    async def scenario():
+        view = make_view(PAGED if click == "page" else INDEX)
+        resolved = stub_enrichment(view)
+        if click == "back":
+            await view.descend(FakeInteraction(), "Radiohead")
+            resolved.clear()
+        before = (view.cursor.artist, view.cursor.album, view.cursor.page)
+        interaction = FakeInteraction()
+        interaction.defer_error = error()
+        if click == "descend":
+            coro = view.descend(interaction, "Radiohead")
+        elif click == "back":
+            coro = view.go_back(interaction)
+        else:
+            coro = view.turn_page(interaction, 1)
+        raised = await attempt(coro)
+        after = (view.cursor.artist, view.cursor.album, view.cursor.page)
+        return before, after, raised, resolved
+
+    before, after, raised, resolved = run(scenario)
+
+    assert isinstance(raised, (aiohttp.ClientOSError, discord.NotFound))
+    assert after == before
+    assert resolved == []
