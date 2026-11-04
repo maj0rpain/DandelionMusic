@@ -91,7 +91,7 @@ class FakeContext:
                 settings=lambda guild: SimpleNamespace(
                     user_must_be_in_vc=False
                 )
-            )
+            ),
         )
         self.sent = []
 
@@ -362,9 +362,7 @@ def test_a_play_failing_after_the_pick_was_used_up_edits_once_and_reports():
 
     view, message, inter = run(go)
     assert message.edits == [{"view": view}]
-    assert [(str(a[0]), k) for a, k in inter.ctx.sent] == [
-        ("play failed", {})
-    ]
+    assert [(str(a[0]), k) for a, k in inter.ctx.sent] == [("play failed", {})]
 
 
 def test_a_failed_message_edit_still_queues_the_pick():
