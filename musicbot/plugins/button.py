@@ -1,6 +1,5 @@
 import discord
 from discord.ext import commands
-from config import config
 from musicbot import linkutils, loader, utils
 from musicbot.bot import MusicBot
 from musicbot.audiocontroller import QueuedPlaylist
@@ -18,9 +17,10 @@ class Button(commands.Cog):
 
     @staticmethod
     def get_links(text: str):
+        links = map(linkutils.normalize_track, linkutils.get_urls(text))
         return [
             link
-            for link in linkutils.get_urls(text)
+            for link in links
             if linkutils.get_site_type(link) in SUPPORTED_SITES
         ]
 
@@ -111,9 +111,7 @@ class Button(commands.Cog):
                 except loader.SongError as e:
                     await ctx.send(str(e))
                     continue
-                if song is None:
-                    await ctx.send(config.SONGINFO_ERROR)
-                elif isinstance(song, QueuedPlaylist) and song.truncated:
+                if isinstance(song, QueuedPlaylist) and song.truncated:
                     await ctx.send(song.truncation.notice(song.queued))
 
 

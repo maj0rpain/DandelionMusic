@@ -191,11 +191,9 @@ async def _admin_or_owner(ctx: Context) -> bool:
     return bool(await ctx.bot.is_owner(ctx.author))
 
 
-def _holds_dj_role(ctx: Context, sett) -> bool:
-    """True when a DJ role is set and the author holds it."""
-    return bool(
-        sett.dj_role and int(sett.dj_role) in [r.id for r in ctx.author.roles]
-    )
+def _holds_role(ctx: Context, role_id) -> bool:
+    """True when the author holds the role with this id."""
+    return int(role_id) in [r.id for r in ctx.author.roles]
 
 
 async def dj_check(ctx: Context):
@@ -204,7 +202,7 @@ async def dj_check(ctx: Context):
         return True
 
     sett = get_settings(ctx)
-    if sett.dj_role and not _holds_dj_role(ctx, sett):
+    if sett.dj_role and not _holds_role(ctx, sett.dj_role):
         raise CheckError(config.NOT_A_DJ)
     return True
 
@@ -242,7 +240,8 @@ async def voice_check(ctx: Context):
     # DJ role set, nobody else bypasses (EXTRA_OWNERS included).
     if await _admin_or_owner(ctx):
         return True
-    if _holds_dj_role(ctx, get_settings(ctx)):
+    dj_role = get_settings(ctx).dj_role
+    if dj_role and _holds_role(ctx, dj_role):
         return True
 
     raise CheckError(config.USER_NOT_IN_VC_MESSAGE)

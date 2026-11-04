@@ -181,6 +181,12 @@ SPOTIFY_ID = "4cOdK2wGLETKBW3PvgPWqT"
         ("<https://youtu.be/xyz.>", "https://youtu.be/xyz"),
         ("<https://youtu.be/xyz.>!", "https://youtu.be/xyz"),
         ("<Re:Zero>!", "<Re:Zero>!"),
+        ("FILE:///lib/A/B/t.mp3", "file:///lib/A/B/t.mp3"),
+        ("File:///lib/A/B/T.MP3", "file:///lib/A/B/T.MP3"),
+        ("file:///lib/A/B/t.mp3", "file:///lib/A/B/t.mp3"),
+        ("<FILE:///lib/A/B/t.mp3>", "file:///lib/A/B/t.mp3"),
+        ("  File:///lib/A/B/t.mp3.", "file:///lib/A/B/t.mp3"),
+        ("<File:///lib/A/B/t.mp3>!", "file:///lib/A/B/t.mp3"),
     ],
 )
 def test_normalize_track(text, expected):
@@ -206,3 +212,16 @@ def test_spotify_link_with_an_upper_case_type_segment_is_not_spotify():
         identify_url(f"https://open.spotify.com/TRACK/{SPOTIFY_ID}")
         is not SiteTypes.SPOTIFY
     )
+
+
+@pytest.mark.parametrize("kind", ["track", "album", "playlist"])
+def test_spotify_link_of_every_type_is_spotify(kind):
+    assert (
+        identify_url(f"https://open.spotify.com/{kind}/{SPOTIFY_ID}")
+        is SiteTypes.SPOTIFY
+    )
+
+
+def test_spotify_uri_with_an_upper_case_type_is_not_rewritten():
+    uri = f"spotify:TRACK:{SPOTIFY_ID}"
+    assert normalize_track(uri) == uri

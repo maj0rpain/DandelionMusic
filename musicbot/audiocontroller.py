@@ -456,7 +456,7 @@ class AudioController(object):
         if client:
             if client.is_playing():
                 client.pause()
-                self.add_task(self.timer.start(True))
+                self.add_task(self.start_idle_timer(True))
                 return PauseState.PAUSED
             elif client.is_paused():
                 client.resume()
@@ -599,13 +599,9 @@ class AudioController(object):
             self._pending = None
             # if self.pickle_file.exists():
             #     self.pickle_file.unlink()
-            if (
-                not self._disconnecting
-                and not self.timer.triggered
-                and self.guild.voice_client
-            ):
+            if not self.timer.triggered and self.guild.voice_client:
                 self.add_task(
-                    self.timer.start(
+                    self.start_idle_timer(
                         not all(
                             m.bot
                             for m in self.guild.voice_client.channel.members
@@ -774,7 +770,7 @@ class AudioController(object):
         track: str,
         user: Optional[discord.abc.User] = None,
         playnext=False,
-    ) -> Union[Optional[Song], QueuedPlaylist]:
+    ) -> Union[Song, QueuedPlaylist]:
         """Adds the track to the playlist instance
         Starts playing if it is the first song.
 
@@ -790,10 +786,9 @@ class AudioController(object):
         # Logged on the way out rather than on the way in, so the
         # success cases below can name what the track resolved to
         # instead of echoing the link. A request that resolves to
-        # nothing still has to leave a trace, though - both ways it
-        # can fail, since an unsupported or blocked link raises
-        # (SongError, which the caller turns into a Discord reply and
-        # nothing else) where an empty extraction returns falsy.
+        # nothing still has to leave a trace, though: a failed load
+        # raises SongError, which the caller turns into a Discord reply
+        # and nothing else.
         try:
             loaded_song = await loader.load_song(track)
         except loader.SongError:
@@ -802,13 +797,7 @@ class AudioController(object):
                 " - could not be loaded"
             )
             raise
-        if not loaded_song:
-            print(
-                f"{user} queued {track!r} in guild {self.guild.name!r}"
-                " - nothing could be loaded"
-            )
-            return None
-        elif isinstance(loaded_song, Song):
+        if isinstance(loaded_song, Song):
             added = [loaded_song]
             print(
                 f"{user} queued {loaded_song.title!r}"
@@ -930,16 +919,12 @@ class AudioController(object):
         result = await loader.preload(song)
         if result is loader.Preload.FAILED:
             return False
-        if (
-            result is loader.Preload.EXTRACTED
-            and song.saved_playlist is not None
-            and song.saved_url is not None
-        ):
+        if result is loader.Preload.EXTRACTED and song.saved_entry is not None:
             try:
                 await playlists.set_title(
                     self.bot.DbSession,
-                    song.saved_playlist,
-                    song.saved_url,
+                    song.saved_entry.ref,
+                    song.saved_entry.url,
                     song.title,
                 )
             except Exception:
@@ -1024,6 +1009,14 @@ class AudioController(object):
             or all(m.bot for m in self.guild.voice_client.channel.members)
         ):
             await self.udisconnect("inactivity timeout")
+
+    async def start_idle_timer(self, restart: bool = False):
+        """Starts the idle timer, unless a disconnect is in flight.
+        The check runs when this coroutine does, not when it was
+        scheduled. Loop only."""
+        if self._disconnecting:
+            return
+        await self.timer.start(restart)
 
     async def udisconnect(self, reason: str):
         self._disconnecting = True
