@@ -878,8 +878,18 @@ def registered(cmd):
     return cog, (group if cmd.name == group.name else subs[cmd.name])
 
 
+@pytest.fixture
+def admitting_play_check(monkeypatch):
+    # every check behind the playlist gate admits
+    async def passing(ctx):
+        return True
+
+    monkeypatch.setattr(utils, "get_audiocontroller", lambda ctx: None)
+    monkeypatch.setattr(utils, "play_check", passing)
+
+
 @pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
-def test_refuses_while_disabled(cmd, monkeypatch):
+def test_cog_check_gates_before_other_refusals(cmd, monkeypatch):
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
     cog, cmd = registered(cmd)
     # no guild, channel or author: any other refusal would break differently
@@ -890,14 +900,19 @@ def test_refuses_while_disabled(cmd, monkeypatch):
 
 
 @pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
-def test_gate_admits_while_enabled(cmd, monkeypatch):
+def test_refuses_while_disabled(cmd, monkeypatch, admitting_play_check):
+    monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
+    cog, cmd = registered(cmd)
+    # a context that would otherwise pass: only the gate refuses
+    ctx = types.SimpleNamespace(command=cmd)
+    with pytest.raises(CheckError) as exc:
+        asyncio.run(cog.cog_check(ctx))
+    assert str(exc.value) == config.PLAYLISTS_ARE_DISABLED
+
+
+@pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
+def test_gate_admits_while_enabled(cmd, monkeypatch, admitting_play_check):
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", True)
-
-    async def passing(ctx):
-        return True
-
-    monkeypatch.setattr(utils, "get_audiocontroller", lambda ctx: None)
-    monkeypatch.setattr(utils, "play_check", passing)
     cog, cmd = registered(cmd)
     ctx = types.SimpleNamespace(command=cmd)
     assert asyncio.run(cog.cog_check(ctx)) is True
@@ -916,14 +931,10 @@ def test_autocomplete_offers_nothing_while_disabled(monkeypatch):
     assert result == []
 
 
-def test_cog_check_admits_a_button_context_with_no_command(monkeypatch):
+def test_cog_check_admits_a_button_context_with_no_command(
+    monkeypatch, admitting_play_check
+):
     # a component interaction's context carries no command
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
-
-    async def passing(ctx):
-        return True
-
-    monkeypatch.setattr(utils, "get_audiocontroller", lambda ctx: None)
-    monkeypatch.setattr(utils, "play_check", passing)
     ctx = types.SimpleNamespace(command=None)
     assert asyncio.run(Music(None).cog_check(ctx)) is True
