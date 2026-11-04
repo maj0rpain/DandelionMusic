@@ -513,6 +513,50 @@ def test_enqueue_starts_the_first_track_when_idle(
     assert _preloaded(stub_loader) == ["a", "b"]
 
 
+def test_enqueue_next_puts_the_song_after_the_current_track(
+    controller, stub_loader, tmp_path
+):
+    _queue(controller, "current", "a")
+    song = _songs(controller, "next")[0]
+
+    async def scenario():
+        controller.guild.voice_client.playing = True
+        await controller.enqueue_next(song)
+
+    _run(controller, scenario)
+
+    assert controller.guild.voice_client.played == []
+    assert _titles(controller) == ["current", "next", "a"]
+    assert _backup(controller, tmp_path) == ["current", "next", "a"]
+    assert _preloaded(stub_loader) == ["next", "a"]
+
+
+def test_enqueue_next_starts_the_song_when_idle(
+    controller, stub_loader, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    song = _songs(controller, "next")[0]
+
+    async def scenario():
+        await controller.enqueue_next(song)
+
+    _run(controller, scenario)
+
+    assert _played(controller) == ["next"]
+    assert _titles(controller) == ["next"]
+    assert _backup(controller, tmp_path) == ["next"]
+
+
+def test_enqueue_no_longer_takes_playnext(controller):
+    songs = _songs(controller, "a", "b")
+
+    async def scenario():
+        await controller.enqueue(songs, playnext=True)
+
+    with pytest.raises(TypeError):
+        _run(controller, scenario)
+
+
 async def _resolved(value):
     return value
 
