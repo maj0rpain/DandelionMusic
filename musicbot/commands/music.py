@@ -95,7 +95,7 @@ class SongButton(MusicButton):
         )
 
     async def join(self, ctx):
-        # a search pick is a joining button, so it joins voice
+        # a search pick acts in a joining command's name, so it joins voice
         await utils.join_voice(ctx)
 
     def on_refused(self):
