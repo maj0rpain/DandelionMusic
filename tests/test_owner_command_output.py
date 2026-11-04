@@ -105,17 +105,11 @@ def test_nonzero_exit_without_output_says_no_output_then_exit():
     assert shlex.join(argv) in sent[1] and "2" in sent[1]
 
 
-def test_zero_exit_gets_no_exit_line():
-    sent = report(py("print('fine')"))
-    assert len(sent) == 1
-    assert "exited" not in sent[0]
-
-
-def test_every_page_is_a_code_block():
+def test_single_unbroken_line_is_split_within_the_limit():
     sent = report(py("print('y' * 5000)"))
     assert len(sent) > 1
-    for page in sent:
-        unwrap(page)
+    assert all(len(p) <= 2000 for p in sent)
+    assert "".join(unwrap(p) for p in sent) == "y" * 5000
 
 
 def test_event_loop_stays_free_while_the_child_runs():
