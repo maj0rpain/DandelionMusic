@@ -195,7 +195,7 @@ class Music(commands.Cog):
         self, ctx, track: Union[str, Iterable[str]], playnext=False
     ):
         # reset timer
-        await ctx.audiocontroller.timer.start(True)
+        await ctx.audiocontroller.start_idle_timer(True)
 
         try:
             song = await ctx.audiocontroller.process_song(

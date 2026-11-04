@@ -1322,14 +1322,16 @@ def _idle_timer_that_fires_at_once(controller, monkeypatch):
     return disconnects
 
 
-def _during_disconnect(controller, during):
-    """Makes the voice client's disconnect() run `during()` first."""
+def _during_disconnect(controller, during, yields=1):
+    """Makes the voice client's disconnect() run `during()` first, then
+    yield `yields` times before disconnecting."""
     voice_client = controller.guild.voice_client
     original = voice_client.disconnect
 
     async def disconnect(*, force=False):
         during()
-        await asyncio.sleep(0)
+        for _ in range(yields):
+            await asyncio.sleep(0)
         await original(force=force)
 
     voice_client.disconnect = disconnect
@@ -1346,7 +1348,9 @@ def test_a_track_end_hop_during_a_disconnect_starts_no_idle_timer(
         disconnects = _idle_timer_that_fires_at_once(controller, monkeypatch)
         generation = controller._generation
         _during_disconnect(
-            controller, lambda: controller._on_track_end(None, generation)
+            controller,
+            lambda: controller._on_track_end(None, generation),
+            yields=3,  # the hop and the task it schedules run first
         )
         await controller.udisconnect("test")
         await _settle()
@@ -2111,3 +2115,71 @@ def test_a_queue_that_plays_to_its_end_leaves_an_empty_backup(
     _run(controller, scenario)
 
     assert _backup(controller, tmp_path) == []
+
+
+def test_disconnecting_while_playing_leaves_the_backup_holding_the_queue(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        await controller.udisconnect("d!disconnect")
+
+    asyncio.run(run())
+
+    assert _backup(controller, tmp_path) == ["first", "second"]
+
+
+def test_start_idle_timer_starts_the_timer(controller):
+    async def run():
+        await controller.start_idle_timer(True)
+        return controller.timer._task
+
+    assert asyncio.run(run()) is not None
+
+
+def test_start_idle_timer_starts_none_while_disconnecting(controller):
+    async def run():
+        controller._disconnecting = True
+        await controller.start_idle_timer(True)
+        return controller.timer._task
+
+    assert asyncio.run(run()) is None
+
+
+def test_pause_while_disconnecting_starts_no_timer(controller):
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        controller.guild.voice_client.playing = True
+        controller._disconnecting = True
+        controller.pause()
+        await _settle()
+        return controller.timer._task
+
+    assert asyncio.run(run()) is None
+
+
+def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
+    async def run():
+        controller.bot.loop = asyncio.get_running_loop()
+        controller.guild.voice_client.playing = True
+        reached = asyncio.Event()
+        release = asyncio.Event()
+
+        async def update_view(view=None):
+            reached.set()
+            await release.wait()
+
+        controller.update_view = update_view
+        disconnect = asyncio.create_task(controller.udisconnect("test"))
+        await reached.wait()
+        controller.pause()
+        release.set()
+        await disconnect
+        await _settle()
+        return controller.timer._task
+
+    assert asyncio.run(run()) is None
