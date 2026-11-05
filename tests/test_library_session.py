@@ -344,8 +344,15 @@ class TestTrimAndFormat:
         assert name in s.frame().footer
 
     def test_count_rounds_before_choosing_unit(self):
-        fmt = library_session._fmt_count
+        def listeners(value):
+            s = at_album()
+            s.offer_enrichment(
+                s.enter_level(),
+                Enr(Ext(value, None, (), None, None, None), None),
+            )
+            return dict(s.frame().fields)["Listeners"]
+
         assert [
-            fmt(v)
+            listeners(v)
             for v in (999, 1_500, 999_949, 999_950, 1_204_338_291, 999_999_999)
         ] == ["999", "1.5K", "999.9K", "1M", "1.2B", "1B"]
