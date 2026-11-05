@@ -51,12 +51,7 @@ async def load(session_factory: SessionFactory) -> Whitelist:
     copy to keep in step with the commands that edit the table.
     """
     async with session_factory() as session:
-        rows = (
-            (await session.execute(select(WhitelistedGuild.guild_id)))
-            .scalars()
-            .all()
-        )
-    return Whitelist(frozenset(int(guild_id) for guild_id in rows))
+        return Whitelist(await _listed(session))
 
 
 class Outcome(enum.Enum):
@@ -108,8 +103,7 @@ async def add(
     refused and rolled back."""
     present = list(present_guild_ids)
     async with session_factory() as session:
-        before = await _listed(session)
-        if guild_id in before:
+        if guild_id in await _listed(session):
             return WhitelistChange(Outcome.ALREADY_LISTED)
         session.add(WhitelistedGuild(guild_id=str(guild_id)))
         try:
@@ -117,7 +111,10 @@ async def add(
         except IntegrityError:
             await session.rollback()
             return WhitelistChange(Outcome.ALREADY_LISTED)
+        # Decided from the read after our own write, inside the write
+        # transaction, so a concurrent add cannot also see an empty list.
         after = await _listed(session)
+        before = after - {guild_id}
         to_leave = _to_leave(before, after, present)
         if protect is not None and protect in to_leave:
             await session.rollback()
@@ -168,13 +165,9 @@ async def import_env_whitelist(session_factory: SessionFactory):
         # backup can have rows without the marker; inserting blindly
         # then raises IntegrityError out of MusicBot.start() and the
         # bot never logs in.
-        existing = set(
-            (await session.execute(select(WhitelistedGuild.guild_id)))
-            .scalars()
-            .all()
-        )
+        existing = await _listed(session)
         for guild_id in config.GUILD_WHITELIST:
-            if str(guild_id) not in existing:
+            if int(guild_id) not in existing:
                 session.add(WhitelistedGuild(guild_id=str(guild_id)))
         session.add(
             BotState(

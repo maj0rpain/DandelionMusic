@@ -2,7 +2,6 @@
 every guild the whitelist does not admit and register the rest."""
 
 import asyncio
-import types
 
 import discord
 
@@ -10,22 +9,8 @@ from musicbot import settings
 from musicbot.bot import MusicBot
 from musicbot.settings import WhitelistedGuild
 from db_seam import in_memory_db
+from developer_fakes import LeavingGuild
 from helpers import run
-
-
-class FakeGuild:
-    def __init__(self, id, name=None, fail=False):
-        self.id = id
-        self.name = name or f"guild{id}"
-        self.fail = fail
-        self.left = False
-
-    async def leave(self):
-        if self.fail:
-            raise discord.HTTPException(
-                types.SimpleNamespace(status=500, reason="boom"), "boom"
-            )
-        self.left = True
 
 
 def drive(monkeypatch, listed, scenario):
@@ -72,21 +57,25 @@ def sweep(monkeypatch, listed, guilds):
 
 
 def test_sweep_leaves_unadmitted_and_registers_admitted(monkeypatch):
-    guilds = [FakeGuild(1), FakeGuild(2), FakeGuild(3)]
+    guilds = [LeavingGuild(1), LeavingGuild(2), LeavingGuild(3)]
     registered = sweep(monkeypatch, [1, 3], guilds)
     assert registered == [1, 3]
     assert [g.left for g in guilds] == [False, True, False]
 
 
 def test_sweep_registers_every_guild_on_an_empty_whitelist(monkeypatch):
-    guilds = [FakeGuild(1), FakeGuild(2)]
+    guilds = [LeavingGuild(1), LeavingGuild(2)]
     registered = sweep(monkeypatch, [], guilds)
     assert registered == [1, 2]
     assert not any(g.left for g in guilds)
 
 
 def test_sweep_logs_a_failed_leave_and_goes_on(monkeypatch, capsys):
-    guilds = [FakeGuild(1, "bad", fail=True), FakeGuild(2), FakeGuild(3)]
+    guilds = [
+        LeavingGuild(1, "bad", fail=True),
+        LeavingGuild(2),
+        LeavingGuild(3),
+    ]
     registered = sweep(monkeypatch, [3], guilds)
     err = capsys.readouterr().err
     assert registered == [3]
@@ -105,7 +94,9 @@ def test_sweep_reads_the_whitelist_once(monkeypatch):
         return await real(factory)
 
     monkeypatch.setattr(guild_whitelist, "load", counting)
-    sweep(monkeypatch, [1], [FakeGuild(1), FakeGuild(2), FakeGuild(3)])
+    sweep(
+        monkeypatch, [1], [LeavingGuild(1), LeavingGuild(2), LeavingGuild(3)]
+    )
     assert len(calls) == 1
 
 
@@ -114,23 +105,23 @@ def join(monkeypatch, listed, guild):
 
 
 def test_join_leaves_an_unadmitted_guild(monkeypatch):
-    guild = FakeGuild(2)
+    guild = LeavingGuild(2)
     assert join(monkeypatch, [1], guild) == []
     assert guild.left
 
 
 def test_join_registers_an_admitted_guild(monkeypatch):
-    guild = FakeGuild(1)
+    guild = LeavingGuild(1)
     assert join(monkeypatch, [1], guild) == [1]
     assert not guild.left
 
 
 def test_join_registers_any_guild_on_an_empty_whitelist(monkeypatch):
-    assert join(monkeypatch, [], FakeGuild(5)) == [5]
+    assert join(monkeypatch, [], LeavingGuild(5)) == [5]
 
 
 def test_join_logs_a_failed_leave_and_does_not_register(monkeypatch, capsys):
-    registered = join(monkeypatch, [1], FakeGuild(2, "bad", fail=True))
+    registered = join(monkeypatch, [1], LeavingGuild(2, "bad", fail=True))
     err = capsys.readouterr().err
     assert registered == []
     assert "bad" in err and "Traceback" in err

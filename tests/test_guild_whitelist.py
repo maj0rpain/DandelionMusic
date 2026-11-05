@@ -26,9 +26,9 @@ from musicbot.settings import (
     BotState,
     WhitelistedGuild,
 )
-from musicbot import settings
+from musicbot import guild_whitelist, settings
 from db_seam import in_memory_db
-from developer_fakes import FakeBot, FakeCtx
+from developer_fakes import FakeBot, FakeCtx, LeavingGuild
 from helpers import run
 
 
@@ -105,6 +105,26 @@ class TestChanges:
         change, listed = with_db(scenario)
         assert change == WhitelistChange(Outcome.UPDATED, ())
         assert listed == [10, 20]
+
+    def test_add_racing_another_add_is_updated_not_enabled(self, monkeypatch):
+        """Another add commits after this one's first read: the outcome
+        comes from the state this add's own transaction ends with."""
+        real = guild_whitelist._listed
+        reads = []
+
+        async def stale_first_read(session):
+            reads.append(1)
+            if len(reads) == 1:
+                await real(session)
+                return frozenset()
+            return await real(session)
+
+        async def scenario(factory):
+            await seed(factory, 20)
+            monkeypatch.setattr(guild_whitelist, "_listed", stale_first_read)
+            return await add(factory, 10, [10, 20])
+
+        assert with_db(scenario) == WhitelistChange(Outcome.UPDATED, ())
 
     def test_add_of_a_listed_guild_changes_nothing(self):
         async def scenario(factory):
@@ -268,28 +288,6 @@ class TestEnvImport:
         assert with_db(scenario) == [111]
 
 
-COMMAND_REPLIES = {
-    "enabled": "Whitelist updated, the whitelist is now enabled.",
-    "updated": "Whitelist updated.",
-}
-
-
-class FakeGuild:
-    def __init__(self, id_, name="g", fail=False):
-        self.id = id_
-        self.name = name
-        self.fail = fail
-        self.left = False
-        self.log = None
-
-    async def leave(self):
-        if self.log is not None:
-            self.log.append(("leave", self.id))
-        if self.fail:
-            raise RuntimeError("boom")
-        self.left = True
-
-
 class OrderedCtx(FakeCtx):
     def __init__(self, bot, log, guild=None):
         super().__init__(bot, guild=guild)
@@ -340,18 +338,20 @@ def left(guilds):
 class TestShow:
     @pytest.mark.parametrize("name", [None, "show"])
     def test_disabled(self, name):
-        sent, _, _ = command([FakeGuild(1)], [], name)
+        sent, _, _ = command([LeavingGuild(1)], [], name)
         assert sent == ["Whitelist is disabled."]
 
     @pytest.mark.parametrize("name", [None, "show"])
     def test_lists_ids_with_the_names_of_present_guilds(self, name):
-        sent, _, _ = command([FakeGuild(10, "ten")], [11, 10], name)
+        sent, _, _ = command([LeavingGuild(10, "ten")], [11, 10], name)
         assert sent == ["```\n10 ten\n11```"]
 
 
 class TestAddCommand:
     def test_enabling_leaves_the_other_guilds_after_replying(self):
-        added, other = FakeGuild(10, "addedname"), FakeGuild(20, "othername")
+        added, other = LeavingGuild(10, "addedname"), LeavingGuild(
+            20, "othername"
+        )
         guilds = [added, other]
         sent, log, after = command(guilds, [], "add", "10")
         assert sent == [
@@ -362,25 +362,25 @@ class TestAddCommand:
         assert left(guilds) == [20] and after == [10]
 
     def test_enabling_with_no_other_guild_names_none(self):
-        g = FakeGuild(10, "addedname")
+        g = LeavingGuild(10, "addedname")
         sent, _, _ = command([g], [], "add", "10")
         assert sent == ["Whitelist updated, the whitelist is now enabled."]
         assert not g.left
 
     def test_updating_an_enabled_whitelist_leaves_nobody(self):
-        guilds = [FakeGuild(10), FakeGuild(20)]
+        guilds = [LeavingGuild(10), LeavingGuild(20)]
         sent, _, after = command(guilds, [10], "add", "30")
         assert sent == ["Whitelist updated."]
         assert left(guilds) == [] and after == [10, 30]
 
     def test_already_listed(self):
-        guilds = [FakeGuild(10)]
+        guilds = [LeavingGuild(10)]
         sent, _, after = command(guilds, [10], "add", "10")
         assert sent == ["That guild is already whitelisted."]
         assert left(guilds) == [] and after == [10]
 
     def test_refused_when_it_would_leave_the_invoking_guild(self):
-        here, other = FakeGuild(10), FakeGuild(20)
+        here, other = LeavingGuild(10), LeavingGuild(20)
         sent, _, after = command([here, other], [], "add", "20", invoking=here)
         assert sent == [
             "That would make the bot leave this guild, so nothing was"
@@ -389,14 +389,14 @@ class TestAddCommand:
         assert left([here, other]) == [] and after == []
 
     def test_from_a_dm_there_is_no_guard(self):
-        guilds = [FakeGuild(10), FakeGuild(20)]
+        guilds = [LeavingGuild(10), LeavingGuild(20)]
         sent, _, after = command(guilds, [], "add", "20", invoking=None)
         assert sent[0].startswith("Whitelist updated, the whitelist is now")
         assert left(guilds) == [10] and after == [20]
 
     def test_a_failed_leave_is_logged_and_the_rest_are_left(self, capsys):
-        bad, good = FakeGuild(10, "badname", fail=True), FakeGuild(20)
-        keep = FakeGuild(30)
+        bad, good = LeavingGuild(10, "badname", fail=True), LeavingGuild(20)
+        keep = LeavingGuild(30)
         command([bad, good, keep], [], "add", "30")
         assert good.left and not bad.left
         assert "badname" in capsys.readouterr().err
@@ -404,24 +404,24 @@ class TestAddCommand:
 
 class TestRemoveCommand:
     def test_one_of_several_replies_then_leaves_that_guild(self):
-        guilds = [FakeGuild(10), FakeGuild(11)]
+        guilds = [LeavingGuild(10), LeavingGuild(11)]
         sent, log, after = command(guilds, [10, 11], "remove", "10")
         assert sent == ["Whitelist updated, leaving the guild."]
         assert log[0][0] == "send" and log[1:] == [("leave", 10)]
         assert left(guilds) == [10] and after == [11]
 
     def test_takes_the_last_word_of_the_argument(self):
-        guilds = [FakeGuild(10)]
+        guilds = [LeavingGuild(10)]
         _, _, after = command(guilds, [10, 11], "remove", "name 10")
         assert left(guilds) == [10] and after == [11]
 
     def test_one_of_several_not_present_leaves_nobody(self):
-        guilds = [FakeGuild(12)]
+        guilds = [LeavingGuild(12)]
         sent, _, _ = command(guilds, [10, 11], "remove", "10")
         assert sent == ["Whitelist updated."] and left(guilds) == []
 
     def test_last_id_disables_and_leaves_nobody(self):
-        g = FakeGuild(10)
+        g = LeavingGuild(10)
         sent, _, after = command([g], [10], "remove", "10")
         assert sent == [
             "Whitelist updated. The whitelist is now empty and"
@@ -430,7 +430,7 @@ class TestRemoveCommand:
         assert not g.left and after == []
 
     def test_not_listed(self):
-        g = FakeGuild(11)
+        g = LeavingGuild(11)
         sent, _, after = command([g], [10], "remove", "11")
         assert sent == ["That guild is not whitelisted."]
         assert not g.left and after == [10]

@@ -79,6 +79,12 @@ async def run_and_report(ctx, argv: List[str]) -> None:
         )
 
 
+def _guild_line(bot, guild_id: int) -> str:
+    """`id name` for a guild the bot is in, else the bare id."""
+    guild = bot.get_guild(guild_id)
+    return f"{guild_id} {guild.name}" if guild else str(guild_id)
+
+
 class Developer(commands.Cog):
     def __init__(self, bot: MusicBot):
         self.bot = bot
@@ -170,13 +176,7 @@ class Developer(commands.Cog):
         if not whitelist.enabled:
             await ctx.send("Whitelist is disabled.")
             return
-        lines = []
-        for id_ in whitelist:
-            guild = ctx.bot.get_guild(id_)
-            if guild:
-                lines.append(f"{id_} {guild.name}")
-            else:
-                lines.append(str(id_))
+        lines = [_guild_line(ctx.bot, id_) for id_ in whitelist]
         await ctx.send("```\n" + "\n".join(lines) + "```")
 
     _show_guild_whitelist = _guild_whitelist.command(name="show")(
@@ -189,15 +189,7 @@ class Developer(commands.Cog):
             guild = ctx.bot.get_guild(guild_id)
             if guild is None:
                 continue
-            try:
-                await guild.leave()
-            except Exception:
-                print(
-                    f"Leaving guild {guild.name} failed:",
-                    file=sys.stderr,
-                    flush=True,
-                )
-                print_exc()
+            await ctx.bot._leave(guild)
 
     @_guild_whitelist.command(name="add")
     @commands.check(owner_check)
@@ -222,12 +214,7 @@ class Developer(commands.Cog):
         if change.outcome is Outcome.ENABLED:
             message = "Whitelist updated, the whitelist is now enabled."
             if change.to_leave:
-                lines = []
-                for guild_id in change.to_leave:
-                    guild = ctx.bot.get_guild(guild_id)
-                    lines.append(
-                        f"{guild_id} {guild.name}" if guild else str(guild_id)
-                    )
+                lines = [_guild_line(ctx.bot, g) for g in change.to_leave]
                 message += " Leaving these guilds:\n" + "\n".join(lines)
         else:
             message = "Whitelist updated."
