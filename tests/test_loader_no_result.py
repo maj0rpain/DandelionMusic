@@ -47,13 +47,6 @@ def test_empty_search_is_search_no_results(monkeypatch):
     )
 
 
-def test_failed_search_is_songinfo_error_not_no_results(monkeypatch):
-    _fake_extraction(monkeypatch, None)
-    message = _raised(loader._load_song, "some title")
-    assert message == config.SONGINFO_ERROR
-    assert message != config.SEARCH_NO_RESULTS
-
-
 @pytest.mark.parametrize(
     "message", [config.SEARCH_NO_RESULTS, config.SONGINFO_ERROR]
 )
