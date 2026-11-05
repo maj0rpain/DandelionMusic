@@ -23,8 +23,9 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/bot.py` - `MusicBot`, custom `Context`; user-facing replies go through `ctx.send(...)`, not raw channel sends.
 - `musicbot/admission.py` - request admission: per request kind, the checks, the join and the current controller; every command, button, pick and reaction goes through it.
 - `musicbot/utils.py` - the joining-command marker (`joining_command`), the DJ and owner checks, `CheckError`, and the voice connect port (`connect_to`, `check_voice_permissions`).
-- `musicbot/sessions.py` - `GuildSessions` (`bot.sessions`): each guild's settings and controller, their creation, lookup (`None` when not registered) and disposal.
-- `musicbot/audiocontroller.py` - per-guild controller over the queue: volume, loop, inactivity timer, views, preload sweep; its public methods delegate the start/advance/stop state machine to `Playback`.
+- `musicbot/sessions.py` - `GuildSessions` (`bot.sessions`): each guild's settings, controller and player panel, their creation, lookup (`None` when not registered) and disposal.
+- `musicbot/audiocontroller.py` - per-guild controller over the queue: volume, loop, inactivity timer, preload sweep; its public methods delegate the start/advance/stop state machine to `Playback`.
+- `musicbot/player_panel.py` - `PlayerPanel` (one per guild, built by `GuildSessions`): the destination channel, announcements, the player message, its refresh and its stale-message/expired-token recovery; implements the controller's panel port. `PanelSnapshot` (defined in `musicbot/panel_snapshot.py` so the controller can build one without importing the panel) is the controller's read-only state it draws from.
 - `musicbot/playback.py` - `Playback` (one per controller) and `PlaybackState`: the start token, pending start, picked-next song, playing flag, disconnect guard, the `after=` hop, and when the playlist backup is written; depends only on callables the controller injects, never `bot`, `guild` or `Playlist`.
 - `musicbot/playlist.py` / `musicbot/song.py` - queue/history and per-track metadata.
 - `musicbot/playlists.py` - saved playlists: the only reader/writer of `SavedPlaylist.songs_json` outside the legacy migration in `settings.py`; callers use `PlaylistEntry`/`PlaylistRef`/`PlaylistContents`/`SavedEntry`.
@@ -36,7 +37,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/cached_lookup.py` - `CachedLookup`: a remote lookup's cache, in-flight dedup (shielded), timeout and failure cooldown, around a backend passed in; imports only the standard library.
 - `musicbot/library_browse.py` - the library browse cursor.
 - `musicbot/library_session.py` - `BrowseSession` and `Frame`: the browse cursor plus what the browse message shows (drawn enrichment, attachment key, undo, one synchronous frame per draw); Discord-free. `LibraryBrowseView` is its Discord adapter.
-- `musicbot/views.py` - `OwnedView`: a single-owner view's owner check, silent refusal, message and message edit; `SearchView` and `LibraryView` subclass it.
+- `musicbot/views.py` - `OwnedView`: a single-owner view's owner check, silent refusal, message and message edit; `SearchView` and `LibraryView` subclass it. `MusicButton`: the admission-checked button the player panel and search picks use.
 - `musicbot/settings.py` - SQLAlchemy models, auto-migrations; the `SETTINGS` table of `SettingDescriptor`s is the single place a guild setting is described (its column aside): it drives defaults, conversion, the `d!setting show` embed and the generated `d!setting` subcommands.
 - `musicbot/guild_whitelist.py` - the guild whitelist: admission (`load` -> `Whitelist.admits`), `add`/`remove` returning a `WhitelistChange` (outcome and guilds to leave), and the one-time `GUILD_WHITELIST` env import; the `WhitelistedGuild` table stays in `settings.py`.
 - `musicbot/commands/` - the `music`, `general`, `developer` cogs.
@@ -49,6 +50,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - A new setting is a `Config` class attribute with a comment directly above it (parsed by `get_comments()`).
 - Don't move `_help`/`_help_autocomplete` into `MusicBot`; they stay module-level (`musicbot/bot.py`).
 - discord.py's `after=` callback runs on its audio thread; it only hops to the loop (`call_soon_threadsafe`). `Playback`'s track-ended handling and everything it calls are loop-only (`musicbot/playback.py`).
+- `musicbot/audiocontroller.py` imports nothing from `discord.ui`, and sends no user-facing message; the player panel does (a test asserts the import).
 - `musicbot/library_browse.py` imports only `musicbot.library` and `typing` (`tests/test_library_browse.py` asserts it) - don't add imports.
 - `musicbot/library_session.py` imports only `musicbot.library`, `musicbot.library_browse` and `typing`, plus `musicbot.library_metadata` inside `if TYPE_CHECKING:` only (`tests/test_library_session.py` asserts it) - don't add imports.
 

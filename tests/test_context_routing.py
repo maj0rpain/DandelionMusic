@@ -34,16 +34,15 @@ def make_ctx(response_done):
     return ctx, interaction
 
 
-def make_send_ctx(
-    monkeypatch, interaction, controller_channel=None, registered=True
-):
-    """A Context, its patched parent send, and its controller.
+def make_send_ctx(monkeypatch, interaction, destination=None, registered=True):
+    """A Context, its patched parent send, and its guild's panel.
 
-    registered=False: no controller is registered for the guild
-    (bot.sessions returns None) and None is returned in the controller
-    position. registered=True: a controller is registered.
-    controller_channel=None: that registered controller has no command
-    channel.
+    registered=False: no panel is registered for the guild
+    (bot.sessions returns None) and None is returned in the panel
+    position. registered=True: a fake panel is: it carries the buttons
+    unless the reply is ephemeral, has a view, or is in another channel
+    than `destination` (None: no destination set yet), and attaches by
+    sending with the view "VIEW".
     """
     ctx = object.__new__(Context)
     ctx.interaction = interaction
@@ -52,19 +51,26 @@ def make_send_ctx(
     parent = AsyncMock(return_value="sent")
     monkeypatch.setattr(commands.Context, "send", parent)
 
-    async def attach_view(send):
+    async def attach(send):
         return await send("VIEW")
 
-    controller = None
+    def carries_buttons(*, channel, ephemeral, has_view):
+        return (
+            not ephemeral
+            and not has_view
+            and (destination is None or channel == destination)
+        )
+
+    panel = None
     if registered:
-        controller = SimpleNamespace(
-            command_channel=controller_channel,
-            attach_view=AsyncMock(side_effect=attach_view),
+        panel = SimpleNamespace(
+            carries_buttons=carries_buttons,
+            attach=AsyncMock(side_effect=attach),
         )
     ctx.bot = SimpleNamespace(
-        sessions=SimpleNamespace(controller=lambda guild: controller)
+        sessions=SimpleNamespace(panel=lambda guild: panel)
     )
-    return ctx, parent, controller
+    return ctx, parent, panel
 
 
 def test_response_done_sends_followup():
@@ -101,7 +107,7 @@ def test_no_interaction_view_path_uses_parent_send(monkeypatch):
     parent.assert_awaited_once_with("x", view="VIEW")
 
 
-def test_no_controller_with_interaction_sends_message(monkeypatch):
+def test_no_panel_with_interaction_sends_message(monkeypatch):
     interaction = make_interaction(False)
     ctx, parent, _ = make_send_ctx(monkeypatch, interaction, registered=False)
     assert run(ctx.send("x")) == "first"
@@ -110,7 +116,7 @@ def test_no_controller_with_interaction_sends_message(monkeypatch):
     parent.assert_not_awaited()
 
 
-def test_no_controller_without_interaction_uses_parent_send(monkeypatch):
+def test_no_panel_without_interaction_uses_parent_send(monkeypatch):
     ctx, parent, _ = make_send_ctx(monkeypatch, None, registered=False)
     assert run(ctx.send("x", tts=True)) == "sent"
     parent.assert_awaited_once_with("x", tts=True)
@@ -123,10 +129,10 @@ def test_no_controller_without_interaction_uses_parent_send(monkeypatch):
 def test_other_triggers_skip_the_view_without_interaction(
     monkeypatch, kwargs, channel
 ):
-    ctx, parent, controller = make_send_ctx(monkeypatch, None, channel)
+    ctx, parent, panel = make_send_ctx(monkeypatch, None, channel)
     assert run(ctx.send("x", **kwargs)) == "sent"
     parent.assert_awaited_once_with("x", **kwargs)
-    controller.attach_view.assert_not_awaited()
+    panel.attach.assert_not_awaited()
 
 
 @pytest.mark.parametrize(
@@ -137,11 +143,11 @@ def test_other_triggers_skip_the_view_with_interaction(
     monkeypatch, kwargs, channel
 ):
     interaction = make_interaction(False)
-    ctx, parent, controller = make_send_ctx(monkeypatch, interaction, channel)
+    ctx, parent, panel = make_send_ctx(monkeypatch, interaction, channel)
     assert run(ctx.send("x", **kwargs)) == "first"
     interaction.response.send_message.assert_awaited_once_with("x", **kwargs)
     parent.assert_not_awaited()
-    controller.attach_view.assert_not_awaited()
+    panel.attach.assert_not_awaited()
 
 
 def test_reference_is_stripped_for_the_parent_send(monkeypatch):
@@ -177,7 +183,7 @@ def test_response_send_message_with_interaction(monkeypatch):
 def test_response_send_message_without_interaction_goes_via_send(
     monkeypatch,
 ):
-    ctx, parent, controller = make_send_ctx(monkeypatch, None)
+    ctx, parent, panel = make_send_ctx(monkeypatch, None)
     assert run(ctx.response_send_message("x")) == "sent"
-    controller.attach_view.assert_awaited_once()
+    panel.attach.assert_awaited_once()
     parent.assert_awaited_once_with("x", view="VIEW")

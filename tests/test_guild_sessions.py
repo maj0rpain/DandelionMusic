@@ -13,6 +13,7 @@ import pytest
 
 from musicbot.sessions import GuildSessions
 from controller_helpers import sleep_forever
+from discord_fakes import FakePanel
 from helpers import run
 
 
@@ -39,8 +40,9 @@ class FakeSettings:
 
 
 class FakeController:
-    def __init__(self, guild):
+    def __init__(self, guild, panel=None):
         self.guild = guild
+        self.panel = panel
         self.disposed = False
 
     async def dispose(self, reason="left guild"):
@@ -54,10 +56,10 @@ class Factory:
         self.fail = False
         self.built = []
 
-    def __call__(self, guild):
+    def __call__(self, guild, panel):
         if self.fail:
             raise RuntimeError("controller factory failed")
-        controller = FakeController(guild)
+        controller = FakeController(guild, panel)
         self.built.append(controller)
         return controller
 
@@ -73,7 +75,7 @@ def factory():
 
 @pytest.fixture
 def sessions(factory):
-    return GuildSessions(factory, load_settings)
+    return GuildSessions(FakePanel, factory, load_settings)
 
 
 def test_get_or_create_registers_settings_and_a_controller(sessions):
@@ -126,7 +128,9 @@ def test_discard_disposes_the_controller_and_drops_both_halves(controller):
     # a real AudioController (tests/controller_seam.py), so dispose()
     # is the real one: its timer and pending tasks must not survive
     guild = controller.guild
-    sessions = GuildSessions(lambda g: controller, load_settings)
+    sessions = GuildSessions(
+        FakePanel, lambda g, panel: controller, load_settings
+    )
 
     async def scenario():
         controller.bot.loop = asyncio.get_running_loop()
@@ -257,8 +261,8 @@ def test_on_guild_remove_discards_the_guilds_session(sessions):
 class ResettableController(FakeController):
     """Enough of a controller for d!reset: dispose() disconnects."""
 
-    def __init__(self, guild):
-        super().__init__(guild)
+    def __init__(self, guild, panel=None):
+        super().__init__(guild, panel)
         self.disconnects = []
 
     async def udisconnect(self, reason):
@@ -301,7 +305,7 @@ def run_reset(guild, channel):
     from musicbot.commands.general import General
     from musicbot.utils import CheckError
 
-    sessions = GuildSessions(ResettableController, load_settings)
+    sessions = GuildSessions(FakePanel, ResettableController, load_settings)
     sent = []
 
     async def defer():
@@ -407,7 +411,7 @@ def test_button_plugin_ignores_a_message_from_an_unregistered_guild():
         absolutely_ready = asyncio.get_running_loop().create_future()
         absolutely_ready.set_result(True)
         bot = types.SimpleNamespace(
-            sessions=GuildSessions(FakeController, load_settings),
+            sessions=GuildSessions(FakePanel, FakeController, load_settings),
             user=object(),
             absolutely_ready=absolutely_ready,
         )
@@ -422,3 +426,68 @@ def test_button_plugin_ignores_a_message_from_an_unregistered_guild():
     run(scenario())
 
     assert reactions == []
+
+
+def test_the_panel_is_built_before_the_controller_and_passed_to_it(
+    sessions, factory
+):
+    guild = FakeGuild(1)
+
+    controller = run(sessions.get_or_create(guild))
+
+    assert controller.panel is sessions.panel(guild)
+    assert isinstance(controller.panel, FakePanel)
+
+
+def test_a_guild_without_a_session_has_no_panel(sessions):
+    assert sessions.panel(FakeGuild(1)) is None
+    assert list(sessions.panels()) == []
+
+
+def test_panels_iterates_every_registered_panel(sessions):
+    guilds = [FakeGuild(1), FakeGuild(2)]
+
+    async def scenario():
+        for guild in guilds:
+            await sessions.get_or_create(guild)
+
+    run(scenario())
+
+    assert list(sessions.panels()) == [sessions.panel(g) for g in guilds]
+
+
+def test_discard_drops_the_panel(sessions):
+    guild = FakeGuild(1)
+
+    async def scenario():
+        await sessions.get_or_create(guild)
+        await sessions.discard(guild)
+
+    run(scenario())
+
+    assert sessions.panel(guild) is None
+
+
+def test_reset_replaces_the_panel_with_the_controller(sessions):
+    guild = FakeGuild(1)
+
+    async def scenario():
+        await sessions.get_or_create(guild)
+        old_panel = sessions.panel(guild)
+        new = await sessions.reset(guild)
+        return old_panel, new
+
+    old_panel, new = run(scenario())
+
+    assert sessions.panel(guild) is not old_panel
+    assert new.panel is sessions.panel(guild)
+
+
+def test_a_failing_controller_factory_registers_no_panel(sessions, factory):
+    guild = FakeGuild(1)
+    factory.fail = True
+
+    with pytest.raises(RuntimeError):
+        run(sessions.get_or_create(guild))
+
+    assert sessions.panel(guild) is None

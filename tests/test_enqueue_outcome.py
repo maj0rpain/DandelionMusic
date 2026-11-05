@@ -19,14 +19,6 @@ from controller_helpers import (
 )
 
 
-class _Channel:
-    def __init__(self):
-        self.sent = []
-
-    async def send(self, *args, **kwargs):
-        self.sent.append((args, kwargs))
-
-
 def _no_idle_timer(controller, monkeypatch):
     async def start_idle_timer(restart=False):
         pass
@@ -39,7 +31,6 @@ def test_a_first_track_whose_preload_fails_is_start_failed(
 ):
     _fake_ffmpeg(monkeypatch)
     _no_idle_timer(controller, monkeypatch)
-    controller.command_channel = _Channel()
     stub_loader.results["preload"] = stub_loader.Preload.FAILED
     stub_loader.results["load_song"] = LoadResult(
         [_song(controller, "a")], True
@@ -49,7 +40,7 @@ def test_a_first_track_whose_preload_fails_is_start_failed(
     _run(controller, lambda: Music(None)._play_song(ctx, "a"))
 
     assert sent == []
-    assert len(controller.command_channel.sent) == 1
+    assert len(controller.panel.skipped) == 1
 
 
 def test_two_concurrent_enqueues_while_idle_start_then_queue(

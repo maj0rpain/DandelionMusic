@@ -392,7 +392,6 @@ def test_the_command_acts_on_the_controller_enter_returns():
     run(cog.cog_before_invoke(ctx))
     assert ctx.audiocontroller is not first
     assert ctx.audiocontroller is ctx.bot.sessions.controller(guild)
-    assert ctx.audiocontroller.command_channel is ctx
 
 
 def test_command_level_checks_read_the_controller_off_the_context():
