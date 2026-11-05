@@ -33,7 +33,7 @@ from controller_helpers import (
 )
 from controller_seam import PlaybackVoiceClient, StubLoader, controller_seam
 from db_seam import in_memory_db
-from helpers import run
+from helpers import imported_names, run
 
 MIX = playlists.PlaylistRef("1234", "mix")
 
@@ -2115,15 +2115,7 @@ def test_the_controller_imports_nothing_from_discord_ui():
     import musicbot.audiocontroller as module
 
     tree = ast.parse(Path(module.__file__).read_text())
-    imported = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported += [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom):
-            base = node.module or ""
-            imported.append(base)
-            if base == "discord":
-                imported += [f"discord.{a.name}" for a in node.names]
+    imported = imported_names(module)
 
     assert [m for m in imported if m.startswith("discord.ui")] == []
     assert "musicbot.player_panel" not in imported

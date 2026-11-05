@@ -10,13 +10,11 @@ pins pytest with no asyncio_mode, so an async test here would be
 collected, skipped with a warning, and silently pass.
 """
 
-import ast
-from pathlib import Path
-
 import pytest
 
 from musicbot import library, library_browse
 
+from helpers import imported_names
 from library_fakes import library_song
 
 # Album contents are in the filename order build_index() produces, and
@@ -361,25 +359,8 @@ class TestTheSeam:
     having already imported discord first.
     """
 
-    @staticmethod
-    def _imports(module) -> set:
-        source = Path(module.__file__).read_text(encoding="utf-8")
-        names = set()
-        for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.Import):
-                names.update(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                # `from musicbot import library` names a module and
-                # `from typing import List` names an object inside
-                # one; recording both shapes covers either
-                names.add(node.module)
-                names.update(
-                    f"{node.module}.{alias.name}" for alias in node.names
-                )
-        return names
-
     def test_the_cursor_imports_nothing_but_typing_and_the_index(self):
-        imports = self._imports(library_browse)
+        imports = imported_names(library_browse)
         assert {name.split(".")[0] for name in imports} == {
             "typing",
             "musicbot",

@@ -9,6 +9,7 @@ from pathlib import Path
 from musicbot import library, library_browse, library_session
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 from musicbot.library_session import BrowseSession, stat_fields
+from helpers import imported_names
 from library_fakes import library_song
 
 INDEX = {
@@ -275,24 +276,7 @@ class TestStatFieldBuilder:
 
 class TestTheSeam:
     def test_imports_are_pinned(self):
-        source = Path(library_session.__file__).read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        guarded = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.If) and (
-                getattr(node.test, "id", None) == "TYPE_CHECKING"
-            ):
-                for inner in ast.walk(node):
-                    guarded.add(id(inner))
-        names = set()
-        for node in ast.walk(tree):
-            if id(node) in guarded:
-                continue
-            if isinstance(node, ast.Import):
-                names.update(a.name for a in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                names.add(node.module)
-                names.update(f"{node.module}.{a.name}" for a in node.names)
+        names = imported_names(library_session, skip_type_checking=True)
         assert {n for n in names if n.startswith("musicbot")} == {
             "musicbot",
             "musicbot.library",
@@ -301,6 +285,9 @@ class TestTheSeam:
         assert {n.split(".")[0] for n in names} == {"typing", "musicbot"}
         # and the one allowed exception really is TYPE_CHECKING-only,
         # and is all that block holds
+        tree = ast.parse(
+            Path(library_session.__file__).read_text(encoding="utf-8")
+        )
         blocks = [
             n
             for n in tree.body
