@@ -123,9 +123,7 @@ class BrowseCursor:
                 None,
             )
         if self.album is None:
-            entries = sorted(
-                self.index.get(self.artist, {}).keys(), key=str.casefold
-            )
+            entries = library.albums_of(self.index, self.artist)
             return Screen(
                 entries,
                 entries,

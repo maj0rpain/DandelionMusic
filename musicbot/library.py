@@ -134,19 +134,26 @@ def index_generation() -> int:
     return _generation
 
 
+def albums_of(index: LibraryIndex, artist: str) -> List[str]:
+    """The artist's album names in browse order (str.casefold); empty
+    for a missing artist. The one album-ordering rule, shared by the
+    browser's listing and sample_track."""
+    return sorted(index.get(artist, {}), key=str.casefold)
+
+
 def sample_track(
     index: LibraryIndex, artist: str, album: Optional[str]
 ) -> Optional[Tuple[str, str, str]]:
     """One track to read tags and artwork off, for a scope of an index
     snapshot: the album's first song at the album level, the first song
-    of the artist's first album (ordered by str.casefold, as the
+    of the artist's first album (in albums_of order, as the
     browser lists them) at the artist level. None for a missing artist
     or album, or one with no songs."""
     albums = index.get(artist)
     if not albums:
         return None
     if album is None:
-        album = min(albums, key=str.casefold)
+        album = albums_of(index, artist)[0]
     songs = albums.get(album)
     if not songs:
         return None

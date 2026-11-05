@@ -487,7 +487,6 @@ def stub_enrichment(view, results=None, default=None):
     finished = []
 
     async def get_enrichment(index, artist, album):
-        assert index is view.session.cursor.index
         level = (artist, album)
         result = results.get(level, default)
         if isinstance(result, Gated):

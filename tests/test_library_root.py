@@ -103,7 +103,7 @@ def test_a_build_that_raises_leaves_the_generation(root, monkeypatch):
     def boom(*a, **kw):
         raise RuntimeError("walk failed")
 
-    monkeypatch.setattr(library, "_make_song", boom)
+    monkeypatch.setattr(library, "read_tags", boom)
     with pytest.raises(RuntimeError):
         library.build_index()
     assert library.index_generation() == before
