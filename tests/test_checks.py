@@ -220,9 +220,10 @@ def slash_ctx(guild, author_in, **kwargs):
 
 
 class TestMusicBeforeInvoke:
-    """Music.cog_before_invoke defers a slash command just before a
-    join it needs, so a slow connect cannot time the interaction
-    out, and leaves every other command as it was."""
+    """Music.cog_before_invoke directs the player panel to the
+    command's channel, and a defer in the command body after it does
+    not raise. The deferral before a join is covered by the
+    tests/test_admission.py table and TestJoiningCommand."""
 
     def test_directs_the_panel_to_the_channel_not_the_context(self):
         guild = VoiceGuild()
@@ -345,8 +346,9 @@ def test_the_joining_music_commands_are_exactly_the_marked_ones():
 
 
 class TestNonJoiningCommand:
-    """An unmarked music command never touches voice, so while the bot
-    is idle it has no voice requirement to refuse on."""
+    """An unmarked music command never touches voice: it does not
+    connect or move the bot. Its lack of a voice requirement is
+    covered by the tests/test_admission.py table."""
 
     def test_does_not_connect_while_idle(self):
         guild = VoiceGuild()
