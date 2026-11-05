@@ -13,6 +13,12 @@ import types
 from helpers import run
 
 
+async def sleep_forever(started):
+    # a task that records itself in `started`, then never finishes
+    started.append(asyncio.current_task())
+    await asyncio.sleep(3600)
+
+
 async def _settle(controller=None):
     # lets the preload task the controller scheduled run to the end;
     # given the controller, waits until it has no task left pending

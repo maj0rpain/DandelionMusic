@@ -29,6 +29,7 @@ from controller_helpers import (
     _song,
     _songs,
     _titles,
+    sleep_forever,
 )
 from controller_seam import PlaybackVoiceClient, StubLoader, controller_seam
 from db_seam import in_memory_db
@@ -540,11 +541,7 @@ def test_dispose_cancels_the_timer_and_every_pending_task(
         timer_task = controller.timer._task
         pending = []
 
-        async def sleep_forever():
-            pending.append(asyncio.current_task())
-            await asyncio.sleep(3600)
-
-        controller.add_task(sleep_forever())
+        controller.add_task(sleep_forever(pending))
         await _settle()
         (pending_task,) = pending
 

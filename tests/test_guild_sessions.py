@@ -12,6 +12,7 @@ import discord
 import pytest
 
 from musicbot.sessions import GuildSessions
+from controller_helpers import sleep_forever
 from helpers import run
 
 
@@ -132,11 +133,7 @@ def test_discard_disposes_the_controller_and_drops_both_halves(controller):
         timer_task = controller.timer._task
         started = []
 
-        async def sleep_forever():
-            started.append(asyncio.current_task())
-            await asyncio.sleep(3600)
-
-        controller.add_task(sleep_forever())
+        controller.add_task(sleep_forever(started))
         await asyncio.sleep(0)
         (pending,) = started
 

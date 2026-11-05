@@ -562,7 +562,7 @@ class AudioController(object):
         discord.py refuse play() and the controller disconnect (#24).
         Reports NOTHING_TO_RESTORE, playing nothing, when there is no
         queue to restore."""
-        if self.playback.state is not PlaybackState.IDLE:
+        if not self.is_idle():
             return RestoreResult.REFUSED_WHILE_ACTIVE
         self.load_pickle_playlist()
         if not self.playlist:
@@ -687,7 +687,7 @@ class AudioController(object):
         # seconds of it on a network-mounted library. One extra round
         # trip buys that back; loading a single track costs about
         # 1.5ms.
-        if self.playback.state is PlaybackState.IDLE and len(tracks) > 1:
+        if self.is_idle() and len(tracks) > 1:
             songs += await loader.load_local_songs(tracks[:1])
             tail = tracks[1:]
             if songs[0] is not None:
@@ -707,7 +707,8 @@ class AudioController(object):
     def add_task(self, coro: Coroutine):
         # loop only: discord.py's audio thread never reaches this - its
         # after= callback only hops to the loop (see
-        # _track_end_callback()), and next_song() runs on the loop
+        # Playback._track_end_callback in musicbot/playback.py), and
+        # Playback._on_track_end runs on the loop
         task = self.bot.loop.create_task(coro)
         self._tasks.add(task)
         task.add_done_callback(self._tasks.discard)
@@ -794,7 +795,7 @@ class AudioController(object):
                 not self.guild.voice_client.is_playing()
                 and self.playback.state is not PlaybackState.STARTING
             )
-            or all(m.bot for m in self.guild.voice_client.channel.members)
+            or not self._humans_present()
         ):
             await self.udisconnect("inactivity timeout")
 
