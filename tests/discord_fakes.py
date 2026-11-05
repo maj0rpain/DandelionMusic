@@ -135,10 +135,10 @@ class VoiceGuild:
 class FakeInteraction:
     """A component click. Records `deferred`, `messages` (direct
     responses) and `followups`. Its client answers get_context with
-    the context and has no controller or player panel for any guild
-    (unless a `panel` is given), so a click ends after its action."""
+    the context and has no controller for any guild, so a click ends
+    after its action."""
 
-    def __init__(self, ctx, custom_id="x", user_id=1, panel=None):
+    def __init__(self, ctx, custom_id="x", user_id=1):
         self.guild = ctx.guild
         self.user = types.SimpleNamespace(id=user_id)
         self.data = {"custom_id": custom_id}
@@ -168,9 +168,7 @@ class FakeInteraction:
 
         self.client = types.SimpleNamespace(
             get_context=get_context,
-            sessions=types.SimpleNamespace(
-                controller=lambda guild: None, panel=lambda guild: panel
-            ),
+            sessions=types.SimpleNamespace(controller=lambda guild: None),
         )
 
 
