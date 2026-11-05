@@ -204,8 +204,8 @@ def spotify(rig):
 
 
 @pytest.fixture
-def no_spotify():
-    pass
+def no_spotify(rig):
+    rig.spotify_client = None
 
 
 @pytest.fixture
