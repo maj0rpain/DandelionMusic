@@ -4,41 +4,20 @@ Synchronous throughout, like the cursor's tests.
 """
 
 import ast
-from collections import namedtuple
 from pathlib import Path
 
 from musicbot import library, library_browse, library_session
-from musicbot.library import LibrarySong
+from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 from musicbot.library_session import BrowseSession, stat_fields
-
-Art = namedtuple("Art", "url data extension")
-Ext = namedtuple(
-    "Ext", "listeners playcount tags popularity followers " "release_date"
-)
-Enr = namedtuple("Enr", "stats art")
-
-
-def song(title, **kw):
-    return LibrarySong(
-        filename=kw.get("filename", title + ".flac"),
-        title=title,
-        duration=kw.get("duration", 60),
-        year=kw.get("year"),
-        genre=kw.get("genre"),
-        fmt="FLAC",
-        bitrate=None,
-        sample_rate=None,
-        bit_depth=None,
-    )
-
+from library_fakes import library_song
 
 INDEX = {
     "Radiohead": {
-        "OK Computer": [song("Airbag", year=1997, genre="Rock")],
-        "Kid A": [song("Zoo")],
+        "OK Computer": [library_song("Airbag", year=1997, genre="Rock")],
+        "Kid A": [library_song("Zoo")],
     },
-    "The Beatles": {"Abbey Road": [song("Come Together")]},
-    "Aphex Twin": {"Drukqs": [song("Avril")]},
+    "The Beatles": {"Abbey Road": [library_song("Come Together")]},
+    "Aphex Twin": {"Drukqs": [library_song("Avril")]},
 }
 
 
@@ -60,8 +39,13 @@ def at_album():
     return s
 
 
-EMBEDDED = Enr(None, Art(None, b"png", "png"))
-URL = Enr(None, Art("http://x/y.jpg", None, None))
+EMBEDDED = Enrichment(
+    stats=None, art=ArtInfo(url=None, data=b"png", extension="png")
+)
+URL = Enrichment(
+    stats=None,
+    art=ArtInfo(url="http://x/y.jpg", data=None, extension=None),
+)
 
 
 class TestUndo:
@@ -108,7 +92,17 @@ class TestStaleness:
         s = at_artist()
         s.offer_enrichment(
             s.enter_level(),
-            Enr(Ext(5000, None, (), None, None, None), EMBEDDED.art),
+            Enrichment(
+                stats=ExternalStats(
+                    listeners=5000,
+                    playcount=None,
+                    tags=(),
+                    popularity=None,
+                    followers=None,
+                    release_date=None,
+                ),
+                art=EMBEDDED.art,
+            ),
         )
         assert s.frame().attachment is not None
         s.back()
@@ -215,7 +209,17 @@ class TestFrameText:
         s = at_album()
         s.offer_enrichment(
             s.enter_level(),
-            Enr(Ext(1500, None, ("a", "b"), 80, None, None), None),
+            Enrichment(
+                stats=ExternalStats(
+                    listeners=1500,
+                    playcount=None,
+                    tags=("a", "b"),
+                    popularity=80,
+                    followers=None,
+                    release_date=None,
+                ),
+                art=None,
+            ),
         )
         f = s.frame()
         assert f.description == "*a · b*"
@@ -224,7 +228,7 @@ class TestFrameText:
 
     def test_long_names_are_trimmed(self):
         name = "x" * 300
-        s = session({name: {name: [song("s")]}})
+        s = session({name: {name: [library_song("s")]}})
         s.descend(name)
         f = s.frame()
         assert f.title == "\U0001f464 " + "x" * 252 + "…"
@@ -331,7 +335,7 @@ class TestTrimAndFormat:
 
     def test_non_bmp_title_fits_the_embed_title_limit(self):
         name = "x" + "\U0001f600" * 255
-        s = session({name: {"Album": [song("S")]}})
+        s = session({name: {"Album": [library_song("S")]}})
         s.descend(name)
         title = s.frame().title
         assert len(title.encode("utf-16-le")) // 2 <= 256
@@ -339,7 +343,7 @@ class TestTrimAndFormat:
 
     def test_footer_breadcrumb_is_not_trimmed(self):
         name = "x" * 255
-        s = session({name: {"Album": [song("S")]}})
+        s = session({name: {"Album": [library_song("S")]}})
         s.descend(name)
         assert name in s.frame().footer
 
@@ -348,7 +352,17 @@ class TestTrimAndFormat:
             s = at_album()
             s.offer_enrichment(
                 s.enter_level(),
-                Enr(Ext(value, None, (), None, None, None), None),
+                Enrichment(
+                    stats=ExternalStats(
+                        listeners=value,
+                        playcount=None,
+                        tags=(),
+                        popularity=None,
+                        followers=None,
+                        release_date=None,
+                    ),
+                    art=None,
+                ),
             )
             return dict(s.frame().fields)["Listeners"]
 

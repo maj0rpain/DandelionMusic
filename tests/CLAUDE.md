@@ -28,7 +28,7 @@ Race tests drive `Playback` through this controller seam (the fake voice port an
 
 Import each shared test-helper module (listed below) in a single `from <module> import ...` statement, in one final block after the third-party, `config` and `musicbot` imports. The one exception: where the import depends on setup code (a `sys.path` or monkeypatch prelude), the helper block, still one block, goes directly after that setup code.
 
-A shared test-helper module is any of `discord_fakes`, `helpers`, `developer_fakes`, `setting_fakes`, `controller_seam`, `controller_helpers` and `db_seam`. No two of them define the same top-level class, function or module-level variable, and no class, function or module-level variable in a test module takes a public top-level name of one of them: a fake whose shape differs takes a distinct, descriptive name (`EditingInteraction`, `CountingVoiceChannel`, `RespondedInteraction`), and one with the same shape imports the shared one. `tests/test_fake_names.py` asserts both.
+A shared test-helper module is any of `discord_fakes`, `helpers`, `developer_fakes`, `setting_fakes`, `controller_seam`, `controller_helpers`, `db_seam` and `library_fakes`. No two of them define the same top-level class, function or module-level variable, and no class, function or module-level variable in a test module takes a public top-level name of one of them: a fake whose shape differs takes a distinct, descriptive name (`EditingInteraction`, `CountingVoiceChannel`, `RespondedInteraction`), and one with the same shape imports the shared one. `tests/test_fake_names.py` asserts both.
 
 ## Subprocess probes
 
