@@ -10,15 +10,13 @@ from discord import app_commands
 from discord.ext import commands
 
 from config import config
-from musicbot import library, library_metadata
+from musicbot import admission, library, library_metadata
 from musicbot.bot import MusicBot
 from musicbot.utils import (
     CheckError,
     get_audiocontroller,
     owner_check,
-    join_voice,
     joining_command,
-    play_check,
 )
 from musicbot.library_session import (
     KIND_EMOJI,
@@ -207,13 +205,13 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
     # placeholder above is a visible message now, so anything
     # escaping here leaves it saying "Queueing..." forever -
     # discord.py logs the traceback and the user is told nothing at
-    # all. join_voice() turns a failed connect into a CheckError, so
+    # all. enter() turns a failed connect into a CheckError, so
     # it is reported as one rather than as a song-info error.
     try:
-        await play_check(ctx)
-        await join_voice(ctx)
+        admitted = await admission.check(ctx, admission.RequestKind.PICK)
+        controller = await admitted.enter()
         tracks = [library.song_uri(*triple) for triple in triples]
-        songs = await ctx.audiocontroller.process_local_tracks(
+        songs = await controller.process_local_tracks(
             tracks, source, user=ctx.author
         )
     except CheckError as e:

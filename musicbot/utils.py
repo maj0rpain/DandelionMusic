@@ -5,7 +5,6 @@ import sys
 import asyncio
 import discord
 import subprocess
-from traceback import print_exc
 from subprocess import CalledProcessError, check_output
 from typing import (
     TYPE_CHECKING,
@@ -176,8 +175,8 @@ def get_settings(ctx: Context) -> "GuildSettings":
     until on_ready has loaded a guild's settings, every path that
     could find its controller missing finds its settings missing
     too. Guarding only the controller just moved the
-    KeyError one line down - play_check() reads settings immediately
-    after Music.cog_check() has resolved the controller."""
+    KeyError one line down - admission.check reads settings immediately
+    after resolving the controller."""
     sett = ctx.bot.sessions.settings(ctx.guild)
     if sett is None:
         raise CheckError(config.BOT_NOT_READY)
@@ -219,88 +218,18 @@ async def owner_check(ctx: Context):
     raise NotOwner("You do not own this bot.")
 
 
-async def voice_check(ctx: Context):
-    """Check if the user can use the bot now. Only refuses: a bot
-    sitting in a channel with only bots admits the user, and
-    join_voice() moves it later."""
-    bot_vc = ctx.guild.voice_client
-    if not bot_vc:
-        # the bot is free
-        return True
-
-    author_voice = ctx.author.voice
-    if author_voice:
-        if author_voice.channel == bot_vc.channel:
-            return True
-
-        if all(m.bot for m in bot_vc.channel.members):
-            # current channel doesn't have any user in it
-            return True
-
-    # Admins and the application owner always pass; a DJ passes only
-    # when the guild has set a DJ role and the member holds it. With no
-    # DJ role set, nobody else bypasses (EXTRA_OWNERS included).
-    if await _admin_or_owner(ctx):
-        return True
-    if _holds_role(ctx, get_settings(ctx).dj_role):
-        return True
-
-    raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
-
-
 def joining_command(func):
     """Marks a command as a joining command (GLOSSARY.md): one that
     may bring the bot into the invoker's voice channel, or move it
-    there, before it runs or later, when a pick in a view it opened
+    there, when it runs or later, when a pick in a view it opened
     acts in its name. A command that opens a view whose picks may
     later join voice must carry the marker too: a pick joins through
     that command's context (a library search or browse pick) or
-    through its own join() override (a search pick). Opt-in: a
+    is admitted as RequestKind.PICK (a search pick). Opt-in: a
     command without it never joins. Place it below the command
     decorator, like a check."""
     func._joining_command = True
     return func
-
-
-def join_needed(ctx: Context) -> bool:
-    """Whether the bot has to join the user's voice channel before a
-    joining command, or a pick acting in its name, runs: it has no
-    voice client (a connect), or user_must_be_in_vc is on, its channel
-    has only bots and the user is in another one (a move). Only a
-    joining command ever needs to: when ctx.command is set but not
-    marked with @joining_command, this is False and the command
-    answers without touching voice. A button's context has no command,
-    so this reads only the voice state; a button decides in its own
-    code whether to ask at all."""
-    command = getattr(ctx, "command", None)
-    if command is not None and not getattr(
-        command.callback, "_joining_command", False
-    ):
-        return False
-    bot_vc = ctx.guild.voice_client
-    if not bot_vc:
-        return True
-    if not get_settings(ctx).user_must_be_in_vc:
-        return False
-    author_voice = ctx.author.voice
-    return (
-        author_voice is not None
-        and author_voice.channel != bot_vc.channel
-        and all(m.bot for m in bot_vc.channel.members)
-    )
-
-
-def join_target(ctx: Context) -> Optional[discord.VoiceChannel]:
-    """The channel the bot has to join or move to, or None when
-    join_needed() says no join is needed. Raises CheckError
-    (USER_NOT_IN_VC_MESSAGE) when a join is needed but the author
-    is not in voice."""
-    if not join_needed(ctx):
-        return None
-    author_voice = ctx.author.voice
-    if not author_voice:
-        raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
-    return author_voice.channel
 
 
 def check_voice_permissions(
@@ -322,64 +251,6 @@ async def connect_to(guild: discord.Guild, channel: discord.VoiceChannel):
         await asyncio.sleep(1)
     else:
         await channel.connect(reconnect=True, timeout=VC_CONNECT_TIMEOUT)
-
-
-def _check_command_channel(ctx: Context, sett):
-    """Refuses a command or button used outside the guild's command
-    channel, when one is set."""
-    cm_channel = sett.command_channel
-    if cm_channel is not None and int(cm_channel) != ctx.channel.id:
-        raise CheckError(config.WRONG_CHANNEL_MESSAGE)
-
-
-async def play_check(ctx: Context):
-    """Refuses a music command or a search pick that may not run.
-    Never touches voice: join_voice() does that once every check has
-    passed. Player buttons use player_check() instead."""
-
-    sett = get_settings(ctx)
-    _check_command_channel(ctx, sett)
-
-    target = join_target(ctx)
-    if target is not None:
-        check_voice_permissions(ctx.guild, target)
-
-    if ctx.guild.voice_client and sett.user_must_be_in_vc:
-        return await voice_check(ctx)
-
-    return True
-
-
-async def player_check(ctx: Context):
-    """Refuses a player button that may not run. A player button
-    never joins voice, so it is refused while the bot has no voice
-    client (a stale player view), and never by play_check()'s join
-    refusals; the command channel and voice_check() still apply."""
-    if not ctx.guild.voice_client:
-        raise CheckError(config.NOT_CONNECTED_MESSAGE)
-
-    sett = get_settings(ctx)
-    _check_command_channel(ctx, sett)
-
-    if sett.user_must_be_in_vc:
-        return await voice_check(ctx)
-
-    return True
-
-
-async def join_voice(ctx: Context):
-    """Connects or moves the bot to the user's voice channel when
-    join_needed() says so, and does nothing otherwise. A failed
-    connect or move is logged and becomes a CheckError, so it reaches
-    on_command_error (or a button's refusal) like any other."""
-    target = join_target(ctx)
-    if target is None:
-        return
-    try:
-        await connect_to(ctx.guild, target)
-    except (asyncio.TimeoutError, discord.ClientException):
-        print_exc(file=sys.stderr)
-        raise CheckError(config.VOICE_CONNECT_FAILED)
 
 
 def get_emoji(bot: MusicBot, string: str) -> Optional[Union[str, Emoji]]:
