@@ -93,7 +93,7 @@ class AudioController(object):
 
     @property
     def current_song(self) -> Optional[Song]:
-        if self.is_active():
+        if self.is_active() and self.playlist:
             return self.playlist[0]
         return None
 
@@ -173,7 +173,7 @@ class AudioController(object):
             queue_empty=len(self.playlist) == 0,
             loop_mode=self.playlist.loop,
             volume=self.volume,
-            current_song=self.playlist[0] if self.playlist else None,
+            current_song=self.current_song,
         )
 
     def queue_embed(self) -> discord.Embed:
