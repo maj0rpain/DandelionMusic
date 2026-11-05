@@ -6,7 +6,7 @@ from discord import Attachment, Embed, app_commands
 from discord.ext import commands
 
 from config import config
-from musicbot import admission, linkutils, utils, loader, playlists
+from musicbot import admission, utils, loader, playlists
 from musicbot.song import PartialPlaylist, Song
 from musicbot.bot import MusicBot, Context
 from musicbot.utils import dj_check, chunks, joining_command, SimplePaginator
