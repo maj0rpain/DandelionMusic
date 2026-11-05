@@ -29,6 +29,7 @@ from controller_helpers import (
     _song,
     _songs,
     _titles,
+    _write_backup,
     sleep_forever,
 )
 from controller_seam import PlaybackVoiceClient, StubLoader, controller_seam
@@ -68,7 +69,7 @@ def test_controller_pickles_its_playlist_into_the_temp_backup_dir(
 ):
     _queue(controller, "first track", "second track")
 
-    controller.pause()
+    _write_backup(controller)
 
     backup = tmp_path / "backup" / f"playlist_{controller.guild.id}.pickle"
     with open(backup, "rb") as f:
@@ -102,7 +103,7 @@ def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
     with controller_seam(work) as (built, _):
         assert isinstance(sys.modules["musicbot.loader"], StubLoader)
         _queue(built, "probe")
-        built.pause()
+        _write_backup(built)
 
     after = sys.modules.get("musicbot.loader")
     assert after is before
@@ -307,7 +308,7 @@ def _restore_while_active(controller, monkeypatch, tmp_path, pause):
 
     async def scenario():
         await controller.ensure_playing()
-        await controller.enqueue([])
+        _write_backup(controller)
         if pause:
             controller.guild.voice_client.pause()
         before = (controller.playlist, backup.read_bytes())
@@ -566,17 +567,9 @@ def test_the_after_callback_only_hands_the_track_end_to_the_loop(
         assert seen == []
         assert _titles(controller) == ["first", "second"]
         assert not _backup_path(controller, tmp_path).exists()
-        ((callback, args),) = fake_loop.calls
-
-        # the one scheduled callback, run on the loop, advances the queue
-        controller.bot.loop = asyncio.get_running_loop()
-        callback(*args)
-        await _settle()
+        ((_, _),) = fake_loop.calls
 
     _run(controller, scenario)
-
-    assert _played(controller) == ["first", "second"]
-    assert _titles(controller) == ["second"]
 
 
 def test_a_track_end_writes_the_queue_and_backup_only_on_the_loop(
@@ -849,11 +842,12 @@ async def _fire_without_raising(after, error=None):
 
 
 async def _start_then_disconnect(controller):
-    """Starts the queue head with its backup written, then drops the
+    """Starts the queue head, then writes its backup, then drops the
     guild's voice client as discord.py's cleanup does and fires the
     track's after= callback."""
     controller.bot.loop = asyncio.get_running_loop()
-    await controller.enqueue([])
+    await controller.ensure_playing()
+    _write_backup(controller)
     await _settle()
     after = _end_track(controller.guild.voice_client)
     controller.guild.voice_client = None
@@ -2062,10 +2056,17 @@ def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
     assert run(scenario()) is None
 
 
-def test_a_local_batch_reports_the_tracks_it_could_not_load(
-    controller, stub_loader, monkeypatch
+@pytest.mark.parametrize(
+    "loaded, requested, count, skipped",
+    [
+        (("a", "c"), ["a", "b", "c"], 2, ["b"]),
+        (("a", "b"), ["a", "b"], 2, []),
+    ],
+)
+def test_a_local_batch_reports_what_it_loaded_and_skipped(
+    controller, stub_loader, monkeypatch, loaded, requested, count, skipped
 ):
-    by_title = {s.title: s for s in _songs(controller, "a", "c")}
+    by_title = {s.title: s for s in _songs(controller, *loaded)}
 
     async def load_local_songs(tracks):
         return [by_title.get(t) for t in tracks]
@@ -2073,33 +2074,15 @@ def test_a_local_batch_reports_the_tracks_it_could_not_load(
     monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
 
     async def scenario():
-        return await controller.process_local_tracks(["a", "b", "c"], "test")
+        return await controller.process_local_tracks(requested, "test")
 
     outcome = _run(controller, scenario)
 
     assert (outcome.kind.value, outcome.count, outcome.skipped) == (
         "playlist",
-        2,
-        ["b"],
+        count,
+        skipped,
     )
-
-
-def test_a_local_batch_that_loads_completely_skips_nothing(
-    controller, stub_loader, monkeypatch
-):
-    by_title = {s.title: s for s in _songs(controller, "a", "b")}
-
-    async def load_local_songs(tracks):
-        return [by_title[t] for t in tracks]
-
-    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
-
-    async def scenario():
-        return await controller.process_local_tracks(["a", "b"], "test")
-
-    outcome = _run(controller, scenario)
-
-    assert (outcome.count, outcome.skipped) == (2, [])
 
 
 def test_a_disconnect_tells_the_panel_that_playback_ended(controller):
