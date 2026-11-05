@@ -291,3 +291,46 @@ class TestTheSeam:
         assert {n.split(".")[0] for n in names} == {"typing", "musicbot"}
         # and the one allowed exception really is TYPE_CHECKING-only
         assert "from musicbot import library_metadata" in source
+
+
+class TestTrimAndFormat:
+    def test_trim_drops_whole_char_when_budget_ends_in_surrogate_pair(self):
+        text = "x" + "\U0001f600" * 10
+        assert library_session.trim(text, 4) == "x\U0001f600…"
+
+    def test_trim_cuts_bmp_text_at_the_limit(self):
+        assert library_session.trim("abcdef", 4) == "abcd…"
+
+    def test_trim_returns_text_within_budget_unchanged(self):
+        assert library_session.trim("abcd", 4) == "abcd"
+        assert library_session.trim("\U0001f600\U0001f600", 4) == (
+            "\U0001f600\U0001f600"
+        )
+
+    def test_trim_counts_a_lone_surrogate_as_one_unit(self):
+        lone = "\udc80"  # an undecodable filename byte
+        assert library_session.trim("ab" + lone, 3) == "ab" + lone
+        assert library_session.trim("ab" + lone + "cd", 3) == (
+            "ab" + lone + "…"
+        )
+
+    def test_non_bmp_title_fits_the_embed_title_limit(self):
+        name = "x" + "\U0001f600" * 255
+        s = session({name: {"Album": [song("S")]}})
+        s.descend(name)
+        title = s.frame().title
+        assert len(title.encode("utf-16-le")) // 2 <= 256
+        assert title.endswith("…")
+
+    def test_footer_breadcrumb_is_not_trimmed(self):
+        name = "x" * 255
+        s = session({name: {"Album": [song("S")]}})
+        s.descend(name)
+        assert name in s.frame().footer
+
+    def test_count_rounds_before_choosing_unit(self):
+        fmt = library_session._fmt_count
+        assert [
+            fmt(v)
+            for v in (999, 1_500, 999_949, 999_950, 1_204_338_291, 999_999_999)
+        ] == ["999", "1.5K", "999.9K", "1M", "1.2B", "1B"]

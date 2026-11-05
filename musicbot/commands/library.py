@@ -3,14 +3,14 @@ import io
 import sys
 from contextlib import contextmanager
 from traceback import print_exc
-from typing import Callable, List, NamedTuple, Optional, Tuple
+from typing import Callable, List, Optional, Tuple
 
 import discord
 from discord import app_commands
 from discord.ext import commands
 
 from config import config
-from musicbot import library, library_browse, library_metadata
+from musicbot import library, library_metadata
 from musicbot.bot import MusicBot
 from musicbot.utils import (
     CheckError,
@@ -19,6 +19,12 @@ from musicbot.utils import (
     join_voice,
     joining_command,
     play_check,
+)
+from musicbot.library_session import (
+    KIND_EMOJI,
+    BrowseSession,
+    Frame,
+    trim,
 )
 from musicbot.views import OwnedView
 
@@ -45,46 +51,15 @@ _search_lock = asyncio.Lock()
 # title to itself at every level
 AUTHOR_LINE = "Music Library"
 
-# One icon per kind of thing the library holds, shared by the browser
-# and the search results so the two can't drift apart. In a Select
-# these go in SelectOption's own `emoji` field, which renders them as
-# an icon column and leaves the whole 100-character label budget for
-# the name; embed titles and footers have no such field, so there they
-# are prefixed as literal text.
-KIND_EMOJI = {
-    "artist": "\U0001f464",
-    "album": "\U0001f4bf",
-    "song": "\U0001f3b5",
-}
-
-
 # `query` is a consume-rest parameter, so a prefix invocation can fill
 # it with most of a 2000-character message. Anything echoed back has
 # to be trimmed first, or the reply itself blows the message limit.
 QUERY_ECHO_LIMIT = 100
 
 
-# An embed title holds 256 UTF-16 code units: the icon is two of them,
-# the space one and the "\u2026" one, leaving 252 for the name. _trim
-# measures in UTF-16 units too, so a non-BMP name counts double.
-NAME_TITLE_LIMIT = 252
-
-
-# A select option label holds 100 UTF-16 code units, and the "\u2026" _trim
+# A select option label holds 100 UTF-16 code units, and the "\u2026" trim
 # appends takes one, leaving 99 for the name.
 SELECT_LABEL_LIMIT = 99
-
-
-def _trim(text: str, limit: int) -> str:
-    """Cuts to `limit` UTF-16 code units plus an ellipsis. A character
-    that would straddle the limit is dropped whole. A lone surrogate
-    (an undecodable filename byte) counts as one unit."""
-    units = 0
-    for end, char in enumerate(text):
-        units += 2 if ord(char) > 0xFFFF else 1
-        if units > limit:
-            return text[:end] + "…"
-    return text
 
 
 def _select_options(pairs) -> List[discord.SelectOption]:
@@ -92,55 +67,12 @@ def _select_options(pairs) -> List[discord.SelectOption]:
     the pair's position as the value, the kind's emoji."""
     return [
         discord.SelectOption(
-            label=_trim(label, SELECT_LABEL_LIMIT),
+            label=trim(label, SELECT_LABEL_LIMIT),
             value=str(i),
             emoji=KIND_EMOJI[kind],
         )
         for i, (label, kind) in enumerate(pairs)
     ]
-
-
-def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
-    """Renders as "42:39" under an hour and "11h 23m" above it - an
-    album runtime and a whole discography's runtime want different
-    units."""
-    if not seconds:
-        return None
-    hours, remainder = divmod(seconds, 3600)
-    minutes, secs = divmod(remainder, 60)
-    if hours:
-        return f"{hours}h {minutes:02d}m"
-    return f"{minutes}:{secs:02d}"
-
-
-def _fmt_count(value: Optional[int]) -> Optional[str]:
-    """Compact form for the six- and ten-digit counters Last.fm and
-    Spotify report - "1.2B" reads at a glance where "1204338291"
-    doesn't."""
-    if not value:
-        return None
-    units = ((1_000, "K"), (1_000_000, "M"), (1_000_000_000, "B"))
-    chosen = None
-    for index, (limit, suffix) in enumerate(units):
-        if value >= limit:
-            chosen = index
-    if chosen is None:
-        return str(value)
-    # rounded to one decimal *before* the unit is settled, so 999,950
-    # reads "1M" rather than "1000K"
-    limit, suffix = units[chosen]
-    if round(value / limit, 1) >= 1000 and chosen + 1 < len(units):
-        limit, suffix = units[chosen + 1]
-    text = f"{value / limit:.1f}".rstrip("0").rstrip(".")
-    return text + suffix
-
-
-def _fmt_years(stats: library.LevelStats) -> Optional[str]:
-    if not stats.year_min:
-        return None
-    if stats.year_max and stats.year_max != stats.year_min:
-        return f"{stats.year_min}\u2013{stats.year_max}"
-    return str(stats.year_min)
 
 
 class _BrowseItem:
@@ -220,12 +152,7 @@ class PageButton(_BrowseItem, discord.ui.Button):
 
 
 class QueueLevelButton(_BrowseItem, discord.ui.Button):
-    def __init__(self, browse_view: "LibraryBrowseView"):
-        label = (
-            "Queue this Album"
-            if browse_view.cursor.at_album_level
-            else "Queue this Artist"
-        )
+    def __init__(self, browse_view: "LibraryBrowseView", label: str):
         super().__init__(
             browse_view, label=label, style=discord.ButtonStyle.green, row=1
         )
@@ -318,16 +245,6 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
     await reply(message)
 
 
-class LevelSnapshot(NamedTuple):
-    """Where the cursor was and what the message showed, taken
-    before a level change so a failed first draw can be undone."""
-
-    artist: Optional[str]
-    album: Optional[str]
-    page: int
-    enrichment: Optional[library_metadata.Enrichment]
-
-
 class LibraryView(OwnedView):
     """An OwnedView over one library index snapshot, with a
     double-click guard (`_busy`) for the browser's slow redraws.
@@ -404,27 +321,23 @@ class LibraryView(OwnedView):
 
 class LibraryBrowseView(LibraryView):
     """The Discord half of the browser: components, message edits,
-    deferral, the _busy guard and the enrichment. Where the browse
-    session is and how it moves is self.cursor's - see
-    musicbot/library_browse.py, which is testable precisely because
+    deferral, the _busy guard and the enrichment lookup. What the
+    message shows, and how it moves, is self.session's - see
+    musicbot/library_session.py, which is testable precisely because
     none of this is in it. Nothing here may keep its own copy of the
-    cursor's state; read it back through self.cursor every time."""
+    session's state; read it back through self.session every time."""
 
     def __init__(self, ctx, index: library.LibraryIndex):
         super().__init__(ctx, index)
-        self.cursor = library_browse.BrowseCursor(index, PAGE_SIZE)
-        self._enrichment: Optional[library_metadata.Enrichment] = None
-        # what _attachment_key() described the last time an edit
-        # actually carried an `attachments` field - see _draw()
-        self._attached: Optional[str] = None
+        self.session = BrowseSession(index, PAGE_SIZE)
         # serialises the message edits themselves - see render()
         self._render_lock = asyncio.Lock()
-        self.build_items()
+        self.build_items(self.session.frame())
 
     @property
     def scope(self) -> Tuple[Optional[str], Optional[str]]:
         """The (artist, album) pair of the level shown now."""
-        return self.cursor.screen().scope
+        return self.session.cursor.screen().scope
 
     async def _resolve_enrichment(
         self,
@@ -433,191 +346,71 @@ class LibraryBrowseView(LibraryView):
         level, or None where there is nothing to ask about: the root,
         and any scope holding no file to read tags and embedded
         artwork off."""
-        sample = self.cursor.sample_track()
+        cursor = self.session.cursor
+        sample = cursor.sample_track()
         if sample is None:
             return None
         path = library.song_path(*sample)
-        if self.cursor.album is None:
+        if cursor.album is None:
             return await library_metadata.get_artist_enrichment(
-                self.cursor.artist, path
+                cursor.artist, path
             )
         return await library_metadata.get_album_enrichment(
-            self.cursor.artist, self.cursor.album, path
+            cursor.artist, cursor.album, path
         )
-
-    def title(self) -> str:
-        """Only the current scope, prefixed with the icon for what
-        that scope is - the path to it lives in the footer, and
-        "Music Library" in the author line."""
-        if self.cursor.artist is None:
-            return f"{KIND_EMOJI['artist']} Artists"
-        if self.cursor.album is None:
-            return (
-                f"{KIND_EMOJI['artist']} "
-                f"{_trim(self.cursor.artist, NAME_TITLE_LIMIT)}"
-            )
-        return (
-            f"{KIND_EMOJI['album']} "
-            f"{_trim(self.cursor.album, NAME_TITLE_LIMIT)}"
-        )
-
-    def footer(self) -> Optional[str]:
-        """In the breadcrumb the icons mark entities only - the
-        leading "Artists" names the root screen rather than an artist,
-        so it stays plain. title() runs the other way round, because
-        there "Artists" *is* the screen being shown and takes the icon
-        for the kind of thing it lists."""
-        if self.cursor.artist is None:
-            return None
-        artist = f"{KIND_EMOJI['artist']} {self.cursor.artist}"
-        if self.cursor.album is None:
-            return f"Artists \u203a {artist}"
-        return f"{artist} \u203a {KIND_EMOJI['album']} {self.cursor.album}"
 
     @staticmethod
-    def _field(embed: discord.Embed, name: str, value) -> None:
-        """A field with nothing behind it is left out entirely rather
-        than rendered as a placeholder dash - which backends answer
-        varies per entity, and a grid of dashes reads worse than a
-        short grid."""
-        if value:
-            embed.add_field(name=name, value=str(value), inline=True)
-
-    def _add_stat_fields(self, embed: discord.Embed) -> None:
-        stats = self._enrichment.stats if self._enrichment else None
-        screen = self.cursor.screen()
-        if self.cursor.artist is None:
-            # non-None exactly at the root, which is what the test
-            # above is standing in for - see Screen
-            artists, albums, songs = screen.counts
-            self._field(embed, "Artists", f"{artists:,}")
-            self._field(embed, "Albums", f"{albums:,}")
-            self._field(embed, "Songs", f"{songs:,}")
-            return
-
-        local = screen.stats
-        if self.cursor.album is None:
-            self._field(embed, "Albums", local.albums)
-            self._field(embed, "Tracks", local.tracks)
-            self._field(embed, "Runtime", _fmt_duration(local.runtime))
-            self._field(embed, "Years", _fmt_years(local))
-            self._field(embed, "Formats", ", ".join(local.formats))
-            if stats:
-                self._field(embed, "Listeners", _fmt_count(stats.listeners))
-        else:
-            self._field(embed, "Tracks", local.tracks)
-            self._field(embed, "Runtime", _fmt_duration(local.runtime))
-            # the tag-derived year is the one that matches these
-            # files; Spotify's release date is only a fallback, and
-            # only its year is worth the width
-            year = _fmt_years(local) or (
-                stats.release_date[:4]
-                if stats and stats.release_date
-                else None
-            )
-            self._field(embed, "Year", year)
-            self._field(
-                embed,
-                "Format",
-                " \u00b7 ".join(
-                    part
-                    for part in (
-                        local.formats[0] if local.formats else None,
-                        local.quality,
-                    )
-                    if part
-                ),
-            )
-            if stats:
-                self._field(embed, "Listeners", _fmt_count(stats.listeners))
-                self._field(
-                    embed,
-                    "Popularity",
-                    (
-                        f"{stats.popularity}/100"
-                        if stats.popularity is not None
-                        else None
-                    ),
-                )
-
-        # community tags where the online backends know any, the
-        # library's own genre tags otherwise
-        labels = (stats.tags if stats else ()) or local.genres
-        if labels:
-            embed.description = "*" + " \u00b7 ".join(labels) + "*"
-
-    def embed(self) -> discord.Embed:
-        embed = discord.Embed(title=self.title(), color=config.EMBED_COLOR)
+    def embed(frame: Frame) -> discord.Embed:
+        embed = discord.Embed(title=frame.title, color=config.EMBED_COLOR)
         embed.set_author(name=AUTHOR_LINE)
-        footer = self.footer()
-        if footer:
-            embed.set_footer(text=footer)
-        if not self.cursor.screen().entries:
+        if frame.footer:
+            embed.set_footer(text=frame.footer)
+        if frame.empty:
             embed.description = config.LIBRARY_EMPTY
         else:
-            self._add_stat_fields(embed)
-        art = self._enrichment.art if self._enrichment else None
-        if art and art.url:
-            embed.set_thumbnail(url=art.url)
-        elif art and art.data:
-            embed.set_thumbnail(url=f"attachment://cover.{art.extension}")
-        return embed
-
-    def _attachments(self) -> List[discord.File]:
-        art = self._enrichment.art if self._enrichment else None
-        if art and art.data:
-            return [
-                discord.File(
-                    io.BytesIO(art.data), filename=f"cover.{art.extension}"
-                )
-            ]
-        return []
-
-    def _attachment_key(self) -> Optional[str]:
-        """Identity of the file the current level needs on the
-        message, or None when it needs none. Embedded artwork runs to
-        megabytes and is re-sent in full whenever an edit carries an
-        `attachments` field, which makes it the most expensive part of
-        a render by a wide margin - so an edit only carries that field
-        when this changes."""
-        art = self._enrichment.art if self._enrichment else None
-        if art is None or not art.data:
-            return None
-        # The scope of the same Screen build_items() and embed() just
-        # read, so the key names the level they drew. Reading it here
-        # is not what makes that true: screen() rebuilds as soon as
-        # its scope stops matching the cursor, which makes this
-        # equivalent to reading cursor.artist/album directly. What
-        # keeps all three agreeing is _draw() never awaiting between
-        # them - see there.
-        artist, album = self.cursor.screen().scope
-        return f"{artist}/{album}.{art.extension}"
-
-    def build_items(self):
-        self.clear_items()
-        page_entries = self.cursor.page_entries()
-        if page_entries:
-            self.add_item(
-                LibrarySelect(
-                    page_entries,
-                    self.cursor.page_labels(),
-                    self.cursor.screen().kind,
-                    self,
+            embed.description = frame.description
+        for name, value in frame.fields:
+            embed.add_field(name=name, value=value, inline=True)
+        if frame.thumbnail:
+            attached = frame.attachment is not None and (
+                frame.thumbnail == frame.attachment.filename
+            )
+            embed.set_thumbnail(
+                url=(
+                    f"attachment://{frame.thumbnail}"
+                    if attached
+                    else frame.thumbnail
                 )
             )
-        if not self.cursor.at_root:
-            self.add_item(QueueLevelButton(self))
+        return embed
+
+    @staticmethod
+    def _attachments(frame: Frame) -> List[discord.File]:
+        if frame.attachment is None:
+            return []
+        return [
+            discord.File(
+                io.BytesIO(frame.attachment.data),
+                filename=frame.attachment.filename,
+            )
+        ]
+
+    def build_items(self, frame: Frame):
+        self.clear_items()
+        if frame.entries:
+            self.add_item(
+                LibrarySelect(frame.entries, frame.labels, frame.kind, self)
+            )
+        if frame.show_queue:
+            self.add_item(QueueLevelButton(self, frame.queue_label))
+        if frame.show_back:
             self.add_item(BackButton(self))
-        if self.cursor.has_prev():
+        if frame.show_prev:
             self.add_item(PageButton(self, -1, "◀ Prev"))
-        if self.cursor.has_next():
+        if frame.show_next:
             self.add_item(PageButton(self, 1, "Next ▶"))
 
-    async def render(
-        self,
-        interaction: discord.Interaction,
-        sync_attachments: bool = False,
-    ) -> bool:
+    async def render(self, interaction: discord.Interaction) -> bool:
         """The locked entry point for redrawing the message; see _draw()
         for the rules the draw keeps. `interaction` must already have
         been deferred - every edit goes out as a followup, so that
@@ -625,9 +418,9 @@ class LibraryBrowseView(LibraryView):
         interaction has to be answered in.
 
         The lock exists because two edits to one message could
-        otherwise land in either order, each writing back an _attached
-        sampled before the other ran, so a later navigation omits an
-        `attachments` field it needed. A click's edit and the
+        otherwise land in either order, each writing back an attachment
+        key sampled before the other ran, so a later navigation omits
+        an `attachments` field it needed. A click's edit and the
         enrichment edit (which waits on this lock, and is not covered
         by _busy - see _enter_level()) are the two that can overlap.
 
@@ -635,43 +428,36 @@ class LibraryBrowseView(LibraryView):
         (see _draw_or_undo()) on a False return and on any exception
         alike."""
         async with self._render_lock:
-            return await self._draw(interaction, sync_attachments)
+            return await self._draw(interaction)
 
     async def _render_enrichment(
         self,
         interaction: discord.Interaction,
-        level_revision: int,
+        token: int,
         enrichment: Optional[library_metadata.Enrichment],
     ) -> None:
         """Draws `enrichment` over the level it was resolved for, unless
-        the cursor has left that level, in which case nothing is drawn
-        and _enrichment is left alone.
+        the session says the cursor has left that level, in which case
+        nothing is drawn.
 
-        The check is made *inside* the render lock, because this edit
+        The offer is made *inside* the render lock, because this edit
         is unguarded: a click can move the cursor while it waits here
-        for an edit already in flight. Checking before the wait would
+        for an edit already in flight. Offering before the wait would
         let that click slip past and get the old level's cover and
-        stats drawn over the new one. The check, the assignment and
-        _draw()'s reads of the cursor then follow without an await
-        between them, so no click can land in between either."""
+        stats drawn over the new one. The offer and _draw()'s frame
+        then follow without an await between them."""
         async with self._render_lock:
-            if level_revision != self.cursor.level_revision:
+            if not self.session.offer_enrichment(token, enrichment):
                 return
-            self._enrichment = enrichment
-            await self._draw(interaction, sync_attachments=True)
+            await self._draw(interaction)
 
-    async def _draw(
-        self, interaction: discord.Interaction, sync_attachments: bool
-    ) -> bool:
-        """Draws the current cursor position over the message. The
+    async def _draw(self, interaction: discord.Interaction) -> bool:
+        """Draws the session's current frame over the message. The
         caller must hold the render lock (see render()).
 
-        Nothing may be awaited between the first read of self.cursor
-        below and the edit: build_items(), embed() and
-        _attachment_key() each read the cursor separately, and a click
-        landing between them would move it, leaving the components, the
-        embed and the attachment key describing two different levels on
-        one message.
+        The frame is built in one synchronous call, and nothing is
+        awaited between building it and the edit, so the components,
+        the embed and the attachments describe one level.
 
         Returns True when the edit lands. When it raises
         discord.HTTPException (a 429 that outlives its retries, a 5xx)
@@ -688,19 +474,18 @@ class LibraryBrowseView(LibraryView):
         keep working; once it lands, discord.py forgets their
         custom_ids and leaving their .view set does no harm.
 
-        _attached is written back only once the edit has landed: a
-        failed edit leaves whatever was already on the message."""
+        The session's landed() is called only once the edit has
+        landed: a failed edit leaves whatever was already on the
+        message."""
+        frame = self.session.frame()
         previous = list(self.children)
-        self.build_items()
+        self.build_items(frame)
         # pointed back at this view - see the docstring
         for item in previous:
             item._update_view(self)
-        kwargs = {"embed": self.embed(), "view": self}
-        attached = self._attached
-        if sync_attachments:
-            attached = self._attachment_key()
-            if attached != self._attached:
-                kwargs["attachments"] = self._attachments()
+        kwargs = {"embed": self.embed(frame), "view": self}
+        if frame.attachments_change:
+            kwargs["attachments"] = self._attachments(frame)
         try:
             await interaction.edit_original_response(**kwargs)
         except discord.HTTPException as e:
@@ -710,8 +495,7 @@ class LibraryBrowseView(LibraryView):
         except BaseException:
             self._restore_items(previous)
             raise
-        # only once the edit has landed - see the docstring
-        self._attached = attached
+        self.session.landed(frame)
         return True
 
     def _restore_items(self, items) -> None:
@@ -732,16 +516,14 @@ class LibraryBrowseView(LibraryView):
         destructive.
 
         The turn is undone when its draw does not land (see
-        _draw_or_undo()): the page goes back to the one the message
-        still shows. It is restored by page_by(saved - page), never by
-        page_by(-delta), because the clamp may have absorbed part of
-        the delta. level_revision and _enrichment are not touched, so
-        an enrichment in flight for this level still lands."""
-        saved = self.cursor.page
-        self.cursor.page_by(delta)
+        _draw_or_undo()) by session.restore_position(), which leaves
+        the drawn enrichment and level_revision alone, so an
+        enrichment in flight for this level still lands."""
+        position = self.session.position()
+        self.session.page_by(delta)
         await self._draw_or_undo(
             interaction,
-            lambda: self.cursor.page_by(saved - self.cursor.page),
+            lambda: self.session.restore_position(position),
         )
 
     async def _draw_or_undo(
@@ -753,30 +535,22 @@ class LibraryBrowseView(LibraryView):
         under busy(), defers the interaction and renders the new
         position. When the draw does not land - render() returned
         False, or the defer or the render raised anything at all,
-        cancellation included - calls `undo`, which puts the cursor
+        cancellation included - calls `undo`, which puts the session
         back to what the message still shows, and then re-raises the
         exception, if there was one. Returns whether the draw landed.
 
         Every cursor-moving click goes through here, so none can
-        forget the undo."""
+        forget the undo. Every draw compares the attachment key, so a
+        page turn also repairs a level whose enrichment edit failed:
+        that edit's enrichment stays drawn, and the next frame carries
+        the attachment the message lacks."""
         landed = False
         try:
             with self.busy():
                 # deferred before render() for the reason given there:
                 # a render can have to wait for one already in flight
                 await interaction.response.defer()
-                # Every move syncs attachments. On a level change they
-                # really change, so the sync is required. On a page
-                # turn they cannot, and the sync repairs a level whose
-                # enrichment edit failed: that edit assigns
-                # _enrichment before sending, so a failure (a 429 that
-                # outlives its retries, a 5xx) leaves the embed asking
-                # for attachment://cover.<ext> while the message
-                # carries no such file - and every later page turn
-                # would redraw that broken reference. It costs nothing
-                # when the attachment key is unchanged: _draw()
-                # compares the key first and omits the field.
-                landed = await self.render(interaction, sync_attachments=True)
+                landed = await self.render(interaction)
         finally:
             if not landed:
                 undo()
@@ -788,8 +562,8 @@ class LibraryBrowseView(LibraryView):
         chosen: str,
         label: Optional[str] = None,
     ):
-        previous = self._level_snapshot()
-        descent = self.cursor.descend(chosen)
+        previous = self.session.snapshot()
+        descent = self.session.descend(chosen)
         if descent.changed_level:
             await self._enter_level(interaction, previous)
             return
@@ -801,8 +575,8 @@ class LibraryBrowseView(LibraryView):
         await self.queue(interaction, [descent.track], source)
 
     async def go_back(self, interaction: discord.Interaction):
-        previous = self._level_snapshot()
-        if not self.cursor.back():
+        previous = self.session.snapshot()
+        if not self.session.back():
             # Already at the root: no level to enter, and nothing on
             # the message would change, so answer the interaction and
             # stop - an unanswered one shows the user "This
@@ -820,42 +594,12 @@ class LibraryBrowseView(LibraryView):
             return
         await self._enter_level(interaction, previous)
 
-    def _level_snapshot(self) -> LevelSnapshot:
-        return LevelSnapshot(
-            self.cursor.artist,
-            self.cursor.album,
-            self.cursor.page,
-            self._enrichment,
-        )
-
-    def _undo_level_change(self, previous: LevelSnapshot) -> None:
-        """Moves the cursor back to `previous` through its own API,
-        after a level change whose first draw failed. The message -
-        and the components _draw() restored - still show that level,
-        so the cursor has to agree with them again. level_revision is
-        left bumped: any enrichment still in flight for the old level
-        was started before the move and is dropped either way."""
-        artist, album, page, enrichment = previous
-        depth = (artist is not None) + (album is not None)
-        here = (self.cursor.artist is not None) + (
-            self.cursor.album is not None
-        )
-        if here > depth:
-            self.cursor.back()
-        else:
-            self.cursor.descend(album if album is not None else artist)
-        self.cursor.page_by(page)
-        self._enrichment = enrichment
-
-    async def _enter_level(
-        self, interaction: discord.Interaction, previous: LevelSnapshot
-    ):
+    async def _enter_level(self, interaction: discord.Interaction, previous):
         """Shows the new level immediately, then fills the enrichment
         in behind it.
 
-        A level's own contents - its entries, and every statistic in
-        _add_stat_fields() - come straight out of the in-memory index,
-        so the screen the user asked for can be drawn at once.
+        A level's own contents come straight out of the in-memory
+        index, so the screen the user asked for can be drawn at once.
         Enrichment cannot: it reads tags and embedded artwork off disk
         and queries two HTTP backends, each with its own three-second
         timeout, so resolving it first would leave the *previous*
@@ -880,24 +624,18 @@ class LibraryBrowseView(LibraryView):
 
         The cursor has already moved by the time this is called, and
         bumped level_revision doing it. Nothing may be awaited between
-        that move and the capture below, or a click could bump it again
-        first and this call would drop its own enrichment. (It holds:
-        descend() and back() both mutate synchronously, and the first
-        suspension here is the defer().) For the same reason
-        level_revision has to stay a plain attribute - a coroutine
-        property would put an await inside the staleness check in
-        _render_enrichment() - and _enrichment has to stay on the view,
-        since it describes what this message is showing rather than
-        where the cursor is.
+        that move and enter_level() below, or a click could bump it
+        again first and this call would drop its own enrichment. (It
+        holds: descend() and back() both mutate synchronously, and the
+        first suspension here is the defer().)
 
-        `previous` is the caller's _level_snapshot() from before the
+        `previous` is the caller's session.snapshot() from before the
         move. A failed first draw is undone by _draw_or_undo(), which
-        puts the cursor back to what the message still shows, so no
-        enrichment is resolved for a level nobody can see."""
-        level_revision = self.cursor.level_revision
-        self._enrichment = None
+        restores it, so no enrichment is resolved for a level nobody
+        can see."""
+        token = self.session.enter_level()
         if not await self._draw_or_undo(
-            interaction, lambda: self._undo_level_change(previous)
+            interaction, lambda: self.session.restore(previous)
         ):
             return
 
@@ -908,15 +646,16 @@ class LibraryBrowseView(LibraryView):
             return
 
         # unguarded, staleness checked in _render_enrichment()
-        await self._render_enrichment(interaction, level_revision, enrichment)
+        await self._render_enrichment(interaction, token, enrichment)
 
     async def queue_current_level(self, interaction: discord.Interaction):
-        artist, album = self.cursor.artist, self.cursor.album
+        cursor = self.session.cursor
+        artist, album = cursor.artist, cursor.album
         if album is not None:
             source = f"browse: entire album {artist} - {album}"
         else:
             source = f"browse: entire discography of {artist}"
-        await self.queue(interaction, self.cursor.tracks(), source)
+        await self.queue(interaction, cursor.tracks(), source)
 
 
 class SearchSelect(discord.ui.Select):
@@ -959,7 +698,7 @@ class LibrarySearchView(LibraryView):
             # embed titles are rendered as plain text, so a query
             # containing markdown or a mention is inert here and only
             # needs trimming to stay under the 256-character cap
-            title=f'Search: "{_trim(self.query, QUERY_ECHO_LIMIT)}"',
+            title=f'Search: "{trim(self.query, QUERY_ECHO_LIMIT)}"',
             color=config.EMBED_COLOR,
         )
         embed.set_author(name=AUTHOR_LINE)
@@ -1079,7 +818,7 @@ class Library(commands.Cog):
             await ctx.send(
                 config.LIBRARY_SEARCH_NO_RESULTS.format(
                     query=discord.utils.escape_markdown(
-                        _trim(query, QUERY_ECHO_LIMIT)
+                        trim(query, QUERY_ECHO_LIMIT)
                     )
                 ),
                 **kwargs,
@@ -1112,7 +851,8 @@ class Library(commands.Cog):
             return
 
         view = LibraryBrowseView(ctx, index)
-        kwargs = {"embed": view.embed(), "view": view}
+        frame = view.session.frame()
+        kwargs = {"embed": view.embed(frame), "view": view}
         # ephemeral only makes sense for an interaction (slash) response -
         # a plain text message from a prefix command can't be ephemeral
         if ctx.interaction is not None:
@@ -1120,6 +860,7 @@ class Library(commands.Cog):
         # whatever this hands back, OwnedView.refresh_message() knows
         # what to do with it - see the note on OwnedView.message
         view.message = await ctx.send(**kwargs)
+        view.session.landed(frame)
 
 
 async def setup(bot: MusicBot):
