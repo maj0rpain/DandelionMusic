@@ -169,7 +169,7 @@ class Music(commands.Cog):
             await ctx.defer()
         # the guild's current controller, not the one cog_check saw
         ctx.audiocontroller = await ctx.admission.enter()
-        ctx.bot.sessions.panel(ctx.guild).direct_to(ctx.channel)
+        ctx.bot.sessions.direct_panel(ctx.guild, ctx.channel)
 
     @commands.hybrid_command(
         name="play",
