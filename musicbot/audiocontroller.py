@@ -254,8 +254,7 @@ class AudioController(object):
     async def _report_skipped(self, song: Song):
         if self.command_channel:
             await self.command_channel.send(
-                f"{config.SONGINFO_ERROR}\n"
-                f"(Skipped: {song.display_name})"
+                f"{config.SONGINFO_ERROR}\n" f"(Skipped: {song.display_name})"
             )
 
     def load_pickle_playlist(self):
