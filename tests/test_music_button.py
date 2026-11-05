@@ -21,11 +21,14 @@ from config import config
 from musicbot.audiocontroller import MusicButton
 from musicbot.admission import RequestKind
 from musicbot.bot import Context
-from discord_fakes import FakeInteraction, VoiceGuild, make_bot
+from discord_fakes import (
+    ADMISSION_CHANNEL,
+    ADMISSION_DJ_ROLE,
+    FakeInteraction,
+    VoiceGuild,
+    make_bot,
+)
 from helpers import run
-
-DJ_ROLE = 99
-CHANNEL = 7
 
 
 class FakeContext(Context):
@@ -43,13 +46,13 @@ class FakeContext(Context):
             id=1, roles=[], voice=SimpleNamespace(channel=lobby)
         )
         self.channel = SimpleNamespace(
-            id=CHANNEL,
+            id=ADMISSION_CHANNEL,
             permissions_for=lambda member: SimpleNamespace(
                 administrator=False
             ),
         )
         self.settings = SimpleNamespace(
-            dj_role=DJ_ROLE,
+            dj_role=ADMISSION_DJ_ROLE,
             user_must_be_in_vc=True,
             command_channel=None,
             vc_timeout=True,

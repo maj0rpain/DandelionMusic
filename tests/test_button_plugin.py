@@ -9,7 +9,7 @@ from musicbot import loader
 from musicbot.audiocontroller import QueuedPlaylist
 from musicbot.plugins.button import Button
 from musicbot.truncation import Truncation, TruncationReason
-from discord_fakes import VoiceGuild, make_bot
+from discord_fakes import ADMISSION_DJ_ROLE, VoiceGuild, make_bot
 from helpers import run
 
 YOUTUBE = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -42,7 +42,6 @@ def test_unsupported_text_returns_nothing(text):
 
 
 CMD_CHANNEL = 2
-DJ_ROLE = 99
 
 
 class FakeChannel:
@@ -110,7 +109,7 @@ def react(
         button_emote="x",
         command_channel=command_channel,
         user_must_be_in_vc=user_must_be_in_vc,
-        dj_role=DJ_ROLE if role == "dj" else None,
+        dj_role=ADMISSION_DJ_ROLE if role == "dj" else None,
         vc_timeout=True,
     )
 
@@ -139,7 +138,7 @@ def react(
         return FakeContext(sent, bot, guild, channel)
 
     bot.get_context = get_context
-    roles = [SimpleNamespace(id=DJ_ROLE)] if role == "dj" else []
+    roles = [SimpleNamespace(id=ADMISSION_DJ_ROLE)] if role == "dj" else []
     member = SimpleNamespace(
         id=5,
         bot=False,

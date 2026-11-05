@@ -20,12 +20,17 @@ import discord
 from config import config
 from musicbot.bot import MusicBot
 from musicbot.commands.music import SearchView, SongButton
-from discord_fakes import FakeInteraction, VoiceGuild, http_error, make_bot
+from discord_fakes import (
+    ADMISSION_CHANNEL,
+    FakeInteraction,
+    VoiceGuild,
+    http_error,
+    make_bot,
+)
 from helpers import run
 
 OWNER = 1
 OTHER = 2
-CHANNEL = 7
 URLS = ["https://youtu.be/one", "https://youtu.be/two"]
 
 
@@ -95,14 +100,14 @@ class FakeContext:
         async def typing():
             yield
 
-        self.channel = SimpleNamespace(typing=typing, id=CHANNEL)
+        self.channel = SimpleNamespace(typing=typing, id=ADMISSION_CHANNEL)
 
     async def send(self, *args, **kwargs):
         self.sent.append((args, kwargs))
 
     def refuse_by_command_channel(self):
         """The guild only takes commands in another channel."""
-        self.settings.command_channel = CHANNEL + 1
+        self.settings.command_channel = ADMISSION_CHANNEL + 1
 
     async def reset_controller(self):
         """d!reset: the guild gets a new controller."""

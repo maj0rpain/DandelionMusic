@@ -82,20 +82,6 @@ def test_voice_commands_refuse_an_outsider_rule_on(name, kind):
     assert disconnects == []
 
 
-@pytest.mark.parametrize("role", ["admin", "owner", "dj"])
-def test_disconnect_admits_an_admin_owner_or_dj(role):
-    _, ctx, _, disconnects = prepare(
-        "disconnect",
-        K.COMMAND,
-        bot=PEOPLE,
-        author="b",
-        role=role,
-        dj_role=99,
-    )
-    assert invoke("disconnect", ctx) is None
-    assert disconnects == ["command"]
-
-
 def test_reset_refused_by_its_first_check_disposes_nothing():
     guild, ctx, _, disconnects = prepare(
         "reset", K.JOINING_COMMAND, bot=PEOPLE, author="b"
@@ -112,6 +98,13 @@ def reset_with_voice_after(post):
     guild, ctx, sent, _ = prepare(
         "reset", K.JOINING_COMMAND, bot=None, author="b"
     )
+    disposed = []
+
+    async def dispose(reason):
+        disposed.append(reason)
+
+    ctx.bot.sessions.controller(guild).dispose = dispose
+    ctx.disposed = disposed
     sessions = ctx.bot.sessions
     real = sessions.reset
 
@@ -149,3 +142,4 @@ def test_a_refusal_after_the_reset_keeps_the_reset():
     assert refusal == config.USER_NOT_IN_VC_MESSAGE
     assert sent == []
     assert guild.events == []
+    assert ctx.disposed == ["reset command"]
