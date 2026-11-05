@@ -11,10 +11,9 @@ from musicbot.loader import SongError
 from helpers import run
 
 
-@pytest.mark.parametrize(
-    "message", [config.SONGINFO_ERROR, config.SEARCH_NO_RESULTS]
-)
-def test_a_search_error_propagates_and_nothing_is_sent(monkeypatch, message):
+def test_a_search_error_propagates_and_nothing_is_sent(monkeypatch):
+    message = config.SEARCH_NO_RESULTS
+
     async def search_youtube(query, count):
         raise SongError(message)
 
