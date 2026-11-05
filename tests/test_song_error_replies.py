@@ -22,6 +22,10 @@ def make_music_bot():
     return MusicBot([], command_prefix="d!", intents=discord.Intents.default())
 
 
+def db_ctx():
+    return RecordingCtx(types.SimpleNamespace(DbSession=object()))
+
+
 def test_add_song_replies_with_the_song_error_and_saves_nothing(monkeypatch):
     add_calls = []
 
@@ -35,7 +39,7 @@ def test_add_song_replies_with_the_song_error_and_saves_nothing(monkeypatch):
     monkeypatch.setattr(music_module.playlists, "add_songs", add_songs)
     group = next(c for c in Music(None).get_commands() if c.name == "playlist")
     command = group.get_command("add_song")
-    ctx = RecordingCtx(types.SimpleNamespace(DbSession=object()))
+    ctx = db_ctx()
     run(command.callback(Music(None), ctx, "mine", "bad link"))
     assert [str(m) for m in ctx.sent] == ["unsupported link"]
     assert add_calls == []
@@ -67,7 +71,7 @@ def test_command_error_handler_answers_a_song_error(monkeypatch, wrap):
 
     async def scenario():
         bot = make_music_bot()
-        ctx = RecordingCtx(types.SimpleNamespace(DbSession=object()))
+        ctx = db_ctx()
         await bot.on_command_error(ctx, wrapped)
         return ctx.sent
 
