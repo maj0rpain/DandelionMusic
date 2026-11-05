@@ -8,6 +8,34 @@ sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 pytest_plugins = ["pytester"]
 
+import dotenv  # noqa: E402
+import dotenv.main  # noqa: E402
+
+
+def _import_config_without_dotenv():
+    """Imports `config` with find_dotenv stubbed to os.devnull.
+
+    The package's __init__ builds the global Config() at import time,
+    and Config.load() resolves its .env with find_dotenv(), which walks
+    up from the config module's file and so finds the developer's real
+    .env. Without this stub that .env would reach os.environ, the global
+    config's values and its unknown_vars for the whole session. The real
+    function is put back on both names in a finally, so nothing but this
+    one build sees the stub.
+    """
+    real = dotenv.main.find_dotenv
+    dotenv.find_dotenv = lambda *a, **kw: os.devnull
+    try:
+        import config.config  # noqa: F401
+    finally:
+        dotenv.find_dotenv = real
+        module = sys.modules.get("config.config")
+        if module is not None:
+            module.find_dotenv = real
+
+
+_import_config_without_dotenv()
+
 from config.config import ENV_ALIASES  # noqa: E402
 from config.config import Config as ConfigClass  # noqa: E402
 
