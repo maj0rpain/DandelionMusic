@@ -12,7 +12,7 @@ import pytest
 from config import config
 from musicbot import loader
 from musicbot.linkutils import SiteTypes
-from musicbot.song import Song
+from musicbot.song import LoadResult, Song
 from helpers import run
 
 URL = "https://example.invalid/a.mp3"
@@ -30,7 +30,7 @@ class FakePool:
         outcome = (
             self.outcomes.pop(0)
             if self.outcomes
-            else Song(SiteTypes.YT_DLP, URL, title="ok")
+            else LoadResult([Song(SiteTypes.YT_DLP, URL, title="ok")], True)
         )
         if isinstance(outcome, str) and outcome == "break":
             future.set_exception(BrokenProcessPool("worker died"))
@@ -83,7 +83,7 @@ def _use(pool, lane=loader.Lane.LOAD):
 def test_a_break_then_a_good_retry_returns_the_retried_result(pools):
     broken = FakePool(["break"])
     _use(broken)
-    assert run(loader.load_song(URL)).title == "ok"
+    assert run(loader.load_song(URL)).songs[0].title == "ok"
     in_load_lane = loader._pools[loader.Lane.LOAD] is pools.built[0]
     assert (len(pools.built), in_load_lane) == (1, True)
 
@@ -126,7 +126,7 @@ def test_concurrent_calls_on_one_broken_pool_rebuild_once(pools):
     async def many():
         return await asyncio.gather(*[loader.load_song(URL) for _ in range(4)])
 
-    assert [s.title for s in run(many())] == ["ok"] * 4
+    assert [r.songs[0].title for r in run(many())] == ["ok"] * 4
     assert len(pools.built) == 1
 
 
@@ -152,7 +152,7 @@ def test_a_break_in_the_preload_lane_rebuilds_only_that_lane(pools):
     load_pool = FakePool()
     _use(load_pool, loader.Lane.LOAD)
     _use(FakePool(["break"]), loader.Lane.PRELOAD)
-    song = run(loader._load(loader.Lane.PRELOAD, URL))
+    song = run(loader._load(loader.Lane.PRELOAD, URL)).songs[0]
     assert (
         song.title,
         len(pools.built),

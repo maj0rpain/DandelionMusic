@@ -30,6 +30,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/playlist.py` / `musicbot/song.py` - queue/history and per-track metadata.
 - `musicbot/playlists.py` - saved playlists: the only reader/writer of `SavedPlaylist.songs_json` outside the legacy migration in `settings.py`; callers use `PlaylistEntry`/`PlaylistRef`/`PlaylistContents`/`SavedEntry`.
 - `musicbot/truncation.py` - `Truncation` (a cut-short Spotify playlist's reported total and its `TruncationReason`) with the one cut-short rule (`Truncation.of`) and the user notice; imports only `config`, `enum` and `dataclasses`.
+- `musicbot/outcome.py` - `EnqueueOutcome` (what adding a request's songs did) and `render`, the one function that turns it into a `Reply` or nothing; imports neither the controller nor voice machinery.
 - `musicbot/loader.py` - yt-dlp extraction in two worker processes, the load lane and the preload lane; calling it before `init()` raises `LoaderNotRunning`.
 - `musicbot/linkutils.py` - URL classification and Spotify resolution.
 - `musicbot/library_metadata.py` - library enrichment (Last.fm/Spotify stats and art, embedded covers): `Enricher(clock, spotify, lastfm_session)` holds the six `CachedLookup` lookups (Last.fm and Spotify artist and album, the tag read and the artwork read, the latter with a `ByteBoundedStore`), and the public `get_enrichment(index, artist, album)` delegates to `default_enricher`; an index rebuild clears them by itself (the generation check).

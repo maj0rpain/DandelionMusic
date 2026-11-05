@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context as mp_context
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
@@ -16,13 +16,14 @@ from yt_dlp.utils import DownloadError
 from config import config
 from musicbot import library
 from musicbot.audiotags import nice_title, read_tags
-from musicbot.song import PartialPlaylist, Song
+from musicbot.song import LoadResult, Song
 from musicbot.utils import wrap_stdio
 from musicbot.linkutils import (
     YT_IE,
     ExtractorT,
     SiteTypes,
     get_ie,
+    SpotifyTrack,
     SpotifyTracks,
     fetch_spotify,
     identify_url,
@@ -181,9 +182,18 @@ def extract_info(url: str, ie: Optional[ExtractorT] = None) -> Optional[dict]:
         return None
 
 
-async def search_youtube(title: str, count: int = 1) -> list[dict]:
-    """See _search_youtube: a non-empty list of entries, or SongError."""
-    return await _run_sync(Lane.LOAD, _search_youtube, title, count)
+async def search_youtube(title: str, count: int = 1) -> list[Song]:
+    """See _search_youtube: a non-empty list of songs, or SongError."""
+    return await _run_sync(Lane.LOAD, _search_songs, title, count)
+
+
+def _search_songs(title: str, count: int = 1) -> list[Song]:
+    songs = []
+    for data in _search_youtube(title, count):
+        song = Song(SiteTypes.YT_DLP, webpage_url=data["url"])
+        song.update(data)
+        songs.append(song)
+    return songs
 
 
 def _search_youtube(title: str, count: int = 1) -> list[dict]:
@@ -202,15 +212,15 @@ def _search_youtube(title: str, count: int = 1) -> list[dict]:
     return r["entries"]
 
 
-async def load_song(track: str) -> Union[Song, List[Song]]:
+async def load_song(track: str) -> LoadResult:
     return await _load(Lane.LOAD, track)
 
 
-async def _load(lane: Lane, track: str) -> Union[Song, List[Song]]:
+async def _load(lane: Lane, track: str) -> LoadResult:
     """Runs _load_song in the given lane and stamps the result."""
     result = await _run_sync(lane, _load_song, track)
     now = _now()
-    for song in result if isinstance(result, list) else [result]:
+    for song in result.songs:
         song.extracted_at = now
     return result
 
@@ -235,7 +245,7 @@ async def load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
     against 254ms), so there is nothing to trade away.
 
     Refuses anything that is not a local-library URI. The other
-    branches of _load_song can return a *list* of songs for one track
+    branches of _load_song can return several songs for one track
     (a playlist), which would silently break the one-entry-per-input
     contract the caller relies on to report which files it skipped.
     """
@@ -257,7 +267,7 @@ def _load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
         # kept everything queued up to the failure rather than losing
         # the batch.
         try:
-            songs.append(_load_song(track))
+            songs.append(_load_song(track).songs[0])
         except SongError:
             songs.append(None)
         except Exception as e:
@@ -266,7 +276,16 @@ def _load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
     return songs
 
 
-def _load_song(track: str) -> Union[Song, List[Song]]:
+def _search_spotify_track(track: SpotifyTrack) -> dict:
+    """The first YouTube result for a Spotify track. Any failure is a
+    SONGINFO_ERROR, as a failed Spotify fetch is."""
+    try:
+        return _search_youtube(track.query)[0]
+    except Exception as e:
+        raise SongError(config.SONGINFO_ERROR) from e
+
+
+def _load_song(track: str) -> LoadResult:
     track = normalize_track(track)
     truncation = None
     host = identify_url(track)
@@ -283,7 +302,9 @@ def _load_song(track: str) -> Union[Song, List[Song]]:
             data = _loop.run_until_complete(fetch_spotify(track))
         except Exception as e:
             raise SongError(config.SONGINFO_ERROR) from e
-        if isinstance(data, SpotifyTracks):
+        if isinstance(data, SpotifyTrack):
+            data = _search_spotify_track(data)
+        elif isinstance(data, SpotifyTracks):
             truncation = data.truncation
             data = [{"url": url} for url in data.links]
 
@@ -340,14 +361,13 @@ def _load_song(track: str) -> Union[Song, List[Song]]:
             )
             song.update(entry)
             results.append(song)
-        if truncation is not None:
-            return PartialPlaylist(results, truncation)
-        return results
+        single = truncation is None and len(results) == 1
+        return LoadResult(results, single, truncation)
 
     song = Song(host, webpage_url=track)
     song.update(data)
 
-    return song
+    return LoadResult([song], True)
 
 
 def _parse_expire(url: str) -> Optional[int]:
@@ -406,10 +426,10 @@ async def preload(song: Song) -> Preload:
         except Exception:
             print_exc(file=sys.stderr)
         else:
-            success = True
+            success = preloaded.single
 
         if success:
-            song.update(preloaded)
+            song.update(preloaded.songs[0])
     finally:
         _preloading.pop(song).set_result(success)
 

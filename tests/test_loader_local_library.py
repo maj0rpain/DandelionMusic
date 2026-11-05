@@ -59,7 +59,9 @@ def _refused(uri):
 def _loads(uri, path, create=True):
     if create:
         _file(path)
-    song = loader._load_song(uri)
+    result = loader._load_song(uri)
+    assert result.single
+    song = result.songs[0]
     assert song.url == str(path)
     return song
 

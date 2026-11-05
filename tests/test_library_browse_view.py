@@ -31,6 +31,7 @@ from musicbot.commands.library import (
     PageButton,
     QueueLevelButton,
 )
+from musicbot.outcome import EnqueueOutcome, OutcomeKind
 from musicbot.library import LibrarySong, SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 from config import config
@@ -1149,7 +1150,9 @@ class LibraryController:
 
     async def process_local_tracks(self, tracks, source, user=None):
         self.queued.append(tracks)
-        return [object() for _ in tracks]
+        return EnqueueOutcome(
+            OutcomeKind.PLAYLIST, count=len(tracks), skipped=[]
+        )
 
 
 def test_a_library_pick_made_after_a_reset_queues_on_the_new_controller():
@@ -1333,6 +1336,59 @@ def test_first_message_is_drawn_from_one_frame(monkeypatch):
 
     assert len(frames) == 1
     assert sent[0]["embed"].title == frames[0].title
+
+
+class _PickController:
+    def __init__(self, missing):
+        self.missing = missing
+
+    async def process_local_tracks(self, tracks, source, user=None):
+        skipped = [t for t in tracks if t in self.missing]
+        return EnqueueOutcome(
+            OutcomeKind.PLAYLIST,
+            count=len(tracks) - len(skipped),
+            skipped=skipped,
+        )
+
+
+def _pick_replies(monkeypatch, missing):
+    from musicbot import admission, library
+
+    controller = _PickController({library.song_uri(*m) for m in missing})
+
+    async def check(ctx, kind):
+        async def enter():
+            return controller
+
+        return SimpleNamespace(enter=enter)
+
+    monkeypatch.setattr(admission, "check", check)
+    replies = []
+    interaction = SimpleNamespace(
+        response=SimpleNamespace(is_done=lambda: True, send_message=None),
+        followup=SimpleNamespace(
+            send=lambda content, ephemeral: _collect(replies, content)
+        ),
+    )
+    ctx = SimpleNamespace(author=None)
+    triples = [("A", "B", "x.mp3"), ("A", "B", "y.mp3")]
+    run(library_commands.queue_songs(ctx, interaction, triples, "browse"))
+    return replies
+
+
+async def _collect(replies, content):
+    replies.append(content)
+
+
+def test_a_library_pick_names_the_skipped_files_by_filename(monkeypatch):
+    assert _pick_replies(monkeypatch, [("A", "B", "y.mp3")]) == [
+        "Queued 1 song(s). 1 skipped (file not found): y.mp3. "
+        "The index may be stale - ask the bot owner to run `d!lib refresh`."
+    ]
+
+
+def test_a_library_pick_that_loads_everything_reports_the_count(monkeypatch):
+    assert _pick_replies(monkeypatch, []) == ["Queued 2 song(s)."]
 
 
 def test_enrichment_is_resolved_on_the_cursors_index_not_the_librarys(

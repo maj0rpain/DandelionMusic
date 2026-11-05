@@ -2,8 +2,7 @@ import discord
 from discord.ext import commands
 from musicbot import admission, linkutils, loader, utils
 from musicbot.bot import MusicBot
-from musicbot.audiocontroller import QueuedPlaylist
-
+from musicbot.outcome import send_outcome
 
 SUPPORTED_SITES = (
     linkutils.SiteTypes.SPOTIFY,
@@ -110,14 +109,13 @@ class Button(commands.Cog):
                     )
             for url in links:
                 try:
-                    song = await audiocontroller.process_song(url, user=member)
+                    outcome = await audiocontroller.process_song(
+                        url, user=member
+                    )
                 except loader.SongError as e:
                     await ctx.send(str(e))
                     continue
-                if isinstance(song, QueuedPlaylist):
-                    notice = song.notice()
-                    if notice is not None:
-                        await ctx.send(notice)
+                await send_outcome(ctx, outcome, sett.announce_songs)
 
 
 async def setup(bot: MusicBot):

@@ -6,12 +6,12 @@ from discord import Attachment, Embed, app_commands
 from discord.ext import commands
 
 from config import config
-from musicbot import admission, linkutils, utils, loader, playlists
-from musicbot.song import PartialPlaylist, Song
+from musicbot import admission, utils, loader, playlists
+from musicbot.outcome import send_outcome
+from musicbot.song import Song
 from musicbot.bot import MusicBot, Context
 from musicbot.utils import dj_check, chunks, joining_command, SimplePaginator
 from musicbot.audiocontroller import (
-    QueuedPlaylist,
     AudioController,
     RestoreResult,
 )
@@ -198,29 +198,16 @@ class Music(commands.Cog):
         await ctx.audiocontroller.start_idle_timer(True)
 
         try:
-            song = await ctx.audiocontroller.process_song(
+            outcome = await ctx.audiocontroller.process_song(
                 track, user=ctx.author, playnext=playnext
             )
         except SongError as e:
             await ctx.send(e)
             return
 
-        if isinstance(song, QueuedPlaylist):
-            notice = song.notice()
-            if notice is not None:
-                await ctx.send(notice)
-            else:
-                await ctx.send(config.SONGINFO_PLAYLIST_QUEUED)
-        else:
-            if len(ctx.audiocontroller.playlist) != 1:
-                await ctx.send(
-                    embed=song.format_output(config.SONGINFO_QUEUE_ADDED)
-                )
-            elif not utils.get_settings(ctx).announce_songs:
-                # auto-announce is disabled, announce here
-                await ctx.send(
-                    embed=song.format_output(config.SONGINFO_NOW_PLAYING)
-                )
+        await send_outcome(
+            ctx, outcome, utils.get_settings(ctx).announce_songs
+        )
 
     @commands.hybrid_command(
         name="playnext",
@@ -243,19 +230,11 @@ class Music(commands.Cog):
     @joining_command
     async def _search(self, ctx, *, query: str):
         await ctx.defer()
-        results = await search_youtube(query, config.SEARCH_RESULTS)
-        songs = []
-        for data in results:
-            song = Song(
-                linkutils.SiteTypes.YT_DLP,
-                webpage_url=data["url"],
-            )
-            song.update(data)
-            songs.append(song)
+        songs = await search_youtube(query, config.SEARCH_RESULTS)
 
         view = SearchView(ctx)
-        for i, data in enumerate(results, start=1):
-            view.add_item(SongButton(self, i, data["url"]))
+        for i, song in enumerate(songs, start=1):
+            view.add_item(SongButton(self, i, song.webpage_url))
 
         view.message = await ctx.send(
             embed=utils.songs_embed(config.SEARCH_EMBED_TITLE, songs),
@@ -536,16 +515,21 @@ class Music(commands.Cog):
         if contents is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
-        await ctx.audiocontroller.enqueue(
-            Song(
-                get_site_type(entry.url),
-                entry.url,
-                title=entry.title,
-                saved_entry=playlists.SavedEntry(contents.ref, entry.url),
-            )
-            for entry in contents.entries
+        outcome = await ctx.audiocontroller.enqueue(
+            (
+                Song(
+                    get_site_type(entry.url),
+                    entry.url,
+                    title=entry.title,
+                    saved_entry=playlists.SavedEntry(contents.ref, entry.url),
+                )
+                for entry in contents.entries
+            ),
+            batch=True,
         )
-        await ctx.send(config.SONGINFO_PLAYLIST_QUEUED)
+        await send_outcome(
+            ctx, outcome, utils.get_settings(ctx).announce_songs
+        )
 
     @_playlist.command(
         name="remove",
@@ -640,25 +624,24 @@ class Music(commands.Cog):
     ):
         await ctx.defer()
         try:
-            song = await loader.load_song(track)
+            result = await loader.load_song(track)
         except SongError as e:
             await ctx.send(e)
             return
-        songs = [song] if isinstance(song, Song) else song
         try:
             await playlists.add_songs(
                 ctx.bot.DbSession,
                 _playlist_ref(ctx, playlist),
                 [
                     playlists.PlaylistEntry(s.webpage_url, s.title)
-                    for s in songs
+                    for s in result.songs
                 ],
             )
         except playlists.SavedPlaylistError as e:
             await ctx.send(_saved_playlist_error_reply(e))
             return
-        if isinstance(song, PartialPlaylist):
-            await ctx.send(song.notice())
+        if result.truncation is not None:
+            await ctx.send(result.truncation.notice(len(result.songs)))
         await ctx.send(config.PLAYLIST_UPDATED)
 
     @_playlist.command(

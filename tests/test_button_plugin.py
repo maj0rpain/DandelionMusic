@@ -6,7 +6,9 @@ from types import SimpleNamespace
 import pytest
 
 from musicbot import loader
-from musicbot.audiocontroller import QueuedPlaylist
+from musicbot.linkutils import SiteTypes
+from musicbot.outcome import EnqueueOutcome, OutcomeKind, render
+from musicbot.song import Song
 from musicbot.plugins.button import Button
 from musicbot.truncation import Truncation, TruncationReason
 from discord_fakes import ADMISSION_DJ_ROLE, VoiceGuild, make_bot
@@ -66,7 +68,8 @@ class FakeContext:
         self.author = None
 
     async def send(self, content=None, **kwargs):
-        self.sent.append(content)
+        embed = kwargs.get("embed")
+        self.sent.append(content if embed is None else embed.title)
 
 
 class FakeController:
@@ -95,6 +98,7 @@ def react(
     role=None,
     user_must_be_in_vc=True,
     fail=None,
+    announce_songs=False,
 ):
     """Drive one reaction over links whose load gives `outcomes`
     against real admission and the voice fakes; returns what the
@@ -111,6 +115,7 @@ def react(
         user_must_be_in_vc=user_must_be_in_vc,
         dj_role=ADMISSION_DJ_ROLE if role == "dj" else None,
         vc_timeout=True,
+        announce_songs=announce_songs,
     )
 
     class Guild(VoiceGuild):
@@ -162,23 +167,32 @@ def react(
     return controller.processed, sent
 
 
+NOTHING = EnqueueOutcome(OutcomeKind.START_FAILED)
+
+
+def _song(title):
+    return Song(
+        SiteTypes.YT_DLP, f"https://example.invalid/{title}", title=title
+    )
+
+
 A = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
 B = "https://www.youtube.com/watch?v=bbbbbbbbbbb"
 
 
 def test_failing_link_replies_and_next_link_is_processed():
-    processed, sent = react({A: loader.SongError("bad link"), B: object()})
+    processed, sent = react({A: loader.SongError("bad link"), B: NOTHING})
     assert processed == [A, B]
     assert sent == ["bad link"]
 
 
 def test_reaction_in_a_thread_is_processed():
-    processed, _ = react({A: object()}, thread=True)
+    processed, _ = react({A: NOTHING}, thread=True)
     assert processed == [A]
 
 
 def test_unresolvable_channel_does_nothing():
-    processed, sent = react({A: object()}, resolves=False)
+    processed, sent = react({A: NOTHING}, resolves=False)
     assert processed == []
     assert sent == []
 
@@ -193,7 +207,7 @@ def test_spotify_uri_returns_the_open_link(kind):
 
 def test_reacting_to_a_spotify_uri_processes_the_open_link():
     processed, _sent = react(
-        {SPOTIFY: object()},
+        {SPOTIFY: NOTHING},
         content=f"spotify:track:{SPOTIFY_ID}",
     )
     assert processed == [SPOTIFY]
@@ -201,23 +215,46 @@ def test_reacting_to_a_spotify_uri_processes_the_open_link():
 
 def test_truncated_playlist_sends_exactly_the_notice():
     cut = Truncation(50, TruncationReason.NO_API)
-    _, sent = react({A: QueuedPlaylist(30, cut)})
+    outcome = EnqueueOutcome(OutcomeKind.PLAYLIST, count=30, truncation=cut)
+    _, sent = react({A: outcome})
     assert sent == [cut.notice(30)]
 
 
-def test_untruncated_playlist_sends_nothing():
-    _, sent = react({A: QueuedPlaylist(30)})
-    assert sent == []
+@pytest.mark.parametrize("announce", [True, False])
+def test_started_link_sends_what_render_returns(announce):
+    outcome = EnqueueOutcome(OutcomeKind.STARTED, song=_song("a"))
+    _, sent = react({A: outcome}, announce_songs=announce)
+    expected = render(outcome, announce)
+    assert sent == ([] if expected is None else [expected.embed.title])
+
+
+def test_several_links_send_each_outcome_and_the_error_in_link_order():
+    queued = EnqueueOutcome(OutcomeKind.QUEUED, song=_song("a"), position=2)
+    playlist = EnqueueOutcome(OutcomeKind.PLAYLIST, count=4)
+    processed, sent = react(
+        {
+            A: queued,
+            B: loader.SongError("bad link"),
+            SOUNDCLOUD: NOTHING,
+            YOUTUBE: playlist,
+        }
+    )
+    assert processed == [A, B, SOUNDCLOUD, YOUTUBE]
+    assert sent == [
+        "Added to queue - position 2",
+        "bad link",
+        render(playlist, False).text,
+    ]
 
 
 def test_reaction_outside_the_command_channel_is_refused_silently():
-    processed, sent = react({A: object()}, command_channel=3)
+    processed, sent = react({A: NOTHING}, command_channel=3)
     assert (processed, sent) == ([], [])
     assert react.guild.events == []
 
 
 def test_dj_reacting_from_another_channel_does_not_move_the_bot():
-    processed, _ = react({A: object()}, bot_in="busy", role="dj")
+    processed, _ = react({A: NOTHING}, bot_in="busy", role="dj")
     assert processed == [A]
     assert react.guild.events == []
 
@@ -233,36 +270,36 @@ def test_dj_reacting_from_another_channel_does_not_move_the_bot():
     ids=["no connect", "no speak", "not in voice", "failed join"],
 )
 def test_refused_reaction_is_silent(kwargs):
-    processed, sent = react({A: object()}, **kwargs)
+    processed, sent = react({A: NOTHING}, **kwargs)
     assert (processed, sent) == ([], [])
 
 
 def test_reaction_while_idle_connects_and_queues():
-    processed, _ = react({A: object()})
+    processed, _ = react({A: NOTHING})
     assert processed == [A]
     assert react.guild.events == [("connect", "mine")]
 
 
 def test_reaction_while_the_bot_sits_alone_elsewhere_moves_it(no_sleep):
-    processed, _ = react({A: object()}, bot_in="other")
+    processed, _ = react({A: NOTHING}, bot_in="other")
     assert processed == [A]
     assert react.guild.events == [("move", "mine")]
 
 
 def test_a_configured_command_channel_is_the_panels_fallback_destination():
-    react({A: object()}, command_channel=2)
+    react({A: NOTHING}, command_channel=2)
 
     ((channel, replace),) = react.panel.directed
     assert (channel.id, replace) == (2, False)
 
 
 def test_no_configured_command_channel_directs_the_panel_nowhere():
-    react({A: object()}, command_channel=None)
+    react({A: NOTHING}, command_channel=None)
 
     assert react.panel.directed == []
 
 
 def test_an_unresolved_command_channel_directs_the_panel_nowhere():
-    react({A: object()}, command_channel=2, resolves=False)
+    react({A: NOTHING}, command_channel=2, resolves=False)
 
     assert react.panel.directed == []

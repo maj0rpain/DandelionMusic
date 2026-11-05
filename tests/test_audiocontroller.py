@@ -35,7 +35,6 @@ from controller_seam import PlaybackVoiceClient, StubLoader, controller_seam
 from db_seam import in_memory_db
 from helpers import run
 
-
 MIX = playlists.PlaylistRef("1234", "mix")
 
 
@@ -1442,7 +1441,14 @@ def test_a_song_loaded_from_a_saved_playlist_keeps_its_title_refresh(
             pass
 
         ctx = types.SimpleNamespace(
-            bot=types.SimpleNamespace(DbSession=factory),
+            bot=types.SimpleNamespace(
+                DbSession=factory,
+                sessions=types.SimpleNamespace(
+                    settings=lambda _guild: types.SimpleNamespace(
+                        announce_songs=True
+                    )
+                ),
+            ),
             guild=controller.guild,
             audiocontroller=controller,
             defer=noop,
@@ -2054,6 +2060,46 @@ def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
         return controller.timer._task
 
     assert run(scenario()) is None
+
+
+def test_a_local_batch_reports_the_tracks_it_could_not_load(
+    controller, stub_loader, monkeypatch
+):
+    by_title = {s.title: s for s in _songs(controller, "a", "c")}
+
+    async def load_local_songs(tracks):
+        return [by_title.get(t) for t in tracks]
+
+    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
+
+    async def scenario():
+        return await controller.process_local_tracks(["a", "b", "c"], "test")
+
+    outcome = _run(controller, scenario)
+
+    assert (outcome.kind.value, outcome.count, outcome.skipped) == (
+        "playlist",
+        2,
+        ["b"],
+    )
+
+
+def test_a_local_batch_that_loads_completely_skips_nothing(
+    controller, stub_loader, monkeypatch
+):
+    by_title = {s.title: s for s in _songs(controller, "a", "b")}
+
+    async def load_local_songs(tracks):
+        return [by_title[t] for t in tracks]
+
+    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
+
+    async def scenario():
+        return await controller.process_local_tracks(["a", "b"], "test")
+
+    outcome = _run(controller, scenario)
+
+    assert (outcome.count, outcome.skipped) == (2, [])
 
 
 def test_a_disconnect_tells_the_panel_that_playback_ended(controller):

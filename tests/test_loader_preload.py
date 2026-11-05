@@ -13,7 +13,8 @@ import pytest
 
 from musicbot import loader
 from musicbot.linkutils import SiteTypes
-from musicbot.song import Song
+from musicbot.song import LoadResult, Song
+from musicbot.truncation import Truncation, TruncationReason
 from helpers import run
 
 Preload = loader.Preload
@@ -23,6 +24,10 @@ URL = "https://example.invalid/track"
 
 def _song(**kw):
     return Song(SiteTypes.YT_DLP, URL, **kw)
+
+
+def _single(song):
+    return LoadResult([song], True)
 
 
 def _never_loads(monkeypatch):
@@ -46,11 +51,13 @@ def test_a_song_whose_stream_url_has_not_expired_is_current(monkeypatch):
 
 def test_a_fresh_extraction_updates_the_song_and_reports_it(monkeypatch):
     async def load(lane, track):
-        return Song(
-            SiteTypes.YT_DLP,
-            track,
-            url="https://stream.invalid/a",
-            title="fresh title",
+        return _single(
+            Song(
+                SiteTypes.YT_DLP,
+                track,
+                url="https://stream.invalid/a",
+                title="fresh title",
+            )
         )
 
     monkeypatch.setattr(loader, "_load", load)
@@ -88,7 +95,9 @@ def test_a_caller_awaiting_an_inflight_extraction_is_told_its_outcome(
         async def load(lane, track):
             await release.wait()
             if extracted:
-                return Song(SiteTypes.YT_DLP, track, url="https://s.invalid")
+                return _single(
+                    Song(SiteTypes.YT_DLP, track, url="https://s.invalid")
+                )
             raise loader.SongError("gone")
 
         monkeypatch.setattr(loader, "_load", load)
@@ -111,7 +120,9 @@ def test_cancelling_one_waiter_leaves_the_owner_and_other_waiters_alone(
 
         async def load(lane, track):
             await release.wait()
-            return Song(SiteTypes.YT_DLP, track, url="https://s.invalid")
+            return _single(
+                Song(SiteTypes.YT_DLP, track, url="https://s.invalid")
+            )
 
         monkeypatch.setattr(loader, "_load", load)
         song = _song()
@@ -149,7 +160,9 @@ def _fresh_load(monkeypatch):
 
     async def load(lane, track):
         calls.append(track)
-        return Song(SiteTypes.YT_DLP, track, url="https://s.invalid/new")
+        return _single(
+            Song(SiteTypes.YT_DLP, track, url="https://s.invalid/new")
+        )
 
     monkeypatch.setattr(loader, "_load", load)
     return calls
@@ -160,14 +173,14 @@ def test_load_song_stamps_every_song_with_the_clock(monkeypatch, count):
     _clock(monkeypatch)
 
     async def run_sync(lane, f, *args):
-        if count is None:
-            return Song(SiteTypes.YT_DLP, URL)
-        return [Song(SiteTypes.YT_DLP, URL) for _ in range(count)]
+        n = count or 1
+        return LoadResult(
+            [Song(SiteTypes.YT_DLP, URL) for _ in range(n)], n == 1
+        )
 
     monkeypatch.setattr(loader, "_run_sync", run_sync)
     result = run(loader.load_song(URL))
-    songs = result if isinstance(result, list) else [result]
-    assert [s.extracted_at for s in songs] == [NOW] * (count or 1)
+    assert [s.extracted_at for s in result.songs] == [NOW] * (count or 1)
 
 
 def test_no_expire_with_a_fresh_stamp_is_current(monkeypatch):
@@ -238,11 +251,14 @@ def test_load_in_the_preload_lane_dispatches_there_and_stamps_the_clock(
 
     async def run_sync(lane, f, *args):
         lanes.append(lane)
-        return Song(SiteTypes.YT_DLP, URL)
+        return _single(Song(SiteTypes.YT_DLP, URL))
 
     monkeypatch.setattr(loader, "_run_sync", run_sync)
-    song = run(loader._load(loader.Lane.PRELOAD, URL))
-    assert (lanes, song.extracted_at) == ([loader.Lane.PRELOAD], NOW)
+    result = run(loader._load(loader.Lane.PRELOAD, URL))
+    assert (lanes, result.songs[0].extracted_at) == (
+        [loader.Lane.PRELOAD],
+        NOW,
+    )
 
 
 def test_preload_extracts_in_the_preload_lane(monkeypatch):
@@ -250,8 +266,31 @@ def test_preload_extracts_in_the_preload_lane(monkeypatch):
 
     async def load(lane, track):
         lanes.append(lane)
-        return Song(SiteTypes.YT_DLP, track, url="https://s.invalid/new")
+        return _single(
+            Song(SiteTypes.YT_DLP, track, url="https://s.invalid/new")
+        )
 
     monkeypatch.setattr(loader, "_load", load)
     run(loader.preload(_song()))
     assert lanes == [loader.Lane.PRELOAD]
+
+
+@pytest.mark.parametrize(
+    "result",
+    [
+        LoadResult([Song(SiteTypes.YT_DLP, URL)] * 2, False),
+        LoadResult(
+            [Song(SiteTypes.YT_DLP, URL)],
+            False,
+            Truncation(5, TruncationReason.NO_API),
+        ),
+    ],
+)
+def test_a_result_that_is_not_single_fails_the_preload(monkeypatch, result):
+    async def load(lane, track):
+        return result
+
+    monkeypatch.setattr(loader, "_load", load)
+    song = _song(title="stale title")
+    assert run(loader.preload(song)) is Preload.FAILED
+    assert song.title == "stale title"

@@ -1,6 +1,5 @@
 import sys
 import asyncio
-from dataclasses import dataclass
 from itertools import islice
 from traceback import print_exc
 from typing import (
@@ -9,14 +8,14 @@ from typing import (
     Iterable,
     List,
     Optional,
-    Union,
 )
 
 import discord
 from config import config
 
 from musicbot import loader, playlists, utils
-from musicbot.song import PartialPlaylist, Song
+from musicbot.outcome import EnqueueOutcome, OutcomeKind
+from musicbot.song import Song
 from musicbot.truncation import Truncation
 from musicbot.linkutils import SiteTypes
 from musicbot.panel_snapshot import PanelSnapshot
@@ -30,22 +29,6 @@ from enum import Enum, auto
 # avoiding circular import
 if TYPE_CHECKING:
     from musicbot.bot import MusicBot
-
-
-@dataclass
-class QueuedPlaylist:
-    """process_song()'s result for a multi-song load. `truncation` is
-    set when the playlist was cut short."""
-
-    queued: int
-    truncation: Optional[Truncation] = None
-
-    def notice(self) -> Optional[str]:
-        """The truncation notice for the queued tracks, or `None` when
-        nothing was cut."""
-        if self.truncation is None:
-            return None
-        return self.truncation.notice(self.queued)
 
 
 class RestoreResult(Enum):
@@ -277,40 +260,87 @@ class AudioController(object):
         on the event loop only - raises RuntimeError anywhere else."""
         self.playback.skip(forced)
 
-    async def play_song(self, song: Song, generation: Optional[int] = None):
+    async def play_song(
+        self, song: Song, generation: Optional[int] = None
+    ) -> bool:
         """Plays a song object. `generation` is ignored: the start
         token is private to Playback."""
-        await self.playback.start(song)
+        return await self.playback.start(song)
 
-    async def ensure_playing(self):
+    async def ensure_playing(self) -> Optional[bool]:
         """Starts the head of the queue if nothing is playing and the
         queue is non-empty; otherwise preloads the queue. The one
-        "start if idle" rule for everything that adds to the queue."""
+        "start if idle" rule for everything that adds to the queue.
+        Returns the start's result, or `None` when it started
+        nothing."""
         if self.is_idle() and len(self.playlist) > 0:
-            await self.play_song(self.playlist[0])
-        else:
-            self._schedule_preload()
+            return await self.play_song(self.playlist[0])
+        self._schedule_preload()
+        return None
 
-    async def enqueue_next(self, song: Song):
+    @staticmethod
+    def _single_outcome(
+        song: Song,
+        index: int,
+        triggers_start: bool,
+        started: Optional[bool],
+    ) -> EnqueueOutcome:
+        if triggers_start and started is not None:
+            kind = OutcomeKind.STARTED if started else OutcomeKind.START_FAILED
+            return EnqueueOutcome(kind, song=song)
+        return EnqueueOutcome(
+            OutcomeKind.QUEUED, song=song, position=index + 1
+        )
+
+    def _would_start(self) -> bool:
+        """Whether a request placed now triggers the start: nothing is
+        playing and the queue is empty."""
+        return self.is_idle() and len(self.playlist) == 0
+
+    async def enqueue_next(self, song: Song) -> EnqueueOutcome:
         """Puts `song` directly after the current track, refreshes the
         backup and starts playing if nothing is (see ensure_playing()).
+        Returns a single-song outcome.
 
         Placement happens before the first await, so no other command
         can slip between the song and its slot."""
-        self.playlist.insert_next(song)
+        triggers_start = self._would_start()
+        index = self.playlist.insert_next(song)
         self.playback.queue_changed()
-        await self.ensure_playing()
+        started = await self.ensure_playing()
+        return self._single_outcome(song, index, triggers_start, started)
 
-    async def enqueue(self, songs: Iterable[Song]):
+    async def enqueue(
+        self,
+        songs: Iterable[Song],
+        *,
+        batch: bool = False,
+        truncation: Optional[Truncation] = None,
+    ) -> EnqueueOutcome:
         """Appends `songs` to the queue, refreshes the backup once and
         starts playing if nothing is (see ensure_playing()).
 
+        Returns PLAYLIST when it places more than one song or `batch`
+        is set, else the single song's outcome.
+
         Placement happens before the first await, so the appended songs
         land together and in order."""
-        for song in songs:
+        triggers_start = self._would_start()
+        placed = list(songs)
+        first_index = len(self.playlist)
+        for song in placed:
             self.playlist.add(song)
         self.playback.queue_changed()
-        await self.ensure_playing()
+        started = await self.ensure_playing()
+        if batch or len(placed) != 1:
+            return EnqueueOutcome(
+                OutcomeKind.PLAYLIST,
+                count=len(placed),
+                truncation=truncation,
+            )
+        return self._single_outcome(
+            placed[0], first_index, triggers_start, started
+        )
 
     async def restore(self) -> RestoreResult:
         """Reloads the playlist backup and starts its head.
@@ -333,7 +363,7 @@ class AudioController(object):
         track: str,
         user: Optional[discord.abc.User] = None,
         playnext=False,
-    ) -> Union[Song, QueuedPlaylist]:
+    ) -> EnqueueOutcome:
         """Adds the track to the playlist instance
         Starts playing if it is the first song.
 
@@ -346,72 +376,52 @@ class AudioController(object):
         serializing the whole, progressively larger playlist once per
         track, an O(n^2) blocking write."""
 
-        # Logged on the way out rather than on the way in, so the
-        # success cases below can name what the track resolved to
-        # instead of echoing the link. A request that resolves to
-        # nothing still has to leave a trace, though: a failed load
-        # raises SongError, which the caller turns into a Discord reply
-        # and nothing else.
+        # A failed load raises SongError, which the caller turns into a
+        # Discord reply; it still has to leave a trace here.
         try:
-            loaded_song = await loader.load_song(track)
+            result = await loader.load_song(track)
         except loader.SongError:
             print(
                 f"{user} queued {track!r} in guild {self.guild.name!r}"
                 " - could not be loaded"
             )
             raise
-        if isinstance(loaded_song, Song):
-            added = [loaded_song]
-            print(
-                f"{user} queued {loaded_song.display_name!r}"
-                f" by {loaded_song.uploader or 'unknown'}"
-                f" ({loaded_song.host.name}) in guild {self.guild.name!r}"
+        added = result.songs
+        if result.single:
+            first = added[0]
+            what = (
+                f"{first.display_name!r} by {first.uploader or 'unknown'}"
+                f" ({first.host.name})"
             )
         else:
-            added = list(loaded_song)
-            count = len(loaded_song)
-            if count == 1 and not isinstance(loaded_song, PartialPlaylist):
-                # special-case one-item playlists
-                loaded_song = loaded_song[0]
-                print(
-                    f"{user} queued {loaded_song.display_name!r}"
-                    f" by {loaded_song.uploader or 'unknown'}"
-                    f" ({loaded_song.host.name})"
-                    f" in guild {self.guild.name!r}"
-                )
-            else:
-                # a resolved playlist has no single title to show -
-                # the input is the only useful identifier left
-                print(
-                    f"{user} queued a playlist ({count} track(s))"
-                    f" via {track!r} in guild {self.guild.name!r}"
-                )
-                loaded_song = QueuedPlaylist(
-                    count,
-                    (
-                        loaded_song.truncation
-                        if isinstance(loaded_song, PartialPlaylist)
-                        else None
-                    ),
-                )
+            # a resolved playlist has no single title to show -
+            # the input is the only useful identifier left
+            what = f"a playlist ({len(added)} track(s)) via {track!r}"
+        print(f"{user} queued {what} in guild {self.guild.name!r}")
 
         if playnext and len(added) == 1:
-            await self.enqueue_next(added[0])
-        else:
-            await self.enqueue(added)
-
-        return loaded_song
+            outcome = await self.enqueue_next(added[0])
+            if not result.single:
+                outcome = EnqueueOutcome(
+                    OutcomeKind.PLAYLIST,
+                    count=1,
+                    truncation=result.truncation,
+                )
+            return outcome
+        return await self.enqueue(
+            added, batch=not result.single, truncation=result.truncation
+        )
 
     async def process_local_tracks(
         self,
         tracks: List[str],
         source: str,
         user: Optional[discord.abc.User] = None,
-    ) -> List[Optional[Song]]:
+    ) -> EnqueueOutcome:
         """Queues a batch of local-library files and settles the
-        playlist once at the end. Returns a list parallel to `tracks`,
-        None wherever a file could not be loaded, so the caller can
-        name what it skipped.
+        playlist once at the end. Returns a PLAYLIST outcome: `count`
+        the songs queued, `skipped` the tracks that could not be
+        loaded (empty when all were).
 
         `source` names the browse/search action that produced `tracks`
         (e.g. "browse: entire album Artist - Album") - unlike a single
@@ -455,12 +465,16 @@ class AudioController(object):
         songs += loaded_tail
 
         added = [song for song in loaded_tail if song is not None]
-        if not added:
-            return songs
+        if added:
+            await self.enqueue(added)
 
-        await self.enqueue(added)
-
-        return songs
+        return EnqueueOutcome(
+            OutcomeKind.PLAYLIST,
+            count=len([song for song in songs if song is not None]),
+            skipped=[
+                track for track, song in zip(tracks, songs) if song is None
+            ],
+        )
 
     def add_task(self, coro: Coroutine):
         # loop only: discord.py's audio thread never reaches this - its

@@ -5,13 +5,14 @@ Queue order is what the user sees in d!queue: titles by index.
 """
 
 import asyncio
-import sys
 import types
 
 import pytest
 
 from musicbot.commands.music import Music
 from musicbot.loader import SongError
+from musicbot.outcome import OutcomeKind
+from musicbot.song import LoadResult
 from controller_helpers import (
     ProcessController,
     command_ctx,
@@ -27,6 +28,10 @@ from controller_helpers import (
     _song,
 )
 from helpers import run
+
+
+def _single(song):
+    return LoadResult([song], True)
 
 
 def _suspended_loads(controller, stub_loader):
@@ -57,7 +62,7 @@ def test_interleaved_playnext_and_plain_keep_their_slots(
         await _settle()
         order = ["plain", "pn"] if plain_first else ["pn", "plain"]
         for track in order:
-            futures[track].set_result(_song(controller, track))
+            futures[track].set_result(_single(_song(controller, track)))
             await _settle()
         await asyncio.gather(pn, plain)
 
@@ -70,7 +75,7 @@ def test_playnext_goes_to_index_1_and_refreshes_backup_and_preload_once(
     controller, stub_loader, tmp_path
 ):
     _queue(controller, "current", "a", "b")
-    stub_loader.results["load_song"] = _song(controller, "x")
+    stub_loader.results["load_song"] = _single(_song(controller, "x"))
 
     _run_while_playing(
         controller, lambda: controller.process_song("x", playnext=True)
@@ -86,7 +91,7 @@ def test_playnext_on_an_empty_queue_starts_the_track(
     controller, stub_loader, monkeypatch, tmp_path
 ):
     _fake_ffmpeg(monkeypatch)
-    stub_loader.results["load_song"] = _song(controller, "x")
+    stub_loader.results["load_song"] = _single(_song(controller, "x"))
 
     _run(controller, lambda: controller.process_song("x", playnext=True))
 
@@ -98,7 +103,7 @@ def test_playnext_on_an_empty_queue_starts_the_track(
 
 def test_playnext_one_item_playlist_goes_next(controller, stub_loader):
     _queue(controller, "current", "a")
-    stub_loader.results["load_song"] = [_song(controller, "x")]
+    stub_loader.results["load_song"] = _single(_song(controller, "x"))
 
     _run_while_playing(
         controller, lambda: controller.process_song("x", playnext=True)
@@ -109,19 +114,17 @@ def test_playnext_one_item_playlist_goes_next(controller, stub_loader):
 
 def test_playnext_multi_track_playlist_is_appended(controller, stub_loader):
     _queue(controller, "current", "a")
-    stub_loader.results["load_song"] = [
-        _song(controller, "x"),
-        _song(controller, "y"),
-    ]
+    stub_loader.results["load_song"] = LoadResult(
+        [_song(controller, "x"), _song(controller, "y")], False
+    )
 
     result = _run_while_playing(
         controller, lambda: controller.process_song("x", playnext=True)
     )
 
     assert _titles(controller) == ["current", "a", "x", "y"]
-    assert isinstance(
-        result, sys.modules[type(controller).__module__].QueuedPlaylist
-    )
+    assert result.kind is OutcomeKind.PLAYLIST
+    assert result.count == 2
 
 
 def test_unloadable_playnext_leaves_everything_alone(
@@ -155,7 +158,7 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
     }
 
     async def load_song(track):
-        return songs[track]
+        return _single(songs[track])
 
     stub_loader.load_song = load_song
 
