@@ -1,21 +1,15 @@
 """General's voice commands go through request admission: the command
 channel and user_must_be_in_vc rules apply, and d!reset admits twice."""
 
-import asyncio
-
 import pytest
 from discord.ext import commands
 
 from config import config
+from musicbot.admission import RequestKind as K
 from musicbot.commands.general import General
 from musicbot.utils import CheckError
+from discord_fakes import HERE, PEOPLE, situation
 from helpers import run
-from test_admission import HERE, PEOPLE, situation
-from test_admission import K
-
-
-async def _no_sleep(_seconds):
-    pass
 
 
 def prepare(name, kind, **kw):
@@ -137,10 +131,7 @@ def test_reset_joins_from_the_post_reset_voice_state():
     assert sent == [":white_check_mark: Connected to b"]
 
 
-def test_reset_still_refuses_when_the_bot_is_in_voice_after_it(
-    monkeypatch,
-):
-    monkeypatch.setattr(asyncio, "sleep", _no_sleep)
+def test_reset_still_refuses_when_the_bot_is_in_voice_after_it(no_sleep):
 
     def post(guild, ctx):
         guild.put_bot_in(guild.channel("a", humans=1))

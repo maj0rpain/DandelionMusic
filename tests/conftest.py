@@ -155,3 +155,13 @@ def worker_loop(monkeypatch):
     monkeypatch.setattr(loader, "_loop", loop)
     yield loop
     loop.close()
+
+
+@pytest.fixture
+def no_sleep(monkeypatch):
+    """A move waits a second before returning; time is a boundary."""
+
+    async def sleep(_seconds):
+        pass
+
+    monkeypatch.setattr(asyncio, "sleep", sleep)

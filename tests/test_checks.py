@@ -168,16 +168,6 @@ def voice_ctx(
     )
 
 
-@pytest.fixture
-def no_sleep(monkeypatch):
-    """A move waits a second before returning; time is a boundary."""
-
-    async def sleep(_seconds):
-        pass
-
-    monkeypatch.setattr(asyncio, "sleep", sleep)
-
-
 async def join(ctx):
     await (await admission.check(ctx)).enter()
 
@@ -384,13 +374,6 @@ class TestNonJoiningCommand:
     """An unmarked music command never touches voice, so while the bot
     is idle it has no voice requirement to refuse on."""
 
-    def test_admits_a_user_outside_voice_while_idle(self):
-        guild = VoiceGuild()
-        ctx = voice_ctx(guild, None)
-        ctx.command = command_of(Music, "history")
-        assert run(admission.check(ctx)).audiocontroller is not None
-        assert guild.events == []
-
     def test_skips_the_voice_permission_check_while_idle(self):
         guild = VoiceGuild()
         ctx = voice_ctx(guild, guild.channel("a", connect=False, speak=False))
@@ -442,12 +425,6 @@ class TestJoiningCommand:
         ctx.command = command_of(Music, "playlist load")
         run(invoke_music(ctx))
         assert guild.events == [("defer", False), ("connect", "a")]
-
-    def test_still_refuses_a_user_outside_voice_while_idle(self):
-        guild = VoiceGuild()
-        ctx = voice_ctx(guild, None)
-        ctx.command = command_of(Music, "search")
-        assert refusal(admission.check(ctx)) == config.USER_NOT_IN_VC_MESSAGE
 
 
 def click(button, ctx, custom_id):

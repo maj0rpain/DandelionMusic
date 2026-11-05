@@ -6,7 +6,6 @@ connect/move port.
 """
 
 import asyncio
-import types
 
 import discord
 import pytest
@@ -14,103 +13,23 @@ import pytest
 from config import config
 from musicbot import admission
 from musicbot.admission import RequestKind as K
-from musicbot.utils import CheckError, joining_command
-from discord_fakes import VoiceGuild, make_bot
+from musicbot.utils import CheckError
+from discord_fakes import (
+    BOTS_ONLY,
+    ADMISSION_DJ_ROLE,
+    HERE,
+    PEOPLE,
+    fake_controller,
+    situation,
+)
 from helpers import run
 
-CMD_CHANNEL = 7
-HERE = "here"  # the bot's channel when the author is with it
-BOTS_ONLY = "bots"
-PEOPLE = "people"
-DJ_ROLE = 99
 
 NOT_IN_VC = config.USER_NOT_IN_VC_MESSAGE
 NO_PERMS = config.VOICE_PERMISSIONS_MISSING
 WRONG_CH = config.WRONG_CHANNEL_MESSAGE
 NOT_CONNECTED = config.NOT_CONNECTED_MESSAGE
 NOT_DJ = config.NOT_A_DJ
-
-
-@joining_command
-async def _joining_callback(ctx):
-    pass
-
-
-async def _plain_callback(ctx):
-    pass
-
-
-def _command(joining):
-    callback = _joining_callback if joining else _plain_callback
-    return types.SimpleNamespace(callback=callback)
-
-
-def _controller():
-    async def dispose(reason):
-        pass
-
-    return types.SimpleNamespace(dispose=dispose)
-
-
-def situation(
-    kind,
-    bot=None,  # None (out of voice), HERE, BOTS_ONLY or PEOPLE
-    author="b",  # None (not in voice), "a" (bot's channel) or "b"
-    rule=True,
-    wrong_channel=False,
-    perms=None,
-    role=None,  # None, "admin", "owner" or "dj"
-    dj_role=None,
-    custom_id="queue",
-    registered=True,
-):
-    """Builds (guild, ctx) for one row."""
-    guild = VoiceGuild()
-    a = guild.channel("a", **{"humans": 1} if bot == PEOPLE else {})
-    if bot == BOTS_ONLY:
-        a = guild.channel("a", bots=1)
-    if bot == HERE:
-        a = guild.channel("a", humans=1)
-    if bot is not None:
-        guild.put_bot_in(a)
-    b = guild.channel("b", humans=1, **(perms or {}))
-    voice = {"a": a, "b": b}.get(author)
-    sett = types.SimpleNamespace(
-        command_channel=CMD_CHANNEL + 1 if wrong_channel else None,
-        user_must_be_in_vc=rule,
-        dj_role=dj_role,
-        vc_timeout=True,
-    )
-    controllers = {guild: _controller()} if registered else {}
-    bot_obj = make_bot(
-        controllers,
-        is_owner=role == "owner",
-        settings={guild: sett},
-    )
-    roles = [types.SimpleNamespace(id=DJ_ROLE)] if role == "dj" else []
-    ctx = types.SimpleNamespace(
-        bot=bot_obj,
-        guild=guild,
-        author=types.SimpleNamespace(
-            id=1,
-            roles=roles,
-            voice=types.SimpleNamespace(channel=voice) if voice else None,
-        ),
-        channel=types.SimpleNamespace(
-            id=CMD_CHANNEL,
-            permissions_for=lambda m: types.SimpleNamespace(
-                administrator=role == "admin"
-            ),
-        ),
-        command=(
-            _command(kind is K.JOINING_COMMAND)
-            if kind in (K.COMMAND, K.JOINING_COMMAND)
-            else None
-        ),
-        interaction=types.SimpleNamespace(data={"custom_id": custom_id}),
-        controllers=controllers,
-    )
-    return guild, ctx
 
 
 def run_request(ctx, kind):
@@ -231,7 +150,7 @@ def rows():
             (
                 f"{n}: bot with others, DJ-role holder",
                 kind,
-                {**base, "role": "dj", "dj_role": DJ_ROLE},
+                {**base, "role": "dj", "dj_role": ADMISSION_DJ_ROLE},
                 "admitted",
             ),
             (
@@ -314,7 +233,7 @@ def rows():
                     "bot": HERE,
                     "author": "a",
                     "custom_id": cid,
-                    "dj_role": DJ_ROLE,
+                    "dj_role": ADMISSION_DJ_ROLE,
                 },
                 NOT_DJ,
             ),
@@ -325,7 +244,7 @@ def rows():
                     "bot": HERE,
                     "author": "a",
                     "custom_id": cid,
-                    "dj_role": DJ_ROLE,
+                    "dj_role": ADMISSION_DJ_ROLE,
                     "role": "dj",
                 },
                 "admitted",
@@ -340,7 +259,7 @@ def rows():
                     "bot": HERE,
                     "author": "a",
                     "custom_id": cid,
-                    "dj_role": DJ_ROLE,
+                    "dj_role": ADMISSION_DJ_ROLE,
                 },
                 "admitted",
             )
@@ -372,14 +291,6 @@ def test_admission_table(kind, spec, outcome, no_sleep):
             run_request(ctx, kind)
         assert str(exc.value) == outcome
         assert guild.events == []
-
-
-@pytest.fixture
-def no_sleep(monkeypatch):
-    async def sleep(_seconds):
-        pass
-
-    monkeypatch.setattr(asyncio, "sleep", sleep)
 
 
 @pytest.mark.parametrize("kind", JOINING, ids=lambda k: k.name)
@@ -425,7 +336,7 @@ def test_enter_returns_the_controller_current_when_it_acts():
     guild, ctx = situation(K.JOINING_COMMAND)
     entry = run(admission.check(ctx))
     assert entry.audiocontroller is ctx.bot.sessions.controller(guild)
-    ctx.controllers[guild] = _controller()
+    ctx.controllers[guild] = fake_controller()
     run(ctx.bot.sessions.reset(guild))
     assert run(entry.enter()) is ctx.bot.sessions.controller(guild)
     assert run(entry.enter()) is not entry.audiocontroller
@@ -468,7 +379,7 @@ async def invoke_hooks(cog, ctx):
 
 
 def test_a_joining_command_refused_by_its_dj_check_never_joins():
-    guild, ctx, cog = music_ctx("prev", dj_role=DJ_ROLE)
+    guild, ctx, cog = music_ctx("prev", dj_role=ADMISSION_DJ_ROLE)
     with pytest.raises(CheckError) as exc:
         run(invoke_hooks(cog, ctx))
     assert str(exc.value) == NOT_DJ
@@ -476,7 +387,7 @@ def test_a_joining_command_refused_by_its_dj_check_never_joins():
 
 
 def test_a_joining_command_defers_then_joins_after_its_dj_check():
-    guild, ctx, cog = music_ctx("prev", dj_role=DJ_ROLE, role="dj")
+    guild, ctx, cog = music_ctx("prev", dj_role=ADMISSION_DJ_ROLE, role="dj")
     run(invoke_hooks(cog, ctx))
     assert guild.events == [("defer",), ("connect", "b")]
 
@@ -491,7 +402,7 @@ def test_the_command_acts_on_the_controller_enter_returns():
     guild, ctx, cog = music_ctx("play")
     run(cog.cog_check(ctx))
     first = ctx.audiocontroller
-    ctx.controllers[guild] = _controller()
+    ctx.controllers[guild] = fake_controller()
     run(ctx.bot.sessions.reset(guild))
     run(cog.cog_before_invoke(ctx))
     assert ctx.audiocontroller is not first

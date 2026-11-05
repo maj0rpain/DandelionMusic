@@ -137,34 +137,16 @@ def join_needed(ctx: Context, joining: Optional[bool] = None) -> bool:
     )
 
 
-def _join_target(
-    ctx: Context, joining: Optional[bool] = None
-) -> Optional[discord.VoiceChannel]:
+def _join_target(ctx: Context) -> Optional[discord.VoiceChannel]:
     """The channel the bot has to join or move to, or None when no
     join is needed. Raises CheckError (USER_NOT_IN_VC_MESSAGE) when a
     join is needed but the author is not in voice."""
-    if not join_needed(ctx, joining):
+    if not join_needed(ctx, True):
         return None
     author_voice = ctx.author.voice
     if not author_voice:
         raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
     return author_voice.channel
-
-
-async def _play_check(ctx: Context):
-    """Refuses a music command or a search pick that may not run.
-    Never touches voice."""
-    sett = get_settings(ctx)
-    _check_command_channel(ctx, sett)
-
-    target = _join_target(ctx)
-    if target is not None:
-        check_voice_permissions(ctx.guild, target)
-
-    if ctx.guild.voice_client and sett.user_must_be_in_vc:
-        return await _voice_check(ctx)
-
-    return True
 
 
 async def _player_check(ctx: Context):
@@ -190,14 +172,6 @@ async def _connect(ctx: Context, target: discord.VoiceChannel):
     except (asyncio.TimeoutError, discord.ClientException):
         print_exc(file=sys.stderr)
         raise CheckError(config.VOICE_CONNECT_FAILED)
-
-
-async def _join_voice(ctx: Context):
-    """Connects or moves the bot to the user's voice channel when a
-    join is needed, and does nothing otherwise."""
-    target = _join_target(ctx)
-    if target is not None:
-        await _connect(ctx, target)
 
 
 class Admission:
@@ -253,7 +227,7 @@ async def check(ctx: Context, kind: Optional[RequestKind] = None):
     _check_command_channel(ctx, sett)
     target = None
     if kind in _JOINING_KINDS:
-        target = _join_target(ctx, True)
+        target = _join_target(ctx)
         if target is not None:
             check_voice_permissions(ctx.guild, target)
     if ctx.guild.voice_client and sett.user_must_be_in_vc:

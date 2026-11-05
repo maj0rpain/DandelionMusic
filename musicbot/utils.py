@@ -175,8 +175,8 @@ def get_settings(ctx: Context) -> "GuildSettings":
     until on_ready has loaded a guild's settings, every path that
     could find its controller missing finds its settings missing
     too. Guarding only the controller just moved the
-    KeyError one line down - play_check() reads settings immediately
-    after Music.cog_check() has resolved the controller."""
+    KeyError one line down - admission.check reads settings immediately
+    after resolving the controller."""
     sett = ctx.bot.sessions.settings(ctx.guild)
     if sett is None:
         raise CheckError(config.BOT_NOT_READY)

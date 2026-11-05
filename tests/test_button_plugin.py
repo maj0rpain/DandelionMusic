@@ -253,11 +253,3 @@ def test_reaction_while_the_bot_sits_alone_elsewhere_moves_it(
     processed, _ = react(monkeypatch, {A: object()}, bot_in="other")
     assert processed == [A]
     assert react.guild.events == [("move", "mine")]
-
-
-@pytest.fixture
-def no_sleep(monkeypatch):
-    async def sleep(_seconds):
-        pass
-
-    monkeypatch.setattr(asyncio, "sleep", sleep)
