@@ -199,10 +199,6 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
         else:
             await interaction.followup.send(content, ephemeral=True)
 
-    # walked twice below (once to build the URIs, once to name what
-    # was skipped), so it must not be something that can be consumed
-    triples = list(triples)
-
     # The checks and the join are inside this, not ahead of it: the
     # placeholder above is a visible message now, so anything
     # escaping here leaves it saying "Queueing..." forever -
@@ -212,7 +208,12 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
     try:
         admitted = await admission.check(ctx, admission.RequestKind.PICK)
         controller = await admitted.enter()
-        tracks = [library.song_uri(*triple) for triple in triples]
+        tracks = []
+        filenames = {}
+        for triple in triples:
+            uri = library.song_uri(*triple)
+            tracks.append(uri)
+            filenames[uri] = triple[2]
         outcome = await controller.process_local_tracks(
             tracks, source, user=ctx.author
         )
@@ -224,7 +225,6 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
         await reply(config.SONGINFO_ERROR)
         return
 
-    filenames = {library.song_uri(*triple): triple[2] for triple in triples}
     outcome = dataclasses.replace(
         outcome, skipped=[filenames[uri] for uri in outcome.skipped]
     )

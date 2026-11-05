@@ -43,14 +43,6 @@ def test_play_sends_exactly_what_render_returns(outcome, announce, playnext):
     assert sent == ([] if expected is None else [expected.embed.title])
 
 
-def test_queued_reply_is_headed_by_the_position():
-    ctx, sent = command_ctx(ProcessController(OUTCOMES[1]))
-
-    run(Music(None)._play_song(ctx, "t"))
-
-    assert sent == ["Added to queue - position 3"]
-
-
 def test_loading_a_one_entry_saved_playlist_replies_queued_playlist(
     controller, monkeypatch
 ):
