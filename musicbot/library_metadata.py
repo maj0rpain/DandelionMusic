@@ -279,6 +279,13 @@ def _art_size(art: Optional[ArtInfo]) -> int:
     return len(art.data) if art is not None and art.data else 0
 
 
+async def _off_loop(executor, fn, *args):
+    """Runs `fn(*args)` in `executor`, off the event loop."""
+    return await asyncio.get_running_loop().run_in_executor(
+        executor, fn, *args
+    )
+
+
 class Enricher:
     """The enrichment for a scope of a library snapshot, and the six
     lookups behind it: Last.fm and Spotify for an artist and for an
@@ -348,10 +355,6 @@ class Enricher:
             ),
         )
 
-    @property
-    def spotify(self) -> Optional[Spotify]:
-        return self._spotify
-
     def clear(self) -> None:
         """Drops every memoized lookup. In-flight lookups are left
         alone: their futures are what concurrent waiters are parked
@@ -394,29 +397,23 @@ class Enricher:
     async def _spotify_artist_backend(
         self, name: str
     ) -> Optional[_SpotifyInfo]:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
+        return await _off_loop(
             _network_executor, _spotify_artist_sync, self._spotify, name
         )
 
     async def _spotify_album_backend(
         self, key: _AlbumKey
     ) -> Optional[_SpotifyInfo]:
-        loop = asyncio.get_running_loop()
-        return await loop.run_in_executor(
+        return await _off_loop(
             _network_executor, _spotify_album_sync, self._spotify, key
         )
 
     async def _tags_backend(self, path: Path) -> _Tags:
-        loop = asyncio.get_running_loop()
-        tags = await loop.run_in_executor(_file_executor, read_tags, path)
+        tags = await _off_loop(_file_executor, read_tags, path)
         return _Tags(tags.album_artist, tags.artist, tags.album)
 
     async def _artwork_backend(self, path: Path) -> Optional[ArtInfo]:
-        loop = asyncio.get_running_loop()
-        embedded = await loop.run_in_executor(
-            _file_executor, read_artwork, path
-        )
+        embedded = await _off_loop(_file_executor, read_artwork, path)
         if embedded is None:
             return None
         data, extension = embedded
