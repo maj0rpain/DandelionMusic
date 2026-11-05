@@ -4,7 +4,9 @@ player view's button ids. Import them rather than writing a per-file
 copy.
 """
 
+import asyncio
 import types
+from concurrent.futures import ThreadPoolExecutor
 
 import discord
 
@@ -35,7 +37,15 @@ def make_bot(controllers=None, is_owner=False, settings=None):
             await sessions.get_or_create(guild)
 
     sessions = GuildSessions(controllers.__getitem__, load)
-    run(seed())
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        run(seed())
+    else:
+        # built from inside a running test coroutine: seed on a loop of
+        # its own, off this thread
+        with ThreadPoolExecutor(1) as pool:
+            pool.submit(run, seed()).result()
     return types.SimpleNamespace(sessions=sessions, is_owner=_is_owner)
 
 

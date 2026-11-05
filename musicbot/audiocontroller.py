@@ -16,7 +16,7 @@ from typing import (
 import discord
 from config import config
 
-from musicbot import loader, playlists, utils
+from musicbot import admission, loader, playlists, utils
 from musicbot.song import PartialPlaylist, Song
 from musicbot.truncation import Truncation
 from musicbot.linkutils import SiteTypes
@@ -24,8 +24,6 @@ from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
 from musicbot.utils import (
     CheckError,
     asset,
-    player_check,
-    dj_check,
 )
 from pathlib import Path
 import pickle
@@ -56,22 +54,18 @@ _not_provided = object()
 
 
 class MusicButton(discord.ui.Button):
-    """A button running `callback` once `check` admits the click.
-    A player button never touches voice: its default check,
-    player_check(), refuses it while the bot is out of voice. A
-    pick acting in a joining command's name (a search pick) overrides
-    join() to join voice (connect, or move the bot) before its
-    action."""
+    """A button running `callback` once admission admits the click as
+    its request `kind`. A player button (the default kind) never
+    touches voice and is refused while the bot is out of voice; a
+    pick (`RequestKind.PICK`) acts in a joining command's name, so
+    `enter()` joins voice before its action."""
 
-    def __init__(self, callback, check=player_check, **kwargs):
+    def __init__(
+        self, callback, kind=admission.RequestKind.PLAYER_BUTTON, **kwargs
+    ):
         super().__init__(**kwargs)
         self._callback = callback
-        self._check = check
-
-    async def join(self, ctx):
-        """Awaited once every check has passed, before the action.
-        Does nothing by default; a CheckError from it refuses the
-        click like a failed check."""
+        self._kind = kind
 
     async def callback(self, inter: discord.Interaction):
         # Build ctx first, then acknowledge: get_context makes no HTTP
@@ -81,25 +75,14 @@ class MusicButton(discord.ui.Button):
         # report through. Acknowledge before the checks and the join:
         # a join can be slow, and it must not push the response past
         # Discord's 3-second deadline. Refusals then go out as
-        # ephemeral followups. join() runs only once every check has
+        # ephemeral followups. enter() runs only once the check has
         # passed, so a refused click never makes the bot join.
         ctx = await inter.client.get_context(inter)
         try:
             await inter.response.defer()
             try:
-                await self._check(ctx)
-                if inter.data.get("custom_id") in [
-                    "prev",
-                    "pause",
-                    "next",
-                    "loop",
-                    "shuffle",
-                    "stop",
-                    "volume_down",
-                    "volume_up",
-                ]:
-                    await dj_check(ctx)
-                await self.join(ctx)
+                admitted = await admission.check(ctx, self._kind)
+                ctx.audiocontroller = await admitted.enter()
             except CheckError as e:
                 self.on_refused()
                 await ctx.send(e, ephemeral=True)

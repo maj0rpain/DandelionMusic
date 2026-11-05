@@ -609,7 +609,10 @@ def click(button, ctx, custom_id):
     """What discord.py does with a component click: the context it
     builds for one has no command."""
     ctx.command = None
-    return run(button.callback(FakeInteraction(ctx, custom_id)))
+    inter = FakeInteraction(ctx, custom_id)
+    if not hasattr(ctx, "interaction"):
+        ctx.interaction = inter
+    return run(button.callback(inter))
 
 
 def recording_send(ctx):
@@ -728,7 +731,7 @@ class TestButtons:
         async def play_song(ctx, track):
             played.append(track)
 
-        cog = types.SimpleNamespace(cog_check=play_check, _play_song=play_song)
+        cog = types.SimpleNamespace(_play_song=play_song)
         view = SearchView(ctx)
         view.add_item(SongButton(cog, 1, "https://example.com/a"))
         click(view.children[0], ctx, "pick")
