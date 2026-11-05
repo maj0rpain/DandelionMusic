@@ -147,12 +147,17 @@ class TestAttachments:
         assert s.frame().attachments_change is True
 
     def test_page_turn_repairs_a_failed_enrichment_edit(self):
-        s = at_artist()
+        # page_size=1 makes Radiohead's two albums two pages
+        s = session(page_size=1)
+        s.descend("Radiohead")
         s.landed(s.frame())
         s.offer_enrichment(s.enter_level(), EMBEDDED)
-        # enrichment edit failed, then the user turns a page
+        # enrichment edit failed, then the user turns a real page
         s.page_by(1)
-        assert s.frame().attachments_change is True
+        assert s.position().page == 1
+        f = s.frame()
+        assert f.attachments_change is True
+        assert f.attachment.key == "Radiohead/None.png"
 
     def test_leaving_an_attached_level_changes_the_attachment(self):
         s = at_artist()
