@@ -937,30 +937,21 @@ def visit_all(rig, count):
         rig.get("Artist", f"Album {i:03}")
 
 
-def test_513_no_cover_albums_make_the_first_be_read_again(
+def test_no_cover_albums_are_remembered_up_to_512_and_the_513th_evicts(
     make_library, monkeypatch, no_lastfm
 ):
     rig = Rig(build_many_albums(make_library, 513))
     reads = CountingReads(monkeypatch)
     first = library.song_path("Artist", "Album 000", "01.mp3")
 
-    visit_all(rig, 513)
-    assert reads.artwork_reads.count(first) == 1
+    visit_all(rig, 512)
+    visit_all(rig, 512)
+    assert len(reads.artwork_reads) == 512  # all remembered
+
+    rig.get("Artist", "Album 512")
     rig.get("Artist", "Album 000")
 
-    assert reads.artwork_reads.count(first) == 2
-
-
-def test_512_no_cover_albums_are_all_remembered(
-    make_library, monkeypatch, no_lastfm
-):
-    rig = Rig(build_many_albums(make_library, 512))
-    reads = CountingReads(monkeypatch)
-
-    visit_all(rig, 512)
-    visit_all(rig, 512)
-
-    assert len(reads.artwork_reads) == 512
+    assert reads.artwork_reads.count(first) == 2  # the 513th evicted it
 
 
 @pytest.mark.parametrize(

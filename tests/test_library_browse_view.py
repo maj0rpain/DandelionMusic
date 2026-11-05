@@ -1339,9 +1339,7 @@ def test_enrichment_is_resolved_on_the_cursors_index_not_the_librarys(
     monkeypatch,
 ):
     other = {"Elsewhere": {"Album": [make_song("Song")]}}
-    monkeypatch.setattr(
-        library_commands.library, "get_index", lambda: other, raising=False
-    )
+    monkeypatch.setattr(library_commands.library, "get_index", lambda: other)
 
     async def scenario():
         view = make_view()
