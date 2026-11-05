@@ -239,10 +239,10 @@ def test_non_http_edit_failure_restores_items_and_propagates():
     assert all(item.view is view for item in view.children)
 
 
-def test_click_after_failed_first_draw_acts_on_the_shown_level():
+def test_click_after_failed_first_draw_acts_on_the_shown_level(monkeypatch):
     async def scenario():
         view = make_view()
-        stub_enrichment(view)
+        stub_enrichment(monkeypatch)
         clicks = Clicks(view)
         failing = clicks.interaction(fail=True)
         await finish(clicks.click(LibrarySelect, failing, label="Radiohead"))
@@ -257,10 +257,10 @@ def test_click_after_failed_first_draw_acts_on_the_shown_level():
     assert level_of(view) == ("The Beatles", None)
 
 
-def test_click_after_failed_page_turn_acts_on_the_shown_page():
+def test_click_after_failed_page_turn_acts_on_the_shown_page(monkeypatch):
     async def scenario():
         view = make_view(PAGED)
-        stub_enrichment(view)
+        stub_enrichment(monkeypatch)
         clicks = Clicks(view)
         failing = clicks.interaction(fail=True)
         await finish(clicks.click(PageButton, failing))
@@ -275,10 +275,12 @@ def test_click_after_failed_page_turn_acts_on_the_shown_page():
     assert level_of(view) == ("Artist 03", None)
 
 
-def test_click_after_failed_enrichment_edit_acts_on_the_shown_level():
+def test_click_after_failed_enrichment_edit_acts_on_the_shown_level(
+    monkeypatch,
+):
     async def scenario():
         view = make_view()
-        stub_enrichment(view, {("Radiohead", None): COVER})
+        stub_enrichment(monkeypatch, {("Radiohead", None): COVER})
         clicks = Clicks(view)
         entering = clicks.interaction(fail_on={1})
         await finish(clicks.click(LibrarySelect, entering, label="Radiohead"))
@@ -380,10 +382,10 @@ def test_stat_fields_become_inline_embed_fields():
 PAGED = {f"Artist {n:02}": {"Album": [make_song("Song")]} for n in range(30)}
 
 
-def test_failed_descend_is_undone():
+def test_failed_descend_is_undone(monkeypatch):
     async def scenario():
         view = make_view(PAGED)
-        resolved = stub_enrichment(view, default=COVER)
+        resolved = stub_enrichment(monkeypatch, default=COVER)
         await view.turn_page(EditingInteraction(), 1)
         interaction = EditingInteraction(fail=True)
         await view.descend(interaction, "Artist 27")
@@ -396,10 +398,10 @@ def test_failed_descend_is_undone():
     assert resolved == []
 
 
-def test_failed_back_is_undone():
+def test_failed_back_is_undone(monkeypatch):
     async def scenario():
         view = make_view()
-        resolved = stub_enrichment(view)
+        resolved = stub_enrichment(monkeypatch)
         await view.descend(EditingInteraction(), "Radiohead")
         await view.descend(EditingInteraction(), "OK Computer")
         resolved.clear()
@@ -413,10 +415,10 @@ def test_failed_back_is_undone():
     assert resolved == []
 
 
-def test_failed_enrichment_edit_is_healed_by_next_page_turn():
+def test_failed_enrichment_edit_is_healed_by_next_page_turn(monkeypatch):
     async def scenario():
         view = make_view()
-        stub_enrichment(view, default=COVER)
+        stub_enrichment(monkeypatch, default=COVER)
         interaction = EditingInteraction()
 
         async def edit(**kwargs):
@@ -464,16 +466,16 @@ class Gated(NamedTuple):
     result: Optional[Enrichment]
 
 
-def stub_enrichment(view, results=None, default=None):
-    """Replaces the disk and HTTP lookup with one answering per
-    (artist, album) from `results`, `default` for a level it does not
-    name. Returns the list each *finished* resolution's level is
-    appended to."""
+def stub_enrichment(monkeypatch, results=None, default=None):
+    """Replaces library_metadata.get_enrichment with a fake answering
+    per the (artist, album) it receives from `results`, `default` for
+    a level it does not name. Returns the list each *finished*
+    resolution's level is appended to."""
     results = results or {}
     finished = []
 
-    async def resolve():
-        level = level_of(view)
+    async def get_enrichment(index, artist, album):
+        level = (artist, album)
         result = results.get(level, default)
         if isinstance(result, Gated):
             await result.gate.wait()
@@ -481,7 +483,11 @@ def stub_enrichment(view, results=None, default=None):
         finished.append(level)
         return result
 
-    view._resolve_enrichment = resolve
+    monkeypatch.setattr(
+        library_commands.library_metadata,
+        "get_enrichment",
+        get_enrichment,
+    )
     return finished
 
 
@@ -510,13 +516,15 @@ class EditClick(NamedTuple):
         return [interaction for interaction, _ in self.log]
 
 
-def _click_during_enrichment_edit(click, index=INDEX, artist="Radiohead"):
+def _click_during_enrichment_edit(
+    monkeypatch, click, index=INDEX, artist="Radiohead"
+):
     """Holds the artist level's enrichment edit in flight and
     dispatches `click(clicks, interaction)` meanwhile."""
 
     async def scenario():
         view = make_view(index)
-        stub_enrichment(view, {(artist, None): COVER})
+        stub_enrichment(monkeypatch, {(artist, None): COVER})
         clicks = Clicks(view)
         log = []
         entering = clicks.interaction(log)
@@ -537,9 +545,9 @@ def _click_during_enrichment_edit(click, index=INDEX, artist="Radiohead"):
     return run(scenario())
 
 
-def test_back_click_during_enrichment_edit_is_accepted():
+def test_back_click_during_enrichment_edit_is_accepted(monkeypatch):
     result = _click_during_enrichment_edit(
-        lambda clicks, i: clicks.click(BackButton, i)
+        monkeypatch, lambda clicks, i: clicks.click(BackButton, i)
     )
 
     assert result.handler is not None
@@ -554,9 +562,10 @@ def test_back_click_during_enrichment_edit_is_accepted():
     assert result.log[1][1]["attachments"][0].filename == "cover.png"
 
 
-def test_select_click_during_enrichment_edit_is_accepted():
+def test_select_click_during_enrichment_edit_is_accepted(monkeypatch):
     result = _click_during_enrichment_edit(
-        lambda clicks, i: clicks.click(LibrarySelect, i, label="OK Computer")
+        monkeypatch,
+        lambda clicks, i: clicks.click(LibrarySelect, i, label="OK Computer"),
     )
 
     assert result.handler is not None
@@ -580,7 +589,7 @@ def test_queue_click_during_enrichment_edit_queues_the_level(monkeypatch):
     monkeypatch.setattr(library_commands, "queue_songs", queue_songs)
 
     result = _click_during_enrichment_edit(
-        lambda clicks, i: clicks.click(QueueLevelButton, i)
+        monkeypatch, lambda clicks, i: clicks.click(QueueLevelButton, i)
     )
 
     assert result.handler is not None
@@ -598,8 +607,9 @@ PAGED_ALBUMS = {
 }
 
 
-def test_page_click_during_enrichment_edit_turns_the_page_once():
+def test_page_click_during_enrichment_edit_turns_the_page_once(monkeypatch):
     result = _click_during_enrichment_edit(
+        monkeypatch,
         lambda clicks, i: clicks.click(PageButton, i),
         index=PAGED_ALBUMS,
         artist="Artist",
@@ -610,12 +620,12 @@ def test_page_click_during_enrichment_edit_turns_the_page_once():
     assert result.view.session.cursor.page == 1
 
 
-def test_enrichment_resolving_after_moving_on_is_not_drawn():
+def test_enrichment_resolving_after_moving_on_is_not_drawn(monkeypatch):
     async def scenario():
         view = make_view()
         gate = asyncio.Event()
         finished = stub_enrichment(
-            view, {("Radiohead", None): Gated(gate, STALE)}
+            monkeypatch, {("Radiohead", None): Gated(gate, STALE)}
         )
         entering = EditingInteraction()
         entry = asyncio.create_task(view.descend(entering, "Radiohead"))
@@ -658,10 +668,10 @@ def test_enrichment_resolving_after_moving_on_is_not_drawn():
     assert not any(carries_enrichment(edit) for edit in redraws)
 
 
-def test_second_select_click_during_first_draw_is_turned_away():
+def test_second_select_click_during_first_draw_is_turned_away(monkeypatch):
     async def scenario():
         view = make_view()
-        stub_enrichment(view)
+        stub_enrichment(monkeypatch)
         clicks = Clicks(view)
         entering = clicks.interaction()
         entering.hold(0)
@@ -681,7 +691,7 @@ def test_second_select_click_during_first_draw_is_turned_away():
     assert level_of(view) == ("Radiohead", None)
 
 
-def test_second_click_during_page_turn_is_turned_away():
+def test_second_click_during_page_turn_is_turned_away(monkeypatch):
     async def scenario():
         view = make_view(PAGED)
         clicks = Clicks(view)
@@ -703,7 +713,9 @@ def test_second_click_during_page_turn_is_turned_away():
     assert view.session.cursor.page == 1
 
 
-def test_select_from_previous_page_during_page_turn_opens_its_entry():
+def test_select_from_previous_page_during_page_turn_opens_its_entry(
+    monkeypatch,
+):
     # The one test here that does not dispatch through the ViewStore:
     # while a page turn's edit is held the double-click guard turns
     # every dispatched click away, and once it lands discord.py has
@@ -712,7 +724,7 @@ def test_select_from_previous_page_during_page_turn_opens_its_entry():
     # callback is awaited directly.
     async def scenario():
         view = make_view(PAGED)
-        stub_enrichment(view)
+        stub_enrichment(monkeypatch)
         clicks = Clicks(view)
         previous = next(
             i for i in view.children if isinstance(i, LibrarySelect)
@@ -734,11 +746,11 @@ def test_select_from_previous_page_during_page_turn_opens_its_entry():
     assert level_of(view) == ("Artist 03", None)
 
 
-async def _descended(index, label):
+async def _descended(monkeypatch, index, label):
     """A view on `index` descended into `label`, with the components
     from before the descend landed kept."""
     view = make_view(index)
-    stub_enrichment(view)
+    stub_enrichment(monkeypatch)
     clicks = Clicks(view)
     kept = list(clicks.shown)
     await finish(
@@ -761,7 +773,7 @@ def test_component_from_an_earlier_scope_is_acknowledged_and_ignored(
     monkeypatch.setattr(library_commands, "queue_songs", queue_songs)
 
     async def scenario():
-        view, clicks, _ = await _descended(PAGED_ALBUMS, "Artist")
+        view, clicks, _ = await _descended(monkeypatch, PAGED_ALBUMS, "Artist")
         kept = next(i for i in clicks.shown if isinstance(i, kind))
         await finish(
             clicks.click(LibrarySelect, clicks.interaction(), label="Album 00")
@@ -815,9 +827,11 @@ def test_every_browse_component_is_built_on_the_stale_guard_base():
         assert type(item).callback is library_commands._BrowseItem.callback
 
 
-def test_stranger_on_a_stale_scope_component_is_told_it_is_not_theirs():
+def test_stranger_on_a_stale_scope_component_is_told_it_is_not_theirs(
+    monkeypatch,
+):
     async def scenario():
-        view, clicks, kept = await _descended(INDEX, "Radiohead")
+        view, clicks, kept = await _descended(monkeypatch, INDEX, "Radiohead")
         select = next(i for i in kept if isinstance(i, LibrarySelect))
         replies = []
 
@@ -869,10 +883,10 @@ async def attempt(coro):
     return None
 
 
-def test_descend_edit_reset_is_undone_and_next_pick_opens_it():
+def test_descend_edit_reset_is_undone_and_next_pick_opens_it(monkeypatch):
     async def scenario():
         view = make_view()
-        resolved = stub_enrichment(view)
+        resolved = stub_enrichment(monkeypatch)
         interaction = EditingInteraction(fail=True, edit_error=reset_error())
         raised = await attempt(view.descend(interaction, "Radiohead"))
         cursor = level_of(view)
@@ -910,10 +924,10 @@ def test_failed_clamped_page_turn_is_undone():
         ("page", reset_error),
     ],
 )
-def test_failed_defer_leaves_cursor_unchanged(click, error):
+def test_failed_defer_leaves_cursor_unchanged(click, error, monkeypatch):
     async def scenario():
         view = make_view(PAGED if click == "page" else INDEX)
-        resolved = stub_enrichment(view)
+        resolved = stub_enrichment(monkeypatch)
         if click == "back":
             await view.descend(EditingInteraction(), "Radiohead")
             resolved.clear()
@@ -993,7 +1007,7 @@ def test_clicking_a_cut_song_option_queues_that_track(monkeypatch):
 
     async def scenario():
         view = make_view(index)
-        stub_enrichment(view)
+        stub_enrichment(monkeypatch)
         clicks = Clicks(view)
         for label in ("Artist", "Album"):
             await finish(
@@ -1319,3 +1333,30 @@ def test_first_message_is_drawn_from_one_frame(monkeypatch):
 
     assert len(frames) == 1
     assert sent[0]["embed"].title == frames[0].title
+
+
+def test_enrichment_is_resolved_on_the_cursors_index_not_the_librarys(
+    monkeypatch,
+):
+    other = {"Elsewhere": {"Album": [make_song("Song")]}}
+    monkeypatch.setattr(library_commands.library, "get_index", lambda: other)
+
+    async def scenario():
+        view = make_view()
+        seen = []
+
+        async def get_enrichment(index, artist, album):
+            seen.append(index)
+            return COVER
+
+        monkeypatch.setattr(
+            library_commands.library_metadata,
+            "get_enrichment",
+            get_enrichment,
+        )
+        await view.descend(EditingInteraction(), "Radiohead")
+        return seen
+
+    seen = run(scenario())
+
+    assert len(seen) == 1 and seen[0] is INDEX

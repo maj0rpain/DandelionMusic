@@ -1,17 +1,17 @@
 import asyncio
-import sys
-from collections import OrderedDict
+import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
-from typing import Dict, NamedTuple, Optional, Tuple
+from typing import Callable, Dict, NamedTuple, Optional, Tuple
 
 from spotipy import Spotify
 
 from config import config
-from musicbot import linkutils
+from musicbot import library, linkutils
 from musicbot.linkutils import spotify_api
 from musicbot.audiotags import read_artwork, read_tags
-from musicbot.cached_lookup import CachedLookup
+from musicbot.cached_lookup import ByteBoundedStore, CachedLookup
+
 
 # prefix of every line this module logs and of its lookup labels
 _LOG_PREFIX = "library_metadata: "
@@ -44,83 +44,10 @@ def _low_limit_client(api: Optional[Spotify]) -> Optional[Spotify]:
     )
 
 
-_enrichment_client = _low_limit_client(spotify_api)
-
-
-# distinguishes "not looked up yet" from a looked-up-and-genuinely-
-# absent None, which the art cache below stores as a real result
-_MISSING = object()
-
-
 class ArtInfo(NamedTuple):
     url: Optional[str]  # a real URL - use with embed.set_thumbnail(url=...)
     data: Optional[bytes]  # raw embedded bytes - needs discord.File
     extension: Optional[str]  # "jpeg"/"png"/etc, set only when data is set
-
-
-# Deliberately unbounded, unlike _art_cache below. The key is one
-# browse level, so this holds at most one small entry per artist and
-# per album in the library and cannot grow past that however long the
-# session runs - where a single cached cover can be 5 MB, which is what
-# the other cache is defending against.
-_names_cache: Dict[
-    Tuple[str, Optional[str], Path], Tuple[str, Optional[str]]
-] = {}
-
-
-async def _resolve_names(
-    artist_folder: str, album_folder: Optional[str], sample_file: Path
-) -> Tuple[str, Optional[str]]:
-    """Resolves the query name(s) to use for external lookups,
-    preferring tag data over the (possibly organizational-only,
-    non-canonical) folder name: albumartist tag > artist tag > folder
-    name for the artist, album tag > folder name for the album. A
-    hung/slow read (e.g. MUSIC_LIBRARY_PATH on a NAS mount) times out
-    and falls back to the folder names rather than blocking forever.
-
-    Memoized, because browsing revisits the same levels constantly -
-    artist, album, back, the next album - and each visit would
-    otherwise re-read the same file off disk.
-
-    A read that hangs past the timeout is deliberately not remembered:
-    caching that fallback would let one NAS stall pin an entity to its
-    folder name for the rest of the process's life, and the folder name
-    is exactly the input the tags exist to correct. A read that *fails*
-    is a different matter - read_tags() never raises, and returns empty
-    tags both for a file it could not open and for one that simply
-    carries no tags - so the two are indistinguishable here and both do
-    get remembered as the folder-name fallback. clear_caches(), on
-    `d!library refresh`, is what clears those."""
-    key = (artist_folder, album_folder, sample_file)
-    cached = _names_cache.get(key)
-    if cached is not None:
-        return cached
-
-    loop = asyncio.get_running_loop()
-    try:
-        tags = await asyncio.wait_for(
-            loop.run_in_executor(_file_executor, read_tags, sample_file),
-            timeout=3,
-        )
-    except asyncio.TimeoutError:
-        print(
-            f"{_LOG_PREFIX}reading tags from {sample_file} timed out",
-            file=sys.stderr,
-        )
-        return artist_folder, album_folder
-    except Exception as e:
-        print(
-            f"{_LOG_PREFIX}reading tags from {sample_file} failed: {e}",
-            file=sys.stderr,
-        )
-        return artist_folder, album_folder
-
-    artist_name = tags.album_artist or tags.artist or artist_folder
-    album_name = (
-        (tags.album or album_folder) if album_folder is not None else None
-    )
-    _names_cache[key] = (artist_name, album_name)
-    return artist_name, album_name
 
 
 class _AlbumKey(NamedTuple):
@@ -174,8 +101,7 @@ def _lastfm_tags(node: dict) -> Tuple[str, ...]:
     return tuple(names[:3])
 
 
-async def _fetch_lastfm(method: str, params: Dict[str, str]) -> dict:
-    session = linkutils.get_session()
+async def _fetch_lastfm(session, method: str, params: Dict[str, str]) -> dict:
     query = {
         "method": method,
         "api_key": config.LASTFM_API_KEY,
@@ -236,113 +162,11 @@ def _parse_lastfm(data: dict) -> Optional[_LastfmInfo]:
     )
 
 
-async def _lastfm_artist_backend(name: str) -> Optional[_LastfmInfo]:
-    data = await _fetch_lastfm("artist.getInfo", {"artist": name})
-    return _parse_lastfm(data)
-
-
-async def _lastfm_album_backend(
-    key: _AlbumKey,
-) -> Optional[_LastfmInfo]:
-    data = await _fetch_lastfm(
-        "album.getInfo", {"artist": key.artist, "album": key.album}
-    )
-    return _parse_lastfm(data)
-
-
-def _lastfm_enabled() -> bool:
-    return bool(config.LASTFM_API_KEY)
-
-
-_lastfm_artist: CachedLookup[str, _LastfmInfo] = CachedLookup(
-    _lastfm_enabled,
-    _lastfm_artist_backend,
-    _LOG_PREFIX + "Last.fm artist.getInfo",
-)
-_lastfm_album: CachedLookup[_AlbumKey, _LastfmInfo] = CachedLookup(
-    _lastfm_enabled,
-    _lastfm_album_backend,
-    _LOG_PREFIX + "Last.fm album.getInfo",
-)
-
-
 class _SpotifyInfo(NamedTuple):
     image_url: Optional[str]
     popularity: Optional[int]  # 0-100
     followers: Optional[int]  # artist level only
     release_date: Optional[str]  # album level only
-
-
-def _spotify_artist_sync(name: str) -> Optional[_SpotifyInfo]:
-    results = _enrichment_client.search(q=name, type="artist", limit=1)
-    items = results.get("artists", {}).get("items", [])
-    if not items:
-        return None
-    item = items[0]
-    images = item.get("images", [])
-    return _SpotifyInfo(
-        image_url=images[0]["url"] if images else None,
-        popularity=item.get("popularity"),
-        followers=(item.get("followers") or {}).get("total"),
-        release_date=None,
-    )
-
-
-def _spotify_album_sync(key: _AlbumKey) -> Optional[_SpotifyInfo]:
-    query = f"artist:{key.artist} album:{key.album}"
-    results = _enrichment_client.search(q=query, type="album", limit=1)
-    items = results.get("albums", {}).get("items", [])
-    if not items:
-        return None
-    item = items[0]
-    images = item.get("images", [])
-    # a search only yields simplified album objects, which carry no
-    # popularity - that lives on the full object and needs its own
-    # fetch. A failed fetch propagates: the whole album lookup is then
-    # a transient failure, retried after the cooldown, rather than a
-    # popularity-less success cached until restart.
-    popularity = None
-    album_id = item.get("id")
-    if album_id:
-        popularity = _enrichment_client.album(album_id).get("popularity")
-    return _SpotifyInfo(
-        image_url=images[0]["url"] if images else None,
-        popularity=popularity,
-        followers=None,
-        release_date=item.get("release_date"),
-    )
-
-
-async def _spotify_artist_backend(name: str) -> Optional[_SpotifyInfo]:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        _network_executor, _spotify_artist_sync, name
-    )
-
-
-async def _spotify_album_backend(
-    key: _AlbumKey,
-) -> Optional[_SpotifyInfo]:
-    loop = asyncio.get_running_loop()
-    return await loop.run_in_executor(
-        _network_executor, _spotify_album_sync, key
-    )
-
-
-def _spotify_enabled() -> bool:
-    return _enrichment_client is not None
-
-
-_spotify_artist: CachedLookup[str, _SpotifyInfo] = CachedLookup(
-    _spotify_enabled,
-    _spotify_artist_backend,
-    _LOG_PREFIX + "Spotify artist",
-)
-_spotify_album: CachedLookup[_AlbumKey, _SpotifyInfo] = CachedLookup(
-    _spotify_enabled,
-    _spotify_album_backend,
-    _LOG_PREFIX + "Spotify album",
-)
 
 
 class ExternalStats(NamedTuple):
@@ -391,171 +215,304 @@ def _remote_art(
     return None
 
 
+def _spotify_artist_sync(client: Spotify, name: str) -> Optional[_SpotifyInfo]:
+    results = client.search(q=name, type="artist", limit=1)
+    items = results.get("artists", {}).get("items", [])
+    if not items:
+        return None
+    item = items[0]
+    images = item.get("images", [])
+    return _SpotifyInfo(
+        image_url=images[0]["url"] if images else None,
+        popularity=item.get("popularity"),
+        followers=(item.get("followers") or {}).get("total"),
+        release_date=None,
+    )
+
+
+def _spotify_album_sync(
+    client: Spotify, key: _AlbumKey
+) -> Optional[_SpotifyInfo]:
+    query = f"artist:{key.artist} album:{key.album}"
+    results = client.search(q=query, type="album", limit=1)
+    items = results.get("albums", {}).get("items", [])
+    if not items:
+        return None
+    item = items[0]
+    images = item.get("images", [])
+    # a search only yields simplified album objects, which carry no
+    # popularity - that lives on the full object and needs its own
+    # fetch. A failed fetch propagates: the whole album lookup is then
+    # a transient failure, retried after the cooldown, rather than a
+    # popularity-less success cached until restart.
+    popularity = None
+    album_id = item.get("id")
+    if album_id:
+        popularity = client.album(album_id).get("popularity")
+    return _SpotifyInfo(
+        image_url=images[0]["url"] if images else None,
+        popularity=popularity,
+        followers=None,
+        release_date=item.get("release_date"),
+    )
+
+
+class _Tags(NamedTuple):
+    """The tag fields the query names are derived from."""
+
+    album_artist: Optional[str]
+    artist: Optional[str]
+    album: Optional[str]
+
+
 # Embedded covers are the one thing worth caching that is also big
 # enough to be worth bounding: read_artwork() admits up to 5 MB per
-# album, and a browsing session can walk hundreds of them. Bounded by
-# total bytes rather than by entry count, because entries differ in
-# size by three orders of magnitude, and evicted least-recently-used,
-# because going back and forth between an artist and its albums is the
-# access pattern this exists to serve.
+# album, and a browsing session can walk hundreds of them.
 _ART_CACHE_BUDGET = 32 * 1024 * 1024
-# A second bound, on entry count. "This album has no embedded cover" is
-# a real result worth remembering - recreating it costs a full mutagen
-# parse - but it weighs nothing, so the byte budget alone does not
-# bound how many of them accumulate.
+# A second bound, on entry count: "this album has no embedded cover"
+# weighs nothing, so the byte budget alone does not bound how many of
+# them accumulate.
 _ART_CACHE_MAX_ENTRIES = 512
-_art_cache: "OrderedDict[Path, Optional[ArtInfo]]" = OrderedDict()
-_art_cache_bytes = 0
 
 
 def _art_size(art: Optional[ArtInfo]) -> int:
     return len(art.data) if art is not None and art.data else 0
 
 
-def _remember_art(key: Path, art: Optional[ArtInfo]) -> None:
-    global _art_cache_bytes
-    if key in _art_cache:
-        # Reachable: unlike the two remote lookups, _embedded_art() has
-        # no in-flight dedup, so two reads of the same file can be
-        # resolving at once - descending into an album, going back, and
-        # descending again before the first enrichment finishes does
-        # it. The dict keeps one entry, so counting the replacement
-        # without discounting what it replaced would leave the budget
-        # permanently overstated, and eventually evict entries that fit.
-        _art_cache_bytes -= _art_size(_art_cache[key])
-    _art_cache[key] = art
-    # assigning to a key it already has leaves it in its old position
-    _art_cache.move_to_end(key)
-    _art_cache_bytes += _art_size(art)
-    # Over the byte budget, evict the least-recently-used entry that
-    # actually holds bytes. Plain least-recently-used would walk a run
-    # of weightless "no cover here" memos first, freeing nothing on
-    # each one and discarding a mutagen parse apiece, so a single large
-    # cover could clear every such memo the session had built up.
-    # Neither loop touches the entry just stored, even if it alone is
-    # over budget - the level being looked at now is the one that
-    # matters.
-    while _art_cache_bytes > _ART_CACHE_BUDGET:
-        victim = next(
-            (
-                other
-                for other, art in _art_cache.items()
-                if other != key and _art_size(art)
+class Enricher:
+    """The enrichment for a scope of a library snapshot, and the six
+    lookups behind it: Last.fm and Spotify for an artist and for an
+    album, plus the tag read and the artwork read of the scope's
+    sample file.
+
+    - `clock`: monotonic seconds, shared by all six lookups.
+    - `spotify`: the enrichment Spotify client, or None to turn
+      Spotify off; exposed as the read-only `spotify` attribute.
+    - `lastfm_session`: zero-argument getter of the HTTP session used
+      for Last.fm. Whether Last.fm is on is a live read of
+      `config.LASTFM_API_KEY`.
+
+    An index rebuild (a change of `library.index_generation()`)
+    clears every lookup at the start of the next `get_enrichment`."""
+
+    def __init__(
+        self,
+        clock: Callable[[], float],
+        spotify: Optional[Spotify],
+        lastfm_session: Callable[[], object],
+    ) -> None:
+        self._spotify = spotify
+        self._lastfm_session = lastfm_session
+        self._generation = library.index_generation()
+        self._lastfm_artist: CachedLookup[str, _LastfmInfo] = CachedLookup(
+            self._lastfm_enabled,
+            self._lastfm_artist_backend,
+            _LOG_PREFIX + "Last.fm artist.getInfo",
+            clock=clock,
+        )
+        self._lastfm_album: CachedLookup[_AlbumKey, _LastfmInfo] = (
+            CachedLookup(
+                self._lastfm_enabled,
+                self._lastfm_album_backend,
+                _LOG_PREFIX + "Last.fm album.getInfo",
+                clock=clock,
+            )
+        )
+        self._spotify_artist: CachedLookup[str, _SpotifyInfo] = CachedLookup(
+            self._spotify_enabled,
+            self._spotify_artist_backend,
+            _LOG_PREFIX + "Spotify artist",
+            clock=clock,
+        )
+        self._spotify_album: CachedLookup[_AlbumKey, _SpotifyInfo] = (
+            CachedLookup(
+                self._spotify_enabled,
+                self._spotify_album_backend,
+                _LOG_PREFIX + "Spotify album",
+                clock=clock,
+            )
+        )
+        self._tags: CachedLookup[Path, _Tags] = CachedLookup(
+            lambda: True,
+            self._tags_backend,
+            _LOG_PREFIX + "reading tags",
+            clock=clock,
+        )
+        self._artwork: CachedLookup[Path, ArtInfo] = CachedLookup(
+            lambda: True,
+            self._artwork_backend,
+            _LOG_PREFIX + "reading artwork",
+            clock=clock,
+            store=ByteBoundedStore(
+                _ART_CACHE_BUDGET, _ART_CACHE_MAX_ENTRIES, _art_size
             ),
-            None,
         )
-        if victim is None:
-            break
-        _art_cache_bytes -= _art_size(_art_cache.pop(victim))
-    # Over the entry cap, plain least-recently-used: here the weightless
-    # entries are exactly what needs trimming.
-    while len(_art_cache) > _ART_CACHE_MAX_ENTRIES:
-        _, evicted = _art_cache.popitem(last=False)
-        _art_cache_bytes -= _art_size(evicted)
 
+    @property
+    def spotify(self) -> Optional[Spotify]:
+        return self._spotify
 
-async def _embedded_art(sample_file: Path) -> Optional[ArtInfo]:
-    """Memoized like _resolve_names(), and for the same reason: this
-    is a second full mutagen parse of the same file on every visit to
-    an album, and it pulls the picture data out in full. A genuine
-    "this file has no cover" is a real result and is remembered; a
-    timeout or a read error is not, so a transient failure can't
-    permanently hide artwork that is actually there."""
-    cached = _art_cache.get(sample_file, _MISSING)
-    if cached is not _MISSING:
-        _art_cache.move_to_end(sample_file)
-        return cached
+    def clear(self) -> None:
+        """Drops every memoized lookup. In-flight lookups are left
+        alone: their futures are what concurrent waiters are parked
+        on, and they simply repopulate the cleared caches."""
+        for lookup in (
+            self._lastfm_artist,
+            self._lastfm_album,
+            self._spotify_artist,
+            self._spotify_album,
+            self._tags,
+            self._artwork,
+        ):
+            lookup.clear()
 
-    loop = asyncio.get_running_loop()
-    try:
-        embedded = await asyncio.wait_for(
-            loop.run_in_executor(_file_executor, read_artwork, sample_file),
-            timeout=3,
+    # --- backends -----------------------------------------------------
+
+    @staticmethod
+    def _lastfm_enabled() -> bool:
+        return bool(config.LASTFM_API_KEY)
+
+    def _spotify_enabled(self) -> bool:
+        return self._spotify is not None
+
+    async def _lastfm_artist_backend(self, name: str) -> Optional[_LastfmInfo]:
+        data = await _fetch_lastfm(
+            self._lastfm_session(), "artist.getInfo", {"artist": name}
         )
-    except asyncio.TimeoutError:
-        print(
-            f"{_LOG_PREFIX}reading artwork from {sample_file} timed out",
-            file=sys.stderr,
-        )
-        return None
-    except Exception as e:
-        print(
-            f"{_LOG_PREFIX}reading artwork from {sample_file} failed: {e}",
-            file=sys.stderr,
-        )
-        return None
+        return _parse_lastfm(data)
 
-    if embedded is None:
-        art = None
-    else:
+    async def _lastfm_album_backend(
+        self, key: _AlbumKey
+    ) -> Optional[_LastfmInfo]:
+        data = await _fetch_lastfm(
+            self._lastfm_session(),
+            "album.getInfo",
+            {"artist": key.artist, "album": key.album},
+        )
+        return _parse_lastfm(data)
+
+    async def _spotify_artist_backend(
+        self, name: str
+    ) -> Optional[_SpotifyInfo]:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            _network_executor, _spotify_artist_sync, self._spotify, name
+        )
+
+    async def _spotify_album_backend(
+        self, key: _AlbumKey
+    ) -> Optional[_SpotifyInfo]:
+        loop = asyncio.get_running_loop()
+        return await loop.run_in_executor(
+            _network_executor, _spotify_album_sync, self._spotify, key
+        )
+
+    async def _tags_backend(self, path: Path) -> _Tags:
+        loop = asyncio.get_running_loop()
+        tags = await loop.run_in_executor(_file_executor, read_tags, path)
+        return _Tags(tags.album_artist, tags.artist, tags.album)
+
+    async def _artwork_backend(self, path: Path) -> Optional[ArtInfo]:
+        loop = asyncio.get_running_loop()
+        embedded = await loop.run_in_executor(
+            _file_executor, read_artwork, path
+        )
+        if embedded is None:
+            return None
         data, extension = embedded
-        art = ArtInfo(url=None, data=data, extension=extension)
-    _remember_art(sample_file, art)
-    return art
+        return ArtInfo(url=None, data=data, extension=extension)
+
+    # --- the entry point ----------------------------------------------
+
+    async def _names(
+        self,
+        artist_folder: str,
+        album_folder: Optional[str],
+        sample_file: Path,
+    ) -> Tuple[str, Optional[str]]:
+        """The query name(s) for external lookups, preferring tag data
+        over the (possibly organizational-only) folder name: albumartist
+        tag > artist tag > folder name for the artist, album tag >
+        folder name for the album. A failed, timed-out or refused tag
+        read falls back to the folder names."""
+        tags = await self._tags.get(sample_file)
+        if tags is None:
+            return artist_folder, album_folder
+        artist_name = tags.album_artist or tags.artist or artist_folder
+        album_name = (
+            (tags.album or album_folder) if album_folder is not None else None
+        )
+        return artist_name, album_name
+
+    async def get_enrichment(
+        self,
+        index: library.LibraryIndex,
+        artist: Optional[str],
+        album: Optional[str],
+    ) -> Optional[Enrichment]:
+        """What is known about a scope of `index`: None for the root
+        (`artist` None) and for a scope with no sample file; otherwise
+        the artist level (`album` None) or the album level."""
+        generation = library.index_generation()
+        if generation != self._generation:
+            self.clear()
+            self._generation = generation
+        if artist is None:
+            return None
+        sample = library.sample_track(index, artist, album)
+        if sample is None:
+            return None
+        path = library.song_path(*sample)
+        if album is None:
+            return await self._artist_enrichment(artist, path)
+        return await self._album_enrichment(artist, album, path)
+
+    async def _artist_enrichment(
+        self, artist_folder: str, sample_file: Path
+    ) -> Enrichment:
+        """Each backend is queried once and feeds both halves of the
+        result - the same response carries the image and the
+        listener/popularity figures. Running the two concurrently
+        overlaps their waits instead of summing them."""
+        artist_name, _ = await self._names(artist_folder, None, sample_file)
+        spotify, lastfm = await asyncio.gather(
+            self._spotify_artist.get(artist_name),
+            self._lastfm_artist.get(artist_name),
+        )
+        return Enrichment(
+            stats=_external_stats(spotify, lastfm),
+            art=_remote_art(spotify, lastfm),
+        )
+
+    async def _album_enrichment(
+        self, artist_folder: str, album_folder: str, sample_file: Path
+    ) -> Enrichment:
+        """Embedded artwork beats the remote images, but does not
+        short-circuit the remote lookups - the stats come from them, so
+        they run regardless, concurrently with the artwork read."""
+        artist_name, album_name = await self._names(
+            artist_folder, album_folder, sample_file
+        )
+        key = _AlbumKey(artist_name, album_name)
+        embedded, spotify, lastfm = await asyncio.gather(
+            self._artwork.get(sample_file),
+            self._spotify_album.get(key),
+            self._lastfm_album.get(key),
+        )
+        return Enrichment(
+            stats=_external_stats(spotify, lastfm),
+            art=embedded or _remote_art(spotify, lastfm),
+        )
 
 
-def clear_caches() -> None:
-    """Drops every memoized lookup. Called after a library rescan: the
-    two local caches are keyed by file path and hold what those files
-    said last time, so without this a `d!library refresh` - whose whole
-    purpose is to pick up what changed on disk - would keep serving
-    stale tags and stale artwork. The remote caches go with them,
-    since a rescan is also the natural moment to give a backend that
-    had no match for an entity another chance.
-
-    In-flight lookups are deliberately left alone. Their futures are
-    what concurrent waiters are parked on, and dropping those would
-    hang the waiters; they simply repopulate the cleared caches when
-    they finish."""
-    global _art_cache_bytes
-    _names_cache.clear()
-    _art_cache.clear()
-    _art_cache_bytes = 0
-    for lookup in (
-        _lastfm_artist,
-        _lastfm_album,
-        _spotify_artist,
-        _spotify_album,
-    ):
-        lookup.clear()
+default_enricher = Enricher(
+    time.monotonic, _low_limit_client(spotify_api), linkutils.get_session
+)
 
 
-async def get_artist_enrichment(
-    artist_folder: str, sample_file: Path
-) -> Enrichment:
-    """Stats and photo for one artist browse level. Each backend is
-    queried once and feeds both halves of the result - the same
-    response carries the image and the listener/popularity figures, so
-    there is nothing left to gain from splitting them. Running the two
-    concurrently overlaps their waits instead of summing them."""
-    artist_name, _ = await _resolve_names(artist_folder, None, sample_file)
-    spotify, lastfm = await asyncio.gather(
-        _spotify_artist.get(artist_name),
-        _lastfm_artist.get(artist_name),
-    )
-    return Enrichment(
-        stats=_external_stats(spotify, lastfm),
-        art=_remote_art(spotify, lastfm),
-    )
-
-
-async def get_album_enrichment(
-    artist_folder: str, album_folder: str, sample_file: Path
-) -> Enrichment:
-    """Stats and cover art for one album browse level. Embedded
-    artwork still beats the remote images, but unlike before it no
-    longer short-circuits the remote lookups - the stats come from
-    them, so they run regardless, concurrently with the tag read."""
-    artist_name, album_name = await _resolve_names(
-        artist_folder, album_folder, sample_file
-    )
-    key = _AlbumKey(artist_name, album_name)
-    embedded, spotify, lastfm = await asyncio.gather(
-        _embedded_art(sample_file),
-        _spotify_album.get(key),
-        _lastfm_album.get(key),
-    )
-    return Enrichment(
-        stats=_external_stats(spotify, lastfm),
-        art=embedded or _remote_art(spotify, lastfm),
-    )
+async def get_enrichment(
+    index: library.LibraryIndex, artist: Optional[str], album: Optional[str]
+) -> Optional[Enrichment]:
+    """The enrichment for a scope of a library snapshot, from the
+    default `Enricher`."""
+    return await default_enricher.get_enrichment(index, artist, album)

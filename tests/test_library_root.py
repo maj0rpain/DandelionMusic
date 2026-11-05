@@ -87,3 +87,23 @@ def test_rebuild_with_no_library_clears_the_stored_root(
     assert library.song_path("A", "B", "t.flac") == (
         other.resolve() / "A" / "B" / "t.flac"
     )
+
+
+def test_index_generation_rises_with_each_build(root):
+    before = library.index_generation()
+    index = library.build_index()
+    assert library.index_generation() == before + 1
+    assert library.get_index() is index
+
+
+def test_a_build_that_raises_leaves_the_generation(root, monkeypatch):
+    library.build_index()
+    before = library.index_generation()
+
+    def boom(*a, **kw):
+        raise RuntimeError("walk failed")
+
+    monkeypatch.setattr(library, "read_tags", boom)
+    with pytest.raises(RuntimeError):
+        library.build_index()
+    assert library.index_generation() == before
