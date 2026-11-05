@@ -25,7 +25,7 @@ class PanelSnapshot:
     current_song: Optional[Song]
 
     @classmethod
-    def inactive(cls, volume: int = 0) -> "PanelSnapshot":
+    def inactive(cls) -> "PanelSnapshot":
         """Nothing is playing or paused: the panel shows no buttons."""
         return cls(
             active=False,
@@ -34,6 +34,6 @@ class PanelSnapshot:
             has_next=False,
             queue_empty=True,
             loop_mode=LoopMode.OFF,
-            volume=volume,
+            volume=0,
             current_song=None,
         )

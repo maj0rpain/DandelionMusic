@@ -279,7 +279,9 @@ class MusicBot(commands.Bot):
     @tasks.loop(seconds=1)
     async def update_views(self):
         await self._gather_per_guild(
-            lambda panel: panel.refresh(), "View update", self.sessions.panels
+            lambda panel: panel.refresh(),
+            "Panel refresh",
+            self.sessions.panels,
         )
 
     async def get_prefix(self, message: discord.Message):

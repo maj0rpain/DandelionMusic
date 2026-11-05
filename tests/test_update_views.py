@@ -43,6 +43,6 @@ def test_failing_refresh_does_not_stop_other_guilds_and_names_the_guild(
     err = capsys.readouterr().err
     assert (
         refreshed,
-        "View update failed for guild Broken Guild:" in err,
+        "Panel refresh failed for guild Broken Guild:" in err,
         "Traceback" in err,
     ) == (["ok"], True, True)

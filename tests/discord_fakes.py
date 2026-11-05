@@ -193,9 +193,7 @@ class RecordingCtx:
 
 
 def http_error():
-    return discord.HTTPException(
-        types.SimpleNamespace(status=500, reason="Server Error"), "boom"
-    )
+    return coded_error(discord.HTTPException, 500, 0)
 
 
 def coded_error(cls, status, code):

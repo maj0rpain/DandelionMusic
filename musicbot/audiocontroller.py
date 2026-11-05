@@ -181,7 +181,7 @@ class AudioController(object):
         """What the player panel draws: read-only, and inactive when
         nothing is playing or paused."""
         if not self.is_active():
-            return PanelSnapshot.inactive(self.volume)
+            return PanelSnapshot.inactive()
         return PanelSnapshot(
             active=True,
             paused=not self.guild.voice_client.is_playing(),

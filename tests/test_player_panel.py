@@ -11,7 +11,7 @@ from config import config
 from musicbot import admission
 from musicbot.panel_snapshot import PanelSnapshot
 from musicbot.player_panel import PlayerPanel
-from discord_fakes import EXPIRED, PLAYER_BUTTONS, coded_error
+from discord_fakes import EXPIRED, PLAYER_BUTTONS, coded_error, http_error
 from helpers import run
 
 
@@ -88,6 +88,27 @@ class Rig:
 
     def refresh(self):
         run(self.panel.refresh())
+
+
+@pytest.fixture
+def expired():
+    """A panel whose attached player message has an expired token:
+    `(rig, channel, stale)`."""
+    rig = Rig()
+    channel = PanelChannel()
+    stale = PanelMessage(channel, errors=[EXPIRED])
+    rig.attach(stale)
+    rig.controller.snapshot = snap(volume=0)
+    return rig, channel, stale
+
+
+@pytest.fixture
+def directed():
+    """A panel directed to a send channel: `(rig, channel)`."""
+    rig = Rig()
+    channel = SendChannel()
+    rig.panel.direct_to(channel)
+    return rig, channel
 
 
 @pytest.fixture
@@ -339,14 +360,10 @@ def test_an_interactions_original_response_is_the_player_message():
     assert response.edits == [None]
 
 
-def test_an_expired_token_refetches_the_message_and_retries_once():
-    rig = Rig()
-    channel = PanelChannel()
-    stale = PanelMessage(channel, errors=[EXPIRED])
+def test_an_expired_token_refetches_the_message_and_retries_once(expired):
+    rig, channel, stale = expired
     fresh = PanelMessage(channel)
     channel.fetch_result = fresh
-    rig.attach(stale)
-    rig.controller.snapshot = snap(volume=0)
 
     rig.refresh()
 
@@ -356,14 +373,10 @@ def test_an_expired_token_refetches_the_message_and_retries_once():
     assert fresh.edits[-1] is None
 
 
-def test_a_second_expired_token_drops_the_message_after_one_retry(capsys):
-    rig = Rig()
-    channel = PanelChannel()
-    stale = PanelMessage(channel, errors=[EXPIRED])
+def test_a_second_expired_token_drops_the_message_after_one_retry(expired):
+    rig, channel, stale = expired
     fresh = PanelMessage(channel, errors=[EXPIRED, EXPIRED])
     channel.fetch_result = fresh
-    rig.attach(stale)
-    rig.controller.snapshot = snap(volume=0)
 
     rig.refresh()
     rig.controller.snapshot = snap(volume=10)
@@ -374,13 +387,9 @@ def test_a_second_expired_token_drops_the_message_after_one_retry(capsys):
     assert stale.edits == [] and fresh.edits == []
 
 
-def test_a_message_gone_on_refetch_is_dropped():
-    rig = Rig()
-    channel = PanelChannel()
+def test_a_message_gone_on_refetch_is_dropped(expired):
+    rig, channel, stale = expired
     channel.fetch_error = coded_error(discord.NotFound, 404, 10008)
-    stale = PanelMessage(channel, errors=[EXPIRED])
-    rig.attach(stale)
-    rig.controller.snapshot = snap(volume=0)
 
     rig.refresh()
     rig.refresh()
@@ -389,13 +398,11 @@ def test_a_message_gone_on_refetch_is_dropped():
     assert channel.fetches == 1
 
 
-def test_another_refetch_error_is_logged_and_drops_the_message(capsys):
-    rig = Rig()
-    channel = PanelChannel()
+def test_another_refetch_error_is_logged_and_drops_the_message(
+    expired, capsys
+):
+    rig, channel, stale = expired
     channel.fetch_error = RuntimeError("boom")
-    stale = PanelMessage(channel, errors=[EXPIRED])
-    rig.attach(stale)
-    rig.controller.snapshot = snap(volume=0)
 
     rig.refresh()
     rig.refresh()
@@ -406,7 +413,7 @@ def test_another_refetch_error_is_logged_and_drops_the_message(capsys):
 
 def test_another_http_error_keeps_the_message_for_the_next_tick(capsys):
     rig = Rig()
-    message = PanelMessage(errors=[coded_error(discord.HTTPException, 500, 0)])
+    message = PanelMessage(errors=[http_error()])
     rig.attach(message)
     rig.controller.snapshot = snap(volume=0)
 
@@ -590,10 +597,8 @@ def skipped(rig):
     run(rig.panel.report_skipped(Track()))
 
 
-def test_announce_sends_the_now_playing_embed_with_the_buttons():
-    rig = Rig()
-    channel = SendChannel()
-    rig.panel.direct_to(channel)
+def test_announce_sends_the_now_playing_embed_with_the_buttons(directed):
+    rig, channel = directed
 
     announce(rig)
 
@@ -602,10 +607,8 @@ def test_announce_sends_the_now_playing_embed_with_the_buttons():
     assert [b.custom_id for b in kwargs["view"].children] == PLAYER_BUTTONS
 
 
-def test_report_skipped_sends_the_notice_with_the_buttons():
-    rig = Rig()
-    channel = SendChannel()
-    rig.panel.direct_to(channel)
+def test_report_skipped_sends_the_notice_with_the_buttons(directed):
+    rig, channel = directed
 
     skipped(rig)
 
@@ -614,11 +617,9 @@ def test_report_skipped_sends_the_notice_with_the_buttons():
     assert [b.custom_id for b in kwargs["view"].children] == PLAYER_BUTTONS
 
 
-def test_announce_honours_announce_songs():
-    rig = Rig()
+def test_announce_honours_announce_songs(directed):
+    rig, channel = directed
     rig.settings.announce_songs = False
-    channel = SendChannel()
-    rig.panel.direct_to(channel)
 
     announce(rig)
 
@@ -632,10 +633,10 @@ def test_announcements_send_nothing_without_a_destination():
     skipped(rig)
 
 
-def test_an_announcement_strips_the_previous_message_and_replaces_it():
-    rig = Rig()
-    channel = SendChannel()
-    rig.panel.direct_to(channel)
+def test_an_announcement_strips_the_previous_message_and_replaces_it(
+    directed,
+):
+    rig, channel = directed
     old = PanelMessage()
     rig.attach(old)
 
