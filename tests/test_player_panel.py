@@ -276,10 +276,11 @@ def test_playback_ended_without_a_message_does_nothing():
     run(Rig().panel.playback_ended())
 
 
-def test_a_failed_strip_in_playback_ended_is_logged_not_raised(capsys):
-    rig = Rig()
-    message = PanelMessage(errors=[EXPIRED])
-    rig.attach(message)
+def test_a_failed_strip_in_playback_ended_is_logged_not_raised(
+    attached, capsys
+):
+    rig, message = attached
+    message.errors = [EXPIRED]
 
     run(rig.panel.playback_ended())
 
@@ -287,10 +288,11 @@ def test_a_failed_strip_in_playback_ended_is_logged_not_raised(capsys):
     assert message.edits == []
 
 
-def test_attach_strips_the_previous_message_and_returns_what_was_sent():
-    rig = Rig()
-    old, new = PanelMessage(), PanelMessage()
-    rig.attach(old)
+def test_attach_strips_the_previous_message_and_returns_what_was_sent(
+    attached,
+):
+    rig, old = attached
+    new = PanelMessage()
 
     assert rig.attach(new) is new
 
@@ -312,19 +314,19 @@ def test_attach_sends_no_view_while_inactive():
     assert seen == [None]
 
 
-def test_a_failed_strip_in_attach_is_logged_and_the_send_goes_on(capsys):
-    rig = Rig()
-    rig.attach(PanelMessage(errors=[EXPIRED]))
+def test_a_failed_strip_in_attach_is_logged_and_the_send_goes_on(
+    attached, capsys
+):
+    rig, old = attached
+    old.errors = [EXPIRED]
     new = PanelMessage()
 
     assert rig.attach(new) is new
     assert "Failed to strip" in capsys.readouterr().err
 
 
-def test_a_raising_send_reaches_the_caller_and_records_nothing():
-    rig = Rig()
-    old = PanelMessage()
-    rig.attach(old)
+def test_a_raising_send_reaches_the_caller_and_records_nothing(attached):
+    rig, old = attached
 
     async def send(view):
         raise RuntimeError("no permission")

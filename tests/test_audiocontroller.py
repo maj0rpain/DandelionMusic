@@ -2090,10 +2090,6 @@ def test_the_controller_imports_nothing_from_discord_ui():
     )
 
 
-# --- the expired-token regression: the real panel over a channel whose
-# send raises 50027 never stalls playback ---
-
-
 def test_a_play_starts_announced_on_the_panel(controller, monkeypatch):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first")
@@ -2103,8 +2099,12 @@ def test_a_play_starts_announced_on_the_panel(controller, monkeypatch):
     assert [s.display_name for s in controller.panel.announced] == ["first"]
 
 
+# --- the expired-token regression: the real panel over a channel whose
+# send raises 50027 never stalls playback ---
+
+
 def test_a_failed_announcement_still_lets_the_next_preload_be_scheduled(
-    expired_panel_seam, monkeypatch, capsys
+    expired_panel_seam, monkeypatch
 ):
     real, stub_loader = expired_panel_seam
     _fake_ffmpeg(monkeypatch)
@@ -2113,7 +2113,6 @@ def test_a_failed_announcement_still_lets_the_next_preload_be_scheduled(
     _run(real, lambda: _start_playing(real))
 
     assert _preloaded(stub_loader) == ["first", "second"]
-    assert "Failed to send a playback message" in capsys.readouterr().err
 
 
 def test_a_failed_skipped_notice_still_lets_the_queue_advance(

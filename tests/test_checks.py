@@ -642,8 +642,6 @@ def test_cog_check_admits_a_button_context_with_no_command(
 
 
 def test_the_library_hook_directs_the_panel_to_the_channel():
-    from musicbot.commands.library import Library
-
     guild = VoiceGuild()
     ctx = slash_ctx(guild, guild.channel("a"))
     ctx.audiocontroller = types.SimpleNamespace()
