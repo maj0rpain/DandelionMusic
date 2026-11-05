@@ -304,7 +304,6 @@ def _load_song(track: str) -> LoadResult:
             raise SongError(config.SONGINFO_ERROR) from e
         if isinstance(data, SpotifyTrack):
             data = _search_spotify_track(data)
-            host = SiteTypes.YT_DLP
         elif isinstance(data, SpotifyTracks):
             truncation = data.truncation
             data = [{"url": url} for url in data.links]

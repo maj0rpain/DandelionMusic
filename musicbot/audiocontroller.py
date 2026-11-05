@@ -517,6 +517,11 @@ class AudioController(object):
             OutcomeKind.QUEUED, song=song, position=index + 1
         )
 
+    def _would_start(self) -> bool:
+        """Whether a request placed now triggers the start: nothing is
+        playing and the queue is empty."""
+        return self.is_idle() and len(self.playlist) == 0
+
     async def enqueue_next(self, song: Song) -> EnqueueOutcome:
         """Puts `song` directly after the current track, refreshes the
         backup and starts playing if nothing is (see ensure_playing()).
@@ -524,7 +529,7 @@ class AudioController(object):
 
         Placement happens before the first await, so no other command
         can slip between the song and its slot."""
-        triggers_start = self.is_idle() and len(self.playlist) == 0
+        triggers_start = self._would_start()
         index = 1 if len(self.playlist) > 0 else 0
         self.playlist.insert_next(song)
         self.playback.queue_changed()
@@ -546,7 +551,7 @@ class AudioController(object):
 
         Placement happens before the first await, so the appended songs
         land together and in order."""
-        triggers_start = self.is_idle() and len(self.playlist) == 0
+        triggers_start = self._would_start()
         placed = list(songs)
         first_index = len(self.playlist)
         for song in placed:

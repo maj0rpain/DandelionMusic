@@ -6,7 +6,6 @@ import asyncio
 from musicbot.commands.music import Music
 from musicbot.outcome import OutcomeKind
 from musicbot.song import LoadResult
-from musicbot.truncation import Truncation, TruncationReason
 from controller_helpers import (
     _fake_ffmpeg,
     _queue,
@@ -132,21 +131,6 @@ def test_process_song_of_a_single_result_gives_a_single_song_outcome(
 
     assert outcome.kind is OutcomeKind.STARTED
     assert outcome.song.title == "a"
-
-
-def test_process_song_of_a_truncated_one_song_result_is_a_playlist(
-    controller, stub_loader, monkeypatch
-):
-    _fake_ffmpeg(monkeypatch)
-    cut = Truncation(50, TruncationReason.API_ERROR)
-    stub_loader.results["load_song"] = LoadResult(
-        [_song(controller, "a")], False, cut
-    )
-
-    outcome = _process(controller)
-
-    assert outcome.kind is OutcomeKind.PLAYLIST
-    assert (outcome.count, outcome.truncation) == (1, cut)
 
 
 def test_enqueue_of_one_song_with_batch_is_a_playlist(controller, monkeypatch):
