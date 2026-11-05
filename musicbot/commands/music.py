@@ -244,19 +244,11 @@ class Music(commands.Cog):
     @joining_command
     async def _search(self, ctx, *, query: str):
         await ctx.defer()
-        results = await search_youtube(query, config.SEARCH_RESULTS)
-        songs = []
-        for data in results:
-            song = Song(
-                linkutils.SiteTypes.YT_DLP,
-                webpage_url=data["url"],
-            )
-            song.update(data)
-            songs.append(song)
+        songs = await search_youtube(query, config.SEARCH_RESULTS)
 
         view = SearchView(ctx)
-        for i, data in enumerate(results, start=1):
-            view.add_item(SongButton(self, i, data["url"]))
+        for i, song in enumerate(songs, start=1):
+            view.add_item(SongButton(self, i, song.webpage_url))
 
         view.message = await ctx.send(
             embed=utils.songs_embed(config.SEARCH_EMBED_TITLE, songs),

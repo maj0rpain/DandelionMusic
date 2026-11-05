@@ -23,3 +23,30 @@ def test_a_search_error_propagates_and_nothing_is_sent(monkeypatch):
         run(Music._search.callback(Music(None), ctx, query="q"))
     assert info.value.args[0] == message
     assert ctx.sent == []
+
+
+def test_search_offers_the_loaders_songs_as_its_picks(monkeypatch):
+    from musicbot.song import Song
+    from musicbot.linkutils import SiteTypes
+
+    songs = [
+        Song(SiteTypes.YT_DLP, webpage_url=f"https://yt/{i}", title=f"T{i}")
+        for i in (1, 2)
+    ]
+
+    async def search_youtube(query, count):
+        return songs
+
+    monkeypatch.setattr(music, "search_youtube", search_youtube)
+
+    class KwargCtx(RecordingCtx):
+        async def send(self, message=None, **kwargs):
+            self.sent.append(kwargs)
+            return "message"
+
+    ctx = KwargCtx()
+    run(Music._search.callback(Music(None), ctx, query="q"))
+    sent = ctx.sent[-1]
+    assert len(sent["view"].children) == 2
+    values = " ".join(f.value for f in sent["embed"].fields)
+    assert "T1" in values and "T2" in values

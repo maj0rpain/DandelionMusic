@@ -8,6 +8,7 @@ from config import config
 from musicbot import linkutils, loader
 from musicbot.linkutils import SiteTypes
 from musicbot.loader import SongError
+from helpers import run
 
 
 def _fake_extraction(monkeypatch, extracted):
@@ -78,3 +79,43 @@ def test_playlist_with_no_entries_is_songinfo_error(monkeypatch):
     assert _no_result_load(monkeypatch, "https://x.invalid/pl") == (
         config.SONGINFO_ERROR
     )
+
+
+def test_spotify_track_is_searched_by_the_loader_with_its_query(
+    monkeypatch, worker_loop
+):
+    queries = []
+
+    async def fetch_spotify(url):
+        return linkutils.SpotifyTrack('T - A "Topic"')
+
+    def search(query, count=1):
+        queries.append(query)
+        return [{"url": "https://yt/x", "title": "T"}]
+
+    monkeypatch.setattr(loader, "fetch_spotify", fetch_spotify)
+    monkeypatch.setattr(loader, "_search_youtube", search)
+    monkeypatch.setattr(loader.YT_IE, "suitable", lambda u: False)
+    track = "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+    song = loader._load_song(track)
+    assert queries == ['T - A "Topic"']
+    assert (song.title, song.host) == ("T", SiteTypes.YT_DLP)
+
+
+def test_search_youtube_returns_songs(monkeypatch):
+    entries = [
+        {"url": "https://yt/a", "title": "A"},
+        {"url": "https://yt/b", "title": "B"},
+    ]
+    _fake_extraction(monkeypatch, {"entries": entries})
+
+    async def run_sync(lane, fn, *args):
+        return fn(*args)
+
+    monkeypatch.setattr(loader, "_run_sync", run_sync)
+    songs = run(loader.search_youtube("q", 2))
+    assert [(s.webpage_url, s.title) for s in songs] == [
+        ("https://yt/a", "A"),
+        ("https://yt/b", "B"),
+    ]
+    assert all(s.host is SiteTypes.YT_DLP for s in songs)

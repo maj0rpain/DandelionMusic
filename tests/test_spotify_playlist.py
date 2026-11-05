@@ -1,7 +1,7 @@
 from bs4 import BeautifulSoup
 import pytest
 
-from musicbot import linkutils, loader
+from musicbot import linkutils
 from musicbot.linkutils import SpotifyPlaylistTypes, fetch_playlist_with_api
 from musicbot.truncation import Truncation, TruncationReason
 from helpers import run
@@ -190,9 +190,9 @@ def test_fetch_spotify_with_credentials_looks_the_track_up_by_id(
             return {"name": "T", "artists": [{"name": "A"}]}
 
     monkeypatch.setattr(linkutils, "spotify_api", FakeApi())
-    monkeypatch.setattr(
-        loader, "_search_youtube", lambda query: [{"url": "u"}]
-    )
     track_id = "4cOdK2wGLETKBW3PvgPWqT"
-    run(linkutils.fetch_spotify(f"HTTPS://OPEN.SPOTIFY.COM/track/{track_id}"))
+    result = run(
+        linkutils.fetch_spotify(f"HTTPS://OPEN.SPOTIFY.COM/track/{track_id}")
+    )
     assert calls == [track_id]
+    assert result == linkutils.SpotifyTrack('T - A "Topic"')

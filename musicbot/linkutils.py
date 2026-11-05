@@ -22,7 +22,6 @@ from yt_dlp.extractor.lazy_extractors import LazyLoadExtractor
 from yt_dlp.utils import DownloadError
 
 from config import config
-from musicbot import loader
 from musicbot.library import FILE_SCHEME
 from musicbot.truncation import Truncation, TruncationReason
 
@@ -181,6 +180,14 @@ class SpotifyTracks:
     truncation: Optional[Truncation] = None
 
 
+@dataclass
+class SpotifyTrack:
+    """A single Spotify track, resolved to the YouTube search query that
+    finds it; the loader runs the search."""
+
+    query: str
+
+
 def download_error(e: Exception) -> DownloadError:
     """A DownloadError for e, named by its type when its message is empty
     (a TimeoutError stringifies empty)."""
@@ -197,8 +204,9 @@ async def get_soup(url: str) -> BeautifulSoup:
 
 async def fetch_spotify(
     url: str,
-) -> Union[dict, SpotifyTracks]:
-    """Searches YouTube for Spotify song or loads Spotify playlist"""
+) -> Union[SpotifyTrack, SpotifyTracks]:
+    """Resolves a Spotify track to its search query, or loads a Spotify
+    playlist's links"""
     match = spotify_regex.match(url)
     # strip any extra parts
     url = match.group()
@@ -229,8 +237,7 @@ async def fetch_spotify(
     else:
         query = f'{title} "Topic"'
 
-    # use sync function because we're already in executor
-    return loader._search_youtube(query)[0]
+    return SpotifyTrack(query)
 
 
 async def fetch_spotify_playlist(

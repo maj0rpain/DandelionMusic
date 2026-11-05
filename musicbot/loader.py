@@ -23,6 +23,7 @@ from musicbot.linkutils import (
     ExtractorT,
     SiteTypes,
     get_ie,
+    SpotifyTrack,
     SpotifyTracks,
     fetch_spotify,
     identify_url,
@@ -181,9 +182,18 @@ def extract_info(url: str, ie: Optional[ExtractorT] = None) -> Optional[dict]:
         return None
 
 
-async def search_youtube(title: str, count: int = 1) -> list[dict]:
-    """See _search_youtube: a non-empty list of entries, or SongError."""
-    return await _run_sync(Lane.LOAD, _search_youtube, title, count)
+async def search_youtube(title: str, count: int = 1) -> list[Song]:
+    """See _search_youtube: a non-empty list of songs, or SongError."""
+    return await _run_sync(Lane.LOAD, _search_songs, title, count)
+
+
+def _search_songs(title: str, count: int = 1) -> list[Song]:
+    songs = []
+    for data in _search_youtube(title, count):
+        song = Song(SiteTypes.YT_DLP, webpage_url=data["url"])
+        song.update(data)
+        songs.append(song)
+    return songs
 
 
 def _search_youtube(title: str, count: int = 1) -> list[dict]:
@@ -266,6 +276,15 @@ def _load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
     return songs
 
 
+def _search_spotify_track(track: SpotifyTrack) -> dict:
+    """The first YouTube result for a Spotify track. Any failure is a
+    SONGINFO_ERROR, as a failed Spotify fetch is."""
+    try:
+        return _search_youtube(track.query)[0]
+    except Exception as e:
+        raise SongError(config.SONGINFO_ERROR) from e
+
+
 def _load_song(track: str) -> Union[Song, List[Song]]:
     track = normalize_track(track)
     truncation = None
@@ -283,7 +302,10 @@ def _load_song(track: str) -> Union[Song, List[Song]]:
             data = _loop.run_until_complete(fetch_spotify(track))
         except Exception as e:
             raise SongError(config.SONGINFO_ERROR) from e
-        if isinstance(data, SpotifyTracks):
+        if isinstance(data, SpotifyTrack):
+            data = _search_spotify_track(data)
+            host = SiteTypes.YT_DLP
+        elif isinstance(data, SpotifyTracks):
             truncation = data.truncation
             data = [{"url": url} for url in data.links]
 
