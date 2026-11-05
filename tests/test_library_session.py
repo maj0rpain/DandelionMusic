@@ -341,3 +341,18 @@ class TestTrimAndFormat:
             listeners(v)
             for v in (999, 1_500, 999_949, 999_950, 1_204_338_291, 999_999_999)
         ] == ["999", "1.5K", "999.9K", "1M", "1.2B", "1B"]
+
+
+class TestNarrowReads:
+    def test_scope_at_each_level(self):
+        assert session().scope() == (None, None)
+        assert at_artist().scope() == ("Radiohead", None)
+        assert at_album().scope() == ("Radiohead", "OK Computer")
+
+    def test_tracks_at_each_level(self):
+        def files(s):
+            return sorted(f for _, _, f in s.tracks())
+
+        assert session().tracks() == []
+        assert files(at_artist()) == ["Airbag.flac", "Zoo.flac"]
+        assert files(at_album()) == ["Airbag.flac"]

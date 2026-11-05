@@ -199,7 +199,7 @@ class Snapshot(NamedTuple):
 
 class BrowseSession:
     def __init__(self, index: library.LibraryIndex, page_size: int):
-        self.cursor = library_browse.BrowseCursor(index, page_size)
+        self._cursor = library_browse.BrowseCursor(index, page_size)
         self._enrichment: Optional["library_metadata.Enrichment"] = None
         # the attachment key the message carries, written back only by
         # landed()
@@ -208,13 +208,13 @@ class BrowseSession:
     # -- cursor moves ----------------------------------------------
 
     def descend(self, entry: str) -> library_browse.Descent:
-        return self.cursor.descend(entry)
+        return self._cursor.descend(entry)
 
     def back(self) -> bool:
-        return self.cursor.back()
+        return self._cursor.back()
 
     def page_by(self, delta: int) -> None:
-        self.cursor.page_by(delta)
+        self._cursor.page_by(delta)
 
     # -- the drawn enrichment --------------------------------------
 
@@ -223,13 +223,13 @@ class BrowseSession:
         enrichment and returns the token an enrichment resolved for
         this level offers back."""
         self._enrichment = None
-        return self.cursor.level_revision
+        return self._cursor.level_revision
 
     def offer_enrichment(self, token: int, enrichment) -> bool:
         """Takes `enrichment` only if `token` is still the current
         level's. A taken enrichment stays drawn even if its edit then
         fails, so the next draw carries it again."""
-        if token != self.cursor.level_revision:
+        if token != self._cursor.level_revision:
             return False
         self._enrichment = enrichment
         return True
@@ -237,17 +237,27 @@ class BrowseSession:
     # -- undo ------------------------------------------------------
 
     def snapshot(self) -> Snapshot:
-        return Snapshot(self.cursor.position(), self._enrichment)
+        return Snapshot(self._cursor.position(), self._enrichment)
 
     def restore(self, snap: Snapshot) -> None:
-        self.cursor.restore(snap.position)
+        self._cursor.restore(snap.position)
         self._enrichment = snap.enrichment
 
     def position(self) -> library_browse.Position:
-        return self.cursor.position()
+        return self._cursor.position()
 
     def restore_position(self, position: library_browse.Position) -> None:
-        self.cursor.restore(position)
+        self._cursor.restore(position)
+
+    # -- narrow reads ----------------------------------------------
+
+    def scope(self) -> Tuple[Optional[str], Optional[str]]:
+        """The (artist, album) of the screen shown now."""
+        return self._cursor.screen().scope
+
+    def tracks(self) -> List[Tuple[str, str, str]]:
+        """The current level's tracks; empty at the root."""
+        return self._cursor.tracks()
 
     # -- drawing ---------------------------------------------------
 
@@ -291,7 +301,7 @@ class BrowseSession:
         return "Queue this Album"
 
     def frame(self) -> Frame:
-        cursor = self.cursor
+        cursor = self._cursor
         screen = cursor.screen()
         art = self._art()
         attachment = None

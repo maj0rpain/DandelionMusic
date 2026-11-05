@@ -314,15 +314,21 @@ class LibraryBrowseView(LibraryView):
         self.session = BrowseSession(index, PAGE_SIZE)
         # serialises the message edits themselves - see render()
         self._render_lock = asyncio.Lock()
-        # the first message's items and embed both come from this one
-        # frame, which landed() is then given
-        self.first_frame = self.session.frame()
-        self.build_items(self.first_frame)
+
+    @classmethod
+    def open(cls, ctx, index: library.LibraryIndex):
+        """The view and the frame its items were built from; the
+        caller sends that frame's embed and then hands the same frame
+        to session.landed()."""
+        view = cls(ctx, index)
+        frame = view.session.frame()
+        view.build_items(frame)
+        return view, frame
 
     @property
     def scope(self) -> Tuple[Optional[str], Optional[str]]:
         """The (artist, album) pair of the level shown now."""
-        return self.session.cursor.screen().scope
+        return self.session.scope()
 
     @staticmethod
     def embed(frame: Frame) -> discord.Embed:
@@ -605,7 +611,7 @@ class LibraryBrowseView(LibraryView):
 
         try:
             enrichment = await library_metadata.get_enrichment(
-                self.session.cursor.index, *self.scope
+                self.index, *self.scope
             )
         except Exception as e:
             print(f"library: enrichment failed: {e}", file=sys.stderr)
@@ -615,13 +621,12 @@ class LibraryBrowseView(LibraryView):
         await self._render_enrichment(interaction, token, enrichment)
 
     async def queue_current_level(self, interaction: discord.Interaction):
-        cursor = self.session.cursor
-        artist, album = cursor.artist, cursor.album
+        artist, album = self.scope
         if album is not None:
             source = f"browse: entire album {artist} - {album}"
         else:
             source = f"browse: entire discography of {artist}"
-        await self.queue(interaction, cursor.tracks(), source)
+        await self.queue(interaction, self.session.tracks(), source)
 
 
 class SearchSelect(discord.ui.Select):
@@ -812,8 +817,7 @@ class Library(commands.Cog):
             await ctx.send(config.LIBRARY_EMPTY)
             return
 
-        view = LibraryBrowseView(ctx, index)
-        frame = view.first_frame
+        view, frame = LibraryBrowseView.open(ctx, index)
         kwargs = {"embed": view.embed(frame), "view": view}
         # ephemeral only makes sense for an interaction (slash) response -
         # a plain text message from a prefix command can't be ephemeral

@@ -141,7 +141,7 @@ def make_view(index=INDEX):
     ctx = SimpleNamespace(
         author=SimpleNamespace(id=AUTHOR_ID), interaction=None
     )
-    return LibraryBrowseView(ctx, index)
+    return LibraryBrowseView.open(ctx, index)[0]
 
 
 class Clicks:
@@ -192,7 +192,7 @@ def pick(select, interaction, label):
 
 
 def level_of(view):
-    return (view.session.cursor.artist, view.session.cursor.album)
+    return view.session.scope()
 
 
 async def finish(*tasks):
@@ -204,7 +204,7 @@ def test_failed_render_keeps_previous_components_live(capsys):
         view = make_view()
         before = list(view.children)
         interaction = EditingInteraction(fail=True)
-        view.session.cursor.descend("Radiohead")
+        view.session.descend("Radiohead")
         result = await view.render(interaction)
         return view, before, result
 
@@ -265,7 +265,7 @@ def test_click_after_failed_page_turn_acts_on_the_shown_page(monkeypatch):
         clicks = Clicks(view)
         failing = clicks.interaction(fail=True)
         await finish(clicks.click(PageButton, failing))
-        undone_page = view.session.cursor.page
+        undone_page = view.session.position().page
         again = clicks.interaction()
         await finish(clicks.click(LibrarySelect, again, label="Artist 03"))
         return undone_page, view
@@ -411,7 +411,7 @@ def test_failed_descend_is_undone(monkeypatch):
     view, resolved = run(scenario())
 
     assert level_of(view) == (None, None)
-    assert view.session.cursor.page == 1
+    assert view.session.position().page == 1
     assert resolved == []
 
 
@@ -552,7 +552,7 @@ def _click_during_enrichment_edit(
         handler = click(clicks, clicking)
         await settle()
         moved_to = level_of(view)
-        page = view.session.cursor.page
+        page = view.session.position().page
         entering.release()
         await finish(entry, handler)
         return EditClick(
@@ -634,7 +634,7 @@ def test_page_click_during_enrichment_edit_turns_the_page_once(monkeypatch):
 
     assert result.handler is not None
     assert result.page == 1
-    assert result.view.session.cursor.page == 1
+    assert result.view.session.position().page == 1
 
 
 def test_enrichment_resolving_after_moving_on_is_not_drawn(monkeypatch):
@@ -727,7 +727,7 @@ def test_second_click_during_page_turn_is_turned_away(monkeypatch):
 
     assert handler is not None
     assert second.deferred == 1
-    assert view.session.cursor.page == 1
+    assert view.session.position().page == 1
 
 
 def test_select_from_previous_page_during_page_turn_opens_its_entry(
@@ -752,7 +752,7 @@ def test_select_from_previous_page_during_page_turn_opens_its_entry(
         await turning.in_flight.wait()
         turning.release()
         await finish(turn)
-        assert view.session.cursor.page == 1
+        assert view.session.position().page == 1
         picking = clicks.interaction()
         pick(previous, picking, "Artist 03")
         await previous.callback(picking)
@@ -795,11 +795,7 @@ def test_component_from_an_earlier_scope_is_acknowledged_and_ignored(
         await finish(
             clicks.click(LibrarySelect, clicks.interaction(), label="Album 00")
         )
-        where = (
-            view.session.cursor.artist,
-            view.session.cursor.album,
-            view.session.cursor.page,
-        )
+        where = view.session.position()
         picking = clicks.interaction()
         if kind is LibrarySelect:
             pick(kept, picking, "Album 01")
@@ -809,11 +805,7 @@ def test_component_from_an_earlier_scope_is_acknowledged_and_ignored(
     view, where, picking = run(scenario())
 
     assert picking.deferred == 1
-    assert (
-        view.session.cursor.artist,
-        view.session.cursor.album,
-        view.session.cursor.page,
-    ) == where
+    assert view.session.position() == where
     assert where[:2] == ("Artist", "Album 00")
     assert queued == []
 
@@ -823,14 +815,14 @@ def test_every_browse_component_is_built_on_the_stale_guard_base():
         views = []
         view = make_view()
         views.append(list(view.children))
-        view.session.cursor.descend("Radiohead")
+        view.session.descend("Radiohead")
         view.build_items(view.session.frame())
         views.append(list(view.children))
-        view.session.cursor.descend("Kid A")
+        view.session.descend("Kid A")
         view.build_items(view.session.frame())
         views.append(list(view.children))
         paged = make_view(PAGED_ALBUMS)
-        paged.session.cursor.descend("Artist")
+        paged.session.descend("Artist")
         paged.build_items(paged.session.frame())
         views.append(list(paged.children))
         return views
@@ -922,10 +914,10 @@ def test_failed_clamped_page_turn_is_undone():
     async def scenario():
         view = make_view(PAGED)
         await view.turn_page(EditingInteraction(), 1)
-        last = view.session.cursor.page
+        last = view.session.position().page
         failing = EditingInteraction(fail=True)
         await view.turn_page(failing, 5)
-        return last, view.session.cursor.page
+        return last, view.session.position().page
 
     last, page = run(scenario())
 
@@ -948,7 +940,7 @@ def test_failed_defer_leaves_cursor_unchanged(click, error, monkeypatch):
         if click == "back":
             await view.descend(EditingInteraction(), "Radiohead")
             resolved.clear()
-        before = (*level_of(view), view.session.cursor.page)
+        before = (*level_of(view), view.session.position().page)
         interaction = EditingInteraction(defer_error=error())
         if click == "descend":
             coro = view.descend(interaction, "Radiohead")
@@ -957,7 +949,7 @@ def test_failed_defer_leaves_cursor_unchanged(click, error, monkeypatch):
         else:
             coro = view.turn_page(interaction, 1)
         raised = await attempt(coro)
-        after = (*level_of(view), view.session.cursor.page)
+        after = (*level_of(view), view.session.position().page)
         return before, after, raised, resolved
 
     before, after, raised, resolved = run(scenario())
@@ -1432,3 +1424,56 @@ def test_enrichment_is_resolved_on_the_cursors_index_not_the_librarys(
     seen = run(scenario())
 
     assert len(seen) == 1 and seen[0] is INDEX
+
+
+def test_open_returns_the_frame_the_items_were_built_from():
+    ctx = SimpleNamespace(
+        author=SimpleNamespace(id=AUTHOR_ID), interaction=None
+    )
+
+    view, frame = LibraryBrowseView.open(ctx, INDEX)
+
+    assert frame == view.session.frame()
+    select = next(c for c in view.children if isinstance(c, LibrarySelect))
+    assert [o.label for o in select.options] == frame.labels
+    assert not hasattr(view, "first_frame")
+
+
+def test_queue_level_click_queues_the_level_with_its_source(monkeypatch):
+    queued = []
+
+    async def queue_songs(ctx, interaction, triples, source):
+        await interaction.response.defer()
+        queued.append((source, sorted(f for _, _, f in triples)))
+
+    monkeypatch.setattr(library_commands, "queue_songs", queue_songs)
+
+    async def scenario():
+        view = make_view()
+        stub_enrichment(monkeypatch)
+        clicks = Clicks(view)
+        await finish(
+            clicks.click(
+                LibrarySelect, clicks.interaction(), label="Radiohead"
+            )
+        )
+        await finish(clicks.click(QueueLevelButton, clicks.interaction()))
+        await finish(
+            clicks.click(
+                LibrarySelect, clicks.interaction(), label="OK Computer"
+            )
+        )
+        await finish(clicks.click(QueueLevelButton, clicks.interaction()))
+
+    run(scenario())
+
+    assert queued == [
+        (
+            "browse: entire discography of Radiohead",
+            ["Airbag.flac", "Lucky.flac", "Zoo.flac"],
+        ),
+        (
+            "browse: entire album Radiohead - OK Computer",
+            ["Airbag.flac", "Lucky.flac"],
+        ),
+    ]
