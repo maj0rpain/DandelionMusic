@@ -15,11 +15,8 @@ from discord import app_commands
 from aioconsole import aexec
 
 from musicbot.bot import MusicBot
-from musicbot.settings import (
-    add_to_guild_whitelist,
-    get_guild_whitelist,
-    remove_from_guild_whitelist,
-)
+from musicbot import guild_whitelist
+from musicbot.guild_whitelist import Outcome
 from musicbot.utils import owner_check
 
 
@@ -80,6 +77,12 @@ async def run_and_report(ctx, argv: List[str]) -> None:
         await ctx.send(
             f"`{shlex.join(argv)}` exited with code {process.returncode}"
         )
+
+
+def _guild_line(bot, guild_id: int) -> str:
+    """`id name` for a guild the bot is in, else the bare id."""
+    guild = bot.get_guild(guild_id)
+    return f"{guild_id} {guild.name}" if guild else str(guild_id)
 
 
 class Developer(commands.Cog):
@@ -169,42 +172,54 @@ class Developer(commands.Cog):
             await self._show_guild_whitelist_callback(ctx)
 
     async def _show_guild_whitelist_callback(self, ctx):
-        whitelist = await get_guild_whitelist(ctx.bot)
-        if not whitelist:
+        whitelist = await guild_whitelist.load(ctx.bot.DbSession)
+        if not whitelist.enabled:
             await ctx.send("Whitelist is disabled.")
             return
-        lines = []
-        for id_ in sorted(whitelist):
-            guild = ctx.bot.get_guild(id_)
-            if guild:
-                lines.append(f"{id_} {guild.name}")
-            else:
-                lines.append(str(id_))
+        lines = [_guild_line(ctx.bot, id_) for id_ in whitelist]
         await ctx.send("```\n" + "\n".join(lines) + "```")
 
     _show_guild_whitelist = _guild_whitelist.command(name="show")(
         commands.check(owner_check)(_show_guild_whitelist_callback)
     )
 
+    async def _leave_guilds(self, ctx, guild_ids):
+        """Leave each guild; one failing does not stop the rest."""
+        for guild_id in guild_ids:
+            guild = ctx.bot.get_guild(guild_id)
+            if guild is None:
+                continue
+            await ctx.bot._leave(guild)
+
     @_guild_whitelist.command(name="add")
     @commands.check(owner_check)
     async def _guild_whitelist_add(self, ctx, *, id: str):
         id = int(id)
-        if await add_to_guild_whitelist(ctx.bot, id):
-            if len(await get_guild_whitelist(ctx.bot)) == 1:
-                doomed = [g for g in ctx.bot.guilds if g.id != id]
-                message = "Whitelist updated, the whitelist is now enabled."
-                if doomed:
-                    message += (
-                        " The bot will leave these guilds at the next"
-                        " restart:\n"
-                        + "\n".join(f"{g.id} {g.name}" for g in doomed)
-                    )
-                await ctx.send(message)
-            else:
-                await ctx.send("Whitelist updated.")
-        else:
+        invoking = ctx.guild
+        change = await guild_whitelist.add(
+            ctx.bot.DbSession,
+            id,
+            [g.id for g in ctx.bot.guilds],
+            protect=invoking.id if invoking is not None else None,
+        )
+        if change.outcome is Outcome.ALREADY_LISTED:
             await ctx.send("That guild is already whitelisted.")
+            return
+        if change.outcome is Outcome.WOULD_LEAVE_HERE:
+            await ctx.send(
+                "That would make the bot leave this guild, so nothing was"
+                " changed. Add this guild's id first."
+            )
+            return
+        if change.outcome is Outcome.ENABLED:
+            message = "Whitelist updated, the whitelist is now enabled."
+            if change.to_leave:
+                lines = [_guild_line(ctx.bot, g) for g in change.to_leave]
+                message += " Leaving these guilds:\n" + "\n".join(lines)
+        else:
+            message = "Whitelist updated."
+        await ctx.send(message)
+        await self._leave_guilds(ctx, change.to_leave)
 
     async def _guild_whitelist_remove_autocomplete(
         self, interaction: discord.Interaction, current: str
@@ -226,25 +241,23 @@ class Developer(commands.Cog):
         id: str,
     ):
         id = int(id.split()[-1])
-        if not await remove_from_guild_whitelist(ctx.bot, id):
+        change = await guild_whitelist.remove(
+            ctx.bot.DbSession, id, [g.id for g in ctx.bot.guilds]
+        )
+        if change.outcome is Outcome.NOT_LISTED:
             await ctx.send("That guild is not whitelisted.")
-            return
-
-        if not await get_guild_whitelist(ctx.bot):
+        elif change.outcome is Outcome.DISABLED:
             await ctx.send(
                 "Whitelist updated. The whitelist is now empty and"
                 " therefore disabled."
             )
-            return
-
-        guild = ctx.bot.get_guild(id)
-        if guild is not None:
-            message = "Whitelist updated, leaving the guild."
         else:
-            message = "Whitelist updated."
-        await ctx.send(message)
-        if guild is not None:
-            await guild.leave()
+            await ctx.send(
+                "Whitelist updated, leaving the guild."
+                if change.to_leave
+                else "Whitelist updated."
+            )
+        await self._leave_guilds(ctx, change.to_leave)
 
 
 async def setup(bot: MusicBot):

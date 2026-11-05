@@ -435,3 +435,11 @@ def test_search_results_is_clamped_to_the_keycap_range(
 ):
     cfg = config_factory(f"SEARCH_RESULTS={raw}\n")
     assert cfg.SEARCH_RESULTS == expected
+
+
+def test_config_no_longer_writes_anything():
+    """Config is read-only now. save() and the .env writer are gone."""
+    from config import config
+
+    for gone in ("save", "_update_env_files", "_replace_env_var"):
+        assert not hasattr(config, gone), f"{gone} is still there"

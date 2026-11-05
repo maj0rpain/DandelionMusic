@@ -25,3 +25,13 @@ async def in_memory_db(settings) -> AsyncIterator[sessionmaker]:
         yield sessionmaker(engine, expire_on_commit=False, class_=AsyncSession)
     finally:
         await engine.dispose()
+
+
+async def seed_whitelist(factory, *ids):
+    """Commit a `WhitelistedGuild` row for each id."""
+    from musicbot.settings import WhitelistedGuild
+
+    async with factory() as session:
+        for guild_id in ids:
+            session.add(WhitelistedGuild(guild_id=str(guild_id)))
+        await session.commit()
