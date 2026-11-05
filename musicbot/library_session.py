@@ -74,8 +74,9 @@ Field = Tuple[str, str]
 
 def stat_fields(screen: library_browse.Screen, external) -> List[Field]:
     """The `(name, value)` stat fields of one screen, empty ones left
-    out - a grid of dashes reads worse than a short grid.
 
+    out - a grid of dashes reads worse than a short grid.
+    Branches on `screen.kind`: "artist" is the root (its `counts`),
     "album" and "song" are below it (its `stats`). `external` is the
     drawn enrichment's stats, or None."""
     fields: List[Field] = []
