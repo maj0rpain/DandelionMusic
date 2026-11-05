@@ -7,8 +7,7 @@ import discord
 
 from musicbot import settings
 from musicbot.bot import MusicBot
-from musicbot.settings import WhitelistedGuild
-from db_seam import in_memory_db
+from db_seam import in_memory_db, seed_whitelist
 from developer_fakes import LeavingGuild
 from helpers import run
 
@@ -20,10 +19,7 @@ def drive(monkeypatch, listed, scenario):
 
     async def go():
         async with in_memory_db(settings) as factory:
-            async with factory() as session:
-                for guild_id in listed:
-                    session.add(WhitelistedGuild(guild_id=str(guild_id)))
-                await session.commit()
+            await seed_whitelist(factory, *listed)
             bot = MusicBot(
                 [], command_prefix="d!", intents=discord.Intents.default()
             )

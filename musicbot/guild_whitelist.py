@@ -132,15 +132,18 @@ async def remove(
     """Unlist a guild. Removing the last id disables the whitelist."""
     present = list(present_guild_ids)
     async with session_factory() as session:
-        before = await _listed(session)
-        if guild_id not in before:
-            return WhitelistChange(Outcome.NOT_LISTED)
-        await session.execute(
+        result = await session.execute(
             delete(WhitelistedGuild).where(
                 WhitelistedGuild.guild_id == str(guild_id)
             )
         )
+        if result.rowcount == 0:
+            await session.rollback()
+            return WhitelistChange(Outcome.NOT_LISTED)
+        # Decided from our own DELETE and the read after it, so two
+        # concurrent removes of one id cannot both report a change.
         after = await _listed(session)
+        before = after | {guild_id}
         await session.commit()
     outcome = Outcome.UPDATED if after else Outcome.DISABLED
     return WhitelistChange(outcome, _to_leave(before, after, present))

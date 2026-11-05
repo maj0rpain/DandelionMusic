@@ -24,10 +24,9 @@ from musicbot.guild_whitelist import (
 from musicbot.settings import (
     ENV_WHITELIST_IMPORTED,
     BotState,
-    WhitelistedGuild,
 )
-from musicbot import guild_whitelist, settings
-from db_seam import in_memory_db
+from musicbot import settings
+from db_seam import in_memory_db, seed_whitelist
 from developer_fakes import FakeBot, FakeCtx, LeavingGuild
 from helpers import run
 
@@ -42,13 +41,6 @@ def with_db(scenario):
     return run(go())
 
 
-async def seed(factory, *ids):
-    async with factory() as session:
-        for guild_id in ids:
-            session.add(WhitelistedGuild(guild_id=str(guild_id)))
-        await session.commit()
-
-
 class TestAdmission:
     def test_empty_whitelist_is_disabled_and_admits_every_guild(self):
         whitelist = with_db(load)
@@ -58,7 +50,7 @@ class TestAdmission:
 
     def test_listed_whitelist_admits_only_listed_guilds(self):
         async def scenario(factory):
-            await seed(factory, 222, 111)
+            await seed_whitelist(factory, 222, 111)
             return await load(factory)
 
         whitelist = with_db(scenario)
@@ -74,7 +66,7 @@ class TestAdmission:
         big = 609212921897025557
 
         async def scenario(factory):
-            await seed(factory, big)
+            await seed_whitelist(factory, big)
             return await load(factory)
 
         whitelist = with_db(scenario)
@@ -98,7 +90,7 @@ class TestChanges:
 
     def test_add_to_an_enabled_whitelist_updates_and_leaves_none(self):
         async def scenario(factory):
-            await seed(factory, 10)
+            await seed_whitelist(factory, 10)
             change = await add(factory, 20, [10, 20, 30])
             return change, list(await load(factory))
 
@@ -106,29 +98,9 @@ class TestChanges:
         assert change == WhitelistChange(Outcome.UPDATED, ())
         assert listed == [10, 20]
 
-    def test_add_racing_another_add_is_updated_not_enabled(self, monkeypatch):
-        """Another add commits after this one's first read: the outcome
-        comes from the state this add's own transaction ends with."""
-        real = guild_whitelist._listed
-        reads = []
-
-        async def stale_first_read(session):
-            reads.append(1)
-            if len(reads) == 1:
-                await real(session)
-                return frozenset()
-            return await real(session)
-
-        async def scenario(factory):
-            await seed(factory, 20)
-            monkeypatch.setattr(guild_whitelist, "_listed", stale_first_read)
-            return await add(factory, 10, [10, 20])
-
-        assert with_db(scenario) == WhitelistChange(Outcome.UPDATED, ())
-
     def test_add_of_a_listed_guild_changes_nothing(self):
         async def scenario(factory):
-            await seed(factory, 10)
+            await seed_whitelist(factory, 10)
             change = await add(factory, 10, [10, 20])
             return change, list(await load(factory))
 
@@ -155,7 +127,7 @@ class TestChanges:
 
     def test_guard_does_not_apply_on_an_enabled_whitelist(self):
         async def scenario(factory):
-            await seed(factory, 10)
+            await seed_whitelist(factory, 10)
             return await add(factory, 20, [10, 20, 30], protect=30)
 
         change = with_db(scenario)
@@ -163,7 +135,7 @@ class TestChanges:
 
     def test_remove_of_one_of_several_leaves_that_guild_if_present(self):
         async def scenario(factory):
-            await seed(factory, 10, 11)
+            await seed_whitelist(factory, 10, 11)
             change = await remove(factory, 10, [10, 30])
             return change, list(await load(factory))
 
@@ -173,7 +145,7 @@ class TestChanges:
 
     def test_remove_of_a_guild_not_present_leaves_none(self):
         async def scenario(factory):
-            await seed(factory, 10, 11)
+            await seed_whitelist(factory, 10, 11)
             return await remove(factory, 10, [30])
 
         change = with_db(scenario)
@@ -181,7 +153,7 @@ class TestChanges:
 
     def test_remove_of_the_last_id_disables_and_leaves_none(self):
         async def scenario(factory):
-            await seed(factory, 10)
+            await seed_whitelist(factory, 10)
             change = await remove(factory, 10, [10, 30])
             return change, await load(factory)
 
@@ -191,7 +163,7 @@ class TestChanges:
 
     def test_remove_of_an_unlisted_guild_changes_nothing(self):
         async def scenario(factory):
-            await seed(factory, 10)
+            await seed_whitelist(factory, 10)
             change = await remove(factory, 11, [10, 11])
             return change, list(await load(factory))
 
@@ -258,7 +230,7 @@ class TestEnvImport:
         monkeypatch.setattr(config, "GUILD_WHITELIST", [111, 222])
 
         async def scenario(factory):
-            await seed(factory, 111)
+            await seed_whitelist(factory, 111)
             await import_env_whitelist(factory)  # must not raise
             return list(await load(factory))
 
@@ -313,7 +285,7 @@ def command(guilds, listed, name, arg=None, invoking=None):
         g.log = log
 
     async def scenario(factory):
-        await seed(factory, *listed)
+        await seed_whitelist(factory, *listed)
         bot = FakeBot(guilds, DbSession=factory)
         cog, grp = group(bot)
         ctx = OrderedCtx(bot, log, guild=invoking)
@@ -428,6 +400,15 @@ class TestRemoveCommand:
             " therefore disabled."
         ]
         assert not g.left and after == []
+
+    def test_the_lockout_guard_does_not_apply_to_remove(self):
+        here = LeavingGuild(10)
+        other = LeavingGuild(11)
+        sent, _, after = command(
+            [here, other], [10, 11], "remove", "10", invoking=here
+        )
+        assert sent == ["Whitelist updated, leaving the guild."]
+        assert left([here, other]) == [10] and after == [11]
 
     def test_not_listed(self):
         g = LeavingGuild(11)

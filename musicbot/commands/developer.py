@@ -195,7 +195,7 @@ class Developer(commands.Cog):
     @commands.check(owner_check)
     async def _guild_whitelist_add(self, ctx, *, id: str):
         id = int(id)
-        invoking = getattr(ctx, "guild", None)
+        invoking = ctx.guild
         change = await guild_whitelist.add(
             ctx.bot.DbSession,
             id,
