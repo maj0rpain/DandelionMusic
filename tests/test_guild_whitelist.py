@@ -8,7 +8,6 @@ removal that did not persist - so the whole write-back path is gone and
 these tests cover what replaced it.
 """
 
-import asyncio
 import types
 
 import pytest
@@ -38,9 +37,10 @@ def bot(tmp_path):
     """A stand-in exposing just the DbSession the helpers use, backed
     by a real sqlite file with the schema applied."""
     # NullPool because each helper below runs under its own
-    # asyncio.run(): a pooled connection would be reused across event
-    # loops, which happens to work with aiosqlite but is the classic
-    # shape of a connection bound to a closed loop.
+    # run(), a fresh event loop each time: a pooled connection would
+    # be reused across event loops, which happens to work with
+    # aiosqlite but is the classic shape of a connection bound to a
+    # closed loop.
     engine = create_async_engine(
         f"sqlite+aiosqlite:///{tmp_path / 'settings.db'}",
         poolclass=NullPool,
@@ -55,7 +55,7 @@ def bot(tmp_path):
         async with engine.connect() as conn:
             await conn.run_sync(run_migrations)
 
-    asyncio.run(setup())  # unbounded: runs before any test coroutine
+    run(setup())
     return stub
 
 
