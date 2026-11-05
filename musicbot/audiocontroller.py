@@ -502,10 +502,12 @@ class AudioController(object):
         on the event loop only - raises RuntimeError anywhere else."""
         self.playback.skip(forced)
 
-    async def play_song(self, song: Song, generation: Optional[int] = None):
+    async def play_song(
+        self, song: Song, generation: Optional[int] = None
+    ) -> bool:
         """Plays a song object. `generation` is ignored: the start
         token is private to Playback."""
-        await self.playback.start(song)
+        return await self.playback.start(song)
 
     async def ensure_playing(self):
         """Starts the head of the queue if nothing is playing and the

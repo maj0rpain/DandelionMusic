@@ -149,12 +149,13 @@ class Playback:
 
     # -- intents -----------------------------------------------------
 
-    async def start(self, song):
+    async def start(self, song) -> bool:
         """Claims a start for `song` and plays it. Once the preload
         returns, a start that was overtaken - a stop, a disconnect or a
         newer start replaced it, or the bot left voice - is dropped:
-        nothing plays, is said or advances."""
-        await self._play(song, self._claim_start())
+        nothing plays, is said or advances. Returns whether the song
+        was handed to the voice client."""
+        return await self._play(song, self._claim_start())
 
     def skip(self, forced: bool = False):
         """Ends the current track and moves on to the next one. With a
@@ -329,17 +330,20 @@ class Playback:
         """Claims a start for `song` and spawns its play."""
         self._spawn(self._play(song, self._claim_start()))
 
-    async def _play(self, song, generation: int):
+    async def _play(self, song, generation: int) -> bool:
+        """True when `song` was handed to the voice client; False for a
+        failed preload, a song without a direct url, an overtaken start
+        or a play() that raised."""
         preloaded = await self._preload(song)
         if self._drop_if_overtaken(generation):
-            return
+            return False
 
         if not preloaded:
             await self._report_skipped(song)
             if self._drop_if_overtaken(generation):
-                return
+                return False
             self.skip(forced=True)
-            return
+            return False
 
         if song.url is None:
             print(
@@ -348,7 +352,7 @@ class Playback:
                 file=sys.stderr,
             )
             self.skip(forced=True)
-            return
+            return False
 
         # Claimed before play() rather than after it, because play()
         # starts the audio thread there and then: a source that yields
@@ -371,7 +375,7 @@ class Playback:
             )
         except discord.ClientException:
             await self._on_play_failed()
-            return
+            return False
 
         # The history's one write site: a song is recorded once the
         # voice client has accepted it, however it later ends.
@@ -388,3 +392,5 @@ class Playback:
         await self._announce(song)
 
         self._schedule_preload()
+
+        return True
