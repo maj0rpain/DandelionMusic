@@ -1,6 +1,6 @@
 import discord
 from discord.ext import commands
-from musicbot import linkutils, loader, utils
+from musicbot import admission, linkutils, loader, utils
 from musicbot.bot import MusicBot
 from musicbot.audiocontroller import QueuedPlaylist
 
@@ -96,11 +96,12 @@ class Button(commands.Cog):
             # not the one who sent the message
             ctx.author = member
             try:
-                if not await utils.voice_check(ctx):
-                    return
+                entry = await admission.check(
+                    ctx, admission.RequestKind.REACTION
+                )
+                audiocontroller = await entry.enter()
             except utils.CheckError:
                 return
-            await audiocontroller.register_voice_channel(user_vc.channel)
             if not audiocontroller.command_channel and sett.command_channel:
                 audiocontroller.command_channel = serv.get_channel_or_thread(
                     int(sett.command_channel)
