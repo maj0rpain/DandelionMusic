@@ -17,7 +17,7 @@ from musicbot.commands.music import Music
 from musicbot.linkutils import SiteTypes
 from musicbot.song import PartialPlaylist, Song
 from musicbot.truncation import Truncation, TruncationReason
-from controller_helpers import ProcessController, _songs, play_ctx
+from controller_helpers import ProcessController, _songs, command_ctx
 from helpers import run
 
 
@@ -28,7 +28,7 @@ def _queued_playlist_class(controller):
 
 def test_truncated_playlist_reply_holds_numbers_and_reason_text():
     cut = Truncation(50, TruncationReason.NO_API)
-    ctx, sent = play_ctx(ProcessController(QueuedPlaylist(30, cut)))
+    ctx, sent = command_ctx(ProcessController(QueuedPlaylist(30, cut)))
 
     run(Music(None)._play_song(ctx, "t"))
 
@@ -36,7 +36,7 @@ def test_truncated_playlist_reply_holds_numbers_and_reason_text():
 
 
 def test_untruncated_playlist_reply_is_queued_playlist():
-    ctx, sent = play_ctx(ProcessController(QueuedPlaylist(30)))
+    ctx, sent = command_ctx(ProcessController(QueuedPlaylist(30)))
 
     run(Music(None)._play_song(ctx, "t"))
 
@@ -96,7 +96,7 @@ def _add(monkeypatch, loaded, add_songs):
 
     monkeypatch.setattr(music.loader, "load_song", load_song)
     monkeypatch.setattr(playlists, "add_songs", add_songs)
-    ctx, sent = play_ctx()
+    ctx, sent = command_ctx()
     run(Music._playlist_add_song.callback(Music(None), ctx, "p", "t"))
     return sent
 
