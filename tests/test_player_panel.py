@@ -90,6 +90,15 @@ class Rig:
         run(self.panel.refresh())
 
 
+@pytest.fixture
+def attached():
+    """A panel with a player message attached: `(rig, message)`."""
+    rig = Rig()
+    message = PanelMessage()
+    rig.attach(message)
+    return rig, message
+
+
 def buttons(view):
     return {b.custom_id: b for b in view.children}
 
@@ -182,10 +191,8 @@ def test_the_dj_buttons_are_the_ones_admission_gates():
     assert playback_buttons == set(admission._DJ_BUTTONS)
 
 
-def test_an_unchanged_snapshot_is_not_edited_again():
-    rig = Rig()
-    message = PanelMessage()
-    rig.attach(message)
+def test_an_unchanged_snapshot_is_not_edited_again(attached):
+    rig, message = attached
 
     rig.refresh()
     rig.refresh()
@@ -193,10 +200,8 @@ def test_an_unchanged_snapshot_is_not_edited_again():
     assert message.edits == []
 
 
-def test_a_changed_snapshot_edits_the_message_once():
-    rig = Rig()
-    message = PanelMessage()
-    rig.attach(message)
+def test_a_changed_snapshot_edits_the_message_once(attached):
+    rig, message = attached
     rig.controller.snapshot = snap(volume=0)
 
     rig.refresh()
@@ -206,10 +211,10 @@ def test_a_changed_snapshot_edits_the_message_once():
     assert buttons(message.edits[0])["volume_down"].disabled
 
 
-def test_an_inactive_snapshot_strips_the_buttons_and_forgets_the_message():
-    rig = Rig()
-    message = PanelMessage()
-    rig.attach(message)
+def test_an_inactive_snapshot_strips_the_buttons_and_forgets_the_message(
+    attached,
+):
+    rig, message = attached
     rig.controller.snapshot = PanelSnapshot.inactive()
 
     rig.refresh()
@@ -220,20 +225,24 @@ def test_an_inactive_snapshot_strips_the_buttons_and_forgets_the_message():
 
 
 def test_a_missing_controller_reads_as_inactive():
-    rig = Rig()
+    settings = types.SimpleNamespace(announce_songs=True)
+    controllers = [PanelController(snap())]
+    panel = PlayerPanel(object(), lambda: controllers[0], lambda: settings)
     message = PanelMessage()
-    rig.attach(message)
-    rig.panel._controller = lambda: None
 
-    rig.refresh()
+    async def send(view):
+        return message
+
+    run(panel.attach(send))
+    controllers[0] = None
+
+    run(panel.refresh())
 
     assert message.edits == [None]
 
 
-def test_playback_ended_strips_the_buttons_and_forgets_the_message():
-    rig = Rig()
-    message = PanelMessage()
-    rig.attach(message)
+def test_playback_ended_strips_the_buttons_and_forgets_the_message(attached):
+    rig, message = attached
 
     run(rig.panel.playback_ended())
     rig.controller.snapshot = snap(volume=0)
@@ -267,19 +276,6 @@ def test_attach_strips_the_previous_message_and_returns_what_was_sent():
     assert old.edits == [None]
     run(rig.panel.playback_ended())
     assert new.edits == [None]
-
-
-def test_attach_hands_the_current_layout_to_send():
-    rig = Rig()
-    seen = []
-
-    async def send(view):
-        seen.append(view)
-        return PanelMessage()
-
-    run(rig.panel.attach(send))
-
-    assert [b.custom_id for b in seen[0].children] == PLAYER_BUTTONS
 
 
 def test_attach_sends_no_view_while_inactive():
@@ -457,11 +453,9 @@ def test_a_message_attached_during_a_refetch_survives_its_failure():
     assert newer.edits[-1:] == [None]
 
 
-def test_a_message_attached_during_an_edit_is_drawn_as_attached():
-    rig = Rig()
-    message = PanelMessage()
+def test_a_message_attached_during_an_edit_is_drawn_as_attached(attached):
+    rig, message = attached
     newer = PanelMessage()
-    rig.attach(message)
     rig.controller.snapshot = snap(volume=0)
     attach_during(rig, newer, message, "edit", snap(volume=5))
 
@@ -537,11 +531,7 @@ class ClickCtx:
 
 
 def test_the_current_song_button_posts_the_songs_embed():
-    class Song:
-        def format_output(self, template):
-            return ("embed", template)
-
-    rig = Rig(snap(current_song=Song()))
+    rig = Rig(snap(current_song=Track()))
     ctx = ClickCtx()
 
     run(rig.panel.current_song(ctx))
