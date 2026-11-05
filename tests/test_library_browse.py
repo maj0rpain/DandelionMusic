@@ -302,12 +302,6 @@ class TestSampleTrack:
             "a1.flac",
         )
 
-    def test_the_cursor_delegates_to_it(self):
-        assert cursor().sample_track() is None
-        c = at_album()
-        assert c.sample_track() == library.sample_track(
-            INDEX, "Radiohead", "OK Computer"
-        )
 
 
 class TestBack:

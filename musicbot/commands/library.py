@@ -340,18 +340,6 @@ class LibraryBrowseView(LibraryView):
         """The (artist, album) pair of the level shown now."""
         return self.session.cursor.screen().scope
 
-    async def _resolve_enrichment(
-        self,
-    ) -> Optional[library_metadata.Enrichment]:
-        """Whatever the online backends know about the current
-        level, or None where there is nothing to ask about: the root,
-        and any scope holding no file to read tags and embedded
-        artwork off."""
-        cursor = self.session.cursor
-        return await library_metadata.get_enrichment(
-            cursor.index, cursor.artist, cursor.album
-        )
-
     @staticmethod
     def embed(frame: Frame) -> discord.Embed:
         embed = discord.Embed(title=frame.title, color=config.EMBED_COLOR)
@@ -633,7 +621,9 @@ class LibraryBrowseView(LibraryView):
             return
 
         try:
-            enrichment = await self._resolve_enrichment()
+            enrichment = await library_metadata.get_enrichment(
+                self.session.cursor.index, *self.scope
+            )
         except Exception as e:
             print(f"library: enrichment failed: {e}", file=sys.stderr)
             return

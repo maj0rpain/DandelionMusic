@@ -265,13 +265,3 @@ class BrowseCursor:
         if self.artist is None:
             return []
         return library.tracks_for(self.index, self.artist, self.album)
-
-    def sample_track(self) -> Optional[Tuple[str, str, str]]:
-        """One track to read tags and embedded artwork off, for the
-        enrichment of the current level - the album's first track at
-        the album level, and the first track of the artist's first
-        album above it. None at the root, and None wherever the scope
-        holds no files at all."""
-        if self.artist is None:
-            return None
-        return library.sample_track(self.index, self.artist, self.album)

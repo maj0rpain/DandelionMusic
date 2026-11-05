@@ -464,16 +464,31 @@ class Gated(NamedTuple):
     result: Optional[Enrichment]
 
 
+@pytest.fixture(autouse=True)
+def _patcher(monkeypatch):
+    """Lets stub_enrichment() patch the public get_enrichment inside
+    the plain scenario functions below; undone after each test."""
+    global _MONKEYPATCH
+    _MONKEYPATCH = monkeypatch
+    yield
+    _MONKEYPATCH = None
+
+
+_MONKEYPATCH = None
+
+
 def stub_enrichment(view, results=None, default=None):
-    """Replaces the disk and HTTP lookup with one answering per
-    (artist, album) from `results`, `default` for a level it does not
-    name. Returns the list each *finished* resolution's level is
-    appended to."""
+    """Replaces library_metadata.get_enrichment with a fake answering
+    per the (artist, album) it receives from `results`, `default` for
+    a level it does not name, and asserting it received the index
+    the view's cursor holds. Returns the list each *finished*
+    resolution's level is appended to."""
     results = results or {}
     finished = []
 
-    async def resolve():
-        level = level_of(view)
+    async def get_enrichment(index, artist, album):
+        assert index is view.session.cursor.index
+        level = (artist, album)
         result = results.get(level, default)
         if isinstance(result, Gated):
             await result.gate.wait()
@@ -481,7 +496,11 @@ def stub_enrichment(view, results=None, default=None):
         finished.append(level)
         return result
 
-    view._resolve_enrichment = resolve
+    _MONKEYPATCH.setattr(
+        library_commands.library_metadata,
+        "get_enrichment",
+        get_enrichment,
+    )
     return finished
 
 
@@ -1319,3 +1338,32 @@ def test_first_message_is_drawn_from_one_frame(monkeypatch):
 
     assert len(frames) == 1
     assert sent[0]["embed"].title == frames[0].title
+
+
+def test_enrichment_is_resolved_on_the_cursors_index_not_the_librarys(
+    monkeypatch,
+):
+    other = {"Elsewhere": {"Album": [make_song("Song")]}}
+    monkeypatch.setattr(
+        library_commands.library, "get_index", lambda: other, raising=False
+    )
+
+    async def scenario():
+        view = make_view()
+        seen = []
+
+        async def get_enrichment(index, artist, album):
+            seen.append(index)
+            return COVER
+
+        monkeypatch.setattr(
+            library_commands.library_metadata,
+            "get_enrichment",
+            get_enrichment,
+        )
+        await view.descend(EditingInteraction(), "Radiohead")
+        return seen
+
+    seen = run(scenario())
+
+    assert len(seen) == 1 and seen[0] is INDEX
