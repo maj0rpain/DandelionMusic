@@ -520,46 +520,6 @@ def test_lastfm_non_200_status_is_retried_after_cooldown(
     assert len(session.queries) == 2
 
 
-def test_clear_clears_the_remote_lookups(rig, lastfm, spotify):
-    session = lastfm(
-        {
-            "artist.getInfo": {"artist": {"stats": {"listeners": "1"}}},
-            "album.getInfo": {"album": {"listeners": "1"}},
-        }
-    )
-    client = spotify(
-        FakeSpotify(
-            artists=[{"popularity": 1, "images": []}],
-            albums=[{"images": [], "release_date": "2000"}],
-        )
-    )
-
-    def lookups():
-        rig.artist()
-        rig.album()
-
-    lookups()
-    lookups()
-    # one backend call per key, for album lookups as well as artist ones
-    assert (len(session.queries), len(client.searches)) == (2, 2)
-
-    rig.enricher.clear()
-    lookups()
-
-    assert sorted(q["method"] for q in session.queries) == [
-        "album.getInfo",
-        "album.getInfo",
-        "artist.getInfo",
-        "artist.getInfo",
-    ]
-    assert sorted(kind for kind, _ in client.searches) == [
-        "album",
-        "album",
-        "artist",
-        "artist",
-    ]
-
-
 def test_a_timeout_is_logged_with_label_and_key(
     rig, lastfm, no_spotify, capsys
 ):

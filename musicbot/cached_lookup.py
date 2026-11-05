@@ -20,13 +20,29 @@ from typing import (
     Dict,
     Generic,
     Hashable,
-    MutableMapping,
     Optional,
+    Protocol,
     TypeVar,
 )
 
 K = TypeVar("K", bound=Hashable)
 V = TypeVar("V")
+
+
+class Store(Protocol[K, V]):
+    """The four operations `CachedLookup` uses on its store."""
+
+    def __contains__(self, key: object) -> bool:
+        """Part of the store protocol."""
+
+    def __getitem__(self, key: K) -> V:
+        """Part of the store protocol."""
+
+    def __setitem__(self, key: K, value: V) -> None:
+        """Part of the store protocol."""
+
+    def clear(self) -> None:
+        """Part of the store protocol."""
 
 
 class ByteBoundedStore(Generic[K, V]):
@@ -61,16 +77,10 @@ class ByteBoundedStore(Generic[K, V]):
     def __contains__(self, key: object) -> bool:
         return key in self._entries
 
-    def __len__(self) -> int:
-        return len(self._entries)
-
     def __getitem__(self, key: K) -> V:
         value = self._entries.pop(key)
         self._entries[key] = value
         return value
-
-    def get(self, key: K, default: Optional[V] = None) -> Optional[V]:
-        return self[key] if key in self._entries else default
 
     def __setitem__(self, key: K, value: V) -> None:
         if key in self._entries:
@@ -131,7 +141,7 @@ class CachedLookup(Generic[K, V]):
         timeout: float = 3,
         cooldown: float = 60,
         clock: Callable[[], float] = time.monotonic,
-        store: Optional[MutableMapping[K, Optional[V]]] = None,
+        store: Optional[Store[K, Optional[V]]] = None,
     ) -> None:
         self._enabled = enabled
         self._backend = backend
@@ -139,9 +149,7 @@ class CachedLookup(Generic[K, V]):
         self._timeout = timeout
         self._cooldown = cooldown
         self._clock = clock
-        self._cache: MutableMapping[K, Optional[V]] = (
-            {} if store is None else store
-        )
+        self._cache: Store[K, Optional[V]] = {} if store is None else store
         self._futures: Dict[K, "asyncio.Future[Optional[V]]"] = {}
         self._cooldown_until: Dict[K, float] = {}
 
