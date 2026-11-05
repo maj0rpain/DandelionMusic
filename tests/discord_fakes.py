@@ -1,6 +1,6 @@
 """Shared Discord stand-ins for the tests: the click FakeInteraction,
 make_bot, the voice fakes, RecordingCtx, http_error and the
-player view's button ids. Import them rather than writing a per-file
+player panel's button ids. Import them rather than writing a per-file
 copy.
 """
 
@@ -208,7 +208,7 @@ def coded_error(cls, status, code):
 EXPIRED = coded_error(discord.HTTPException, 401, 50027)
 
 
-# The player view's button ids, in its order. Hand-written because
+# The player panel's button ids, in its order. Hand-written because
 # parametrize reads it at collection; test_player_panel checks it
 # against the real view.
 PLAYER_BUTTONS = [

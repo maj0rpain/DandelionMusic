@@ -777,7 +777,7 @@ class Library(commands.Cog):
             # matches the deferral above, and matches the hit-list send
             # below. Without it Context.send takes its public-message
             # path, which moves the playback controls off the
-            # now-playing message and onto this one - which the
+            # player panel and onto this one - which the
             # ephemeral deferral then hides from everyone but the
             # searcher.
             if ctx.interaction is not None:

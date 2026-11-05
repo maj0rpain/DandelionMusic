@@ -119,11 +119,11 @@ class MusicBot(commands.Bot):
         loader.init()
         return await super().start(*args, **kwargs)
 
-    async def _gather_per_guild(self, make_coro, action: str, items=None):
-        """Run make_coro(item) for every controller (or every item of
-        `items()`, e.g. the panels); one guild's failure is logged and
-        never stops the others."""
-        targets = list(items() if items else self.sessions)
+    async def _gather_per_guild(self, targets, make_coro, action: str):
+        """Run make_coro(target) for every target (the controllers or
+        the panels); one guild's failure is logged and never stops the
+        others."""
+        targets = list(targets)
         results = await asyncio.gather(
             *(make_coro(target) for target in targets),
             return_exceptions=True,
@@ -141,6 +141,7 @@ class MusicBot(commands.Bot):
         print(config.SHUTDOWN_MESSAGE, flush=True)
 
         await self._gather_per_guild(
+            self.sessions,
             lambda controller: controller.udisconnect("bot shutdown"),
             "Disconnect",
         )
@@ -186,8 +187,8 @@ class MusicBot(commands.Bot):
 
         print(config.STARTUP_COMPLETE_MESSAGE)
 
-        if not self.update_views.is_running():
-            self.update_views.start()
+        if not self.refresh_panels.is_running():
+            self.refresh_panels.start()
 
         if not self.absolutely_ready.done():
             self.absolutely_ready.set_result(True)
@@ -277,11 +278,11 @@ class MusicBot(commands.Bot):
             )
 
     @tasks.loop(seconds=1)
-    async def update_views(self):
+    async def refresh_panels(self):
         await self._gather_per_guild(
+            self.sessions.panels(),
             lambda panel: panel.refresh(),
             "Panel refresh",
-            self.sessions.panels,
         )
 
     async def get_prefix(self, message: discord.Message):

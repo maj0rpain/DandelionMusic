@@ -463,7 +463,7 @@ class TestButtons:
     @pytest.mark.parametrize("custom_id", PLAYER_BUTTONS)
     def test_a_player_button_does_not_connect(self, custom_id):
         """With no voice client a player button is refused instead:
-        a stale player view must not act on a bot out of voice."""
+        a stale player panel must not act on a bot out of voice."""
         guild = VoiceGuild()
         ctx = voice_ctx(guild, guild.channel("a"), admin=True)
         sent, ran = press(ctx, custom_id)
