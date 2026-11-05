@@ -1,13 +1,13 @@
 """d!play and d!playnext share one request path: they differ only in
 whether the track is queued as the next one."""
 
-import asyncio
 import types
 
 import pytest
 
 from config import config
 from musicbot.commands.music import Music
+from helpers import run
 
 
 class FakeCtx:
@@ -35,7 +35,7 @@ def run_command(name, ctx, monkeypatch, **kwargs):
 
     monkeypatch.setattr(Music, "_play_song", play_song)
     command = getattr(Music, name)
-    asyncio.run(command.callback(Music(None), ctx, **kwargs))
+    run(command.callback(Music(None), ctx, **kwargs))
     return reached
 
 

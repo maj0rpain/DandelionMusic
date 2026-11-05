@@ -207,9 +207,9 @@ print(json.dumps({"raised": raised}))
 
 
 def _run_in_fresh_interpreter(cwd: Path, script: str, as_file=False):
-    # without the settings an earlier test's load_dotenv() may have left
-    # in os.environ - a half-set Spotify credential, say, makes the
-    # import print a traceback
+    # without the settings exported in the shell that runs pytest - a
+    # half-set Spotify credential, say, would reach the child and make
+    # the import print a traceback
     leaked = {*Config.as_dict(), *ENV_ALIASES}
     env = {k: v for k, v in os.environ.items() if k not in leaked}
     env["PYTHONPATH"] = os.pathsep.join(

@@ -10,6 +10,8 @@ import pickle
 import sys
 import types
 
+from helpers import run
+
 
 async def _settle():
     # lets the preload task the controller scheduled run to the end
@@ -30,6 +32,10 @@ def _songs(controller, *titles):
     ]
 
 
+def _song(controller, title):
+    return _songs(controller, title)[0]
+
+
 def _queue(controller, *titles):
     for song in _songs(controller, *titles):
         controller.playlist.add(song)
@@ -45,14 +51,14 @@ def _run(controller, scenario):
         await _settle()
         return result
 
-    return asyncio.run(main())
+    return run(main())
 
 
-def _run_intent(controller, intent, playing=True):
+def _run_while_playing(controller, intent):
     """Runs `intent` (a plain callable, or one returning a coroutine,
-    which is awaited) with a track already playing unless `playing` is
-    false, then lets the preload it scheduled finish."""
-    controller.guild.voice_client.playing = playing
+    which is awaited) with a track already playing, then lets the
+    preload it scheduled finish."""
+    controller.guild.voice_client.playing = True
 
     async def scenario():
         result = intent()
@@ -112,6 +118,9 @@ class ProcessController:
     def __init__(self, result):
         self.result = result
 
+    async def start_idle_timer(self, restart=False):
+        pass
+
     async def process_song(self, track, user=None, playnext=False):
         if isinstance(self.result, BaseException):
             raise self.result
@@ -119,14 +128,14 @@ class ProcessController:
 
 
 def play_ctx(controller=None, on_send=None):
-    """A fake context for Music._play_song and the list of its replies.
+    """The fake command context for `Music` callbacks, and the list of
+    its replies (what `send` was given, as strings).
 
-    Works with no controller, a real controller or a `ProcessController`.
+    `controller` is what the callback reads from `ctx.audiocontroller`;
+    `controller=None` is the playlist-command case, where the command
+    reads no controller. `on_send(sent)`, when given, is
+    awaited after each reply. The controller is never modified.
     """
-
-    class Timer:
-        async def start(self, *_):
-            pass
 
     sent = []
 
@@ -138,13 +147,8 @@ def play_ctx(controller=None, on_send=None):
     async def defer(**kwargs):
         pass
 
-    async def start_idle_timer(*a):
-        pass
-
     guild = types.SimpleNamespace(id=1)
     if controller is not None:
-        controller.start_idle_timer = start_idle_timer
-        controller.timer = Timer()
         guild = getattr(controller, "guild", None) or guild
     ctx = types.SimpleNamespace(
         audiocontroller=controller,

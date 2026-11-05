@@ -18,6 +18,7 @@ from musicbot.linkutils import SiteTypes
 from musicbot.song import PartialPlaylist, Song
 from musicbot.truncation import Truncation, TruncationReason
 from controller_helpers import ProcessController, _songs, play_ctx
+from helpers import run
 
 
 def _queued_playlist_class(controller):
@@ -29,7 +30,7 @@ def test_truncated_playlist_reply_holds_numbers_and_reason_text():
     cut = Truncation(50, TruncationReason.NO_API)
     ctx, sent = play_ctx(ProcessController(QueuedPlaylist(30, cut)))
 
-    asyncio.run(Music(None)._play_song(ctx, "t"))
+    run(Music(None)._play_song(ctx, "t"))
 
     assert sent == [cut.notice(30)]
 
@@ -37,17 +38,17 @@ def test_truncated_playlist_reply_holds_numbers_and_reason_text():
 def test_untruncated_playlist_reply_is_queued_playlist():
     ctx, sent = play_ctx(ProcessController(QueuedPlaylist(30)))
 
-    asyncio.run(Music(None)._play_song(ctx, "t"))
+    run(Music(None)._play_song(ctx, "t"))
 
     assert sent == [config.SONGINFO_PLAYLIST_QUEUED]
 
 
 def _process(controller):
-    async def run():
+    async def main():
         controller.bot.loop = asyncio.get_running_loop()
         return await controller.process_song("x")
 
-    return asyncio.run(run())
+    return run(main())
 
 
 def test_one_song_partial_playlist_is_reported_as_queued_playlist(
@@ -96,7 +97,7 @@ def _add(monkeypatch, loaded, add_songs):
     monkeypatch.setattr(music.loader, "load_song", load_song)
     monkeypatch.setattr(playlists, "add_songs", add_songs)
     ctx, sent = play_ctx()
-    asyncio.run(Music._playlist_add_song.callback(Music(None), ctx, "p", "t"))
+    run(Music._playlist_add_song.callback(Music(None), ctx, "p", "t"))
     return sent
 
 

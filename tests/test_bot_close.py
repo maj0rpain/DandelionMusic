@@ -12,6 +12,7 @@ from discord.ext import commands
 
 from musicbot import bot as bot_module
 from musicbot.bot import MusicBot
+from helpers import run
 
 
 def test_close_keeps_the_loop_running_while_the_loader_shuts_down(
@@ -51,13 +52,11 @@ def test_close_keeps_the_loop_running_while_the_loader_shuts_down(
         still_closing = not closing.done()
 
         release.set()
-        await asyncio.wait_for(closing, timeout=5)
+        await closing
         return ran_while_blocked, still_closing
 
     try:
-        ran_while_blocked, still_closing = asyncio.run(
-            asyncio.wait_for(scenario(), timeout=10)
-        )
+        ran_while_blocked, still_closing = run(scenario())
     finally:
         release.set()
 
@@ -116,7 +115,7 @@ def test_failing_disconnect_does_not_stop_close_and_names_the_guild(
         monkeypatch,
         [_Controller("Broken Guild", RuntimeError("boom")), _Controller("ok")],
     )
-    asyncio.run(scenario())
+    run(scenario())
     err = capsys.readouterr().err
     assert (
         calls,
@@ -128,7 +127,7 @@ def test_failing_disconnect_does_not_stop_close_and_names_the_guild(
 def test_failing_link_stop_runs_the_rest_then_raises(monkeypatch):
     calls, scenario = _close(monkeypatch, stop_error=ValueError("stop"))
     with pytest.raises(ValueError, match="stop"):
-        asyncio.run(scenario())
+        run(scenario())
     assert calls == ["stop", "shutdown", "discord"]
 
 
@@ -137,7 +136,7 @@ def test_failing_loader_shutdown_still_closes_discord_then_raises(
 ):
     calls, scenario = _close(monkeypatch, shutdown_error=OSError("join"))
     with pytest.raises(OSError, match="join"):
-        asyncio.run(scenario())
+        run(scenario())
     assert calls == ["stop", "shutdown", "discord"]
 
 
@@ -150,6 +149,6 @@ def test_two_failing_steps_raise_the_later_chained_onto_the_earlier(
         shutdown_error=OSError("join"),
     )
     with pytest.raises(OSError, match="join") as raised:
-        asyncio.run(scenario())
+        run(scenario())
     assert calls == ["stop", "shutdown", "discord"]
     assert isinstance(raised.value.__context__, ValueError)
