@@ -21,7 +21,7 @@ from controller_helpers import (
     _backup_path,
     _fake_ffmpeg,
     _preloaded,
-    play_ctx,
+    command_ctx,
     _queue,
     _run,
     _run_while_playing,
@@ -2074,7 +2074,7 @@ def test_a_title_less_song_whose_preload_fails_is_skipped_by_its_url(
 def test_remove_names_a_title_less_song_by_its_webpage_url(controller):
     _queue(controller, "current")
     song = _title_less_song(controller)
-    ctx, sent = play_ctx(controller)
+    ctx, sent = command_ctx(controller)
 
     async def scenario():
         await Music._remove.callback(Music(None), ctx, 2)

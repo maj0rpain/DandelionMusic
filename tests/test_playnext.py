@@ -14,7 +14,7 @@ from musicbot.commands.music import Music
 from musicbot.loader import SongError
 from controller_helpers import (
     ProcessController,
-    play_ctx,
+    command_ctx,
     _backup,
     _backup_path,
     _fake_ffmpeg,
@@ -163,7 +163,7 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
         if len(sent) == 1:
             await controller.process_song("plain")
 
-    ctx, _ = play_ctx(controller, on_send)
+    ctx, _ = command_ctx(controller, on_send)
 
     async def start_idle_timer(restart=False):
         pass
@@ -184,7 +184,7 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
 
 
 def test_play_replies_with_the_load_error():
-    ctx, sent = play_ctx(ProcessController(SongError("nope")))
+    ctx, sent = command_ctx(ProcessController(SongError("nope")))
 
     run(Music(None)._play_song(ctx, "x"))
 

@@ -1,5 +1,7 @@
-"""Fake names are unambiguous: no two shared test-helper modules define the
-same name, and no fake in a test module takes a shared fake's name.
+"""Shared names are unambiguous: no two shared test-helper modules define
+the same top-level class, function or module-level variable, and no class,
+function or module-level variable in a test module takes a public
+top-level name of a shared module.
 
 Source scans over `ast`; nothing under test is imported.
 """
@@ -23,61 +25,74 @@ SHARED_MODULES = [
 PARAGRAPH_OPENING = "A shared test-helper module is any of"
 
 
-def _top_level_names(source):
-    """name -> line of each top-level class or function in `source`."""
+DEFINITIONS = (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
+
+
+def _bound_names(target):
+    """The names a single assignment target binds."""
+    if isinstance(target, ast.Name):
+        yield target.id
+    elif isinstance(target, (ast.Tuple, ast.List)):
+        for element in target.elts:
+            yield from _bound_names(element)
+    elif isinstance(target, ast.Starred):
+        yield from _bound_names(target.value)
+
+
+def _defined_names(nodes):
+    """(name, line) of each name the nodes define: a class or function, or
+    a name an assignment or annotated assignment binds. Imports, augmented
+    assignments and attribute or subscript targets define nothing."""
+    for node in nodes:
+        if isinstance(node, DEFINITIONS):
+            yield node.name, node.lineno
+        elif isinstance(node, ast.Assign):
+            for target in node.targets:
+                for name in _bound_names(target):
+                    yield name, node.lineno
+        elif isinstance(node, ast.AnnAssign):
+            for name in _bound_names(node.target):
+                yield name, node.lineno
+
+
+def _shared_names(sources):
+    """public name -> shared module, over {module: source}."""
     names = {}
-    for node in ast.parse(source).body:
-        if isinstance(
-            node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
-        ):
-            names.setdefault(node.name, node.lineno)
+    for module, source in sources.items():
+        for name, _ in _defined_names(ast.parse(source).body):
+            if not name.startswith("_"):
+                names.setdefault(name, module)
     return names
 
 
-def _shared_fakes(sources):
-    """fake name -> shared module, over {module: source}."""
-    fakes = {}
-    for module, source in sources.items():
-        for node in ast.parse(source).body:
-            is_class = isinstance(node, ast.ClassDef)
-            is_factory = isinstance(
-                node, (ast.FunctionDef, ast.AsyncFunctionDef)
-            ) and node.name.startswith(("make_", "fake_"))
-            if (is_class or is_factory) and not node.name.startswith("_"):
-                fakes.setdefault(node.name, module)
-    return fakes
-
-
 def duplicate_names(sources):
-    """Rule (a): one message per name defined in two shared modules."""
+    """One message per top-level name defined in two shared modules."""
     first = {}
     problems = []
     for module, source in sources.items():
-        for name, line in _top_level_names(source).items():
-            if name in first:
+        for name, line in _defined_names(ast.parse(source).body):
+            if name in first and first[name] != module:
                 problems.append(
                     f"{module}:{line}: {name} is also defined in "
                     f"{first[name]}"
                 )
             else:
-                first[name] = module
+                first.setdefault(name, module)
     return problems
 
 
-def shadowing_names(module_name, source, fakes):
-    """Rule (b): one message per class or function, at any nesting level,
-    taking a shared fake's name."""
+def shadowing_names(module_name, source, shared):
+    """One message per class or function at any nesting level, or
+    module-level variable, taking a shared module's public name."""
+    tree = ast.parse(source)
+    nodes = [n for n in ast.walk(tree) if isinstance(n, DEFINITIONS)]
+    nodes += [n for n in tree.body if not isinstance(n, DEFINITIONS)]
     problems = []
-    for node in ast.walk(ast.parse(source)):
-        if (
-            isinstance(
-                node, (ast.ClassDef, ast.FunctionDef, ast.AsyncFunctionDef)
-            )
-            and node.name in fakes
-        ):
+    for name, line in sorted(_defined_names(nodes), key=lambda pair: pair[1]):
+        if name in shared:
             problems.append(
-                f"{module_name}:{node.lineno}: {node.name} shadows the "
-                f"shared fake in {fakes[node.name]}"
+                f"{module_name}:{line}: {name} shadows the shared name "
+                f"in {shared[name]}"
             )
     return problems
 
@@ -93,7 +108,7 @@ def listed_modules(claude_md):
 
 
 def list_mismatch(guard_list, doc_list):
-    """Rule (c): one message per module in one list but not the other."""
+    """One message per module in one list but not the other."""
     problems = [
         f"{m} is in the guard's list but not in tests/CLAUDE.md"
         for m in guard_list
@@ -118,7 +133,7 @@ def _shared_sources():
 # The checks on fixture sources.
 
 
-def test_rule_a_names_both_modules_and_the_line():
+def test_duplicate_names_reports_both_modules_and_the_line():
     sources = {
         "one": "x = 1\n\nclass Dup:\n    pass\n",
         "two": "def Dup(): ...",
@@ -126,29 +141,94 @@ def test_rule_a_names_both_modules_and_the_line():
     assert duplicate_names(sources) == ["two:1: Dup is also defined in one"]
 
 
-def test_rule_b_names_module_line_and_shadowed_shared_module():
-    shared = {"shared": "class FakeThing:\n    pass\n"}
-    test_src = "def test_x():\n    class FakeThing:\n        pass\n"
-    found = shadowing_names("test_x.py", test_src, _shared_fakes(shared))
-    assert found == [
-        "test_x.py:2: FakeThing shadows the shared fake in shared"
+def test_duplicate_names_reports_a_module_level_variable():
+    sources = {"one": "BUTTONS = 1\n", "two": "\nBUTTONS = 2\n"}
+    assert duplicate_names(sources) == [
+        "two:2: BUTTONS is also defined in one"
     ]
 
 
-def test_rule_b_ignores_private_and_non_fake_shared_names():
-    shared = {"shared": "def run(): ...\nclass _Hidden: ...\n"}
-    test_src = "def run(): ...\nclass _Hidden: ...\n"
-    assert shadowing_names("t.py", test_src, _shared_fakes(shared)) == []
+def test_duplicate_names_ignores_imports():
+    sources = {"one": "import discord\n", "two": "import discord\n"}
+    assert duplicate_names(sources) == []
 
 
-def test_rule_b_covers_make_and_fake_functions():
-    shared = {"shared": "def make_x(): ...\ndef fake_y(): ...\n"}
-    test_src = "def make_x(): ...\ndef fake_y(): ...\n"
-    found = shadowing_names("t.py", test_src, _shared_fakes(shared))
-    assert [p.split(" ")[1] for p in found] == ["make_x", "fake_y"]
+def test_shadowing_names_reports_module_line_and_shared_module():
+    shared = {"shared": "class FakeThing:\n    pass\n"}
+    test_src = "def test_x():\n    class FakeThing:\n        pass\n"
+    found = shadowing_names("test_x.py", test_src, _shared_names(shared))
+    assert found == [
+        "test_x.py:2: FakeThing shadows the shared name in shared"
+    ]
 
 
-def test_rule_c_names_each_module_in_one_list_only():
+def test_shadowing_names_ignores_private_names():
+    shared = {"shared": "class _Hidden: ...\n_X = 1\n"}
+    test_src = "class _Hidden: ...\n_X = 2\n"
+    assert shadowing_names("t.py", test_src, _shared_names(shared)) == []
+
+
+def test_shadowing_names_reports_a_non_fake_helper():
+    shared = {"shared": "def run(): ...\n"}
+    found = shadowing_names("t.py", "def run(): ...\n", _shared_names(shared))
+    assert found == ["t.py:1: run shadows the shared name in shared"]
+
+
+def test_shadowing_names_reports_a_module_level_variable():
+    shared = {"shared": "PLAYER_BUTTONS = 1\n"}
+    found = shadowing_names(
+        "t.py", "PLAYER_BUTTONS = 2\n", _shared_names(shared)
+    )
+    assert found == [
+        "t.py:1: PLAYER_BUTTONS shadows the shared name in shared"
+    ]
+
+
+def test_shadowing_names_ignores_a_local_variable():
+    shared = {"shared": "run = 1\n"}
+    test_src = "def test_x():\n    run = 2\n"
+    assert shadowing_names("t.py", test_src, _shared_names(shared)) == []
+
+
+def test_shadowing_names_ignores_assignments_under_top_level_if():
+    shared = {"shared": "run = 1\n"}
+    test_src = "if True:\n    run = 2\n"
+    assert shadowing_names("t.py", test_src, _shared_names(shared)) == []
+
+
+def test_shared_names_count_every_definition_form():
+    source = (
+        "async def a(): ...\n"
+        "B: int = 1\n"
+        "C: int\n"
+        "D, (E, *F) = 1, (2, 3)\n"
+        "G = H = 1\n"
+        "I = 0\n"
+        "I += 1\n"
+        "J.attr = 1\n"
+        "K[0] = 1\n"
+        "import L\n"
+        "if True:\n"
+        "    M = 1\n"
+        "try:\n"
+        "    N = 1\n"
+        "except Exception:\n"
+        "    pass\n"
+    )
+    assert list(_shared_names({"m": source})) == [
+        "a",
+        "B",
+        "C",
+        "D",
+        "E",
+        "F",
+        "G",
+        "H",
+        "I",
+    ]
+
+
+def test_list_mismatch_reports_each_module_in_one_list_only():
     doc = f"{PARAGRAPH_OPENING} `a`, `b` and `c`. Rest.\n\nOther."
     assert list_mismatch(["a", "b", "d"], listed_modules(doc)) == [
         "d is in the guard's list but not in tests/CLAUDE.md",
@@ -163,11 +243,11 @@ def test_no_two_shared_modules_define_the_same_name():
     assert duplicate_names(_shared_sources()) == []
 
 
-def test_no_test_fake_shadows_a_shared_fake():
-    fakes = _shared_fakes(_shared_sources())
+def test_no_test_module_shadows_a_shared_name():
+    shared = _shared_names(_shared_sources())
     problems = []
     for path in sorted(TESTS.glob("test_*.py")):
-        problems += shadowing_names(path.name, _read(path), fakes)
+        problems += shadowing_names(path.name, _read(path), shared)
     assert problems == []
 
 

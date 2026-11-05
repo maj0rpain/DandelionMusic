@@ -15,7 +15,7 @@ from musicbot.commands import music
 from musicbot.commands.music import Music
 from musicbot.linkutils import SiteTypes
 from musicbot.song import Song
-from controller_helpers import play_ctx
+from controller_helpers import command_ctx
 from helpers import run
 
 
@@ -36,7 +36,7 @@ def _run_playlist_command(monkeypatch, command, function, error, *args):
 
     monkeypatch.setattr(music.loader, "load_song", load_song)
     monkeypatch.setattr(playlists, function, _fail_with(error))
-    ctx, sent = play_ctx()
+    ctx, sent = command_ctx()
     run(command.callback(Music(None), ctx, *args))
     return sent
 
@@ -99,7 +99,7 @@ def test_save_with_an_existing_name_replies_already_exists(monkeypatch):
     controller = types.SimpleNamespace(
         playlist=types.SimpleNamespace(playque=[_song()])
     )
-    ctx, sent = play_ctx(controller)
+    ctx, sent = command_ctx(controller)
 
     run(Music._playlist_save.callback(Music(None), ctx, "p"))
 
