@@ -7,6 +7,7 @@ import pytest
 from discord.ext import commands
 
 from musicbot.bot import Context
+from musicbot.player_panel import PlayerPanel
 from helpers import run
 
 VIEW_SKIP_TRIGGERS = [
@@ -39,10 +40,9 @@ def make_send_ctx(monkeypatch, interaction, destination=None, registered=True):
 
     registered=False: no panel is registered for the guild
     (bot.sessions returns None) and None is returned in the panel
-    position. registered=True: a fake panel is: it carries the buttons
-    unless the reply is ephemeral, has a view, or is in another channel
-    than `destination` (None: no destination set yet), and attaches by
-    sending with the view "VIEW".
+    position. registered=True: a real PlayerPanel is, directed to
+    `destination` (None: no destination set yet); only its `attach` is
+    replaced, sending with the view "VIEW".
     """
     ctx = object.__new__(Context)
     ctx.interaction = interaction
@@ -54,19 +54,12 @@ def make_send_ctx(monkeypatch, interaction, destination=None, registered=True):
     async def attach(send):
         return await send("VIEW")
 
-    def carries_buttons(*, channel, ephemeral, has_view):
-        return (
-            not ephemeral
-            and not has_view
-            and (destination is None or channel == destination)
-        )
-
     panel = None
     if registered:
-        panel = SimpleNamespace(
-            carries_buttons=carries_buttons,
-            attach=AsyncMock(side_effect=attach),
-        )
+        panel = PlayerPanel(object(), lambda: None, lambda: None)
+        if destination is not None:
+            panel.direct_to(destination)
+        panel.attach = AsyncMock(side_effect=attach)
     ctx.bot = SimpleNamespace(
         sessions=SimpleNamespace(panel=lambda guild: panel)
     )
@@ -103,6 +96,13 @@ def test_response_not_done_returns_original_response():
 
 def test_no_interaction_view_path_uses_parent_send(monkeypatch):
     ctx, parent, _ = make_send_ctx(monkeypatch, None)
+    assert run(ctx.send("x")) == "sent"
+    parent.assert_awaited_once_with("x", view="VIEW")
+
+
+def test_reply_in_the_directed_channel_carries_the_view(monkeypatch):
+    ctx, parent, panel = make_send_ctx(monkeypatch, None)
+    panel.direct_to(ctx.channel)
     assert run(ctx.send("x")) == "sent"
     parent.assert_awaited_once_with("x", view="VIEW")
 
