@@ -30,6 +30,8 @@ Import each shared test-helper module (listed below) in a single `from <module> 
 
 A shared test-helper module is any of `discord_fakes`, `helpers`, `developer_fakes`, `setting_fakes`, `controller_seam`, `controller_helpers`, `db_seam` and `library_fakes`. No two of them define the same top-level class, function or module-level variable, and no class, function or module-level variable in a test module takes a public top-level name of one of them: a fake whose shape differs takes a distinct, descriptive name (`EditingInteraction`, `CountingVoiceChannel`, `RespondedInteraction`), and one with the same shape imports the shared one. `tests/test_fake_names.py` asserts both.
 
+`tests/library_fakes.py` holds `library_song(title, **fields)`, a `LibrarySong` with `None` defaults that rejects unknown fields; the library test modules import it.
+
 ## Subprocess probes
 
 `tests/test_import_inert.py` runs fresh-interpreter subprocesses to check that importing `musicbot` changes no process-global state, that the entrypoint wraps stdout/stderr before `bot.run()`, that `MusicBot` can be built with no current event loop, and the loader's `init()`/`shutdown()` lifecycle, which starts real extraction workers (one per lane). `tests/test_loader_lanes.py` holds one real lane with a flag-file blocker: a preload completes while the load lane is held, and a worker killed in either lane leaves the other lane's in-flight and next calls intact while the killed lane's next call succeeds after its rebuild.
