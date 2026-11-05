@@ -13,10 +13,19 @@ import types
 from helpers import run
 
 
-async def _settle():
-    # lets the preload task the controller scheduled run to the end
+async def sleep_forever(started):
+    # a task that records itself in `started`, then never finishes
+    started.append(asyncio.current_task())
+    await asyncio.sleep(3600)
+
+
+async def _settle(controller=None):
+    # lets the preload task the controller scheduled run to the end;
+    # given the controller, waits until it has no task left pending
     for _ in range(10):
         await asyncio.sleep(0)
+    while controller is not None and controller._tasks:
+        await asyncio.gather(*controller._tasks)
 
 
 def _songs(controller, *titles):
