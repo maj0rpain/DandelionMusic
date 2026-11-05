@@ -253,29 +253,6 @@ async def connect_to(guild: discord.Guild, channel: discord.VoiceChannel):
         await channel.connect(reconnect=True, timeout=VC_CONNECT_TIMEOUT)
 
 
-# Temporary aliases: these moved to musicbot.admission as private
-# functions. The callers not yet moved onto admission reach them here
-# under their old names. Resolved lazily, as admission imports utils.
-_ADMISSION_ALIASES = {
-    "voice_check": "_voice_check",
-    "join_needed": "join_needed",
-    "join_target": "_join_target",
-    "play_check": "_play_check",
-    "player_check": "_player_check",
-    "join_voice": "_join_voice",
-    "_check_command_channel": "_check_command_channel",
-}
-
-
-def __getattr__(name):
-    target = _ADMISSION_ALIASES.get(name)
-    if target is None:
-        raise AttributeError(f"module {__name__!r} has no attribute {name!r}")
-    from musicbot import admission
-
-    return getattr(admission, target)
-
-
 def get_emoji(bot: MusicBot, string: str) -> Optional[Union[str, Emoji]]:
     if string.isdecimal():
         return utils.get(bot.emojis, id=int(string))
