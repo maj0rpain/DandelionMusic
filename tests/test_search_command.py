@@ -6,19 +6,9 @@ import pytest
 from config import config
 from musicbot.commands import music
 from musicbot.commands.music import Music
+from discord_fakes import RecordingCtx
 from musicbot.loader import SongError
 from helpers import run
-
-
-class RecordingCtx:
-    def __init__(self):
-        self.sent = []
-
-    async def defer(self):
-        pass
-
-    async def send(self, message=None, **kwargs):
-        self.sent.append(message)
 
 
 @pytest.mark.parametrize(
