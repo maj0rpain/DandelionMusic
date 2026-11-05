@@ -24,7 +24,8 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/admission.py` - request admission: per request kind, the checks, the join and the current controller; every command, button, pick and reaction goes through it.
 - `musicbot/utils.py` - the joining-command marker (`joining_command`), the DJ and owner checks, `CheckError`, and the voice connect port (`connect_to`, `check_voice_permissions`).
 - `musicbot/sessions.py` - `GuildSessions` (`bot.sessions`): each guild's settings and controller, their creation, lookup (`None` when not registered) and disposal.
-- `musicbot/audiocontroller.py` - per-guild playback state machine (volume, loop, inactivity timer, playlist backup).
+- `musicbot/audiocontroller.py` - per-guild controller over the queue: volume, loop, inactivity timer, views, preload sweep; its public methods delegate the start/advance/stop state machine to `Playback`.
+- `musicbot/playback.py` - `Playback` (one per controller) and `PlaybackState`: the start token, pending start, picked-next song, playing flag, disconnect guard, the `after=` hop, and when the playlist backup is written; depends only on callables the controller injects, never `bot`, `guild` or `Playlist`.
 - `musicbot/playlist.py` / `musicbot/song.py` - queue/history and per-track metadata.
 - `musicbot/playlists.py` - saved playlists: the only reader/writer of `SavedPlaylist.songs_json` outside the legacy migration in `settings.py`; callers use `PlaylistEntry`/`PlaylistRef`/`PlaylistContents`/`SavedEntry`.
 - `musicbot/truncation.py` - `Truncation` (a cut-short Spotify playlist's reported total and its `TruncationReason`) with the one cut-short rule (`Truncation.of`) and the user notice; imports only `config`, `enum` and `dataclasses`.
@@ -45,7 +46,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `Config` is read-only; runtime state goes in the DB - see ADR-0001 (`docs/adr/0001-config-is-read-only.md`).
 - A new setting is a `Config` class attribute with a comment directly above it (parsed by `get_comments()`).
 - Don't move `_help`/`_help_autocomplete` into `MusicBot`; they stay module-level (`musicbot/bot.py`).
-- discord.py's `after=` callback runs on its audio thread; it only hops to the loop (`call_soon_threadsafe`). `next_song` and everything it calls are loop-only (`musicbot/audiocontroller.py`).
+- discord.py's `after=` callback runs on its audio thread; it only hops to the loop (`call_soon_threadsafe`). `Playback`'s track-ended handling and everything it calls are loop-only (`musicbot/playback.py`).
 - `musicbot/library_browse.py` imports only `musicbot.library` and `typing` (`tests/test_library_browse.py` asserts it) - don't add imports.
 - `musicbot/library_session.py` imports only `musicbot.library`, `musicbot.library_browse` and `typing`, plus `musicbot.library_metadata` inside `if TYPE_CHECKING:` only (`tests/test_library_session.py` asserts it) - don't add imports.
 
