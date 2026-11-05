@@ -1,6 +1,5 @@
 """Which links the reaction-button plugin offers a button for."""
 
-import asyncio
 from types import SimpleNamespace
 
 import pytest
@@ -9,6 +8,7 @@ from musicbot import loader, utils
 from musicbot.audiocontroller import QueuedPlaylist
 from musicbot.plugins.button import Button
 from musicbot.truncation import Truncation, TruncationReason
+from helpers import run
 
 YOUTUBE = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
 YOUTU_BE = "https://youtu.be/dQw4w9WgXcQ"
@@ -120,7 +120,7 @@ def react(monkeypatch, outcomes, *, resolves=True, thread=False, content=None):
         member=member,
         emoji=SimpleNamespace(name="x", id=None),
     )
-    asyncio.run(Button(bot).on_raw_reaction_add(event))
+    run(Button(bot).on_raw_reaction_add(event))
     return controller.processed, sent
 
 

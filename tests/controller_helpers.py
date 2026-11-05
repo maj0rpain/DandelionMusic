@@ -10,6 +10,8 @@ import pickle
 import sys
 import types
 
+from helpers import run
+
 
 async def _settle():
     # lets the preload task the controller scheduled run to the end
@@ -45,7 +47,7 @@ def _run(controller, scenario):
         await _settle()
         return result
 
-    return asyncio.run(main())
+    return run(main())
 
 
 def _run_intent(controller, intent, playing=True):

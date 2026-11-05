@@ -14,6 +14,7 @@ import pytest
 from musicbot import loader
 from musicbot.linkutils import SiteTypes
 from musicbot.song import Song
+from helpers import run
 
 Preload = loader.Preload
 
@@ -34,13 +35,13 @@ def _never_loads(monkeypatch):
 def test_a_song_with_no_webpage_url_is_current(monkeypatch):
     _never_loads(monkeypatch)
     song = Song(SiteTypes.LOCAL_LIBRARY, None, url="/music/a.mp3")
-    assert asyncio.run(loader.preload(song)) is Preload.CURRENT
+    assert run(loader.preload(song)) is Preload.CURRENT
 
 
 def test_a_song_whose_stream_url_has_not_expired_is_current(monkeypatch):
     _never_loads(monkeypatch)
     song = _song(url="https://stream.invalid/a?expire=4102444800")
-    assert asyncio.run(loader.preload(song)) is Preload.CURRENT
+    assert run(loader.preload(song)) is Preload.CURRENT
 
 
 def test_a_fresh_extraction_updates_the_song_and_reports_it(monkeypatch):
@@ -54,7 +55,7 @@ def test_a_fresh_extraction_updates_the_song_and_reports_it(monkeypatch):
 
     monkeypatch.setattr(loader, "_load", load)
     song = _song(title="stale title")
-    assert asyncio.run(loader.preload(song)) is Preload.EXTRACTED
+    assert run(loader.preload(song)) is Preload.EXTRACTED
     assert song.title == "fresh title"
 
 
@@ -67,7 +68,7 @@ def test_a_failed_extraction_reports_failure(monkeypatch, outcome):
 
     monkeypatch.setattr(loader, "_load", load)
     song = _song(title="stale title")
-    assert asyncio.run(loader.preload(song)) is Preload.FAILED
+    assert run(loader.preload(song)) is Preload.FAILED
     assert song.title == "stale title"
 
 
@@ -81,7 +82,7 @@ def test_a_failed_extraction_reports_failure(monkeypatch, outcome):
 def test_a_caller_awaiting_an_inflight_extraction_is_told_its_outcome(
     monkeypatch, extracted, first, second
 ):
-    async def run():
+    async def scenario():
         release = asyncio.Event()
 
         async def load(lane, track):
@@ -99,13 +100,13 @@ def test_a_caller_awaiting_an_inflight_extraction_is_told_its_outcome(
         release.set()
         return await running, await waiting
 
-    assert asyncio.run(run()) == (first, second)
+    assert run(scenario()) == (first, second)
 
 
 def test_cancelling_one_waiter_leaves_the_owner_and_other_waiters_alone(
     monkeypatch,
 ):
-    async def run():
+    async def scenario():
         release = asyncio.Event()
 
         async def load(lane, track):
@@ -126,7 +127,7 @@ def test_cancelling_one_waiter_leaves_the_owner_and_other_waiters_alone(
             owner, cancelled, other, return_exceptions=True
         )
 
-    owner, cancelled, other = asyncio.run(run())
+    owner, cancelled, other = run(scenario())
     assert isinstance(cancelled, asyncio.CancelledError)
     assert (owner, other) == (Preload.EXTRACTED, Preload.CURRENT)
 
@@ -164,7 +165,7 @@ def test_load_song_stamps_every_song_with_the_clock(monkeypatch, count):
         return [Song(SiteTypes.YT_DLP, URL) for _ in range(count)]
 
     monkeypatch.setattr(loader, "_run_sync", run_sync)
-    result = asyncio.run(loader.load_song(URL))
+    result = run(loader.load_song(URL))
     songs = result if isinstance(result, list) else [result]
     assert [s.extracted_at for s in songs] == [NOW] * (count or 1)
 
@@ -174,7 +175,7 @@ def test_no_expire_with_a_fresh_stamp_is_current(monkeypatch):
     _clock(monkeypatch)
     song = _song(url="https://stream.invalid/a")
     song.extracted_at = NOW - 9 * MINUTE
-    assert asyncio.run(loader.preload(song)) is Preload.CURRENT
+    assert run(loader.preload(song)) is Preload.CURRENT
 
 
 @pytest.mark.parametrize("age", [11 * MINUTE, None])
@@ -186,7 +187,7 @@ def test_no_expire_with_a_stale_or_missing_stamp_is_reextracted(
     song = _song(url="https://stream.invalid/a")
     if age is not None:
         song.extracted_at = NOW - age
-    assert asyncio.run(loader.preload(song)) is Preload.EXTRACTED
+    assert run(loader.preload(song)) is Preload.EXTRACTED
     assert calls == [URL]
 
 
@@ -194,7 +195,7 @@ def test_an_expire_within_the_margin_is_reextracted(monkeypatch):
     calls = _fresh_load(monkeypatch)
     _clock(monkeypatch)
     song = _song(url=_expiring_in(9 * MINUTE))
-    assert asyncio.run(loader.preload(song)) is Preload.EXTRACTED
+    assert run(loader.preload(song)) is Preload.EXTRACTED
     assert calls == [URL]
 
 
@@ -202,7 +203,7 @@ def test_an_expire_beyond_the_margin_is_current(monkeypatch):
     _never_loads(monkeypatch)
     _clock(monkeypatch)
     song = _song(url=_expiring_in(11 * MINUTE))
-    assert asyncio.run(loader.preload(song)) is Preload.CURRENT
+    assert run(loader.preload(song)) is Preload.CURRENT
 
 
 def test_a_stream_url_with_its_webpage_urls_expire_is_current(monkeypatch):
@@ -210,7 +211,7 @@ def test_a_stream_url_with_its_webpage_urls_expire_is_current(monkeypatch):
     _clock(monkeypatch)
     url = _expiring_in(MINUTE)
     song = Song(SiteTypes.YT_DLP, url, url=url)
-    assert asyncio.run(loader.preload(song)) is Preload.CURRENT
+    assert run(loader.preload(song)) is Preload.CURRENT
 
 
 @pytest.mark.parametrize("host", [SiteTypes.LOCAL_LIBRARY, SiteTypes.CUSTOM])
@@ -220,7 +221,7 @@ def test_local_library_and_custom_link_songs_are_always_current(
     _never_loads(monkeypatch)
     _clock(monkeypatch)
     song = Song(host, "file:///music/a.mp3", url=_expiring_in(-MINUTE))
-    assert asyncio.run(loader.preload(song)) is Preload.CURRENT
+    assert run(loader.preload(song)) is Preload.CURRENT
 
 
 def test_the_controller_seams_stub_preload_matches_the_real_one():
@@ -240,7 +241,7 @@ def test_load_in_the_preload_lane_dispatches_there_and_stamps_the_clock(
         return Song(SiteTypes.YT_DLP, URL)
 
     monkeypatch.setattr(loader, "_run_sync", run_sync)
-    song = asyncio.run(loader._load(loader.Lane.PRELOAD, URL))
+    song = run(loader._load(loader.Lane.PRELOAD, URL))
     assert (lanes, song.extracted_at) == ([loader.Lane.PRELOAD], NOW)
 
 
@@ -252,5 +253,5 @@ def test_preload_extracts_in_the_preload_lane(monkeypatch):
         return Song(SiteTypes.YT_DLP, track, url="https://s.invalid/new")
 
     monkeypatch.setattr(loader, "_load", load)
-    asyncio.run(loader.preload(_song()))
+    run(loader.preload(_song()))
     assert lanes == [loader.Lane.PRELOAD]
