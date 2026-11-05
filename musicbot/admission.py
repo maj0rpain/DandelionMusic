@@ -52,6 +52,9 @@ _JOINING_KINDS = frozenset(
     {RequestKind.JOINING_COMMAND, RequestKind.PICK, RequestKind.REACTION}
 )
 
+# the kinds whose kind is derived from the command, never passed
+COMMAND_KINDS = frozenset({RequestKind.COMMAND, RequestKind.JOINING_COMMAND})
+
 # the custom ids of the player's playback buttons, which need a DJ
 _DJ_BUTTONS = frozenset(
     {
@@ -75,6 +78,11 @@ def _check_command_channel(ctx: Context, sett):
         raise CheckError(config.WRONG_CHANNEL_MESSAGE)
 
 
+def _bot_alone(bot_vc) -> bool:
+    """Whether the bot's channel has only bots in it."""
+    return all(m.bot for m in bot_vc.channel.members)
+
+
 async def _voice_check(ctx: Context):
     """Check if the user can use the bot now. Only refuses: a bot
     sitting in a channel with only bots admits the user, and the join
@@ -89,7 +97,7 @@ async def _voice_check(ctx: Context):
         if author_voice.channel == bot_vc.channel:
             return True
 
-        if all(m.bot for m in bot_vc.channel.members):
+        if _bot_alone(bot_vc):
             # current channel doesn't have any user in it
             return True
 
@@ -127,7 +135,7 @@ def _join_needed(ctx: Context) -> bool:
     return (
         author_voice is not None
         and author_voice.channel != bot_vc.channel
-        and all(m.bot for m in bot_vc.channel.members)
+        and _bot_alone(bot_vc)
     )
 
 
@@ -198,7 +206,7 @@ async def check(ctx: Context, kind: Optional[RequestKind] = None):
     """Decides whether the request may act now. Raises CheckError on
     refusal; never touches voice. `kind` is None for a command, whose
     kind is read off its @joining_command marker."""
-    if kind in (RequestKind.COMMAND, RequestKind.JOINING_COMMAND):
+    if kind in COMMAND_KINDS:
         raise ValueError(f"{kind} is derived from the command, not passed")
     # first, as Music.cog_check always resolved it first
     controller = get_audiocontroller(ctx)

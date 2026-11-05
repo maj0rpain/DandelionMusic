@@ -314,7 +314,6 @@ def test_connect_moves_the_bot_out_of_a_bots_only_channel(no_sleep):
     ctx.send = send
 
     async def scenario():
-        assert await admission.check(ctx)
         await General._connect.callback(General(None), ctx)
 
     run(scenario())

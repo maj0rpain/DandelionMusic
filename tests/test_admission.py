@@ -18,6 +18,7 @@ from discord_fakes import (
     BOTS_ONLY,
     ADMISSION_DJ_ROLE,
     HERE,
+    PLAYER_BUTTONS,
     PEOPLE,
     fake_controller,
     situation,
@@ -35,13 +36,15 @@ NOT_DJ = config.NOT_A_DJ
 def run_request(ctx, kind):
     async def go():
         entry = await admission.check(
-            ctx, None if kind in (K.COMMAND, K.JOINING_COMMAND) else kind
+            ctx, None if kind in admission.COMMAND_KINDS else kind
         )
         return await entry.enter()
 
     return run(go())
 
 
+OPEN_BUTTONS = ["current_song", "queue"]
+DJ_BUTTONS = [b for b in PLAYER_BUTTONS if b not in OPEN_BUTTONS]
 JOINING = [K.JOINING_COMMAND, K.PICK, K.REACTION]
 EVERY = [K.COMMAND, K.JOINING_COMMAND, K.PLAYER_BUTTON, K.PICK, K.REACTION]
 
@@ -221,10 +224,7 @@ def rows():
             WRONG_CH,
         ),
     ]
-    for cid in ["prev", "pause", "next", "loop", "shuffle", "stop"] + [
-        "volume_down",
-        "volume_up",
-    ]:
+    for cid in DJ_BUTTONS:
         out += [
             (
                 f"player_button {cid}: plain member under a DJ role",
@@ -250,7 +250,7 @@ def rows():
                 "admitted",
             ),
         ]
-    for cid in ["current_song", "queue"]:
+    for cid in OPEN_BUTTONS:
         out.append(
             (
                 f"player_button {cid}: plain member under a DJ role",
@@ -359,8 +359,7 @@ def test_a_join_is_made_from_the_target_check_computed():
 def music_ctx(name, **spec):
     from musicbot.commands.music import Music
 
-    kind = K.JOINING_COMMAND if name in ("prev", "play") else K.COMMAND
-    guild, ctx = situation(kind, **spec)
+    guild, ctx = situation(K.COMMAND, **spec)
     cog = Music(None)
     ctx.command = {c.qualified_name: c for c in cog.walk_commands()}[name]
 
