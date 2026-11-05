@@ -628,11 +628,15 @@ def test_announce_honours_announce_songs(directed):
     assert channel.sent == []
 
 
-def test_announcements_send_nothing_without_a_destination():
-    rig = Rig()
+def test_announcements_send_nothing_without_a_destination(attached):
+    rig, message = attached
 
     announce(rig)
     skipped(rig)
+
+    assert message.edits == []
+    run(rig.panel.playback_ended())
+    assert message.edits == [None]
 
 
 def test_an_announcement_strips_the_previous_message_and_replaces_it(
@@ -652,9 +656,9 @@ def test_an_announcement_strips_the_previous_message_and_replaces_it(
     assert second.edits == [None]
 
 
-def test_a_failed_announcement_is_logged_and_not_raised(capsys):
-    rig = Rig()
-    rig.panel.direct_to(SendChannel(error=EXPIRED))
+def test_a_failed_announcement_is_logged_and_not_raised(directed, capsys):
+    rig, channel = directed
+    channel.error = EXPIRED
 
     announce(rig)
     skipped(rig)
