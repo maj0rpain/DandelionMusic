@@ -33,21 +33,10 @@ from controller_helpers import (
 )
 from controller_seam import PlaybackVoiceClient, StubLoader, controller_seam
 from db_seam import in_memory_db
-from discord_fakes import PLAYER_BUTTONS
 from helpers import run
 
 
 MIX = playlists.PlaylistRef("1234", "mix")
-
-
-class _RecordingChannel:
-    """A channel or context: records what the controller sends."""
-
-    def __init__(self):
-        self.sent = []
-
-    async def send(self, *args, **kwargs):
-        self.sent.append((args, kwargs))
 
 
 async def _start_playing(controller):
@@ -457,79 +446,6 @@ def test_enqueue_no_longer_takes_playnext(controller):
 
     with pytest.raises(TypeError):
         _run(controller, scenario)
-
-
-async def _resolved(value):
-    return value
-
-
-class _FakeMessage:
-    """A sent message: records every view it is edited to."""
-
-    def __init__(self):
-        self.edits = []
-
-    async def edit(self, *, view):
-        self.edits.append(view)
-
-
-def test_attach_view_moves_the_buttons_onto_the_new_message(controller):
-    import discord
-
-    _queue(controller, "current")
-    controller.guild.voice_client.playing = True
-    sent = []
-    new_message = _FakeMessage()
-
-    async def send(view):
-        sent.append(view)
-        return new_message
-
-    async def scenario():
-        old_message = _FakeMessage()
-        await controller.attach_view(lambda view: _resolved(old_message))
-        result = await controller.attach_view(send)
-        return old_message, result
-
-    old_message, result = _run(controller, scenario)
-
-    assert old_message.edits == [None]
-    assert len(sent) == 1 and isinstance(sent[0], discord.ui.View)
-    assert result is new_message
-    # the next attach_view takes the buttons off the new message
-    run(controller.attach_view(lambda view: _resolved(_FakeMessage())))
-    assert new_message.edits == [None]
-
-
-def test_attach_view_records_an_interactions_original_response(controller):
-    import discord
-
-    _queue(controller, "current")
-    controller.guild.voice_client.playing = True
-    response = _FakeMessage()
-
-    class RespondedInteraction(discord.Interaction):
-        def __init__(self):
-            pass
-
-        async def original_response(self):
-            return response
-
-    interaction = RespondedInteraction()
-
-    async def send(view):
-        return interaction
-
-    result = run(controller.attach_view(send))
-
-    assert result is interaction
-    # the buttons the next attach_view takes off are the response's
-
-    async def send_plain(view):
-        return _FakeMessage()
-
-    run(controller.attach_view(send_plain))
-    assert response.edits == [None]
 
 
 def test_dispose_cancels_the_timer_and_every_pending_task(
@@ -1386,10 +1302,6 @@ def test_a_track_end_after_the_idle_timer_expired_starts_it_again(
     assert len(_run(controller, scenario)) == 2
 
 
-def _button(view, custom_id):
-    return next(c for c in view.children if c.custom_id == custom_id)
-
-
 def test_volume_down_lowers_the_volume_to_zero_from_five(controller):
     _queue(controller, "current")
     controller.guild.voice_client.playing = True
@@ -1400,103 +1312,84 @@ def test_volume_down_lowers_the_volume_to_zero_from_five(controller):
     assert controller.volume == 0
 
 
-def test_the_volume_down_button_is_disabled_at_zero_only(controller):
+def test_the_snapshot_is_inactive_with_nothing_playing_or_paused(controller):
+    _queue(controller, "current")
+
+    snapshot = controller.panel_snapshot()
+
+    assert not snapshot.active
+    assert snapshot.current_song is None
+
+
+def test_the_snapshot_of_a_playing_track(controller):
     _queue(controller, "current")
     controller.guild.voice_client.playing = True
 
-    controller.set_volume(10)
-    assert not _button(controller.make_view(), "volume_down").disabled
-    controller.set_volume(0)
-    view = controller.make_view()
-    assert _button(view, "volume_down").disabled
-    assert not _button(view, "volume_up").disabled
-    controller.set_volume(100)
-    assert _button(controller.make_view(), "volume_up").disabled
+    snapshot = controller.panel_snapshot()
+
+    assert snapshot.active and not snapshot.paused
+    assert snapshot.current_song is controller.playlist[0]
+    assert snapshot.volume == 70
 
 
-def test_a_current_song_click_with_no_current_song_replies_queue_empty(
+def test_the_snapshot_of_a_paused_track(controller):
+    _queue(controller, "current")
+    controller.guild.voice_client.paused = True
+
+    snapshot = controller.panel_snapshot()
+
+    assert snapshot.active and snapshot.paused
+
+
+def test_the_snapshot_has_next_only_with_a_song_behind_the_current_one(
     controller,
 ):
-    from config import config
-
-    ctx = _RecordingChannel()
-
-    run(controller.current_song_callback(ctx))
-
-    assert ctx.sent == [((config.QUEUE_EMPTY,), {})]
-
-
-def test_a_current_song_click_while_a_track_plays_shows_the_song_info(
-    controller,
-):
     _queue(controller, "current")
     controller.guild.voice_client.playing = True
-    ctx = _RecordingChannel()
+    assert not controller.panel_snapshot().has_next
 
-    run(controller.current_song_callback(ctx))
+    _queue(controller, "behind")
 
-    assert len(ctx.sent) == 1 and "embed" in ctx.sent[0][1]
-
-
-def _http_exception(status, code):
-    import discord
-
-    class _Response:
-        def __init__(self):
-            self.status = status
-            self.reason = "x"
-
-    return discord.HTTPException(_Response(), {"code": code, "message": "x"})
+    assert controller.panel_snapshot().has_next
 
 
-class _FlakyMessage(_FakeMessage):
-    """Fails its first edit with `error`, then edits normally."""
-
-    def __init__(self, error):
-        super().__init__()
-        self.error = error
-        self.id = 1
-        self.channel = self
-
-    async def edit(self, *, view):
-        if self.error:
-            error, self.error = self.error, None
-            raise error
-        self.edits.append(view)
-
-    async def fetch_message(self, _id):
-        return self
-
-
-def test_the_retry_after_an_expired_token_edit_applies_the_view(controller):
+def test_the_snapshot_has_previous_only_with_history(controller):
     _queue(controller, "current")
     controller.guild.voice_client.playing = True
-    message = _FlakyMessage(_http_exception(401, 50027))
+    assert not controller.panel_snapshot().has_previous
 
-    async def scenario():
-        await controller.attach_view(lambda view: _resolved(message))
-        controller.set_volume(0)  # the buttons now differ
-        await controller.update_view()
+    controller.playlist.playhistory.append(_song(controller, "old"))
 
-    _run(controller, scenario)
-
-    assert len(message.edits) == 1 and message.edits[0] is not None
+    assert controller.panel_snapshot().has_previous
 
 
-def test_a_refresh_after_a_failed_edit_applies_the_view_again(controller):
+def test_the_snapshot_reports_an_empty_queue(controller):
+    controller.guild.voice_client.playing = True
+
+    assert controller.panel_snapshot().queue_empty
     _queue(controller, "current")
-    voice = controller.guild.voice_client
-    message = _FlakyMessage(_http_exception(500, 0))
+    assert not controller.panel_snapshot().queue_empty
 
-    async def scenario():
-        await controller.attach_view(lambda view: _resolved(message))
-        voice.playing = True
-        await controller.update_view()
-        await controller.update_view()
 
-    _run(controller, scenario)
+def test_the_snapshot_follows_the_loop_mode_and_the_volume(controller):
+    _queue(controller, "current")
+    controller.guild.voice_client.playing = True
+    controller.loop()
+    controller.set_volume(30)
 
-    assert len(message.edits) == 1 and message.edits[0] is not None
+    snapshot = controller.panel_snapshot()
+
+    assert snapshot.loop_mode == controller.playlist.loop
+    assert snapshot.loop_mode != "off"
+    assert snapshot.volume == 30
+
+
+def test_the_queue_embed_is_the_playlists_queue_embed(controller):
+    _queue(controller, "current")
+
+    assert controller.queue_embed().to_dict() == (
+        controller.playlist.queue_embed().to_dict()
+    )
 
 
 def _rewriting_preload(stub_loader, normalised):
@@ -1580,7 +1473,6 @@ def _pending_start(controller, stub_loader, monkeypatch, *titles, result=None):
     """Queues `titles` and starts the first one with its preload held.
     Returns (release event, the start's task, its song)."""
     _fake_ffmpeg(monkeypatch)
-    controller.command_channel = _RecordingChannel()
     _queue(controller, *titles)
     slow = controller.playlist[0]
     release = stub_loader.hold(slow, result)
@@ -1741,7 +1633,7 @@ def test_prev_during_a_pending_start_plays_the_previous_track_only(
     assert _played(controller) == ["old"]
     assert "slow" not in later
     assert controller.guild.voice_client.disconnected is False
-    assert controller.command_channel.sent == []
+    assert controller.panel.skipped == []
 
 
 def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
@@ -1766,7 +1658,7 @@ def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
     assert later == []
     assert controller.guild.voice_client.disconnected is False
     assert _titles(controller) == ["next", "third"]
-    assert controller.command_channel.sent == []
+    assert controller.panel.skipped == []
 
 
 def _preloads_after_release(controller, stub_loader, monkeypatch, act):
@@ -1797,7 +1689,7 @@ def test_a_stop_during_a_pending_start_leaves_nothing_playing(
 
     assert _played(controller) == []
     assert later == []
-    assert controller.command_channel.sent == []
+    assert controller.panel.skipped == []
     assert controller.guild.voice_client.disconnected is False
 
 
@@ -1811,7 +1703,7 @@ def test_a_disconnect_during_a_pending_start_leaves_nothing_playing(
 
     assert _played(controller) == []
     assert later == []
-    assert controller.command_channel.sent == []
+    assert controller.panel.skipped == []
     assert controller.guild.voice_client.disconnected is True
 
 
@@ -1827,7 +1719,7 @@ def test_losing_the_voice_client_during_a_pending_start_plays_nothing(
 
     assert voice_client.played == []
     assert later == []
-    assert controller.command_channel.sent == []
+    assert controller.panel.skipped == []
     # the abandoned start no longer holds the bot busy
     controller.guild.voice_client = voice_client
     assert controller.is_idle()
@@ -1853,7 +1745,7 @@ def test_a_stale_failed_preload_skips_nothing_and_moves_nothing(
 
     _run(controller, scenario)
     assert _played(controller) == ["old"]
-    assert controller.command_channel.sent == []
+    assert controller.panel.skipped == []
     # "slow" is gone because the queue preload behind "old" met its
     # FAILED result; "next" was not started or dropped by the stale one
     assert _titles(controller) == ["old", "next"]
@@ -1877,7 +1769,7 @@ def test_a_current_failed_preload_skips_to_the_next_track(
 
     _run(controller, scenario)
 
-    assert len(controller.command_channel.sent) == 1
+    assert len(controller.panel.skipped) == 1
     assert _played(controller) == ["next"]
 
 
@@ -1908,7 +1800,6 @@ def test_a_stale_start_without_a_url_moves_nothing(
     async def scenario():
         controller.playlist.add(_without_url(controller, "slow"))
         _queue(controller, "next")
-        controller.command_channel = _RecordingChannel()
         _fake_ffmpeg(monkeypatch)
         release = stub_loader.hold(controller.playlist[0])
         task = asyncio.ensure_future(controller.ensure_playing())
@@ -2014,7 +1905,9 @@ def test_disconnecting_a_new_idle_controller_keeps_an_existing_backup(
     async def scenario():
         await controller.ensure_playing()
         controller.stop()
-        restarted = type(controller)(controller.bot, controller.guild)
+        restarted = type(controller)(
+            controller.bot, controller.guild, controller.panel
+        )
         await restarted.udisconnect("shutdown")
 
     _run(controller, scenario)
@@ -2093,7 +1986,6 @@ def test_a_title_less_song_whose_preload_fails_is_skipped_by_its_url(
     controller, stub_loader, monkeypatch
 ):
     async def scenario():
-        controller.command_channel = _RecordingChannel()
         song = _title_less_song(controller)
         stub_loader.results["preload"] = stub_loader.Preload.FAILED
         await controller.play_song(song)
@@ -2101,8 +1993,8 @@ def test_a_title_less_song_whose_preload_fails_is_skipped_by_its_url(
 
     song = _run(controller, scenario)
 
-    ((args, _),) = controller.command_channel.sent
-    assert f"(Skipped: {song.webpage_url})" in args[0]
+    (reported,) = controller.panel.skipped
+    assert reported is song
 
 
 def test_remove_names_a_title_less_song_by_its_webpage_url(controller):
@@ -2116,15 +2008,6 @@ def test_remove_names_a_title_less_song_by_its_webpage_url(controller):
     _run(controller, scenario)
 
     assert sent == [f"Removed #2: {song.webpage_url}"]
-
-
-def test_the_player_view_buttons_are_the_player_buttons_in_order(controller):
-    _queue(controller, "current")
-    controller.guild.voice_client.playing = True
-
-    ids = [c.custom_id for c in controller.make_view().children]
-
-    assert ids == PLAYER_BUTTONS
 
 
 def test_start_idle_timer_starts_the_timer(controller):
@@ -2157,11 +2040,11 @@ def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
         reached = asyncio.Event()
         release = asyncio.Event()
 
-        async def update_view(view=None):
+        async def playback_ended():
             reached.set()
             await release.wait()
 
-        controller.update_view = update_view
+        controller.panel.playback_ended = playback_ended
         disconnect = asyncio.create_task(controller.udisconnect("test"))
         await reached.wait()
         controller.pause()
@@ -2171,3 +2054,89 @@ def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
         return controller.timer._task
 
     assert run(scenario()) is None
+
+
+def test_a_disconnect_tells_the_panel_that_playback_ended(controller):
+    _run(controller, lambda: controller.udisconnect("test"))
+
+    assert controller.panel.ended == 1
+
+
+def test_the_controller_imports_nothing_from_discord_ui():
+    import ast
+    from pathlib import Path
+
+    import musicbot.audiocontroller as module
+
+    tree = ast.parse(Path(module.__file__).read_text())
+    imported = []
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            imported += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            imported.append(base)
+            if base == "discord":
+                imported += [f"discord.{a.name}" for a in node.names]
+
+    assert [m for m in imported if m.startswith("discord.ui")] == []
+    assert "musicbot.player_panel" not in imported
+    assert not any(
+        isinstance(n, ast.Attribute)
+        and isinstance(n.value, ast.Name)
+        and n.value.id == "discord"
+        and n.attr == "ui"
+        for n in ast.walk(tree)
+    )
+
+
+def test_a_play_starts_announced_on_the_panel(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first")
+
+    _run(controller, lambda: _start_playing(controller))
+
+    assert [s.display_name for s in controller.panel.announced] == ["first"]
+
+
+# --- the expired-token regression: the real panel over a channel whose
+# send raises 50027 never stalls playback ---
+
+
+def test_a_failed_announcement_still_lets_the_next_preload_be_scheduled(
+    expired_panel_seam, monkeypatch
+):
+    real, stub_loader = expired_panel_seam
+    _fake_ffmpeg(monkeypatch)
+    _queue(real, "first", "second")
+
+    _run(real, lambda: _start_playing(real))
+
+    assert _preloaded(stub_loader) == ["first", "second"]
+
+
+def test_a_failed_skipped_notice_still_lets_the_queue_advance(
+    expired_panel_seam, monkeypatch
+):
+    real, stub_loader = expired_panel_seam
+
+    async def scenario():
+        release, task, _ = _pending_start(
+            real,
+            stub_loader,
+            monkeypatch,
+            "slow",
+            "next",
+            result=stub_loader.Preload.FAILED,
+        )
+        await _settle()
+        release.set()
+        await _finish(task)
+
+    _run(real, scenario)
+
+    assert _played(real) == ["next"]
+
+
+def test_the_controller_keeps_no_command_channel(controller):
+    assert not hasattr(controller, "command_channel")
