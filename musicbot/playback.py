@@ -165,8 +165,7 @@ class Playback:
         _require_loop()
 
         if self._active():
-            self._next_song = self._next_track(forced)
-            self._voice_client().stop()
+            self._hand_over_to(self._next_track(forced))
             return
 
         self._invalidate_start()
@@ -177,10 +176,9 @@ class Playback:
         when nothing is playing, otherwise after the current one is
         stopped."""
         if not self._active():
-            self._spawn(self._play(song, self._claim_start()))
+            self._spawn_start(song)
         else:
-            self._next_song = song
-            self._voice_client().stop()
+            self._hand_over_to(song)
 
     def stop(self):
         """Stops the player and empties the queue. Loop only."""
@@ -317,7 +315,18 @@ class Playback:
                 self._spawn(self.start_idle_timer(self._humans_present()))
             return
 
-        self._spawn(self._play(next_song, self._claim_start()))
+        self._spawn_start(next_song)
+
+    def _hand_over_to(self, song):
+        """With a track active, picks `song` as the next one and stops
+        the voice client: the after= hop of the track does the advance.
+        """
+        self._next_song = song
+        self._voice_client().stop()
+
+    def _spawn_start(self, song):
+        """Claims a start for `song` and spawns its play."""
+        self._spawn(self._play(song, self._claim_start()))
 
     async def _play(self, song, generation: int):
         preloaded = await self._preload(song)
