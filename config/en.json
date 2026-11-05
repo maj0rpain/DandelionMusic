@@ -25,6 +25,7 @@
   "SONGINFO_DURATION": "Duration: ",
   "SONGINFO_NOW_PLAYING": "Now Playing",
   "SONGINFO_QUEUE_ADDED": "Added to queue",
+  "SONGINFO_QUEUE_POSITION": "Added to queue - position {position}",
   "SONGINFO_SONGINFO": "Song info",
   "SONGINFO_UNSUPPORTED": "Unsupported site or file format.",
   "SONGINFO_ERROR": "Error: Unable to fetch song info. If you're trying to access age restricted content, check the documentation/wiki.",
