@@ -225,7 +225,7 @@ def joining_command(func):
     acts in its name. A command that opens a view whose picks may
     later join voice must carry the marker too: a pick joins through
     that command's context (a library search or browse pick) or
-    through its own join() override (a search pick). Opt-in: a
+    is admitted as RequestKind.PICK (a search pick). Opt-in: a
     command without it never joins. Place it below the command
     decorator, like a check."""
     func._joining_command = True

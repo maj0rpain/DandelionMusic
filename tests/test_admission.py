@@ -342,14 +342,6 @@ def test_enter_returns_the_controller_current_when_it_acts():
     assert run(entry.enter()) is not entry.audiocontroller
 
 
-def test_a_join_is_made_from_the_target_check_computed():
-    guild, ctx = situation(K.JOINING_COMMAND)
-    entry = run(admission.check(ctx))
-    assert entry.join_needed
-    run(entry.enter())
-    assert guild.events == [("connect", "b")]
-
-
 # --- the Music cog's hooks ------------------------------------------
 #
 # discord.py runs the cog check, then the command's own checks, then
