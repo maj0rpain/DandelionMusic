@@ -14,6 +14,7 @@ from musicbot.commands.developer import (
     Developer,
     run_and_report,
 )
+from helpers import run
 
 PREFIX, SUFFIX = OUTPUT_FORMAT.split("{}")
 DISCORD_MESSAGE_LIMIT = 2000
@@ -33,7 +34,7 @@ def py(code):
 
 def report(argv):
     ctx = FakeContext()
-    asyncio.run(run_and_report(ctx, argv))
+    run(run_and_report(ctx, argv))
     return ctx.sent
 
 
@@ -128,7 +129,7 @@ def test_event_loop_stays_free_while_the_child_runs():
         task.cancel()
         return ticks
 
-    assert asyncio.run(main()) >= 5
+    assert run(main()) >= 5
 
 
 def test_update_says_updating_then_pulls(monkeypatch):
@@ -139,7 +140,7 @@ def test_update_says_updating_then_pulls(monkeypatch):
 
     monkeypatch.setattr(developer, "run_and_report", recorder)
     ctx = FakeContext()
-    asyncio.run(Developer._update.callback(None, ctx))
+    run(Developer._update.callback(None, ctx))
     assert calls == [(["Updating..."], ["git", "pull"])]
 
 

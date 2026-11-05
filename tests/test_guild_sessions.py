@@ -12,6 +12,7 @@ import discord
 import pytest
 
 from musicbot.sessions import GuildSessions
+from helpers import run
 
 
 class FakeGuild:
@@ -75,7 +76,7 @@ def sessions(factory):
 def test_get_or_create_registers_settings_and_a_controller(sessions):
     guild = FakeGuild(1)
 
-    controller = asyncio.run(sessions.get_or_create(guild))
+    controller = run(sessions.get_or_create(guild))
 
     assert sessions.controller(guild) is controller
     assert sessions.settings(guild).guild is guild
@@ -84,13 +85,13 @@ def test_get_or_create_registers_settings_and_a_controller(sessions):
 def test_get_or_create_returns_the_existing_controller(sessions, factory):
     guild = FakeGuild(1)
 
-    async def run():
+    async def scenario():
         return (
             await sessions.get_or_create(guild),
             await sessions.get_or_create(guild),
         )
 
-    first, second = asyncio.run(run())
+    first, second = run(scenario())
 
     assert first is second
     assert factory.built == [first]
@@ -101,7 +102,7 @@ def test_a_failing_factory_leaves_the_guild_settings_only(sessions, factory):
     factory.fail = True
 
     with pytest.raises(RuntimeError):
-        asyncio.run(sessions.get_or_create(guild))
+        run(sessions.get_or_create(guild))
 
     assert sessions.controller(guild) is None
     assert sessions.settings(guild).guild is guild
@@ -110,7 +111,7 @@ def test_a_failing_factory_leaves_the_guild_settings_only(sessions, factory):
 def test_load_settings_fills_the_settings_half_only(sessions):
     guilds = [FakeGuild(1), FakeGuild(2)]
 
-    asyncio.run(sessions.load_settings(guilds))
+    run(sessions.load_settings(guilds))
 
     for guild in guilds:
         assert sessions.settings(guild).guild is guild
@@ -124,7 +125,7 @@ def test_discard_disposes_the_controller_and_drops_both_halves(controller):
     guild = controller.guild
     sessions = GuildSessions(lambda g: controller, load_settings)
 
-    async def run():
+    async def scenario():
         controller.bot.loop = asyncio.get_running_loop()
         await sessions.get_or_create(guild)
         await controller.timer.start()
@@ -137,7 +138,7 @@ def test_discard_disposes_the_controller_and_drops_both_halves(controller):
             await asyncio.sleep(0)
         return timer_task, pending
 
-    timer_task, pending = asyncio.run(run())
+    timer_task, pending = run(scenario())
 
     assert timer_task.cancelled()
     assert pending.cancelled()
@@ -151,13 +152,13 @@ def test_discard_drops_both_halves_even_when_dispose_raises(sessions):
     async def failing_dispose():
         raise RuntimeError("dispose failed")
 
-    async def run():
+    async def scenario():
         controller = await sessions.get_or_create(guild)
         controller.dispose = failing_dispose
         await sessions.discard(guild)
 
     with pytest.raises(RuntimeError):
-        asyncio.run(run())
+        run(scenario())
 
     assert sessions.controller(guild) is None
     assert sessions.settings(guild) is None
@@ -166,11 +167,11 @@ def test_discard_drops_both_halves_even_when_dispose_raises(sessions):
 def test_discard_of_a_settings_only_guild_drops_its_settings(sessions):
     guild = FakeGuild(1)
 
-    async def run():
+    async def scenario():
         await sessions.load_settings([guild])
         await sessions.discard(guild)
 
-    asyncio.run(run())
+    run(scenario())
 
     assert sessions.settings(guild) is None
 
@@ -178,13 +179,13 @@ def test_discard_of_a_settings_only_guild_drops_its_settings(sessions):
 def test_iteration_no_longer_yields_a_discarded_controller(sessions):
     kept, dropped = FakeGuild(1), FakeGuild(2)
 
-    async def run():
+    async def scenario():
         kept_controller = await sessions.get_or_create(kept)
         await sessions.get_or_create(dropped)
         await sessions.discard(dropped)
         return kept_controller
 
-    kept_controller = asyncio.run(run())
+    kept_controller = run(scenario())
 
     assert list(sessions) == [kept_controller]
 
@@ -192,13 +193,13 @@ def test_iteration_no_longer_yields_a_discarded_controller(sessions):
 def test_reset_replaces_the_controller_and_keeps_the_settings(sessions):
     guild = FakeGuild(1)
 
-    async def run():
+    async def scenario():
         old = await sessions.get_or_create(guild)
         settings = sessions.settings(guild)
         new = await sessions.reset(guild)
         return old, settings, new
 
-    old, settings, new = asyncio.run(run())
+    old, settings, new = run(scenario())
 
     assert old.disposed
     assert new is not old
@@ -211,14 +212,14 @@ def test_a_reset_whose_factory_fails_leaves_the_guild_settings_only(
 ):
     guild = FakeGuild(1)
 
-    async def run():
+    async def scenario():
         old = await sessions.get_or_create(guild)
         factory.fail = True
         with pytest.raises(RuntimeError):
             await sessions.reset(guild)
         return old
 
-    old = asyncio.run(run())
+    old = run(scenario())
 
     assert old.disposed
     assert sessions.controller(guild) is None
@@ -240,7 +241,7 @@ def test_on_guild_remove_discards_the_guilds_session(sessions):
         await MusicBot.on_guild_remove(bot, guild)
         return controller
 
-    controller = asyncio.run(scenario())
+    controller = run(scenario())
 
     assert controller.disposed
     assert sessions.controller(guild) is None
@@ -322,7 +323,7 @@ def run_reset(guild, channel):
             return old, settings, str(e)
         return old, settings, None
 
-    old, settings, refusal = asyncio.run(scenario())
+    old, settings, refusal = run(scenario())
     return sessions, old, settings, sent, refusal
 
 
@@ -396,9 +397,8 @@ def test_button_plugin_ignores_a_message_from_an_unregistered_guild():
     async def add_reaction(emoji):
         reactions.append(emoji)
 
-    loop = asyncio.new_event_loop()
-    try:
-        absolutely_ready = loop.create_future()
+    async def scenario():
+        absolutely_ready = asyncio.get_running_loop().create_future()
         absolutely_ready.set_result(True)
         bot = types.SimpleNamespace(
             sessions=GuildSessions(FakeController, load_settings),
@@ -411,8 +411,8 @@ def test_button_plugin_ignores_a_message_from_an_unregistered_guild():
             content="https://youtu.be/dQw4w9WgXcQ",
             add_reaction=add_reaction,
         )
-        loop.run_until_complete(Button(bot).on_message(message))
-    finally:
-        loop.close()
+        await Button(bot).on_message(message)
+
+    run(scenario())
 
     assert reactions == []

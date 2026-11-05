@@ -5,7 +5,6 @@ The `d!playlist` subcommands are driven on a fake context with the
 involved.
 """
 
-import asyncio
 import types
 
 import pytest
@@ -17,6 +16,7 @@ from musicbot.commands.music import Music
 from musicbot.linkutils import SiteTypes
 from musicbot.song import Song
 from controller_helpers import play_ctx
+from helpers import run
 
 
 def _song():
@@ -37,7 +37,7 @@ def _run_playlist_command(monkeypatch, command, function, error, *args):
     monkeypatch.setattr(music.loader, "load_song", load_song)
     monkeypatch.setattr(playlists, function, _fail_with(error))
     ctx, sent = play_ctx()
-    asyncio.run(command.callback(Music(None), ctx, *args))
+    run(command.callback(Music(None), ctx, *args))
     return sent
 
 
@@ -101,6 +101,6 @@ def test_save_with_an_existing_name_replies_already_exists(monkeypatch):
     )
     ctx, sent = play_ctx(controller)
 
-    asyncio.run(Music._playlist_save.callback(Music(None), ctx, "p"))
+    run(Music._playlist_save.callback(Music(None), ctx, "p"))
 
     assert sent == [config.PLAYLIST_ALREADY_EXISTS]

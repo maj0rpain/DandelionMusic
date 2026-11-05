@@ -5,12 +5,13 @@ import asyncio
 
 from musicbot.commands.developer import Developer
 from developer_fakes import FakeBot, FakeCtx
+from helpers import run
 
 
 def execute(code):
     cog = Developer(None)
     ctx = FakeCtx(FakeBot([]))
-    asyncio.run(cog._execute.callback(cog, ctx, code=code))
+    run(cog._execute.callback(cog, ctx, code=code))
     return ctx.sent
 
 
@@ -44,6 +45,6 @@ def test_execute_ignores_concurrent_prints(capsys):
         )
         await t
 
-    asyncio.run(main())
+    run(main())
     assert "mine" in ctx.sent[0] and "OTHER" not in ctx.sent[0]
     assert "OTHER" in capsys.readouterr().out

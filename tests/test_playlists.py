@@ -16,13 +16,14 @@ from musicbot import playlists, settings
 from musicbot.playlists import PlaylistEntry, PlaylistRef
 from musicbot.settings import SavedPlaylist
 from db_seam import in_memory_db
+from helpers import run
 
 GUILD = "123"
 MIX = PlaylistRef(GUILD, "mix")
 GONE = PlaylistRef(GUILD, "gone")
 
 
-def run(test):
+def run_with_db(test):
     """Runs ``test(session_factory)`` in one event loop against a fresh
     in-memory database."""
 
@@ -30,7 +31,7 @@ def run(test):
         async with in_memory_db(settings) as factory:
             return await test(factory)
 
-    return asyncio.run(main())
+    return run(main())
 
 
 A = PlaylistEntry("https://a.example/1", "A")
@@ -56,7 +57,7 @@ def test_save_add_move_remove_and_load_round_trip():
         await playlists.remove_song(factory, MIX, 2)
         return await load(factory)
 
-    assert run(test) == [C, B]
+    assert run_with_db(test) == [C, B]
 
 
 def test_list_names_filters_by_guild_and_prefix():
@@ -70,7 +71,7 @@ def test_list_names_filters_by_guild_and_prefix():
             sorted(await playlists.list_names(factory, GUILD, prefix="r")),
         )
 
-    assert run(test) == (["jazz", "rap", "rock"], ["rap", "rock"])
+    assert run_with_db(test) == (["jazz", "rap", "rock"], ["rap", "rock"])
 
 
 def test_delete_removes_the_playlist():
@@ -79,7 +80,7 @@ def test_delete_removes_the_playlist():
         await playlists.delete(factory, MIX)
         return await playlists.get(factory, MIX)
 
-    assert run(test) is None
+    assert run_with_db(test) is None
 
 
 def test_set_title_updates_only_the_matching_url():
@@ -88,7 +89,7 @@ def test_set_title_updates_only_the_matching_url():
         await playlists.set_title(factory, MIX, B.url, "New B")
         return await load(factory)
 
-    assert run(test) == [A, PlaylistEntry(B.url, "New B")]
+    assert run_with_db(test) == [A, PlaylistEntry(B.url, "New B")]
 
 
 def test_set_title_on_a_missing_playlist_does_nothing():
@@ -96,7 +97,7 @@ def test_set_title_on_a_missing_playlist_does_nothing():
         await playlists.set_title(factory, GONE, A.url, "x")
         return await playlists.list_names(factory, GUILD)
 
-    assert run(test) == []
+    assert run_with_db(test) == []
 
 
 def test_set_title_that_changes_nothing_leaves_the_blob_untouched():
@@ -114,7 +115,7 @@ def test_set_title_that_changes_nothing_leaves_the_blob_untouched():
         await playlists.set_title(factory, MIX, "https://other.example", "x")
         return await stored_json(factory)
 
-    assert run(test) == blob
+    assert run_with_db(test) == blob
 
 
 def test_a_blob_in_todays_format_reads_back():
@@ -131,7 +132,7 @@ def test_a_blob_in_todays_format_reads_back():
             await session.commit()
         return await load(factory)
 
-    assert run(test) == [A, C]
+    assert run_with_db(test) == [A, C]
 
 
 def test_a_blob_written_through_the_module_is_todays_format():
@@ -140,7 +141,7 @@ def test_a_blob_written_through_the_module_is_todays_format():
         await playlists.add_songs(factory, MIX, [B, C])
         return await stored_json(factory)
 
-    assert run(test) == json.dumps(
+    assert run_with_db(test) == json.dumps(
         [
             {"url": "https://a.example/1", "title": "A"},
             {"url": "https://b.example/2", "title": "B"},
@@ -164,14 +165,14 @@ def test_operations_on_a_missing_playlist_report_not_found(operation):
         with pytest.raises(playlists.PlaylistNotFound):
             await operation(factory)
 
-    run(test)
+    run_with_db(test)
 
 
 def test_get_on_a_missing_playlist_returns_none():
     async def test(factory):
         return await playlists.get(factory, GONE)
 
-    assert run(test) is None
+    assert run_with_db(test) is None
 
 
 def test_saving_a_duplicate_name_reports_it_and_keeps_the_original():
@@ -181,7 +182,7 @@ def test_saving_a_duplicate_name_reports_it_and_keeps_the_original():
             await playlists.save(factory, MIX, [B])
         return await load(factory)
 
-    assert run(test) == [A]
+    assert run_with_db(test) == [A]
 
 
 @pytest.mark.parametrize(
@@ -201,7 +202,7 @@ def test_an_out_of_range_position_reports_the_playlist_size(operation):
             await operation(factory)
         return excinfo.value.size, await load(factory)
 
-    assert run(test) == (2, [A, B])
+    assert run_with_db(test) == (2, [A, B])
 
 
 def test_removing_the_only_song_is_refused():
@@ -211,7 +212,7 @@ def test_removing_the_only_song_is_refused():
             await playlists.remove_song(factory, MIX, 1)
         return await load(factory)
 
-    assert run(test) == [A]
+    assert run_with_db(test) == [A]
 
 
 def test_get_returns_the_ref_it_was_given_and_the_saved_entries():
@@ -220,7 +221,7 @@ def test_get_returns_the_ref_it_was_given_and_the_saved_entries():
         await playlists.save(factory, MIX, [A, C])
         return await playlists.get(factory, MIX)
 
-    assert run(test) == playlists.PlaylistContents(MIX, [A, C])
+    assert run_with_db(test) == playlists.PlaylistContents(MIX, [A, C])
 
 
 def test_no_public_function_takes_or_returns_the_row():
@@ -326,7 +327,7 @@ def test_set_title_overlapping_add_songs_keeps_both_changes():
         )
         return await load(factory)
 
-    assert run(test) == [PlaylistEntry(A.url, "New"), B]
+    assert run_with_db(test) == [PlaylistEntry(A.url, "New"), B]
 
 
 @pytest.mark.parametrize(
@@ -347,7 +348,7 @@ def test_delete_overlapping_edit_leaves_it_deleted(first_operation):
         )
         return first, second, await playlists.get(factory, MIX)
 
-    assert run(test) == (None, None, None)
+    assert run_with_db(test) == (None, None, None)
 
 
 def test_add_songs_overlapping_delete_reports_not_found():
@@ -360,7 +361,7 @@ def test_add_songs_overlapping_delete_reports_not_found():
         )
         return first, second, await playlists.get(factory, MIX)
 
-    first, second, left = run(test)
+    first, second, left = run_with_db(test)
     assert first is None
     assert isinstance(second, playlists.PlaylistNotFound)
     assert left is None
@@ -379,7 +380,7 @@ def test_an_edit_to_another_playlist_does_not_wait():
         )
         return finished, first, second, await load(factory, "other")
 
-    assert run(test) == (True, None, None, [A, C])
+    assert run_with_db(test) == (True, None, None, [A, C])
 
 
 def test_a_failed_move_does_not_block_the_next_edit():
@@ -390,4 +391,4 @@ def test_a_failed_move_does_not_block_the_next_edit():
         await asyncio.wait_for(playlists.add_songs(factory, MIX, [B]), WAIT)
         return await load(factory)
 
-    assert run(test) == [A, B]
+    assert run_with_db(test) == [A, B]
