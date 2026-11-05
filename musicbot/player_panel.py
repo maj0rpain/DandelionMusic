@@ -228,13 +228,11 @@ class PlayerPanel:
         try:
             fresh = await message.channel.fetch_message(message.id)
         except discord.NotFound:
-            if self._message is message:
-                self._forget()
+            self._forget_if_current(message)
             return
         except Exception:
             _log("Failed to refetch the player message:")
-            if self._message is message:
-                self._forget()
+            self._forget_if_current(message)
             return
         if self._message is not message:
             return
@@ -245,8 +243,13 @@ class PlayerPanel:
                 self._drawn = snapshot
         except Exception:
             _log("Failed to update the refetched player message:")
-            if self._message is fresh:
-                self._forget()
+            self._forget_if_current(fresh)
+
+    def _forget_if_current(self, message) -> None:
+        """Forgets `message` only when it is still the panel's
+        current one."""
+        if self._message is message:
+            self._forget()
 
     async def announce(self, song) -> None:
         """The now-playing announcement, when the guild's
