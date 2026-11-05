@@ -167,8 +167,7 @@ async def import_env_whitelist(session_factory: SessionFactory):
         # one database can both pass the check above, and a restored
         # backup can have rows without the marker; inserting blindly
         # then raises IntegrityError out of MusicBot.start() and the
-        # bot never logs in. Two processes that both read before either
-        # commits still collide at the commit, which is caught below.
+        # bot never logs in.
         existing = await _listed(session)
         for guild_id in config.GUILD_WHITELIST:
             if int(guild_id) not in existing:
@@ -179,12 +178,7 @@ async def import_env_whitelist(session_factory: SessionFactory):
                 value=str(len(config.GUILD_WHITELIST)),
             )
         )
-        try:
-            await session.commit()
-        except IntegrityError:
-            # The other process imported first; its rows stand.
-            await session.rollback()
-            return
+        await session.commit()
     if config.GUILD_WHITELIST:
         print(
             f"Imported {len(config.GUILD_WHITELIST)} guild(s) from the"
