@@ -389,6 +389,22 @@ def test_a_second_expired_token_drops_the_message_after_one_retry(expired):
     assert stale.edits == [] and fresh.edits == []
 
 
+def test_another_error_on_the_retry_is_logged_and_drops_the_message(
+    expired, capsys
+):
+    rig, channel, stale = expired
+    fresh = PanelMessage(channel, errors=[RuntimeError("boom")])
+    channel.fetch_result = fresh
+
+    rig.refresh()
+    rig.controller.snapshot = snap(volume=10)
+    rig.refresh()
+    run(rig.panel.playback_ended())
+
+    assert "Failed to update the refetched" in capsys.readouterr().err
+    assert stale.edits == [] and fresh.edits == []
+
+
 def test_a_message_gone_on_refetch_is_dropped(expired):
     rig, channel, stale = expired
     channel.fetch_error = coded_error(discord.NotFound, 404, 10008)
