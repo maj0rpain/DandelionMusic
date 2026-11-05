@@ -78,13 +78,11 @@ class AudioController(object):
             write_backup=self._write_backup,
             queue_is_empty=lambda: not self.playlist,
             spawn=self.add_task,
-            start_timer=lambda restart: self.timer.start(restart),
-            timer_triggered=lambda: self.timer.triggered,
+            timer=self.timer,
             humans_present=self._humans_present,
             on_play_failed=lambda: self.udisconnect("playback error"),
             get_loop=lambda: self.bot.loop,
-            guild_name=guild.name,
-            guild_id=guild.id,
+            log_label=f"{guild.name!r} ({guild.id})",
         )
 
         # according to Python documentation, we need
@@ -181,10 +179,7 @@ class AudioController(object):
         return self.playlist.queue_embed()
 
     def is_active(self) -> bool:
-        client = self.guild.voice_client
-        return client is not None and (
-            client.is_playing() or client.is_paused()
-        )
+        return self.playback.is_active()
 
     def is_idle(self) -> bool:
         """True when a new track may be started: the voice client is
@@ -222,7 +217,7 @@ class AudioController(object):
     def _queue_changed(self):
         """Refreshes the backup and the preload after the queue was
         edited in place."""
-        self.playback.queue_changed()
+        self.playback.save_backup()
         self._schedule_preload()
 
     def shuffle(self):
@@ -248,7 +243,7 @@ class AudioController(object):
         """Empties the queue, keeping the current track. Nothing new
         is queued behind it, so there is nothing to preload."""
         self.playlist.clear()
-        self.playback.queue_changed()
+        self.playback.save_backup()
 
     def skip(self):
         """Ends the current track and moves on to the next one,
@@ -260,11 +255,8 @@ class AudioController(object):
         on the event loop only - raises RuntimeError anywhere else."""
         self.playback.skip(forced)
 
-    async def play_song(
-        self, song: Song, generation: Optional[int] = None
-    ) -> bool:
-        """Plays a song object. `generation` is ignored: the start
-        token is private to Playback."""
+    async def play_song(self, song: Song) -> bool:
+        """Plays a song object."""
         return await self.playback.start(song)
 
     async def ensure_playing(self) -> Optional[bool]:
@@ -306,7 +298,7 @@ class AudioController(object):
         can slip between the song and its slot."""
         triggers_start = self._would_start()
         index = self.playlist.insert_next(song)
-        self.playback.queue_changed()
+        self.playback.save_backup()
         started = await self.ensure_playing()
         return self._single_outcome(song, index, triggers_start, started)
 
@@ -330,7 +322,7 @@ class AudioController(object):
         first_index = len(self.playlist)
         for song in placed:
             self.playlist.add(song)
-        self.playback.queue_changed()
+        self.playback.save_backup()
         started = await self.ensure_playing()
         if batch or len(placed) != 1:
             return EnqueueOutcome(
