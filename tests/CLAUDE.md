@@ -12,7 +12,7 @@ Only the parts that need no Discord connection: request admission (`tests/test_a
 
 Race tests drive `Playback` through this controller seam (the fake voice port and stub loader), never by reading its private attributes.
 
-`tests/controller_helpers.py` holds the controller helpers the test modules share (`_settle`, `_songs`, `_queue`, `_run`, `_run_while_playing`, `_song`, `_backup`, `_preloaded`, `_titles`, ...), `command_ctx`, the fake command context for `Music` callbacks (`controller=None` for a command that reads no controller), and `ProcessController`, a guild-less controller whose `process_song` returns or raises a set result; import them from there, never from another test module.
+`tests/controller_helpers.py` holds the controller helpers the test modules share (`_settle`, `_songs`, `_queue`, `_run`, `_run_while_playing`, `_song`, `_backup`, `_preloaded`, `_titles`, `_no_idle_timer`, ...), `command_ctx`, the fake command context for `Music` callbacks (`controller=None` for a command that reads no controller), and `ProcessController`, a guild-less controller whose `process_song` returns or raises a set result; import them from there, never from another test module.
 
 `tests/db_seam.py` holds `in_memory_db(settings)`, an async context manager yielding a sessionmaker over a fresh in-memory sqlite database migrated by `settings.run_migrations`; the saved-playlists and AudioController tests share it.
 

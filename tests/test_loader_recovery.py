@@ -30,7 +30,7 @@ class FakePool:
         outcome = (
             self.outcomes.pop(0)
             if self.outcomes
-            else LoadResult([Song(SiteTypes.YT_DLP, URL, title="ok")], True)
+            else LoadResult.of_song(Song(SiteTypes.YT_DLP, URL, title="ok"))
         )
         if isinstance(outcome, str) and outcome == "break":
             future.set_exception(BrokenProcessPool("worker died"))

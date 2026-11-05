@@ -7,6 +7,7 @@ from musicbot.commands.music import Music
 from musicbot.outcome import OutcomeKind
 from musicbot.song import LoadResult
 from controller_helpers import (
+    _no_idle_timer,
     _fake_ffmpeg,
     _queue,
     _run,
@@ -19,21 +20,14 @@ from controller_helpers import (
 )
 
 
-def _no_idle_timer(controller, monkeypatch):
-    async def start_idle_timer(restart=False):
-        pass
-
-    monkeypatch.setattr(controller, "start_idle_timer", start_idle_timer)
-
-
 def test_a_first_track_whose_preload_fails_is_start_failed(
     controller, stub_loader, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
     _no_idle_timer(controller, monkeypatch)
     stub_loader.results["preload"] = stub_loader.Preload.FAILED
-    stub_loader.results["load_song"] = LoadResult(
-        [_song(controller, "a")], True
+    stub_loader.results["load_song"] = LoadResult.of_song(
+        _song(controller, "a")
     )
     ctx, sent = command_ctx(controller)
 
@@ -114,8 +108,8 @@ def test_process_song_of_a_single_result_gives_a_single_song_outcome(
     controller, stub_loader, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
-    stub_loader.results["load_song"] = LoadResult(
-        [_song(controller, "a")], True
+    stub_loader.results["load_song"] = LoadResult.of_song(
+        _song(controller, "a")
     )
 
     outcome = _process(controller)

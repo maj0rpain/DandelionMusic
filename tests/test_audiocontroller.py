@@ -1437,22 +1437,8 @@ def test_a_song_loaded_from_a_saved_playlist_keeps_its_title_refresh(
     _rewriting_preload(stub_loader, "https://example.invalid/normalised")
 
     async def load_and_preload(ac, factory):
-        async def noop(*args, **kwargs):
-            pass
-
-        ctx = types.SimpleNamespace(
-            bot=types.SimpleNamespace(
-                DbSession=factory,
-                sessions=types.SimpleNamespace(
-                    settings=lambda _guild: types.SimpleNamespace(
-                        announce_songs=True
-                    )
-                ),
-            ),
-            guild=controller.guild,
-            audiocontroller=controller,
-            defer=noop,
-            send=noop,
+        ctx, _ = command_ctx(
+            controller, db_session=factory, announce_songs=True
         )
         await Music._playlist_load.callback(Music(None), ctx, "mix")
         await _settle(controller)
