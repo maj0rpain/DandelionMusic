@@ -113,27 +113,27 @@ def scan(source, name):
 
 def test_bare_asyncio_run_is_flagged():
     src = "import asyncio\nasyncio.run(main())\n"
-    assert _lines(scan(src, "t.py")) == [2]
+    assert [v.line for v in scan(src, "t.py")] == [2]
 
 
 def test_from_import_run_is_flagged():
     src = "from asyncio import run\nrun(main())\n"
-    assert _lines(scan(src, "t.py")) == [2]
+    assert [v.line for v in scan(src, "t.py")] == [2]
 
 
 def test_run_until_complete_is_flagged():
     src = "loop.run_until_complete(main())\n"
-    assert _lines(scan(src, "t.py")) == [1]
+    assert [v.line for v in scan(src, "t.py")] == [1]
 
 
 def test_aliased_module_is_flagged():
     src = "import asyncio as aio\naio.run(main())\n"
-    assert _lines(scan(src, "t.py")) == [2]
+    assert [v.line for v in scan(src, "t.py")] == [2]
 
 
 def test_aliased_run_is_flagged():
     src = "from asyncio import run as r\nr(main())\n"
-    assert _lines(scan(src, "t.py")) == [2]
+    assert [v.line for v in scan(src, "t.py")] == [2]
 
 
 def test_marked_line_is_accepted():
@@ -143,7 +143,7 @@ def test_marked_line_is_accepted():
 
 def test_empty_reason_marker_is_flagged():
     src = "import asyncio\nasyncio.run(m())  # unbounded:   \n"
-    assert _lines(scan(src, "t.py")) == [2]
+    assert [v.line for v in scan(src, "t.py")] == [2]
 
 
 def test_prose_mentions_are_ignored():
@@ -155,11 +155,13 @@ def test_prose_mentions_are_ignored():
 
 
 def test_module_level_def_run_is_flagged():
-    assert _lines(scan("def run(c):\n    pass\n", "t.py")) == [1]
+    assert [v.line for v in scan("def run(c):\n    pass\n", "t.py")] == [1]
 
 
 def test_module_level_async_def_run_is_flagged():
-    assert _lines(scan("async def run(c):\n    pass\n", "t.py")) == [1]
+    assert [v.line for v in scan("async def run(c):\n    pass\n", "t.py")] == [
+        1
+    ]
 
 
 def test_nested_and_method_run_are_not_flagged():
@@ -191,12 +193,12 @@ def test_multiline_call_marked_only_on_later_line_is_flagged():
         "    m()  # unbounded: real child\n"
         ")\n"
     )
-    assert _lines(scan(src, "t.py")) == [2]
+    assert [v.line for v in scan(src, "t.py")] == [2]
 
 
 def test_marker_text_inside_a_string_is_not_a_marker():
     src = 'import asyncio\nasyncio.run(f("# unbounded: x"))\n'
-    assert _lines(scan(src, "t.py")) == [2]
+    assert [v.line for v in scan(src, "t.py")] == [2]
 
 
 def test_violation_names_file_and_line():
@@ -206,27 +208,27 @@ def test_violation_names_file_and_line():
     )
 
 
-def _lines(violations):
-    return [v.line for v in violations]
-
-
 def _check(src, line, what):
+    """Assert one violation at ``line``, its text pinned literally."""
     (v,) = scan(src, "t.py")
     assert v.line == line
-    assert str(v) == f"t.py:{line}: {what} {SUFFIX}"
+    assert str(v) == f"t.py:{line}: {what} without '# unbounded: <reason>'"
 
 
 def test_runner_forms_are_flagged():
     cases = [
-        ("import asyncio\nasyncio.Runner()\n", RUNNER),
-        ("import asyncio as a\na.Runner()\n", RUNNER),
-        ("from asyncio import Runner\nRunner()\n", RUNNER),
-        ("from asyncio import Runner as R\nR()\n", RUNNER),
-        ("from asyncio.runners import Runner as R\nR()\n", RUNNER),
-        ("import asyncio.runners\nasyncio.runners.Runner()\n", RUNNER),
-        ("import asyncio.runners as x\nx.Runner()\n", RUNNER),
-        ("from asyncio import runners as x\nx.Runner()\n", RUNNER),
-        ("import asyncio\nasyncio.runners.Runner()\n", RUNNER),
+        ("import asyncio\nasyncio.Runner()\n", "asyncio.Runner()"),
+        ("import asyncio as a\na.Runner()\n", "asyncio.Runner()"),
+        ("from asyncio import Runner\nRunner()\n", "asyncio.Runner()"),
+        ("from asyncio import Runner as R\nR()\n", "asyncio.Runner()"),
+        ("from asyncio.runners import Runner as R\nR()\n", "asyncio.Runner()"),
+        (
+            "import asyncio.runners\nasyncio.runners.Runner()\n",
+            "asyncio.Runner()",
+        ),
+        ("import asyncio.runners as x\nx.Runner()\n", "asyncio.Runner()"),
+        ("from asyncio import runners as x\nx.Runner()\n", "asyncio.Runner()"),
+        ("import asyncio\nasyncio.runners.Runner()\n", "asyncio.Runner()"),
     ]
     for src, what in cases:
         _check(src, 2, what)
@@ -234,38 +236,49 @@ def test_runner_forms_are_flagged():
 
 def test_runners_run_forms_are_flagged():
     cases = [
-        ("import asyncio.runners\nasyncio.runners.run(c)\n", RUNNERS_RUN),
-        ("import asyncio.runners as x\nx.run(c)\n", RUNNERS_RUN),
-        ("from asyncio import runners as x\nx.run(c)\n", RUNNERS_RUN),
-        ("from asyncio.runners import run as r\nr(c)\n", RUNNERS_RUN),
-        ("from asyncio.runners import run\nrun(c)\n", RUNNERS_RUN),
+        (
+            "import asyncio.runners\nasyncio.runners.run(c)\n",
+            "asyncio.runners.run()",
+        ),
+        ("import asyncio.runners as x\nx.run(c)\n", "asyncio.runners.run()"),
+        (
+            "from asyncio import runners as x\nx.run(c)\n",
+            "asyncio.runners.run()",
+        ),
+        (
+            "from asyncio.runners import run as r\nr(c)\n",
+            "asyncio.runners.run()",
+        ),
+        ("from asyncio.runners import run\nrun(c)\n", "asyncio.runners.run()"),
     ]
     for src, what in cases:
         _check(src, 2, what)
 
 
 def test_plain_import_of_runners_binds_asyncio():
-    _check("import asyncio.runners\nasyncio.run(c)\n", 2, RUN)
+    _check("import asyncio.runners\nasyncio.run(c)\n", 2, "asyncio.run()")
 
 
 def test_plain_import_of_any_submodule_binds_asyncio():
-    _check("import asyncio.events\nasyncio.run(c)\n", 2, RUN)
-    _check("import asyncio.subprocess\nasyncio.Runner()\n", 2, RUNNER)
+    _check("import asyncio.events\nasyncio.run(c)\n", 2, "asyncio.run()")
+    _check(
+        "import asyncio.subprocess\nasyncio.Runner()\n", 2, "asyncio.Runner()"
+    )
 
 
 def test_inline_runner_run_is_flagged_at_construction():
     src = "import asyncio\nasyncio.Runner().run(c)\n"
-    _check(src, 2, RUNNER)
+    _check(src, 2, "asyncio.Runner()")
 
 
 def test_with_runner_is_flagged_at_construction():
     src = "import asyncio\nwith asyncio.Runner() as r:\n    r.run(c)\n"
-    _check(src, 2, RUNNER)
+    _check(src, 2, "asyncio.Runner()")
 
 
 def test_assigned_runner_is_flagged_at_construction():
     src = "import asyncio\nr = asyncio.Runner()\nr.run(c)\n"
-    _check(src, 2, RUNNER)
+    _check(src, 2, "asyncio.Runner()")
 
 
 def test_marked_runner_is_accepted():
@@ -283,7 +296,7 @@ def test_unrelated_runner_is_not_flagged():
 
 def test_violations_order_by_line_as_a_number():
     src = "import asyncio\nasyncio.run(a)\n" + "\n" * 7 + "asyncio.run(b)\n"
-    assert _lines(scan(src, "t.py")) == [2, 10]
+    assert [v.line for v in scan(src, "t.py")] == [2, 10]
 
 
 def test_violations_at_one_line_order_by_message():
