@@ -379,6 +379,22 @@ def test_stat_fields_become_inline_embed_fields():
     assert all(f.inline for f in edit["embed"].fields)
 
 
+def test_queue_and_back_are_present_exactly_below_the_root():
+    def has(view):
+        kinds = {type(c) for c in view.children}
+        return QueueLevelButton in kinds, BackButton in kinds
+
+    view = make_view()
+    view.build_items(view.session.frame())
+    assert has(view) == (False, False)
+    view.session.descend("Radiohead")
+    view.build_items(view.session.frame())
+    assert has(view) == (True, True)
+    view.session.descend("OK Computer")
+    view.build_items(view.session.frame())
+    assert has(view) == (True, True)
+
+
 # thirty artists: two pages of the root's Select
 PAGED = {f"Artist {n:02}": {"Album": [make_song("Song")]} for n in range(30)}
 

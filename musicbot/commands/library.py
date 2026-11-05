@@ -366,9 +366,8 @@ class LibraryBrowseView(LibraryView):
             self.add_item(
                 LibrarySelect(frame.entries, frame.labels, frame.kind, self)
             )
-        if frame.show_queue:
+        if frame.queue_label is not None:
             self.add_item(QueueLevelButton(self, frame.queue_label))
-        if frame.show_back:
             self.add_item(BackButton(self))
         if frame.show_prev:
             self.add_item(PageButton(self, -1, "◀ Prev"))

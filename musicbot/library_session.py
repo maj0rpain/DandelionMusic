@@ -25,6 +25,7 @@ from musicbot import library, library_browse, library_display
 if TYPE_CHECKING:
     from musicbot import library_metadata
 
+
 def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
     """Renders as "42:39" under an hour and "11h 23m" above it - an
     album runtime and a whole discography's runtime want different
@@ -75,16 +76,17 @@ def stat_fields(screen: library_browse.Screen, external) -> List[Field]:
     """The `(name, value)` stat fields of one screen, empty ones left
     out - a grid of dashes reads worse than a short grid.
 
-    Branches on the screen's own fields: `counts` is set at the root,
-    `stats` below it. `external` is the drawn enrichment's stats, or
-    None."""
+    "album" and "song" are below it (its `stats`). `external` is the
+    drawn enrichment's stats, or None."""
     fields: List[Field] = []
 
     def add(name: str, value) -> None:
         if value:
             fields.append((name, str(value)))
 
-    if screen.counts is not None:
+    if screen.kind == "artist":
+        if screen.counts is None:
+            return fields
         artists, albums, songs = screen.counts
         add("Artists", f"{artists:,}")
         add("Albums", f"{albums:,}")
@@ -166,9 +168,9 @@ class Frame(NamedTuple):
     labels: List[str]
     kind: str
     # the buttons
-    show_queue: bool
+    # None at the root, where neither Queue nor Back is drawn; below
+    # it, the Queue button's label (and Back is drawn)
     queue_label: Optional[str]
-    show_back: bool
     show_prev: bool
     show_next: bool
     # the embed
@@ -251,31 +253,41 @@ class BrowseSession:
     def _art(self):
         return self._enrichment.art if self._enrichment else None
 
-    def _title(self) -> str:
+    @staticmethod
+    def _title(screen: library_browse.Screen) -> str:
         """Only the current scope, prefixed with the icon for what that
         scope is - the path to it lives in the footer."""
-        cursor = self.cursor
-        if cursor.artist is None:
+        if screen.kind == "artist":
             return f"{library_display.KIND_EMOJI['artist']} Artists"
-        if cursor.album is None:
-            name, kind = cursor.artist, "artist"
+        artist, album = screen.scope
+        if screen.kind == "album":
+            name, kind = artist, "artist"
         else:
-            name, kind = cursor.album, "album"
+            name, kind = album, "album"
         icon = library_display.KIND_EMOJI[kind]
         trimmed = library_display.trim(name, library_display.NAME_TITLE_LIMIT)
         return f"{icon} {trimmed}"
 
-    def _footer(self) -> Optional[str]:
+    @staticmethod
+    def _footer(screen: library_browse.Screen) -> Optional[str]:
         """In the breadcrumb the icons mark entities only - the leading
         "Artists" names the root screen rather than an artist."""
-        cursor = self.cursor
-        if cursor.artist is None:
+        if screen.kind == "artist":
             return None
-        artist = f"{library_display.KIND_EMOJI['artist']} {cursor.artist}"
-        if cursor.album is None:
+        artist_name, album_name = screen.scope
+        artist = f"{library_display.KIND_EMOJI['artist']} {artist_name}"
+        if screen.kind == "album":
             return f"Artists › {artist}"
         icon = library_display.KIND_EMOJI["album"]
-        return f"{artist} › {icon} {cursor.album}"
+        return f"{artist} › {icon} {album_name}"
+
+    @staticmethod
+    def _queue_label(screen: library_browse.Screen) -> Optional[str]:
+        if screen.kind == "artist":
+            return None
+        if screen.kind == "album":
+            return "Queue this Artist"
+        return "Queue this Album"
 
     def frame(self) -> Frame:
         cursor = self.cursor
@@ -298,21 +310,11 @@ class BrowseSession:
             entries=cursor.page_entries(),
             labels=cursor.page_labels(),
             kind=screen.kind,
-            show_queue=not cursor.at_root,
-            queue_label=(
-                None
-                if cursor.at_root
-                else (
-                    "Queue this Album"
-                    if cursor.at_album_level
-                    else "Queue this Artist"
-                )
-            ),
-            show_back=not cursor.at_root,
+            queue_label=self._queue_label(screen),
             show_prev=cursor.has_prev(),
             show_next=cursor.has_next(),
-            title=self._title(),
-            footer=self._footer(),
+            title=self._title(screen),
+            footer=self._footer(screen),
             description=(None if empty else _description(screen, external)),
             fields=() if empty else tuple(stat_fields(screen, external)),
             empty=empty,

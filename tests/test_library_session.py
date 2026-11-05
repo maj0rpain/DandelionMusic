@@ -188,7 +188,7 @@ class TestFrameText:
             ("Albums", "4"),
             ("Songs", "4"),
         )
-        assert not f.show_back and not f.show_queue
+        assert f.queue_label is None
         assert f.entries == ["Aphex Twin", "Radiohead"]
         assert f.show_next and not f.show_prev
 
@@ -251,22 +251,26 @@ class TestStatFieldBuilder:
         base.update(kw)
         return library_browse.Screen(**base)
 
-    def test_counts_alone_select_the_root_branch(self):
-        # scope says "artist level"; only `counts` is set
-        screen = self._screen(scope=("A", None), counts=(1, 2, 3))
+    def test_root_kind_selects_the_counts_fields(self):
+        screen = self._screen(counts=(1, 2, 3))
         assert stat_fields(screen, None) == [
             ("Artists", "1"),
             ("Albums", "2"),
             ("Songs", "3"),
         ]
 
-    def test_stats_alone_select_the_lower_branch(self):
+    def test_album_kind_selects_the_artist_level_fields(self):
         stats = library.LevelStats(2, 5, None, None, None, (), None, ())
-        screen = self._screen(kind="album", scope=(None, None), stats=stats)
+        screen = self._screen(kind="album", scope=("A", None), stats=stats)
         assert stat_fields(screen, None) == [
             ("Albums", "2"),
             ("Tracks", "5"),
         ]
+
+    def test_song_kind_selects_the_album_level_fields(self):
+        stats = library.LevelStats(1, 5, None, None, None, (), None, ())
+        screen = self._screen(kind="song", scope=("A", "B"), stats=stats)
+        assert stat_fields(screen, None) == [("Tracks", "5")]
 
 
 class TestTheSeam:
