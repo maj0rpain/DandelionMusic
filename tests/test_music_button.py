@@ -27,6 +27,7 @@ from discord_fakes import (
     FakeInteraction,
     VoiceGuild,
     FakePanel,
+    admission_settings,
     make_bot,
 )
 from helpers import run
@@ -52,12 +53,7 @@ class FakeContext(Context):
                 administrator=False
             ),
         )
-        self.settings = SimpleNamespace(
-            dj_role=ADMISSION_DJ_ROLE,
-            user_must_be_in_vc=True,
-            command_channel=None,
-            vc_timeout=True,
-        )
+        self.settings = admission_settings(dj_role=ADMISSION_DJ_ROLE)
         self.bot = make_bot(
             {
                 self.guild: SimpleNamespace(
@@ -121,33 +117,6 @@ def test_an_action_failure_is_reraised_not_refused(error):
     else:
         raise AssertionError("not re-raised")
     assert inter.followups == []
-
-
-def test_a_player_button_is_refused_while_the_bot_is_out_of_voice():
-    inter, ctx = click_interaction()
-    ctx.out_of_voice()
-    ran = []
-
-    run(MusicButton(ran.append).callback(inter))
-    assert sent_texts_and_kwargs(inter.followups) == [
-        (config.NOT_CONNECTED_MESSAGE, {"ephemeral": True})
-    ]
-    assert inter.messages == []
-    assert ran == []
-    assert ctx.guild.events == []
-
-
-def test_a_dj_only_button_is_refused_to_a_non_dj():
-    inter, ctx = click_interaction(custom_id="next")
-    ran = []
-
-    run(MusicButton(ran.append).callback(inter))
-    assert sent_texts_and_kwargs(inter.followups) == [
-        (config.NOT_A_DJ, {"ephemeral": True})
-    ]
-    assert inter.messages == []
-    assert ran == []
-    assert ctx.guild.events == []
 
 
 def test_an_admitted_click_runs_the_buttons_action():

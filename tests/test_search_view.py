@@ -24,6 +24,7 @@ from discord_fakes import (
     ADMISSION_CHANNEL,
     FakeInteraction,
     VoiceGuild,
+    admission_settings,
     http_error,
     make_bot,
 )
@@ -62,7 +63,7 @@ class FakeFollowup:
         self.edits.append((message_id, kwargs))
 
 
-class Controller:
+class NamedController:
     async def dispose(self, reason=None):
         pass
 
@@ -84,12 +85,8 @@ class FakeContext:
             # nothing of self
             await MusicBot.on_command_error(None, ctx, error)
 
-        self.settings = SimpleNamespace(
-            command_channel=None,
-            user_must_be_in_vc=False,
-            vc_timeout=True,
-        )
-        self.controllers = {self.guild: Controller("first")}
+        self.settings = admission_settings(user_must_be_in_vc=False)
+        self.controllers = {self.guild: NamedController("first")}
         self.bot = make_bot(
             self.controllers, settings={self.guild: self.settings}
         )
@@ -111,7 +108,7 @@ class FakeContext:
 
     async def reset_controller(self):
         """d!reset: the guild gets a new controller."""
-        self.controllers[self.guild] = Controller("second")
+        self.controllers[self.guild] = NamedController("second")
         await self.bot.sessions.reset(self.guild)
 
     def bot_out_of_voice(self, connect_error):
@@ -254,7 +251,7 @@ def test_the_owners_pick_queues_its_url_and_disables_the_buttons():
     assert view.is_finished()
 
 
-def test_a_pick_failing_the_play_check_is_refused_and_can_be_retried():
+def test_a_refused_pick_can_be_retried():
     async def go():
         view, cog = make_view(message=EditRecordingMessage())
         inter = SearchInteraction()

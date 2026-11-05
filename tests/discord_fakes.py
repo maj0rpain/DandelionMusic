@@ -10,6 +10,7 @@ from concurrent.futures import ThreadPoolExecutor
 
 import discord
 
+from musicbot import admission
 from musicbot.admission import RequestKind
 from musicbot.sessions import GuildSessions
 from musicbot.utils import joining_command
@@ -226,6 +227,8 @@ PLAYER_BUTTONS = [
 
 
 ADMISSION_CHANNEL = 7
+# HERE differs from PEOPLE only when used with author="a" (the author
+# is then the one human with the bot); both build the same channel.
 HERE = "here"  # the bot's channel when the author is with it
 BOTS_ONLY = "bots"
 PEOPLE = "people"
@@ -244,6 +247,19 @@ async def _plain_callback(ctx):
 def _command(joining):
     callback = _joining_callback if joining else _plain_callback
     return types.SimpleNamespace(callback=callback)
+
+
+def admission_settings(**overrides):
+    """The settings admission reads, at their defaults; `overrides`
+    change those or add fields outside them."""
+    fields = {
+        "command_channel": None,
+        "user_must_be_in_vc": True,
+        "dj_role": None,
+        "vc_timeout": True,
+    }
+    fields.update(overrides)
+    return types.SimpleNamespace(**fields)
 
 
 def fake_controller():
@@ -267,20 +283,20 @@ def situation(
 ):
     """Builds (guild, ctx) for one row."""
     guild = VoiceGuild()
-    a = guild.channel("a", **{"humans": 1} if bot == PEOPLE else {})
-    if bot == BOTS_ONLY:
-        a = guild.channel("a", bots=1)
-    if bot == HERE:
-        a = guild.channel("a", humans=1)
+    members = {
+        PEOPLE: {"humans": 1},
+        HERE: {"humans": 1},
+        BOTS_ONLY: {"bots": 1},
+    }
+    a = guild.channel("a", **members.get(bot, {}))
     if bot is not None:
         guild.put_bot_in(a)
     b = guild.channel("b", humans=1, **(perms or {}))
     voice = {"a": a, "b": b}.get(author)
-    sett = types.SimpleNamespace(
+    sett = admission_settings(
         command_channel=ADMISSION_CHANNEL + 1 if wrong_channel else None,
         user_must_be_in_vc=rule,
         dj_role=dj_role,
-        vc_timeout=True,
     )
     controllers = {guild: fake_controller()} if registered else {}
     bot_obj = make_bot(
@@ -307,7 +323,7 @@ def situation(
         ),
         command=(
             _command(kind is RequestKind.JOINING_COMMAND)
-            if kind in (RequestKind.COMMAND, RequestKind.JOINING_COMMAND)
+            if kind in admission.COMMAND_KINDS
             else None
         ),
         interaction=types.SimpleNamespace(data={"custom_id": custom_id}),

@@ -35,7 +35,12 @@ from musicbot.outcome import EnqueueOutcome, OutcomeKind
 from musicbot.library import LibrarySong, SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 from config import config
-from discord_fakes import VoiceGuild, http_error, make_bot
+from discord_fakes import (
+    VoiceGuild,
+    admission_settings,
+    http_error,
+    make_bot,
+)
 from helpers import run
 
 
@@ -1126,13 +1131,7 @@ def voice_ctx_for(view, in_voice):
     view.ctx.controllers = {guild: LibraryController("first")}
     view.ctx.bot = make_bot(
         view.ctx.controllers,
-        settings={
-            guild: SimpleNamespace(
-                command_channel=None,
-                user_must_be_in_vc=False,
-                vc_timeout=True,
-            )
-        },
+        settings={guild: admission_settings(user_must_be_in_vc=False)},
     )
     view.ctx.author.voice = None
     if in_voice:

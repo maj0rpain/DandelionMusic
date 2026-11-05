@@ -11,7 +11,12 @@ from musicbot.outcome import EnqueueOutcome, OutcomeKind, render
 from musicbot.song import Song
 from musicbot.plugins.button import Button
 from musicbot.truncation import Truncation, TruncationReason
-from discord_fakes import ADMISSION_DJ_ROLE, VoiceGuild, make_bot
+from discord_fakes import (
+    ADMISSION_DJ_ROLE,
+    VoiceGuild,
+    admission_settings,
+    make_bot,
+)
 from helpers import run
 
 YOUTUBE = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -109,12 +114,11 @@ def react(
     channel = FakeChannel(message)
     known = {channel.id: channel}
     controller = FakeController(outcomes)
-    sett = SimpleNamespace(
+    sett = admission_settings(
         button_emote="x",
         command_channel=command_channel,
         user_must_be_in_vc=user_must_be_in_vc,
         dj_role=ADMISSION_DJ_ROLE if role == "dj" else None,
-        vc_timeout=True,
         announce_songs=announce_songs,
     )
 

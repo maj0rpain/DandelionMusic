@@ -104,7 +104,6 @@ def reset_with_voice_after(post):
         disposed.append(reason)
 
     ctx.bot.sessions.controller(guild).dispose = dispose
-    ctx.disposed = disposed
     sessions = ctx.bot.sessions
     real = sessions.reset
 
@@ -114,11 +113,11 @@ def reset_with_voice_after(post):
         return result
 
     sessions.reset = reset
-    return guild, ctx, sent, invoke("reset", ctx)
+    return guild, ctx, sent, disposed, invoke("reset", ctx)
 
 
 def test_reset_joins_from_the_post_reset_voice_state():
-    guild, ctx, sent, refusal = reset_with_voice_after(lambda g, c: None)
+    guild, ctx, sent, _, refusal = reset_with_voice_after(lambda g, c: None)
     assert refusal is None
     assert guild.events == [("connect", "b")]
     assert sent == [":white_check_mark: Connected to b"]
@@ -129,7 +128,7 @@ def test_reset_still_refuses_when_the_bot_is_in_voice_after_it(no_sleep):
     def post(guild, ctx):
         guild.put_bot_in(guild.channel("a", humans=1))
 
-    guild, _, sent, refusal = reset_with_voice_after(post)
+    guild, _, sent, _, refusal = reset_with_voice_after(post)
     assert refusal == config.ALREADY_CONNECTED_MESSAGE
     assert sent == []
 
@@ -138,8 +137,8 @@ def test_a_refusal_after_the_reset_keeps_the_reset():
     def post(guild, ctx):
         ctx.author.voice = None
 
-    guild, ctx, sent, refusal = reset_with_voice_after(post)
+    guild, ctx, sent, disposed, refusal = reset_with_voice_after(post)
     assert refusal == config.USER_NOT_IN_VC_MESSAGE
     assert sent == []
     assert guild.events == []
-    assert ctx.disposed == ["reset command"]
+    assert disposed == ["reset command"]
