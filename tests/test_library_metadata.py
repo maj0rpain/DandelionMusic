@@ -682,9 +682,8 @@ def test_low_limit_client_of_none_is_none():
 
 
 def test_spotify_enrichment_is_disabled_without_a_client(
-    make_library, no_lastfm
+    rig, no_spotify, no_lastfm
 ):
-    rig = Rig(make_library(LAYOUT))
     enricher = rig.enricher  # built with spotify=None
 
     result = rig.artist()

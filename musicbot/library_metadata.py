@@ -445,7 +445,10 @@ class Enricher:
         return artist_name, album_name
 
     async def get_enrichment(
-        self, index: library.LibraryIndex, artist: Optional[str], album
+        self,
+        index: library.LibraryIndex,
+        artist: Optional[str],
+        album: Optional[str],
     ) -> Optional[Enrichment]:
         """What is known about a scope of `index`: None for the root
         (`artist` None) and for a scope with no sample file; otherwise
