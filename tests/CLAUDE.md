@@ -18,7 +18,7 @@ Only the parts that need no Discord connection: config loading, `Playlist`, save
 
 ## Discord fakes
 
-`tests/discord_fakes.py` holds the shared Discord stand-ins - the click `FakeInteraction`, `make_bot`, and the voice fakes (`VoiceGuild`, `FakeVoiceChannel`, `FakeVoiceClient`), `RecordingCtx` (a context recording each `send` and whether it was deferred) - plus `http_error` and `PLAYER_BUTTONS`, the player view's button ids. Import them rather than writing a per-file copy.
+`tests/discord_fakes.py` holds the shared Discord stand-ins - the click `FakeInteraction`, `make_bot`, the voice fakes (`VoiceGuild`, `FakeVoiceChannel`, `FakeVoiceClient`) and `RecordingCtx` (a context recording each `send` and whether it was deferred) - plus `http_error` and `PLAYER_BUTTONS`, the player view's button ids. Import them rather than writing a per-file copy.
 
 ## Shared helpers
 
