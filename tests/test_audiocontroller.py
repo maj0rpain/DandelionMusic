@@ -567,7 +567,7 @@ def test_the_after_callback_only_hands_the_track_end_to_the_loop(
         assert seen == []
         assert _titles(controller) == ["first", "second"]
         assert not _backup_path(controller, tmp_path).exists()
-        assert len(fake_loop.calls) == 1
+        ((_, _),) = fake_loop.calls
 
     _run(controller, scenario)
 
