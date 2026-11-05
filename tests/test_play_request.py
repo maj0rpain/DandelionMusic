@@ -7,21 +7,8 @@ import pytest
 
 from config import config
 from musicbot.commands.music import Music
+from discord_fakes import RecordingCtx
 from helpers import run
-
-
-class FakeCtx:
-    def __init__(self):
-        self.sent = []
-        self.deferred = False
-        self.interaction = None
-        self.message = types.SimpleNamespace(attachments=[], reference=None)
-
-    async def defer(self):
-        self.deferred = True
-
-    async def send(self, message=None, **kwargs):
-        self.sent.append(message)
 
 
 COMMANDS = [("_play", False), ("_play_next", True)]
@@ -43,7 +30,7 @@ def run_command(name, ctx, monkeypatch, **kwargs):
 def test_no_track_and_no_file_replies_args_missing(
     name, playnext, monkeypatch
 ):
-    ctx = FakeCtx()
+    ctx = RecordingCtx()
     reached = run_command(name, ctx, monkeypatch)
     assert ctx.sent == [config.PLAY_ARGS_MISSING]
     assert reached == []
@@ -51,7 +38,7 @@ def test_no_track_and_no_file_replies_args_missing(
 
 @pytest.mark.parametrize("name,playnext", COMMANDS)
 def test_a_track_reaches_the_play_path(name, playnext, monkeypatch):
-    ctx = FakeCtx()
+    ctx = RecordingCtx()
     reached = run_command(name, ctx, monkeypatch, track="song")
     assert reached == [("song", playnext)]
     assert ctx.deferred
@@ -59,7 +46,7 @@ def test_a_track_reaches_the_play_path(name, playnext, monkeypatch):
 
 @pytest.mark.parametrize("name,playnext", COMMANDS)
 def test_a_slash_file_is_played_by_its_url(name, playnext, monkeypatch):
-    ctx = FakeCtx()
+    ctx = RecordingCtx()
     ctx.interaction = object()
     file = types.SimpleNamespace(url="https://cdn/a.mp3")
     reached = run_command(name, ctx, monkeypatch, file=file)
