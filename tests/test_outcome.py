@@ -3,7 +3,6 @@ import types
 from pathlib import Path
 
 import pytest
-from helpers import run
 
 from config import config
 from musicbot import outcome as outcome_module
@@ -11,6 +10,8 @@ from musicbot.linkutils import SiteTypes
 from musicbot.outcome import EnqueueOutcome, OutcomeKind, render, send_outcome
 from musicbot.song import Song
 from musicbot.truncation import Truncation, TruncationReason
+
+from helpers import run
 
 
 def _song():
