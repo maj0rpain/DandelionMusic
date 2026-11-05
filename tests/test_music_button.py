@@ -203,9 +203,9 @@ def test_after_is_awaited_with_the_clicks_ctx_after_the_action():
         events.append(("after", c))
 
     run(
-        MusicButton(
-            lambda c: events.append("action"), after=after
-        ).callback(inter)
+        MusicButton(lambda c: events.append("action"), after=after).callback(
+            inter
+        )
     )
     assert events == ["action", ("after", ctx)]
 
