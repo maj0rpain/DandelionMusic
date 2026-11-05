@@ -1061,6 +1061,7 @@ class ClickInteraction:
         self.message = SimpleNamespace(id=message_id)
         self.followup = Followup(fail=fail)
         self.original_edits = []
+        self.deleted = 0
         self.sent = []
         self.deferred = 0
 
@@ -1078,6 +1079,9 @@ class ClickInteraction:
 
     async def edit_original_response(self, **kwargs):
         self.original_edits.append(kwargs)
+
+    async def delete_original_response(self):
+        self.deleted += 1
 
 
 def timeout_message(cls, fail=False):
@@ -1151,7 +1155,7 @@ class LibraryController:
     async def process_local_tracks(self, tracks, source, user=None):
         self.queued.append(tracks)
         return EnqueueOutcome(
-            OutcomeKind.PLAYLIST, count=len(tracks), skipped=[]
+            OutcomeKind.LIBRARY_PICK, count=len(tracks)
         )
 
 
@@ -1343,9 +1347,9 @@ class _PickController:
         self.missing = missing
 
     async def process_local_tracks(self, tracks, source, user=None):
-        skipped = [t for t in tracks if t in self.missing]
+        skipped = tuple(t.name for t in tracks if t.uri in self.missing)
         return EnqueueOutcome(
-            OutcomeKind.PLAYLIST,
+            OutcomeKind.LIBRARY_PICK,
             count=len(tracks) - len(skipped),
             skipped=skipped,
         )
@@ -1385,6 +1389,41 @@ def test_a_library_pick_names_the_skipped_files_by_filename(monkeypatch):
         "Queued 1 song(s). 1 skipped (file not found): y.mp3. "
         "The index may be stale - ask the bot owner to run `d!lib refresh`."
     ]
+
+
+def _silent_pick(monkeypatch, interaction):
+    from musicbot import admission
+
+    async def check(ctx, kind):
+        async def enter():
+            return LibraryController("c")
+
+        return SimpleNamespace(enter=enter)
+
+    monkeypatch.setattr(admission, "check", check)
+    monkeypatch.setattr(library_commands, "render", lambda *a, **k: None)
+    ctx = SimpleNamespace(author=None)
+    run(
+        library_commands.queue_songs(
+            ctx, interaction, [("A", "B", "x.mp3")], "browse"
+        )
+    )
+
+
+def test_a_library_pick_with_no_reply_deletes_its_placeholder(monkeypatch):
+    click = ClickInteraction()
+    _silent_pick(monkeypatch, click)
+    assert (click.deleted, click.original_edits) == (1, [])
+
+
+def test_a_library_pick_with_no_reply_and_no_placeholder_sends_nothing(
+    monkeypatch,
+):
+    click = ClickInteraction()
+    run(click.response.defer())
+    _silent_pick(monkeypatch, click)
+    # the fake followup has no `send`, so any reply would raise
+    assert (click.deleted, click.original_edits) == (0, [])
 
 
 def test_a_library_pick_that_loads_everything_reports_the_count(monkeypatch):

@@ -8,12 +8,13 @@ from typing import (
     Iterable,
     List,
     Optional,
+    Sequence,
 )
 
 import discord
 from config import config
 
-from musicbot import loader, playlists, utils
+from musicbot import library, loader, playlists, utils
 from musicbot.outcome import EnqueueOutcome, OutcomeKind
 from musicbot.song import Song
 from musicbot.truncation import Truncation
@@ -414,14 +415,14 @@ class AudioController(object):
 
     async def process_local_tracks(
         self,
-        tracks: List[str],
+        tracks: Sequence[library.LocalTrack],
         source: str,
         user: Optional[discord.abc.User] = None,
     ) -> EnqueueOutcome:
         """Queues a batch of local-library files and settles the
-        playlist once at the end. Returns a PLAYLIST outcome: `count`
-        the songs queued, `skipped` the tracks that could not be
-        loaded (empty when all were).
+        playlist once at the end. Returns a LIBRARY_PICK outcome: `count`
+        the songs queued, `skipped` the names of the tracks that could
+        not be loaded (empty when all were).
 
         `source` names the browse/search action that produced `tracks`
         (e.g. "browse: entire album Artist - Album") - unlike a single
@@ -442,8 +443,9 @@ class AudioController(object):
             f" in guild {self.guild.name!r}"
         )
 
+        uris = [track.uri for track in tracks]
         songs: List[Optional[Song]] = []
-        tail = tracks
+        tail = uris
 
         # With nothing playing, the first track is loaded and enqueued
         # on its own before the rest (this only splits the batch; the
@@ -455,9 +457,9 @@ class AudioController(object):
         # seconds of it on a network-mounted library. One extra round
         # trip buys that back; loading a single track costs about
         # 1.5ms.
-        if self.is_idle() and len(tracks) > 1:
-            songs += await loader.load_local_songs(tracks[:1])
-            tail = tracks[1:]
+        if self.is_idle() and len(uris) > 1:
+            songs += await loader.load_local_songs(uris[:1])
+            tail = uris[1:]
             if songs[0] is not None:
                 await self.enqueue(songs[:1])
 
@@ -469,11 +471,13 @@ class AudioController(object):
             await self.enqueue(added)
 
         return EnqueueOutcome(
-            OutcomeKind.PLAYLIST,
+            OutcomeKind.LIBRARY_PICK,
             count=len([song for song in songs if song is not None]),
-            skipped=[
-                track for track, song in zip(tracks, songs) if song is None
-            ],
+            skipped=tuple(
+                track.name
+                for track, song in zip(tracks, songs)
+                if song is None
+            ),
         )
 
     def add_task(self, coro: Coroutine):

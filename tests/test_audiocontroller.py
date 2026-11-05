@@ -15,6 +15,7 @@ import types
 import pytest
 
 from musicbot import playlists
+from musicbot.library import LocalTrack
 from musicbot.commands.music import Music
 from controller_helpers import (
     _backup,
@@ -1584,7 +1585,9 @@ def test_a_local_batch_during_a_pending_start_starts_nothing_new(
             controller, stub_loader, monkeypatch, "slow"
         )
         await _settle()
-        await controller.process_local_tracks(["a", "b"], "test")
+        await controller.process_local_tracks(
+            [LocalTrack(t, t) for t in ["a", "b"]], "test"
+        )
         release.set()
         await _finish(task)
 
@@ -2073,14 +2076,16 @@ def test_a_local_batch_reports_the_tracks_it_could_not_load(
     monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
 
     async def scenario():
-        return await controller.process_local_tracks(["a", "b", "c"], "test")
+        return await controller.process_local_tracks(
+            [LocalTrack(t, t) for t in ["a", "b", "c"]], "test"
+        )
 
     outcome = _run(controller, scenario)
 
     assert (outcome.kind.value, outcome.count, outcome.skipped) == (
-        "playlist",
+        "library_pick",
         2,
-        ["b"],
+        ("b",),
     )
 
 
@@ -2095,11 +2100,13 @@ def test_a_local_batch_that_loads_completely_skips_nothing(
     monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
 
     async def scenario():
-        return await controller.process_local_tracks(["a", "b"], "test")
+        return await controller.process_local_tracks(
+            [LocalTrack(t, t) for t in ["a", "b"]], "test"
+        )
 
     outcome = _run(controller, scenario)
 
-    assert (outcome.count, outcome.skipped) == (2, [])
+    assert (outcome.count, outcome.skipped) == (2, ())
 
 
 def test_a_disconnect_tells_the_panel_that_playback_ended(controller):

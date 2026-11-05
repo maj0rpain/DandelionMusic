@@ -1,5 +1,4 @@
 import asyncio
-import dataclasses
 import io
 import sys
 from contextlib import contextmanager
@@ -208,12 +207,10 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
     try:
         admitted = await admission.check(ctx, admission.RequestKind.PICK)
         controller = await admitted.enter()
-        tracks = []
-        filenames = {}
-        for triple in triples:
-            uri = library.song_uri(*triple)
-            tracks.append(uri)
-            filenames[uri] = triple[2]
+        tracks = [
+            library.LocalTrack(library.song_uri(*triple), triple[2])
+            for triple in triples
+        ]
         outcome = await controller.process_local_tracks(
             tracks, source, user=ctx.author
         )
@@ -225,10 +222,11 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
         await reply(config.SONGINFO_ERROR)
         return
 
-    outcome = dataclasses.replace(
-        outcome, skipped=[filenames[uri] for uri in outcome.skipped]
-    )
-    await reply(render(outcome, announce_songs=False).text)
+    rendered = render(outcome, announce_songs=False)
+    if rendered is not None:
+        await reply(rendered.text)
+    elif owns_placeholder:
+        await interaction.delete_original_response()
 
 
 class LibraryView(OwnedView):

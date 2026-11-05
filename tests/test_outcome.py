@@ -50,7 +50,7 @@ def test_truncated_playlist_says_how_many_of_how_many():
 
 def _library(count, skipped):
     outcome = EnqueueOutcome(
-        OutcomeKind.PLAYLIST, count=count, skipped=skipped
+        OutcomeKind.LIBRARY_PICK, count=count, skipped=tuple(skipped)
     )
     return render(outcome, True).text
 
