@@ -317,7 +317,7 @@ class BrowseSession:
             thumbnail = attachment.filename
         empty = not screen.entries
         external = self._enrichment.stats if self._enrichment else None
-        return Frame(
+        frame = Frame(
             entries=cursor.page_entries(),
             labels=cursor.page_labels(),
             kind=screen.kind,
@@ -341,9 +341,10 @@ class BrowseSession:
             empty=empty,
             thumbnail=thumbnail,
             attachment=attachment,
-            attachments_change=(
-                (attachment.key if attachment else None) != self._attached
-            ),
+            attachments_change=False,
+        )
+        return frame._replace(
+            attachments_change=frame.attachment_key != self._attached
         )
 
     def landed(self, frame: Frame) -> None:

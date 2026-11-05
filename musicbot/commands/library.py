@@ -332,7 +332,10 @@ class LibraryBrowseView(LibraryView):
         self.session = BrowseSession(index, PAGE_SIZE)
         # serialises the message edits themselves - see render()
         self._render_lock = asyncio.Lock()
-        self.build_items(self.session.frame())
+        # the first message's items and embed both come from this one
+        # frame, which landed() is then given
+        self.first_frame = self.session.frame()
+        self.build_items(self.first_frame)
 
     @property
     def scope(self) -> Tuple[Optional[str], Optional[str]]:
@@ -851,7 +854,7 @@ class Library(commands.Cog):
             return
 
         view = LibraryBrowseView(ctx, index)
-        frame = view.session.frame()
+        frame = view.first_frame
         kwargs = {"embed": view.embed(frame), "view": view}
         # ephemeral only makes sense for an interaction (slash) response -
         # a plain text message from a prefix command can't be ephemeral

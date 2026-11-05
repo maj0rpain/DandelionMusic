@@ -216,15 +216,93 @@ def test_failed_render_keeps_previous_components_live(capsys):
     assert "library: render failed:" in capsys.readouterr().err
 
 
+def test_non_http_edit_failure_restores_items_and_propagates():
+    async def scenario():
+        view = make_view()
+        before = list(view.children)
+        interaction = EditingInteraction(
+            fail=True, edit_error=RuntimeError("boom")
+        )
+        view.session.descend("Radiohead")
+        try:
+            await view.render(interaction)
+        except RuntimeError:
+            raised = True
+        else:
+            raised = False
+        return view, before, raised
+
+    view, before, raised = run(scenario())
+
+    assert raised
+    assert view.children == before
+    assert all(item.view is view for item in view.children)
+
+
+def test_click_after_failed_first_draw_acts_on_the_shown_level():
+    async def scenario():
+        view = make_view()
+        stub_enrichment(view)
+        clicks = Clicks(view)
+        failing = clicks.interaction(fail=True)
+        await finish(clicks.click(LibrarySelect, failing, label="Radiohead"))
+        undone = level_of(view)
+        again = clicks.interaction()
+        await finish(clicks.click(LibrarySelect, again, label="The Beatles"))
+        return undone, view
+
+    undone, view = run(scenario())
+
+    assert undone == (None, None)
+    assert level_of(view) == ("The Beatles", None)
+
+
+def test_click_after_failed_page_turn_acts_on_the_shown_page():
+    async def scenario():
+        view = make_view(PAGED)
+        stub_enrichment(view)
+        clicks = Clicks(view)
+        failing = clicks.interaction(fail=True)
+        await finish(clicks.click(PageButton, failing))
+        undone_page = view.session.cursor.page
+        again = clicks.interaction()
+        await finish(clicks.click(LibrarySelect, again, label="Artist 03"))
+        return undone_page, view
+
+    undone_page, view = run(scenario())
+
+    assert undone_page == 0
+    assert level_of(view) == ("Artist 03", None)
+
+
+def test_click_after_failed_enrichment_edit_acts_on_the_shown_level():
+    async def scenario():
+        view = make_view()
+        stub_enrichment(view, {("Radiohead", None): COVER})
+        clicks = Clicks(view)
+        entering = clicks.interaction(fail_on={1})
+        await finish(clicks.click(LibrarySelect, entering, label="Radiohead"))
+        again = clicks.interaction()
+        await finish(clicks.click(BackButton, again))
+        return view
+
+    view = run(scenario())
+
+    assert level_of(view) == (None, None)
+
+
+def _enter_artist(view):
+    view.session.descend("Radiohead")
+    return view.session.enter_level()
+
+
 def _drawn(enrichment, draws=1, index=INDEX):
     """The edits of `draws` renders of the artist level, the first
     carrying `enrichment`."""
 
     async def scenario():
         view = make_view(index)
-        token = (
-            view.session.descend("Radiohead") and view.session.enter_level()
-        )
+        token = _enter_artist(view)
         view.session.offer_enrichment(token, enrichment)
         interaction = EditingInteraction()
         for _ in range(draws):
@@ -251,9 +329,7 @@ def test_edit_omits_attachments_when_the_frame_does_not_change_them():
 def test_edit_clears_attachments_when_leaving_an_attached_level():
     async def scenario():
         view = make_view()
-        token = (
-            view.session.descend("Radiohead") and view.session.enter_level()
-        )
+        token = _enter_artist(view)
         view.session.offer_enrichment(token, COVER)
         interaction = EditingInteraction()
         await view.render(interaction)
@@ -1149,3 +1225,34 @@ def test_timeout_swallows_a_failed_followup_edit():
         return view
 
     assert all(item.disabled for item in run(go()).children)
+
+
+def test_first_message_is_drawn_from_one_frame(monkeypatch):
+    monkeypatch.setattr(library_commands.config, "MUSIC_LIBRARY_PATH", "/x")
+    monkeypatch.setattr(library_commands.library, "get_index", lambda: INDEX)
+    sent = []
+
+    async def send(**kwargs):
+        sent.append(kwargs)
+        return SimpleNamespace(id=MESSAGE_ID)
+
+    ctx = SimpleNamespace(
+        author=SimpleNamespace(id=AUTHOR_ID), interaction=None, send=send
+    )
+    frames = []
+    real = library_commands.BrowseSession.frame
+
+    def counting(self):
+        frames.append(real(self))
+        return frames[-1]
+
+    monkeypatch.setattr(library_commands.BrowseSession, "frame", counting)
+
+    run(
+        library_commands.Library._library_browse.callback(
+            library_commands.Library(None), ctx
+        )
+    )
+
+    assert len(frames) == 1
+    assert sent[0]["embed"].title == frames[0].title

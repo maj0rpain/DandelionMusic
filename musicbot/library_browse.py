@@ -12,7 +12,7 @@ Nothing here imports discord, or config, or anything that reaches the
 bot. That is the point of the module, not an accident of what it
 happens to need today: the moment it does, the tests below it need a
 gateway again. The view keeps everything Discord owns - components,
-message edits, deferral, the _busy guard, and the emoji.
+message edits, deferral, and the _busy guard.
 """
 
 from typing import List, NamedTuple, Optional, Tuple

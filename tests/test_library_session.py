@@ -289,8 +289,17 @@ class TestTheSeam:
             "musicbot.library_browse",
         }
         assert {n.split(".")[0] for n in names} == {"typing", "musicbot"}
-        # and the one allowed exception really is TYPE_CHECKING-only
-        assert "from musicbot import library_metadata" in source
+        # and the one allowed exception really is TYPE_CHECKING-only,
+        # and is all that block holds
+        blocks = [
+            n
+            for n in tree.body
+            if isinstance(n, ast.If)
+            and getattr(n.test, "id", None) == "TYPE_CHECKING"
+        ]
+        assert [ast.unparse(s) for b in blocks for s in b.body] == [
+            "from musicbot import library_metadata"
+        ]
 
 
 class TestTrimAndFormat:
