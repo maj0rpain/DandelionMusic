@@ -348,16 +348,8 @@ class LibraryBrowseView(LibraryView):
         and any scope holding no file to read tags and embedded
         artwork off."""
         cursor = self.session.cursor
-        sample = cursor.sample_track()
-        if sample is None:
-            return None
-        path = library.song_path(*sample)
-        if cursor.album is None:
-            return await library_metadata.get_artist_enrichment(
-                cursor.artist, path
-            )
-        return await library_metadata.get_album_enrichment(
-            cursor.artist, cursor.album, path
+        return await library_metadata.get_enrichment(
+            cursor.index, cursor.artist, cursor.album
         )
 
     @staticmethod
