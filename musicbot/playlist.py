@@ -1,12 +1,13 @@
 import random
 from typing import Optional
 from collections import deque
+from enum import StrEnum
 
 from discord import Embed
 
 from config import config
 from musicbot.song import Song
-from musicbot.utils import StrEnum, songs_embed
+from musicbot.utils import songs_embed
 
 LoopMode = StrEnum("LoopMode", config.get_dict("LoopMode"))
 LoopState = StrEnum("LoopState", config.get_dict("LoopState"))
