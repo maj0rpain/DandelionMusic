@@ -186,8 +186,9 @@ class TestScreen:
         assert c.screen().entries == root.entries
 
     def test_counts_are_present_exactly_at_the_root(self):
-        """stat_fields() unpacks counts into three names without
-        a guard, having tested the cursor's position instead."""
+        """stat_fields() picks its branch from the screen's own
+        fields, so a screen carries counts exactly at the root and
+        stats below it."""
         c = cursor()
         assert c.screen().counts == (3, 4, 7)
         assert c.screen().stats is None

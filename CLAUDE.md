@@ -31,8 +31,8 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/linkutils.py` - URL classification and Spotify resolution.
 - `musicbot/library_metadata.py` - library enrichment (Last.fm/Spotify stats and art, embedded covers); the four remote lookups are `CachedLookup` instances, and `clear_caches()` clears them with the local caches.
 - `musicbot/cached_lookup.py` - `CachedLookup`: a remote lookup's cache, in-flight dedup (shielded), timeout and failure cooldown, around a backend passed in; imports only the standard library.
-- `musicbot/library_browse.py` - the library browse cursor; `LibraryBrowseView` is its Discord adapter.
-- `musicbot/library_session.py` - `BrowseSession` and `Frame`: the browse cursor plus what the browse message shows (drawn enrichment, attachment key, undo, one synchronous frame per draw); Discord-free.
+- `musicbot/library_browse.py` - the library browse cursor.
+- `musicbot/library_session.py` - `BrowseSession` and `Frame`: the browse cursor plus what the browse message shows (drawn enrichment, attachment key, undo, one synchronous frame per draw); Discord-free. `LibraryBrowseView` is its Discord adapter.
 - `musicbot/views.py` - `OwnedView`: a single-owner view's owner check, silent refusal, message and message edit; `SearchView` and `LibraryView` subclass it.
 - `musicbot/settings.py` - SQLAlchemy models, auto-migrations, guild whitelist; the `SETTINGS` table of `SettingDescriptor`s is the single place a guild setting is described (its column aside): it drives defaults, conversion, the `d!setting show` embed and the generated `d!setting` subcommands.
 - `musicbot/commands/` - the `music`, `general`, `developer` cogs.

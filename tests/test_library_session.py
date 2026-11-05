@@ -4,12 +4,12 @@ Synchronous throughout, like the cursor's tests.
 """
 
 import ast
+from collections import namedtuple
 from pathlib import Path
 
 from musicbot import library, library_browse, library_session
 from musicbot.library import LibrarySong
 from musicbot.library_session import BrowseSession, stat_fields
-from collections import namedtuple
 
 Art = namedtuple("Art", "url data extension")
 Ext = namedtuple(
