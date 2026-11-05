@@ -32,7 +32,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/loader.py` - yt-dlp extraction in two worker processes, the load lane and the preload lane; calling it before `init()` raises `LoaderNotRunning`.
 - `musicbot/linkutils.py` - URL classification and Spotify resolution.
 - `musicbot/library_metadata.py` - library enrichment (Last.fm/Spotify stats and art, embedded covers); the four remote lookups are `CachedLookup` instances, and `clear_caches()` clears them with the local caches.
-- `musicbot/cached_lookup.py` - `CachedLookup`: a remote lookup's cache, in-flight dedup (shielded), timeout and failure cooldown, around a backend passed in; imports only the standard library.
+- `musicbot/cached_lookup.py` - `CachedLookup`: a remote lookup's cache, in-flight dedup (shielded), timeout and failure cooldown, around a backend passed in and an optional passed-in store (a `dict` by default; `ByteBoundedStore` keeps the art cache's byte-budget and entry-cap eviction); imports only the standard library.
 - `musicbot/library_browse.py` - the library browse cursor.
 - `musicbot/library_session.py` - `BrowseSession` and `Frame`: the browse cursor plus what the browse message shows (drawn enrichment, attachment key, undo, one synchronous frame per draw); Discord-free. `LibraryBrowseView` is its Discord adapter.
 - `musicbot/views.py` - `OwnedView`: a single-owner view's owner check, silent refusal, message and message edit; `SearchView` and `LibraryView` subclass it.
