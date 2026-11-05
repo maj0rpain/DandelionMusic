@@ -12,6 +12,6 @@
 
 **Guild whitelist** - The guilds the bot may stay in. When it is empty the whitelist is *disabled* and every guild is *admitted*; otherwise a guild is admitted only if it is listed. A change that leaves a present guild unadmitted makes the bot leave it.
 
-**Playback** - one guild's start/advance/stop state machine over its voice connection: which track is starting or playing, which comes next, and when the playlist backup is written. Distinct from a guild session (the guild's settings and controller, `GuildSessions`). Its states are idle, starting (a track is claimed but its preload has not finished) and active (playing or paused).
+**Playback** - one guild's start/advance/stop state machine over its voice connection: which track is starting or playing, which comes next, and when the playlist backup is written. Distinct from a guild session (the guild's settings, controller and player panel, `GuildSessions`). Its states are idle, starting (a track is claimed but its preload has not finished) and active (playing or paused).
 
 **Player panel**: A guild's playback-facing side in Discord: the channel the bot posts playback news to (now playing, skipped tracks), and the one message whose buttons follow the playback state. _Avoid_: view, now-playing message.

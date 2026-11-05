@@ -171,6 +171,14 @@ class PlayerPanel:
         except Exception:
             _log("Failed to strip the player buttons:")
 
+    async def _take_down(self) -> None:
+        """Forgets the player message and its drawn snapshot, then
+        strips the old message's buttons, if there was one."""
+        message, drawn = self._message, self._drawn
+        self._forget()
+        if message is not None:
+            await self._strip(message, drawn)
+
     async def attach(self, send):
         """Moves the buttons onto the message `send` sends.
 
@@ -181,10 +189,7 @@ class PlayerPanel:
         raises, the error propagates and no message is recorded.
         """
         async with self._lock:
-            previous, drawn = self._message, self._drawn
-            self._forget()
-            if previous is not None:
-                await self._strip(previous, drawn)
+            await self._take_down()
             snapshot = self._snapshot()
             res = await send(self._layout(snapshot))
             if isinstance(res, discord.Interaction):
@@ -204,14 +209,13 @@ class PlayerPanel:
         if snapshot == self._drawn:
             return
         if not snapshot.active:
-            drawn = self._drawn
-            self._forget()
-            await self._strip(message, drawn)
+            await self._take_down()
             return
         view = self._layout(snapshot)
         try:
             await message.edit(view=view)
-            self._drawn = snapshot
+            if self._message is message:
+                self._drawn = snapshot
         except discord.HTTPException as e:
             if e.code == INVALID_WEBHOOK_TOKEN:
                 await self._recover(message, view, snapshot)
@@ -224,17 +228,21 @@ class PlayerPanel:
         try:
             fresh = await message.channel.fetch_message(message.id)
         except discord.NotFound:
-            self._forget()
+            if self._message is message:
+                self._forget()
             return
         except Exception:
             _log("Failed to refetch the player message:")
-            self._forget()
+            if self._message is message:
+                self._forget()
             return
-        if self._message is message:
-            self._message = fresh
+        if self._message is not message:
+            return
+        self._message = fresh
         try:
             await fresh.edit(view=view)
-            self._drawn = snapshot
+            if self._message is fresh:
+                self._drawn = snapshot
         except Exception:
             _log("Failed to update the refetched player message:")
             if self._message is fresh:
@@ -273,10 +281,7 @@ class PlayerPanel:
     async def playback_ended(self) -> None:
         """Forgets the player message, then strips its buttons: a
         failed strip is logged and never retried or raised."""
-        message, drawn = self._message, self._drawn
-        self._forget()
-        if message is not None:
-            await self._strip(message, drawn)
+        await self._take_down()
 
     # -- button callbacks -----------------------------------------------
 

@@ -198,6 +198,18 @@ def http_error():
     )
 
 
+def coded_error(cls, status, code):
+    class Response:
+        def __init__(self):
+            self.status = status
+            self.reason = "x"
+
+    return cls(Response(), {"code": code, "message": "x"})
+
+
+EXPIRED = coded_error(discord.HTTPException, 401, 50027)
+
+
 # The player view's button ids, in its order. Hand-written because
 # parametrize reads it at collection; test_player_panel checks it
 # against the real view.

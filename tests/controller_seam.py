@@ -209,9 +209,13 @@ def _musicbot_modules():
 
 
 @contextlib.contextmanager
-def controller_seam(workdir: Path) -> Iterator[Tuple[object, StubLoader]]:
+def controller_seam(
+    workdir: Path, make_panel=None
+) -> Iterator[Tuple[object, StubLoader]]:
     """Yields (controller, stub loader), run from `workdir`, with
-    config.ANNOUNCE_DISCONNECT off while the seam is open."""
+    config.ANNOUNCE_DISCONNECT off while the seam is open. The
+    controller's panel is a `RecordingPanel`, or, given,
+    `make_panel(guild, get_controller)`."""
     stub = StubLoader()
     saved_modules = _musicbot_modules()
     package = saved_modules.get("musicbot")
@@ -235,9 +239,15 @@ def controller_seam(workdir: Path) -> Iterator[Tuple[object, StubLoader]]:
         guild = ControllerGuild(voice_client=voice_client)
         bot = ControllerBot()
         bot.sessions.add_settings(guild, ControllerSettings())
-        yield audiocontroller.AudioController(
-            bot, guild, RecordingPanel()
-        ), stub
+        holder = []
+        panel = (
+            RecordingPanel()
+            if make_panel is None
+            else make_panel(guild, lambda: holder[0])
+        )
+        built = audiocontroller.AudioController(bot, guild, panel)
+        holder.append(built)
+        yield built, stub
     finally:
         config.ANNOUNCE_DISCONNECT = old_announce
         os.chdir(old_cwd)

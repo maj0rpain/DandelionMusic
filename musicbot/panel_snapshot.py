@@ -20,7 +20,7 @@ class PanelSnapshot:
     has_previous: bool
     has_next: bool
     queue_empty: bool
-    loop_mode: str
+    loop_mode: LoopMode
     volume: int
     current_song: Optional[Song]
 

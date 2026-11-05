@@ -2094,28 +2094,6 @@ def test_the_controller_imports_nothing_from_discord_ui():
 # send raises 50027 never stalls playback ---
 
 
-class _ExpiredChannel:
-    async def send(self, *args, **kwargs):
-        from test_player_panel import EXPIRED
-
-        raise EXPIRED
-
-
-def _with_real_panel(controller):
-    from musicbot.player_panel import PlayerPanel
-
-    holder = []
-    panel = PlayerPanel(
-        controller.guild,
-        lambda: holder[0],
-        lambda: types.SimpleNamespace(announce_songs=True),
-    )
-    panel.direct_to(_ExpiredChannel())
-    real = type(controller)(controller.bot, controller.guild, panel)
-    holder.append(real)
-    return real
-
-
 def test_a_play_starts_announced_on_the_panel(controller, monkeypatch):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first")
@@ -2126,10 +2104,10 @@ def test_a_play_starts_announced_on_the_panel(controller, monkeypatch):
 
 
 def test_a_failed_announcement_still_lets_the_next_preload_be_scheduled(
-    controller, stub_loader, monkeypatch, capsys
+    expired_panel_seam, monkeypatch, capsys
 ):
+    real, stub_loader = expired_panel_seam
     _fake_ffmpeg(monkeypatch)
-    real = _with_real_panel(controller)
     _queue(real, "first", "second")
 
     _run(real, lambda: _start_playing(real))
@@ -2139,9 +2117,9 @@ def test_a_failed_announcement_still_lets_the_next_preload_be_scheduled(
 
 
 def test_a_failed_skipped_notice_still_lets_the_queue_advance(
-    controller, stub_loader, monkeypatch
+    expired_panel_seam, monkeypatch
 ):
-    real = _with_real_panel(controller)
+    real, stub_loader = expired_panel_seam
 
     async def scenario():
         release, task, _ = _pending_start(

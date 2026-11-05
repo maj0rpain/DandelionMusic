@@ -11,20 +11,8 @@ from config import config
 from musicbot import admission
 from musicbot.panel_snapshot import PanelSnapshot
 from musicbot.player_panel import PlayerPanel
-from discord_fakes import PLAYER_BUTTONS
+from discord_fakes import EXPIRED, PLAYER_BUTTONS, coded_error
 from helpers import run
-
-
-def coded_error(cls, status, code):
-    class Response:
-        def __init__(self):
-            self.status = status
-            self.reason = "x"
-
-    return cls(Response(), {"code": code, "message": "x"})
-
-
-EXPIRED = coded_error(discord.HTTPException, 401, 50027)
 
 
 def snap(**overrides):
@@ -431,6 +419,56 @@ def test_another_http_error_keeps_the_message_for_the_next_tick(capsys):
 
     assert "Failed to update" in capsys.readouterr().err
     assert len(message.edits) == 1 and message.edits[0] is not None
+
+
+def attach_during(rig, message, target, attr, new_snapshot=None):
+    """Makes `target.<attr>` (an async method) first attach `message` as
+    the player message, as a command arriving mid-refresh would."""
+    original = getattr(target, attr)
+    once = []
+
+    async def replaced(*args, **kwargs):
+        async def send(view):
+            return message
+
+        if not once:
+            once.append(True)
+            if new_snapshot is not None:
+                rig.controller.snapshot = new_snapshot
+            await rig.panel.attach(send)
+        return await original(*args, **kwargs)
+
+    setattr(target, attr, replaced)
+
+
+def test_a_message_attached_during_a_refetch_survives_its_failure():
+    rig = Rig()
+    channel = PanelChannel()
+    channel.fetch_error = coded_error(discord.NotFound, 404, 10008)
+    stale = PanelMessage(channel, errors=[EXPIRED])
+    newer = PanelMessage()
+    rig.attach(stale)
+    rig.controller.snapshot = snap(volume=0)
+    attach_during(rig, newer, channel, "fetch_message")
+
+    rig.refresh()
+    run(rig.panel.playback_ended())
+
+    assert newer.edits[-1:] == [None]
+
+
+def test_a_message_attached_during_an_edit_is_drawn_as_attached():
+    rig = Rig()
+    message = PanelMessage()
+    newer = PanelMessage()
+    rig.attach(message)
+    rig.controller.snapshot = snap(volume=0)
+    attach_during(rig, newer, message, "edit", snap(volume=5))
+
+    rig.refresh()
+    rig.refresh()
+
+    assert newer.edits == []
 
 
 # -- the destination ---------------------------------------------------

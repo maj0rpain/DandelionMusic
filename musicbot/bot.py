@@ -74,7 +74,7 @@ class MusicBot(commands.Bot):
         super().__init__(*args, **kwargs)
         self.initial_extensions = initial_extensions
 
-        # every guild's session: its settings and its audio controller
+        # every guild's session: its settings, controller and panel
         self.sessions: GuildSessions[
             discord.Guild, PlayerPanel, AudioController, GuildSettings
         ] = GuildSessions(
@@ -121,17 +121,17 @@ class MusicBot(commands.Bot):
 
     async def _gather_per_guild(self, make_coro, action: str, items=None):
         """Run make_coro(item) for every controller (or every item of
-        `items()`); one guild's failure is logged and never stops the
-        others."""
-        controllers = list(items() if items else self.sessions)
+        `items()`, e.g. the panels); one guild's failure is logged and
+        never stops the others."""
+        targets = list(items() if items else self.sessions)
         results = await asyncio.gather(
-            *(make_coro(controller) for controller in controllers),
+            *(make_coro(target) for target in targets),
             return_exceptions=True,
         )
-        for controller, result in zip(controllers, results):
+        for target, result in zip(targets, results):
             if isinstance(result, BaseException):
                 print(
-                    f"{action} failed for guild {controller.guild.name}:",
+                    f"{action} failed for guild {target.guild.name}:",
                     file=sys.stderr,
                     flush=True,
                 )
@@ -386,7 +386,7 @@ class Context(commands.Context):
         # absolutely_ready the way process_commands gates prefix
         # commands, so it can land before on_ready has registered this
         # guild - and self.guild is None outside a guild entirely.
-        # With no controller there is no playback message to carry the
+        # With no panel there is no playback message to carry the
         # view, so fall through to the plain send below.
         panel = self.bot.sessions.panel(self.guild)
         # bound here: a zero-argument super() inside the closure below

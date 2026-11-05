@@ -1,11 +1,11 @@
 """The per-guild session registry.
 
-A guild's session has two halves, its settings and its audio
-controller, kept separately: a guild can be settings-only (loaded in
+A guild's session has its settings, its audio controller and its
+player panel, kept separately: a guild can be settings-only (loaded in
 bulk before any controller exists, or left that way when building one
-failed), and that is a legal state. `controller()` and `settings()`
-are the single readiness policy - each returns None for a half that
-is not registered.
+failed), and that is a legal state. `controller()`, `settings()` and
+`panel()` are the single readiness policy - each returns None for a
+part that is not registered.
 """
 
 import sys
@@ -114,8 +114,8 @@ class GuildSessions(Generic[Guild, Panel, Controller, Settings]):
         return controller
 
     async def discard(self, guild: Guild) -> None:
-        """Dispose of the guild's controller, if any, and drop both
-        halves - even when dispose() raises."""
+        """Dispose of the guild's controller, if any, and drop every
+        part - even when dispose() raises."""
         controller = self._controllers.get(guild)
         try:
             if controller is not None:

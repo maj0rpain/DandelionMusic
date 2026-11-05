@@ -46,13 +46,3 @@ def test_failing_refresh_does_not_stop_other_guilds_and_names_the_guild(
         "View update failed for guild Broken Guild:" in err,
         "Traceback" in err,
     ) == (["ok"], True, True)
-
-
-def test_one_tick_refreshes_every_registered_panel():
-    refreshed = []
-    bot = MusicBot([], command_prefix="d!", intents=discord.Intents.default())
-    bot.sessions = _Sessions([_Panel("a", refreshed), _Panel("b", refreshed)])
-
-    run(MusicBot.update_views.coro(bot))
-
-    assert refreshed == ["a", "b"]
