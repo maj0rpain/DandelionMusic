@@ -138,6 +138,34 @@ def controller_and_stub(tmp_path):
 
 
 @pytest.fixture
+def expired_panel_seam(tmp_path):
+    """(controller, stub loader) over a real PlayerPanel whose
+    destination channel's send always fails with an expired token."""
+    from controller_seam import controller_seam
+    from discord_fakes import EXPIRED
+
+    class ExpiredChannel:
+        async def send(self, *args, **kwargs):
+            raise EXPIRED
+
+    def make_panel(guild, get_controller):
+        import types
+
+        from musicbot.player_panel import PlayerPanel
+
+        panel = PlayerPanel(
+            guild,
+            get_controller,
+            lambda: types.SimpleNamespace(announce_songs=True),
+        )
+        panel.direct_to(ExpiredChannel())
+        return panel
+
+    with controller_seam(tmp_path, make_panel) as built:
+        yield built
+
+
+@pytest.fixture
 def controller(controller_and_stub):
     return controller_and_stub[0]
 

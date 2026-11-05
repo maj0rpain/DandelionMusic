@@ -73,7 +73,6 @@ class FakeController:
     def __init__(self, outcomes):
         self.outcomes = outcomes
         self.processed = []
-        self.command_channel = object()
 
     async def process_song(self, url, user=None):
         self.processed.append(url)
@@ -104,6 +103,7 @@ def react(
     sent = []
     message = SimpleNamespace(content=content or " ".join(outcomes))
     channel = FakeChannel(message)
+    known = {channel.id: channel}
     controller = FakeController(outcomes)
     sett = SimpleNamespace(
         button_emote="x",
@@ -118,8 +118,12 @@ def react(
             # a plain channel lookup does not see threads
             return None if thread or not resolves else channel
 
-        def get_channel_or_thread(self, _id):
-            return channel if resolves else None
+        def get_channel_or_thread(self, channel_id):
+            # a channel with the id asked for, so the id passed on shows
+            if not resolves:
+                return None
+            fresh = FakeChannel(message, channel_id)
+            return known.setdefault(channel_id, fresh)
 
     guild = Guild()
     mine = guild.channel("mine", humans=1, **(reactor_perms or {}))
@@ -153,6 +157,7 @@ def react(
         emoji=SimpleNamespace(name="x", id=None),
     )
     react.guild = guild
+    react.panel = bot.sessions.panel(guild)
     run(Button(bot).on_raw_reaction_add(event))
     return controller.processed, sent
 
@@ -242,3 +247,22 @@ def test_reaction_while_the_bot_sits_alone_elsewhere_moves_it(no_sleep):
     processed, _ = react({A: object()}, bot_in="other")
     assert processed == [A]
     assert react.guild.events == [("move", "mine")]
+
+
+def test_a_configured_command_channel_is_the_panels_fallback_destination():
+    react({A: object()}, command_channel=2)
+
+    ((channel, replace),) = react.panel.directed
+    assert (channel.id, replace) == (2, False)
+
+
+def test_no_configured_command_channel_directs_the_panel_nowhere():
+    react({A: object()}, command_channel=None)
+
+    assert react.panel.directed == []
+
+
+def test_an_unresolved_command_channel_directs_the_panel_nowhere():
+    react({A: object()}, command_channel=2, resolves=False)
+
+    assert react.panel.directed == []

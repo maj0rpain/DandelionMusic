@@ -23,6 +23,7 @@ from musicbot.settings import (
     migrate_old_playlists,
 )
 from musicbot import guild_whitelist
+from musicbot.player_panel import PlayerPanel
 from musicbot.sessions import GuildSessions
 from musicbot.utils import VC_CONNECT_TIMEOUT, CheckError
 
@@ -73,11 +74,16 @@ class MusicBot(commands.Bot):
         super().__init__(*args, **kwargs)
         self.initial_extensions = initial_extensions
 
-        # every guild's session: its settings and its audio controller
+        # every guild's session: its settings, controller and panel
         self.sessions: GuildSessions[
-            discord.Guild, AudioController, GuildSettings
+            discord.Guild, PlayerPanel, AudioController, GuildSettings
         ] = GuildSessions(
-            lambda guild: AudioController(self, guild),
+            lambda guild: PlayerPanel(
+                guild,
+                lambda: self.sessions.controller(guild),
+                lambda: self.sessions.settings(guild),
+            ),
+            lambda guild, panel: AudioController(self, guild, panel),
             lambda guilds: GuildSettings.load_many(self, guilds),
         )
 
@@ -113,18 +119,19 @@ class MusicBot(commands.Bot):
         loader.init()
         return await super().start(*args, **kwargs)
 
-    async def _gather_per_guild(self, make_coro, action: str):
-        """Run make_coro(controller) for every controller; one guild's
-        failure is logged and never stops the others."""
-        controllers = list(self.sessions)
+    async def _gather_per_guild(self, make_coro, action: str, items=None):
+        """Run make_coro(item) for every controller (or every item of
+        `items()`, e.g. the panels); one guild's failure is logged and
+        never stops the others."""
+        targets = list(items() if items else self.sessions)
         results = await asyncio.gather(
-            *(make_coro(controller) for controller in controllers),
+            *(make_coro(target) for target in targets),
             return_exceptions=True,
         )
-        for controller, result in zip(controllers, results):
+        for target, result in zip(targets, results):
             if isinstance(result, BaseException):
                 print(
-                    f"{action} failed for guild {controller.guild.name}:",
+                    f"{action} failed for guild {target.guild.name}:",
                     file=sys.stderr,
                     flush=True,
                 )
@@ -272,7 +279,9 @@ class MusicBot(commands.Bot):
     @tasks.loop(seconds=1)
     async def update_views(self):
         await self._gather_per_guild(
-            lambda controller: controller.update_view(), "View update"
+            lambda panel: panel.refresh(),
+            "Panel refresh",
+            self.sessions.panels,
         )
 
     async def get_prefix(self, message: discord.Message):
@@ -379,25 +388,19 @@ class Context(commands.Context):
         # absolutely_ready the way process_commands gates prefix
         # commands, so it can land before on_ready has registered this
         # guild - and self.guild is None outside a guild entirely.
-        # With no controller there is no playback message to carry the
+        # With no panel there is no playback message to carry the
         # view, so fall through to the plain send below.
-        audiocontroller = self.bot.sessions.controller(self.guild)
-        channel = audiocontroller.command_channel if audiocontroller else None
+        panel = self.bot.sessions.panel(self.guild)
         # bound here: a zero-argument super() inside the closure below
         # would bind to its `view` parameter and raise TypeError
         super_send = super().send
-        if (
-            audiocontroller is None
-            or "view" in kwargs
-            or kwargs.get("ephemeral", False)
-            or (
-                channel
-                # unwrap channel from context
-                and getattr(channel, "channel", channel) != self.channel
-            )
+        if panel is None or not panel.carries_buttons(
+            channel=self.channel,
+            ephemeral=kwargs.get("ephemeral", False),
+            has_view="view" in kwargs,
         ):
-            # sending ephemeral message or using different channel
-            # don't bother with views
+            # an ephemeral reply, one with its own view, or one in
+            # another channel does not carry the buttons
             return await self._send_routed(super_send, *args, **kwargs)
 
         async def send_with_view(view):
@@ -407,7 +410,7 @@ class Context(commands.Context):
                 super_send, *args, original_response=True, **kwargs
             )
 
-        return await audiocontroller.attach_view(send_with_view)
+        return await panel.attach(send_with_view)
 
 
 class UniversalHelpCommand(DefaultHelpCommand):

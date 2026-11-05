@@ -1,11 +1,11 @@
 """The per-guild session registry.
 
-A guild's session has two halves, its settings and its audio
-controller, kept separately: a guild can be settings-only (loaded in
+A guild's session has its settings, its audio controller and its
+player panel, kept separately: a guild can be settings-only (loaded in
 bulk before any controller exists, or left that way when building one
-failed), and that is a legal state. `controller()` and `settings()`
-are the single readiness policy - each returns None for a half that
-is not registered.
+failed), and that is a legal state. `controller()`, `settings()` and
+`panel()` are the single readiness policy - each returns None for a
+part that is not registered.
 """
 
 import sys
@@ -25,21 +25,27 @@ from config import config
 
 Guild = TypeVar("Guild")
 Controller = TypeVar("Controller")
+Panel = TypeVar("Panel")
 Settings = TypeVar("Settings")
 
 
-class GuildSessions(Generic[Guild, Controller, Settings]):
+class GuildSessions(Generic[Guild, Panel, Controller, Settings]):
     def __init__(
         self,
-        controller_factory: Callable[[Guild], Controller],
+        panel_factory: Callable[[Guild], Panel],
+        controller_factory: Callable[[Guild, Panel], Controller],
         settings_loader: Callable[
             [Iterable[Guild]], Awaitable[Mapping[Guild, Settings]]
         ],
     ):
-        """`controller_factory(guild)` builds a controller;
+        """`panel_factory(guild)` builds a guild's player panel, which
+        is built before its controller; `controller_factory(guild,
+        panel)` builds the controller around that panel;
         `settings_loader(guilds)` loads (creating where missing) the
         settings of every guild given, keyed by guild."""
+        self._build_panel = panel_factory
         self._build_controller = controller_factory
+        self._panels: Dict[Guild, Panel] = {}
         self._load_settings = settings_loader
         self._controllers: Dict[Guild, Controller] = {}
         self._settings: Dict[Guild, Settings] = {}
@@ -47,8 +53,24 @@ class GuildSessions(Generic[Guild, Controller, Settings]):
     def controller(self, guild: Guild) -> Optional[Controller]:
         return self._controllers.get(guild)
 
+    def panel(self, guild: Guild) -> Optional[Panel]:
+        return self._panels.get(guild)
+
+    def panels(self) -> Iterator[Panel]:
+        # a snapshot, like __iter__
+        return iter(list(self._panels.values()))
+
     def settings(self, guild: Guild) -> Optional[Settings]:
         return self._settings.get(guild)
+
+    def _build(self, guild: Guild) -> Controller:
+        """Builds the guild's panel, then its controller around it,
+        registering both only once the controller exists."""
+        panel = self._build_panel(guild)
+        controller = self._build_controller(guild, panel)
+        self._panels[guild] = panel
+        self._controllers[guild] = controller
+        return controller
 
     def __iter__(self) -> Iterator[Controller]:
         # a snapshot: a guild discarded while a caller awaits between
@@ -74,7 +96,7 @@ class GuildSessions(Generic[Guild, Controller, Settings]):
         # settings first: a factory that raises leaves the guild
         # settings-only rather than half-registered
         sett = await self._ensure_settings(guild)
-        controller = self._controllers[guild] = self._build_controller(guild)
+        controller = self._build(guild)
 
         if config.GLOBAL_DISABLE_AUTOJOIN_VC or sett.vc_timeout:
             return controller
@@ -92,14 +114,15 @@ class GuildSessions(Generic[Guild, Controller, Settings]):
         return controller
 
     async def discard(self, guild: Guild) -> None:
-        """Dispose of the guild's controller, if any, and drop both
-        halves - even when dispose() raises."""
+        """Dispose of the guild's controller, if any, and drop every
+        part - even when dispose() raises."""
         controller = self._controllers.get(guild)
         try:
             if controller is not None:
                 await controller.dispose()
         finally:
             self._controllers.pop(guild, None)
+            self._panels.pop(guild, None)
             self._settings.pop(guild, None)
 
     async def reset(self, guild: Guild, reason: str = "reset") -> Controller:
@@ -108,7 +131,7 @@ class GuildSessions(Generic[Guild, Controller, Settings]):
         the old controller or building the new one fails."""
         await self._ensure_settings(guild)
         old = self._controllers.pop(guild, None)
+        self._panels.pop(guild, None)
         if old is not None:
             await old.dispose(reason)
-        controller = self._controllers[guild] = self._build_controller(guild)
-        return controller
+        return self._build(guild)
