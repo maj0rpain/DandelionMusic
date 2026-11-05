@@ -73,7 +73,6 @@ class FakeController:
     def __init__(self, outcomes):
         self.outcomes = outcomes
         self.processed = []
-        self.command_channel = object()
 
     async def process_song(self, url, user=None):
         self.processed.append(url)

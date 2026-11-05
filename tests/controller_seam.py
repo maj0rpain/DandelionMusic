@@ -79,10 +79,19 @@ class StubLoader(types.ModuleType):
 
 class RecordingPanel:
     """The controller's panel port, recording its calls: `ended` counts
-    playback_ended() calls. No `discord.ui` is needed."""
+    playback_ended() calls, `announced` and `skipped` list the songs
+    passed to announce() and report_skipped(). No `discord.ui` is needed."""
 
     def __init__(self):
         self.ended = 0
+        self.announced = []
+        self.skipped = []
+
+    async def announce(self, song):
+        self.announced.append(song)
+
+    async def report_skipped(self, song):
+        self.skipped.append(song)
 
     async def playback_ended(self):
         self.ended += 1

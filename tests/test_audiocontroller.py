@@ -39,16 +39,6 @@ from helpers import run
 MIX = playlists.PlaylistRef("1234", "mix")
 
 
-class _RecordingChannel:
-    """A channel or context: records what the controller sends."""
-
-    def __init__(self):
-        self.sent = []
-
-    async def send(self, *args, **kwargs):
-        self.sent.append((args, kwargs))
-
-
 async def _start_playing(controller):
     """Starts the queue head on the running loop and lets it settle."""
     controller.bot.loop = asyncio.get_running_loop()
@@ -1483,7 +1473,6 @@ def _pending_start(controller, stub_loader, monkeypatch, *titles, result=None):
     """Queues `titles` and starts the first one with its preload held.
     Returns (release event, the start's task, its song)."""
     _fake_ffmpeg(monkeypatch)
-    controller.command_channel = _RecordingChannel()
     _queue(controller, *titles)
     slow = controller.playlist[0]
     release = stub_loader.hold(slow, result)
@@ -1644,7 +1633,7 @@ def test_prev_during_a_pending_start_plays_the_previous_track_only(
     assert _played(controller) == ["old"]
     assert "slow" not in later
     assert controller.guild.voice_client.disconnected is False
-    assert controller.command_channel.sent == []
+    assert controller.panel.skipped == []
 
 
 def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
@@ -1669,7 +1658,7 @@ def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
     assert later == []
     assert controller.guild.voice_client.disconnected is False
     assert _titles(controller) == ["next", "third"]
-    assert controller.command_channel.sent == []
+    assert controller.panel.skipped == []
 
 
 def _preloads_after_release(controller, stub_loader, monkeypatch, act):
@@ -1700,7 +1689,7 @@ def test_a_stop_during_a_pending_start_leaves_nothing_playing(
 
     assert _played(controller) == []
     assert later == []
-    assert controller.command_channel.sent == []
+    assert controller.panel.skipped == []
     assert controller.guild.voice_client.disconnected is False
 
 
@@ -1714,7 +1703,7 @@ def test_a_disconnect_during_a_pending_start_leaves_nothing_playing(
 
     assert _played(controller) == []
     assert later == []
-    assert controller.command_channel.sent == []
+    assert controller.panel.skipped == []
     assert controller.guild.voice_client.disconnected is True
 
 
@@ -1730,7 +1719,7 @@ def test_losing_the_voice_client_during_a_pending_start_plays_nothing(
 
     assert voice_client.played == []
     assert later == []
-    assert controller.command_channel.sent == []
+    assert controller.panel.skipped == []
     # the abandoned start no longer holds the bot busy
     controller.guild.voice_client = voice_client
     assert controller.is_idle()
@@ -1756,7 +1745,7 @@ def test_a_stale_failed_preload_skips_nothing_and_moves_nothing(
 
     _run(controller, scenario)
     assert _played(controller) == ["old"]
-    assert controller.command_channel.sent == []
+    assert controller.panel.skipped == []
     # "slow" is gone because the queue preload behind "old" met its
     # FAILED result; "next" was not started or dropped by the stale one
     assert _titles(controller) == ["old", "next"]
@@ -1780,7 +1769,7 @@ def test_a_current_failed_preload_skips_to_the_next_track(
 
     _run(controller, scenario)
 
-    assert len(controller.command_channel.sent) == 1
+    assert len(controller.panel.skipped) == 1
     assert _played(controller) == ["next"]
 
 
@@ -1811,7 +1800,6 @@ def test_a_stale_start_without_a_url_moves_nothing(
     async def scenario():
         controller.playlist.add(_without_url(controller, "slow"))
         _queue(controller, "next")
-        controller.command_channel = _RecordingChannel()
         _fake_ffmpeg(monkeypatch)
         release = stub_loader.hold(controller.playlist[0])
         task = asyncio.ensure_future(controller.ensure_playing())
@@ -1998,7 +1986,6 @@ def test_a_title_less_song_whose_preload_fails_is_skipped_by_its_url(
     controller, stub_loader, monkeypatch
 ):
     async def scenario():
-        controller.command_channel = _RecordingChannel()
         song = _title_less_song(controller)
         stub_loader.results["preload"] = stub_loader.Preload.FAILED
         await controller.play_song(song)
@@ -2006,8 +1993,8 @@ def test_a_title_less_song_whose_preload_fails_is_skipped_by_its_url(
 
     song = _run(controller, scenario)
 
-    ((args, _),) = controller.command_channel.sent
-    assert f"(Skipped: {song.webpage_url})" in args[0]
+    (reported,) = controller.panel.skipped
+    assert reported is song
 
 
 def test_remove_names_a_title_less_song_by_its_webpage_url(controller):
@@ -2101,3 +2088,78 @@ def test_the_controller_imports_nothing_from_discord_ui():
         and n.attr == "ui"
         for n in ast.walk(tree)
     )
+
+
+# --- the expired-token regression: the real panel over a channel whose
+# send raises 50027 never stalls playback ---
+
+
+class _ExpiredChannel:
+    async def send(self, *args, **kwargs):
+        from test_player_panel import EXPIRED
+
+        raise EXPIRED
+
+
+def _with_real_panel(controller):
+    from musicbot.player_panel import PlayerPanel
+
+    holder = []
+    panel = PlayerPanel(
+        controller.guild,
+        lambda: holder[0],
+        lambda: types.SimpleNamespace(announce_songs=True),
+    )
+    panel.direct_to(_ExpiredChannel())
+    real = type(controller)(controller.bot, controller.guild, panel)
+    holder.append(real)
+    return real
+
+
+def test_a_play_starts_announced_on_the_panel(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first")
+
+    _run(controller, lambda: _start_playing(controller))
+
+    assert [s.display_name for s in controller.panel.announced] == ["first"]
+
+
+def test_a_failed_announcement_still_lets_the_next_preload_be_scheduled(
+    controller, stub_loader, monkeypatch, capsys
+):
+    _fake_ffmpeg(monkeypatch)
+    real = _with_real_panel(controller)
+    _queue(real, "first", "second")
+
+    _run(real, lambda: _start_playing(real))
+
+    assert _preloaded(stub_loader) == ["first", "second"]
+    assert "Failed to send a playback message" in capsys.readouterr().err
+
+
+def test_a_failed_skipped_notice_still_lets_the_queue_advance(
+    controller, stub_loader, monkeypatch
+):
+    real = _with_real_panel(controller)
+
+    async def scenario():
+        release, task, _ = _pending_start(
+            real,
+            stub_loader,
+            monkeypatch,
+            "slow",
+            "next",
+            result=stub_loader.Preload.FAILED,
+        )
+        await _settle()
+        release.set()
+        await _finish(task)
+
+    _run(real, scenario)
+
+    assert _played(real) == ["next"]
+
+
+def test_the_controller_keeps_no_command_channel(controller):
+    assert not hasattr(controller, "command_channel")

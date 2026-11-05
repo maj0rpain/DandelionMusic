@@ -527,3 +527,105 @@ def test_the_queue_button_posts_the_queue_embed():
     run(rig.panel.queue(ctx))
 
     assert ctx.sent == [((), {"embed": rig.controller.embed})]
+
+
+# -- announcements --------------------------------------------------
+
+
+class SendChannel:
+    """A destination channel: records sends, raises `error` when set."""
+
+    def __init__(self, error=None):
+        self.sent = []
+        self.error = error
+
+    async def send(self, *args, **kwargs):
+        if self.error is not None:
+            raise self.error
+        message = PanelMessage()
+        self.sent.append((args, kwargs, message))
+        return message
+
+
+class Track:
+    display_name = "Tune"
+
+    def format_output(self, kind):
+        return ("embed", kind)
+
+
+def announce(rig, track=None):
+    run(rig.panel.announce(track or Track()))
+
+
+def skipped(rig):
+    run(rig.panel.report_skipped(Track()))
+
+
+def test_announce_sends_the_now_playing_embed_with_the_buttons():
+    rig = Rig()
+    channel = SendChannel()
+    rig.panel.direct_to(channel)
+
+    announce(rig)
+
+    ((_, kwargs, _),) = channel.sent
+    assert kwargs["embed"] == ("embed", config.SONGINFO_NOW_PLAYING)
+    assert [b.custom_id for b in kwargs["view"].children] == PLAYER_BUTTONS
+
+
+def test_report_skipped_sends_the_notice_with_the_buttons():
+    rig = Rig()
+    channel = SendChannel()
+    rig.panel.direct_to(channel)
+
+    skipped(rig)
+
+    ((_, kwargs, _),) = channel.sent
+    assert "(Skipped: Tune)" in kwargs["content"]
+    assert [b.custom_id for b in kwargs["view"].children] == PLAYER_BUTTONS
+
+
+def test_announce_honours_announce_songs():
+    rig = Rig()
+    rig.settings.announce_songs = False
+    channel = SendChannel()
+    rig.panel.direct_to(channel)
+
+    announce(rig)
+
+    assert channel.sent == []
+
+
+def test_announcements_send_nothing_without_a_destination():
+    rig = Rig()
+
+    announce(rig)
+    skipped(rig)
+
+
+def test_an_announcement_strips_the_previous_message_and_replaces_it():
+    rig = Rig()
+    channel = SendChannel()
+    rig.panel.direct_to(channel)
+    old = PanelMessage()
+    rig.attach(old)
+
+    announce(rig)
+    skipped(rig)
+
+    assert old.edits == [None]
+    first, second = channel.sent[0][2], channel.sent[1][2]
+    assert first.edits == [None]
+    run(rig.panel.playback_ended())
+    assert second.edits == [None]
+
+
+def test_a_failed_announcement_is_logged_and_not_raised(capsys):
+    rig = Rig()
+    rig.panel.direct_to(SendChannel(error=EXPIRED))
+
+    announce(rig)
+    skipped(rig)
+
+    assert "Failed to send a playback message" in capsys.readouterr().err

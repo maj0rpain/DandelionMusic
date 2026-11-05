@@ -105,8 +105,6 @@ class Button(commands.Cog):
             if sett.command_channel:
                 channel = serv.get_channel_or_thread(int(sett.command_channel))
                 if channel is not None:
-                    if not audiocontroller.command_channel:
-                        audiocontroller.command_channel = channel
                     self.bot.sessions.panel(serv).direct_to(
                         channel, replace=False
                     )

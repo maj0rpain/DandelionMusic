@@ -252,7 +252,6 @@ class TestMusicBeforeInvoke:
         ctx = slash_ctx(guild, here)
         run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == []
-        assert ctx.audiocontroller.command_channel is ctx
 
     def test_directs_the_panel_to_the_channel_not_the_context(self):
         guild = VoiceGuild()
@@ -647,9 +646,8 @@ def test_the_library_hook_directs_the_panel_to_the_channel():
 
     guild = VoiceGuild()
     ctx = slash_ctx(guild, guild.channel("a"))
-    ctx.audiocontroller = types.SimpleNamespace(command_channel=None)
+    ctx.audiocontroller = types.SimpleNamespace()
 
     run(Library(None).cog_before_invoke(ctx))
 
     assert ctx.bot.sessions.panel(guild).directed == [(ctx.channel, True)]
-    assert ctx.audiocontroller.command_channel is ctx

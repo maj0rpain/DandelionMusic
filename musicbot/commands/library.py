@@ -735,7 +735,6 @@ class Library(commands.Cog):
         return True
 
     async def cog_before_invoke(self, ctx):
-        ctx.audiocontroller.command_channel = ctx
         ctx.bot.sessions.panel(ctx.guild).direct_to(ctx.channel)
 
     # `lib` is a prefix-only alias: discord.py registers aliases for

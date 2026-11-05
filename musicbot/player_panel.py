@@ -3,7 +3,8 @@
 It owns the destination (the channel playback news goes to), the one
 player message whose buttons follow the playback state, that message's
 refresh and its recovery from a stale message or an expired token. It
-implements the controller's panel port (`playback_ended`)
+implements the controller's panel port (`announce`, `report_skipped`,
+`playback_ended`)
 and reads the controller only through a getter:
 `panel_snapshot()` to draw, `queue_embed()` on a queue click.
 """
@@ -238,6 +239,36 @@ class PlayerPanel:
             _log("Failed to update the refetched player message:")
             if self._message is fresh:
                 self._forget()
+
+    async def announce(self, song) -> None:
+        """The now-playing announcement, when the guild's
+        `announce_songs` is on and a destination is set. A failure is
+        logged, never raised."""
+        settings = self._settings()
+        if settings is None or not settings.announce_songs:
+            return
+        await self._post(embed=song.format_output(config.SONGINFO_NOW_PLAYING))
+
+    async def report_skipped(self, song) -> None:
+        """The notice for a track that failed to load, sent to the
+        destination if one is set. A failure is logged, never
+        raised."""
+        await self._post(
+            content=f"{config.SONGINFO_ERROR}\n"
+            f"(Skipped: {song.display_name})"
+        )
+
+    async def _post(self, **content) -> None:
+        """Sends to the raw destination the way `attach` does, so the
+        message becomes the player message. Sends nothing without a
+        destination; never raises."""
+        channel = self._channel
+        if channel is None:
+            return
+        try:
+            await self.attach(lambda view: channel.send(view=view, **content))
+        except Exception:
+            _log("Failed to send a playback message:")
 
     async def playback_ended(self) -> None:
         """Forgets the player message, then strips its buttons: a

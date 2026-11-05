@@ -49,7 +49,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - A new setting is a `Config` class attribute with a comment directly above it (parsed by `get_comments()`).
 - Don't move `_help`/`_help_autocomplete` into `MusicBot`; they stay module-level (`musicbot/bot.py`).
 - discord.py's `after=` callback runs on its audio thread; it only hops to the loop (`call_soon_threadsafe`). `Playback`'s track-ended handling and everything it calls are loop-only (`musicbot/playback.py`).
-- `musicbot/audiocontroller.py` imports nothing from `discord.ui`, and sends no user-facing message; the player panel does (a test asserts the import). Until the announcements move to the panel, the controller still sends the now-playing and skipped notices itself.
+- `musicbot/audiocontroller.py` imports nothing from `discord.ui`, and sends no user-facing message; the player panel does (a test asserts the import).
 - `musicbot/library_browse.py` imports only `musicbot.library` and `typing` (`tests/test_library_browse.py` asserts it) - don't add imports.
 - `musicbot/library_session.py` imports only `musicbot.library`, `musicbot.library_browse` and `typing`, plus `musicbot.library_metadata` inside `if TYPE_CHECKING:` only (`tests/test_library_session.py` asserts it) - don't add imports.
 

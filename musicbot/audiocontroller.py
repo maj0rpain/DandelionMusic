@@ -68,10 +68,10 @@ class AudioController(object):
 
     def __init__(self, bot: "MusicBot", guild: discord.Guild, panel):
         """`panel` is the controller's panel port, which for now has
-        one method: `playback_ended()`."""
+        three methods: `announce(song)`, `report_skipped(song)` and
+        `playback_ended()`."""
         self.bot = bot
         self.panel = panel
-        self.command_channel: Optional[discord.abc.Messageable] = None
         self.playlist = Playlist()
         self.pickle_file = Path("backup") / f"playlist_{guild.id}.pickle"
         self.pickle_file.parent.mkdir(parents=True, exist_ok=True)
@@ -89,8 +89,8 @@ class AudioController(object):
             next_track=lambda forced: self.playlist.next(forced),
             clear_queue=self._clear_queue,
             schedule_preload=self._schedule_preload,
-            announce=self._announce,
-            report_skipped=self._report_skipped,
+            announce=self.panel.announce,
+            report_skipped=self.panel.report_skipped,
             record_history=lambda name: self.playlist.add_name(name),
             write_backup=self._write_backup,
             queue_is_empty=lambda: not self.playlist,
@@ -156,21 +156,6 @@ class AudioController(object):
             ),
             float(self.volume) / 100.0,
         )
-
-    async def _announce(self, song: Song):
-        if (
-            self.bot.sessions.settings(self.guild).announce_songs
-            and self.command_channel
-        ):
-            await self.command_channel.send(
-                embed=song.format_output(config.SONGINFO_NOW_PLAYING)
-            )
-
-    async def _report_skipped(self, song: Song):
-        if self.command_channel:
-            await self.command_channel.send(
-                f"{config.SONGINFO_ERROR}\n" f"(Skipped: {song.display_name})"
-            )
 
     def load_pickle_playlist(self):
         if self.pickle_file.exists():
