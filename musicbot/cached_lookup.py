@@ -21,11 +21,93 @@ from typing import (
     Generic,
     Hashable,
     Optional,
+    Protocol,
     TypeVar,
 )
 
 K = TypeVar("K", bound=Hashable)
 V = TypeVar("V")
+
+
+class Store(Protocol[K, V]):
+    """The four operations `CachedLookup` uses on its store."""
+
+    def __contains__(self, key: object) -> bool:
+        """Part of the store protocol."""
+
+    def __getitem__(self, key: K) -> V:
+        """Part of the store protocol."""
+
+    def __setitem__(self, key: K, value: V) -> None:
+        """Part of the store protocol."""
+
+    def clear(self) -> None:
+        """Part of the store protocol."""
+
+
+class ByteBoundedStore(Generic[K, V]):
+    """A cache store bounded by total bytes and by entry count.
+
+    `size(value)` is a value's weight in bytes; a weightless value (a
+    remembered "nothing here") costs nothing against the byte budget.
+    Reads and writes both make an entry the most recently used.
+
+    - Over `budget`, the least recently used entry with nonzero size
+      is evicted, never the entry just stored (even if it alone is over
+      budget). Plain least-recently-used would walk a run of weightless
+      entries first, freeing nothing on each one.
+    - Over `max_entries`, the plain least recently used entry is
+      evicted, weightless or not.
+    """
+
+    def __init__(
+        self,
+        budget: int,
+        max_entries: int,
+        size: Callable[[V], int],
+    ) -> None:
+        self._budget = budget
+        self._max_entries = max_entries
+        self._size = size
+        # a dict keeps insertion order: the first key is the least
+        # recently used, and re-inserting a key makes it the newest
+        self._entries: Dict[K, V] = {}
+        self._total = 0
+
+    def __contains__(self, key: object) -> bool:
+        return key in self._entries
+
+    def __getitem__(self, key: K) -> V:
+        value = self._entries.pop(key)
+        self._entries[key] = value
+        return value
+
+    def __setitem__(self, key: K, value: V) -> None:
+        if key in self._entries:
+            # a replacement must discount what it replaced, or the
+            # total stays overstated and evicts entries that fit
+            self._total -= self._size(self._entries.pop(key))
+        self._entries[key] = value
+        self._total += self._size(value)
+        while self._total > self._budget:
+            victim = next(
+                (
+                    other
+                    for other, held in self._entries.items()
+                    if other != key and self._size(held)
+                ),
+                None,
+            )
+            if victim is None:
+                break
+            self._total -= self._size(self._entries.pop(victim))
+        while len(self._entries) > self._max_entries:
+            oldest = next(iter(self._entries))
+            self._total -= self._size(self._entries.pop(oldest))
+
+    def clear(self) -> None:
+        self._entries.clear()
+        self._total = 0
 
 
 class CachedLookup(Generic[K, V]):
@@ -46,6 +128,9 @@ class CachedLookup(Generic[K, V]):
       its full timeout again for each new key, so the key's retries
       are suppressed for this long.
     - `clock`: monotonic seconds, injectable for tests.
+    - `store`: where results are kept; a plain `dict` by default. It is
+      used only through `in`, `[]` get, `[]` set and `clear()`, so a
+      bounded store such as `ByteBoundedStore` can stand in.
     """
 
     def __init__(
@@ -56,6 +141,7 @@ class CachedLookup(Generic[K, V]):
         timeout: float = 3,
         cooldown: float = 60,
         clock: Callable[[], float] = time.monotonic,
+        store: Optional[Store[K, Optional[V]]] = None,
     ) -> None:
         self._enabled = enabled
         self._backend = backend
@@ -63,7 +149,7 @@ class CachedLookup(Generic[K, V]):
         self._timeout = timeout
         self._cooldown = cooldown
         self._clock = clock
-        self._cache: Dict[K, Optional[V]] = {}
+        self._cache: Store[K, Optional[V]] = {} if store is None else store
         self._futures: Dict[K, "asyncio.Future[Optional[V]]"] = {}
         self._cooldown_until: Dict[K, float] = {}
 

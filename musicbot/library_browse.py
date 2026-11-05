@@ -123,9 +123,7 @@ class BrowseCursor:
                 None,
             )
         if self.album is None:
-            entries = sorted(
-                self.index.get(self.artist, {}).keys(), key=str.casefold
-            )
+            entries = library.albums_of(self.index, self.artist)
             return Screen(
                 entries,
                 entries,
@@ -265,24 +263,3 @@ class BrowseCursor:
         if self.artist is None:
             return []
         return library.tracks_for(self.index, self.artist, self.album)
-
-    def sample_track(self) -> Optional[Tuple[str, str, str]]:
-        """One track to read tags and embedded artwork off, for the
-        enrichment of the current level - the album's first track at
-        the album level, and the first track of the artist's first
-        album above it. None at the root, and None wherever the scope
-        holds no files at all."""
-        if self.artist is None:
-            return None
-        album = self.album
-        if album is None:
-            # the current screen's entries are already that artist's
-            # sorted album folder names
-            albums = self.screen().entries
-            if not albums:
-                return None
-            album = albums[0]
-        songs = self.index.get(self.artist, {}).get(album, [])
-        if not songs:
-            return None
-        return (self.artist, album, songs[0].filename)

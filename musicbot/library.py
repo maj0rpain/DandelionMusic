@@ -31,6 +31,8 @@ _index: LibraryIndex = {}
 # The configured library root, resolved once per index build (off the
 # event loop); None when there is no usable library.
 _root: Optional[Path] = None
+# bumped by build_index right after a new index is swapped in
+_generation = 0
 
 
 def _safe_iterdir(path: Path) -> List[Path]:
@@ -81,7 +83,7 @@ def build_index() -> LibraryIndex:
     config.MUSIC_LIBRARY_PATH (expected layout:
     Artist/Album/song.ext) and rebuilds the in-memory index.
     Returns the new index."""
-    global _index, _root
+    global _index, _root, _generation
     new_index: LibraryIndex = {}
     root = (
         Path(config.MUSIC_LIBRARY_PATH) if config.MUSIC_LIBRARY_PATH else None
@@ -118,11 +120,44 @@ def build_index() -> LibraryIndex:
 
     _index = new_index
     _root = new_root
+    _generation += 1
     return _index
 
 
 def get_index() -> LibraryIndex:
     return _index
+
+
+def index_generation() -> int:
+    """How many indexes build_index has swapped in; it rises with each
+    build, after get_index() already returns the new index."""
+    return _generation
+
+
+def albums_of(index: LibraryIndex, artist: str) -> List[str]:
+    """The artist's album names in browse order (str.casefold); empty
+    for a missing artist. The one album-ordering rule, shared by the
+    browser's listing and sample_track."""
+    return sorted(index.get(artist, {}), key=str.casefold)
+
+
+def sample_track(
+    index: LibraryIndex, artist: str, album: Optional[str]
+) -> Optional[Tuple[str, str, str]]:
+    """One track to read tags and artwork off, for a scope of an index
+    snapshot: the album's first song at the album level, the first song
+    of the artist's first album (in albums_of order, as the
+    browser lists them) at the artist level. None for a missing artist
+    or album, or one with no songs."""
+    albums = index.get(artist)
+    if not albums:
+        return None
+    if album is None:
+        album = albums_of(index, artist)[0]
+    songs = albums.get(album)
+    if not songs:
+        return None
+    return (artist, album, songs[0].filename)
 
 
 class SearchResult(NamedTuple):

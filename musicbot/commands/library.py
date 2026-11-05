@@ -328,26 +328,6 @@ class LibraryBrowseView(LibraryView):
         """The (artist, album) pair of the level shown now."""
         return self.session.cursor.screen().scope
 
-    async def _resolve_enrichment(
-        self,
-    ) -> Optional[library_metadata.Enrichment]:
-        """Whatever the online backends know about the current
-        level, or None where there is nothing to ask about: the root,
-        and any scope holding no file to read tags and embedded
-        artwork off."""
-        cursor = self.session.cursor
-        sample = cursor.sample_track()
-        if sample is None:
-            return None
-        path = library.song_path(*sample)
-        if cursor.album is None:
-            return await library_metadata.get_artist_enrichment(
-                cursor.artist, path
-            )
-        return await library_metadata.get_album_enrichment(
-            cursor.artist, cursor.album, path
-        )
-
     @staticmethod
     def embed(frame: Frame) -> discord.Embed:
         embed = discord.Embed(title=frame.title, color=config.EMBED_COLOR)
@@ -629,7 +609,9 @@ class LibraryBrowseView(LibraryView):
             return
 
         try:
-            enrichment = await self._resolve_enrichment()
+            enrichment = await library_metadata.get_enrichment(
+                self.session.cursor.index, *self.scope
+            )
         except Exception as e:
             print(f"library: enrichment failed: {e}", file=sys.stderr)
             return
@@ -754,10 +736,6 @@ class Library(commands.Cog):
             return
         await ctx.defer()
         index = await library.build_index_async()
-        # the enrichment caches hold tag and artwork reads keyed by
-        # file path; a rescan exists to pick up what changed on disk,
-        # so they have to go with it
-        library_metadata.clear_caches()
         artists, albums, songs = library.counts(index)
         await ctx.send(
             config.LIBRARY_REFRESHED.format(

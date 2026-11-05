@@ -2,7 +2,7 @@
 
 import asyncio
 
-from musicbot.cached_lookup import CachedLookup
+from musicbot.cached_lookup import ByteBoundedStore, CachedLookup
 from helpers import FakeClock, run
 
 
@@ -238,6 +238,89 @@ def test_log_lines_carry_the_label_and_key(capsys):
         "Fake artist failed for b: boom",
         "Fake artist found no match for c",
     ]
+
+
+def test_a_passed_in_store_holds_the_results_and_clear_empties_it():
+    store = {}
+    backend = FakeBackend({"Radiohead": "info"})
+    cached = lookup(backend, store=store)
+
+    async def scenario():
+        await cached.get("Radiohead")
+        held = dict(store)
+        await cached.get("Radiohead")
+        cached.clear()
+        return held, dict(store)
+
+    held, after = run(scenario())
+    assert held == {"Radiohead": "info"}
+    assert after == {}
+    assert backend.calls == ["Radiohead"]
+
+
+def sized(budget=10, max_entries=100):
+    return ByteBoundedStore(budget, max_entries, len)
+
+
+def keys(store):
+    return [k for k in "abcdefgh" if k in store]
+
+
+def test_byte_budget_evicts_least_recent_weighted_entries_only():
+    store = sized(budget=10)
+    store["a"] = "xxxx"
+    store["w"] = ""
+    store["b"] = "xxxx"
+    store["c"] = "xxxx"
+    assert "a" not in store
+    assert "w" in store and "b" in store and "c" in store
+
+
+def test_byte_budget_never_evicts_the_entry_just_stored():
+    store = sized(budget=10)
+    store["a"] = "xx"
+    store["b"] = "x" * 50
+    assert keys(store) == ["b"]
+
+
+def test_entry_cap_evicts_plain_least_recently_used():
+    store = sized(budget=1000, max_entries=3)
+    store["a"] = ""
+    store["b"] = "xx"
+    store["c"] = ""
+    store["d"] = ""
+    assert keys(store) == ["b", "c", "d"]
+
+
+def test_a_read_refreshes_recency():
+    store = sized(budget=1000, max_entries=3)
+    store["a"] = ""
+    store["b"] = ""
+    store["c"] = ""
+    assert store["a"] == ""
+    store["d"] = ""
+    assert keys(store) == ["a", "c", "d"]
+
+
+def test_replacing_an_entry_keeps_the_total_exact():
+    store = sized(budget=10)
+    store["a"] = "xxxx"
+    store["a"] = "xxxx"
+    store["a"] = "xxxx"
+    store["b"] = "xxxx"
+    assert keys(store) == ["a", "b"]
+    store["c"] = "xxx"
+    assert keys(store) == ["b", "c"]
+
+
+def test_store_clear_resets_the_total():
+    store = sized(budget=10)
+    store["a"] = "x" * 9
+    store.clear()
+    assert keys(store) == []
+    store["b"] = "x" * 5
+    store["c"] = "x" * 5
+    assert keys(store) == ["b", "c"]
 
 
 def test_the_module_imports_only_the_standard_library_it_names():
