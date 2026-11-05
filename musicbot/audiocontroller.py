@@ -20,6 +20,7 @@ from musicbot import loader, playlists, utils
 from musicbot.song import PartialPlaylist, Song
 from musicbot.truncation import Truncation
 from musicbot.linkutils import SiteTypes
+from musicbot.playback import Playback, PlaybackState
 from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
 from musicbot.utils import (
     CheckError,
@@ -137,12 +138,6 @@ class RestoreResult(Enum):
     REFUSED_WHILE_ACTIVE = auto()
 
 
-def _require_loop():
-    """Raises RuntimeError unless called on a thread running an event
-    loop - the guard for AudioController's loop-only methods."""
-    asyncio.get_running_loop()
-
-
 class AudioController(object):
     """Controls the playback of audio and the sequential playing of the songs.
 
@@ -158,35 +153,34 @@ class AudioController(object):
         self.playlist = Playlist()
         self.pickle_file = Path("backup") / f"playlist_{guild.id}.pickle"
         self.pickle_file.parent.mkdir(parents=True, exist_ok=True)
-        self._next_song = None
-        # The start token: bumped when a start is committed to (see
-        # _claim_start()), before its preload. A track end carries the
-        # generation it was started as; a start whose generation is no
-        # longer current has been overtaken.
-        self._generation = 0
-        # whether a start is under way (claimed, not yet handed to the
-        # voice client) - see is_idle()
-        self._start_pending = False
         self.guild = guild
-
-        # True from the moment playback starts until the queue runs
-        # dry or the player is stopped - see play_song(). is_active()
-        # cannot stand in for this: by the time _advance() moves
-        # the queue, discord.py has already cleared the player state
-        # (see _advance()'s own comment below), so is_active() reads
-        # False on an ordinary track change just as it does when
-        # nothing was playing at all.
-        self._playing = False
-
-        # True for the whole of udisconnect(): a track-end hop that
-        # lands meanwhile must not start the idle timer - see
-        # _advance().
-        self._disconnecting = False
 
         sett = bot.sessions.settings(guild)
         self._volume: int = sett.default_volume
 
         self.timer = utils.Timer(self.timeout_handler)
+
+        self.playback = Playback(
+            voice_client=lambda: self.guild.voice_client,
+            preload=self._preload,
+            make_source=self._make_source,
+            next_track=lambda forced: self.playlist.next(forced),
+            clear_queue=self._clear_queue,
+            schedule_preload=self._schedule_preload,
+            announce=self._announce,
+            report_skipped=self._report_skipped,
+            record_history=lambda name: self.playlist.add_name(name),
+            write_backup=self._write_backup,
+            queue_is_empty=lambda: not self.playlist,
+            spawn=self.add_task,
+            start_timer=lambda restart: self.timer.start(restart),
+            timer_triggered=lambda: self.timer.triggered,
+            humans_present=self._humans_present,
+            on_play_failed=lambda: self.udisconnect("playback error"),
+            get_loop=lambda: self.bot.loop,
+            guild_name=guild.name,
+            guild_id=guild.id,
+        )
 
         self.command_channel: Optional[discord.abc.Messageable] = None
 
@@ -220,15 +214,49 @@ class AudioController(object):
             print("Unknown error when setting volume:", file=sys.stderr)
             print_exc(file=sys.stderr)
 
-    def _pickle_playlist(self):
-        # An idle controller with an empty queue has nothing to save, and
-        # writing it would wipe the last real backup d!restore reloads.
-        # _playing keeps the save when the last track ends on its own, so
-        # a finished queue still leaves an empty backup.
-        if not self.playlist and not self._playing:
-            return
+    def _write_backup(self):
         with open(self.pickle_file, "wb") as f:
             pickle.dump(self.playlist, f)
+
+    def _humans_present(self) -> bool:
+        return not all(m.bot for m in self.guild.voice_client.channel.members)
+
+    def _clear_queue(self):
+        self.playlist.loop = LoopMode.OFF
+        self.playlist.clear()
+        self.playlist.next()
+
+    def _make_source(self, song: Song):
+        before_options = (
+            None
+            if song.host == SiteTypes.LOCAL_LIBRARY
+            else "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+        )
+        return discord.PCMVolumeTransformer(
+            discord.FFmpegPCMAudio(
+                song.url,
+                before_options=before_options,
+                options="-loglevel error",
+                stderr=sys.stderr,
+            ),
+            float(self.volume) / 100.0,
+        )
+
+    async def _announce(self, song: Song):
+        if (
+            self.bot.sessions.settings(self.guild).announce_songs
+            and self.command_channel
+        ):
+            await self.command_channel.send(
+                embed=song.format_output(config.SONGINFO_NOW_PLAYING)
+            )
+
+    async def _report_skipped(self, song: Song):
+        if self.command_channel:
+            await self.command_channel.send(
+                f"{config.SONGINFO_ERROR}\n"
+                f"(Skipped: {song.display_name})"
+            )
 
     def load_pickle_playlist(self):
         if self.pickle_file.exists():
@@ -420,32 +448,9 @@ class AudioController(object):
 
     def is_idle(self) -> bool:
         """True when a new track may be started: the voice client is
-        neither playing nor paused and no start is pending.
-
-        A pending start is one play_song() has committed to but not yet
-        handed to the voice client: its preload is still awaited, so
-        the voice client reads idle and current_song reads None, yet a
-        second start would make discord.py refuse play(). Every "start
-        if idle" path asks this. Loop only."""
-        return not self.is_active() and not self._start_pending
-
-    def _claim_start(self) -> int:
-        """Commits to a start: bumps the generation, which
-        supersedes any pending start, and marks the new one pending.
-        Called in the same loop step as the decision to start. A track
-        a skip picked for an earlier track's end is not this one's
-        next. Loop only."""
-        self._generation += 1
-        self._start_pending = True
-        self._next_song = None
-        return self._generation
-
-    def _invalidate_start(self):
-        """Drops a pending start, if any, so that it plays nothing
-        once its preload returns. Loop only."""
-        if self._start_pending:
-            self._generation += 1
-            self._start_pending = False
+        neither playing nor paused and no start is pending. Every
+        "start if idle" path asks this. Loop only."""
+        return self.playback.state is PlaybackState.IDLE
 
     def track_history(self):
         history_string = config.INFO_HISTORY_TITLE
@@ -454,7 +459,7 @@ class AudioController(object):
         return history_string
 
     def pause(self):
-        self._pickle_playlist()
+        self.playback.queue_changed()
         client = self.guild.voice_client
         if client:
             if client.is_playing():
@@ -487,7 +492,7 @@ class AudioController(object):
     def _queue_changed(self):
         """Refreshes the backup and the preload after the queue was
         edited in place."""
-        self._pickle_playlist()
+        self.playback.queue_changed()
         self._schedule_preload()
 
     def shuffle(self):
@@ -513,7 +518,7 @@ class AudioController(object):
         """Empties the queue, keeping the current track. Nothing new
         is queued behind it, so there is nothing to preload."""
         self.playlist.clear()
-        self._pickle_playlist()
+        self.playback.queue_changed()
 
     def skip(self):
         """Ends the current track and moves on to the next one,
@@ -522,210 +527,13 @@ class AudioController(object):
 
     def next_song(self, *, forced=False):
         """Ends the current track and moves on to the next one. Runs
-        on the event loop only - raises RuntimeError anywhere else.
-
-        With a track playing, it picks the next track and stops the
-        voice client: the after= hop of that track (see
-        _on_track_end()) does the advance. With nothing playing, it
-        advances directly, dropping a pending start."""
-        _require_loop()
-
-        if self.is_active():
-            self._next_song = self.playlist.next(forced)
-            self.guild.voice_client.stop()
-            return
-
-        self._invalidate_start()
-        self._advance(forced)
-
-    def _track_end_callback(self, generation: int):
-        """The after= callable for the track play_song() starts as
-        `generation`. discord.py calls it on its audio-player thread,
-        so it does only thread-safe work: print the error, then hand
-        the track end to the loop."""
-
-        def after(error):
-            if error is not None:
-                print(
-                    f"Playback error in guild {self.guild.id}: {error!r}",
-                    file=sys.stderr,
-                )
-            try:
-                self.bot.loop.call_soon_threadsafe(
-                    self._on_track_end, error, generation
-                )
-            except RuntimeError:
-                # the loop is closed: the bot is shutting down, and
-                # there is nothing left to advance to
-                pass
-
-        return after
-
-    def _on_track_end(self, error, generation: int):
-        """Runs on the loop once the track play_song() started as
-        `generation` has ended, and advances the queue - unless a newer
-        start has overtaken it, or discord.py has already torn the
-        voice connection down (then the cut-off track stays at the
-        head of the queue)."""
-        _require_loop()
-
-        if generation != self._generation:
-            # a newer track has already started: it is not this
-            # callback's to end
-            return
-        if self.guild.voice_client is None:
-            # discord.py tore the connection down from outside and
-            # stopped the player on its way: the track was cut off,
-            # not finished. Leave the queue, history and backup as
-            # they are - udisconnect() ends the session, and the cut
-            # off track restarts from the head of the queue. Only
-            # `is None`: is_connected() is briefly False during a
-            # move or reconnect, when a real track end must advance.
-            return
-
-        self._advance()
-
-    def _advance(self, forced=False):
-        """Moves the queue on past the finished track and starts the
-        next one, or the idle timer when there is none. Loop only."""
-        if self._next_song:
-            next_song = self._next_song
-            self._next_song = None
-        else:
-            next_song = self.playlist.next(forced)
-
-        self._pickle_playlist()
-
-        if next_song is None:
-            # nothing left to advance to - the next song to start is a
-            # fresh one, and play_song() should say so
-            self._playing = False
-            # if self.pickle_file.exists():
-            #     self.pickle_file.unlink()
-            if not self.timer.triggered and self.guild.voice_client:
-                self.add_task(
-                    self.start_idle_timer(
-                        not all(
-                            m.bot
-                            for m in self.guild.voice_client.channel.members
-                        )
-                    )
-                )
-            return
-
-        coro = self.play_song(next_song, self._claim_start())
-        self.add_task(coro)
+        on the event loop only - raises RuntimeError anywhere else."""
+        self.playback.skip(forced)
 
     async def play_song(self, song: Song, generation: Optional[int] = None):
-        """Plays a song object. `generation` is the start the caller
-        already claimed for it (see _claim_start()); without one, the
-        start is claimed here, before the preload.
-
-        Once the preload returns, a start that was overtaken - a stop,
-        a disconnect or a newer start replaced it, or the bot left
-        voice - is dropped: nothing plays, is said or advances."""
-        if generation is None:
-            generation = self._claim_start()
-
-        preloaded = await self._preload(song)
-        if self._drop_if_overtaken(generation):
-            return
-
-        if not preloaded:
-            if self.command_channel:
-                await self.command_channel.send(
-                    f"{config.SONGINFO_ERROR}\n"
-                    f"(Skipped: {song.display_name})"
-                )
-                if self._drop_if_overtaken(generation):
-                    return
-            self.next_song(forced=True)
-            return
-
-        if song.url is None:
-            print(
-                "Something is wrong."
-                " Refusing to play a song without direct url.",
-                file=sys.stderr,
-            )
-            self.next_song(forced=True)
-            return
-
-        before_options = (
-            None
-            if song.host == SiteTypes.LOCAL_LIBRARY
-            else "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
-        )
-        # Claimed before play() rather than after it, because play()
-        # starts the audio thread there and then: a source that yields
-        # nothing (a truncated file, a stream URL that died) ends
-        # immediately, and its after= hop advances an empty queue,
-        # which clears this flag. Reading it afterwards would
-        # see the value that callback left, announce a track that has
-        # already finished, and leave the flag set with nothing
-        # playing - silencing the next genuine start. A play() that
-        # raises below disconnects, and stop() clears it there.
-        was_idle = not self._playing
-        self._playing = True
-        # no longer pending once it reaches play(); the generation
-        # token that guards the start is _claim_start()'s
-        self._start_pending = False
-        try:
-            self.guild.voice_client.play(
-                discord.PCMVolumeTransformer(
-                    discord.FFmpegPCMAudio(
-                        song.url,
-                        before_options=before_options,
-                        options="-loglevel error",
-                        stderr=sys.stderr,
-                    ),
-                    float(self.volume) / 100.0,
-                ),
-                after=self._track_end_callback(generation),
-            )
-        except discord.ClientException:
-            await self.udisconnect("playback error")
-            return
-
-        # The history's one write site: a song is recorded once the
-        # voice client has accepted it, however it later ends. Reading
-        # the queue head when a track ends names the wrong song once
-        # next_song()/prev_song()/stop() have moved the queue.
-        self.playlist.add_name(song.display_name)
-
-        if was_idle:
-            # only the transition into playing, so advancing through a
-            # queue stays silent. A first track that fails to preload
-            # returns above without claiming the flag, so whichever
-            # track actually starts is the one that gets announced.
-            print(
-                f"Started playing {song.display_name!r}"
-                f" in guild {self.guild.name!r}"
-            )
-
-        if (
-            self.bot.sessions.settings(self.guild).announce_songs
-            and self.command_channel
-        ):
-            await self.command_channel.send(
-                embed=song.format_output(config.SONGINFO_NOW_PLAYING)
-            )
-
-        self._schedule_preload()
-
-    def _drop_if_overtaken(self, generation: int) -> bool:
-        """True when the start claimed as `generation` must be dropped:
-        a newer start superseded it, or the voice client is gone - in
-        which case this also releases that start's pending mark."""
-        if generation != self._generation:
-            # a newer start owns the pending mark
-            return True
-        if self.guild.voice_client is None:
-            # abandoned while still the current start: release its mark
-            # so the bot is not left busy
-            self._start_pending = False
-            return True
-        return False
+        """Plays a song object. `generation` is ignored: the start
+        token is private to Playback."""
+        await self.playback.start(song)
 
     async def ensure_playing(self):
         """Starts the head of the queue if nothing is playing and the
@@ -743,7 +551,7 @@ class AudioController(object):
         Placement happens before the first await, so no other command
         can slip between the song and its slot."""
         self.playlist.insert_next(song)
-        self._pickle_playlist()
+        self.playback.queue_changed()
         await self.ensure_playing()
 
     async def enqueue(self, songs: Iterable[Song]):
@@ -754,7 +562,7 @@ class AudioController(object):
         land together and in order."""
         for song in songs:
             self.playlist.add(song)
-        self._pickle_playlist()
+        self.playback.queue_changed()
         await self.ensure_playing()
 
     async def restore(self) -> RestoreResult:
@@ -765,7 +573,7 @@ class AudioController(object):
         discord.py refuse play() and the controller disconnect (#24).
         Reports NOTHING_TO_RESTORE, playing nothing, when there is no
         queue to restore."""
-        if not self.is_idle():
+        if self.playback.state is not PlaybackState.IDLE:
             return RestoreResult.REFUSED_WHILE_ACTIVE
         self.load_pickle_playlist()
         if not self.playlist:
@@ -890,7 +698,7 @@ class AudioController(object):
         # seconds of it on a network-mounted library. One extra round
         # trip buys that back; loading a single track costs about
         # 1.5ms.
-        if self.is_idle() and len(tracks) > 1:
+        if self.playback.state is PlaybackState.IDLE and len(tracks) > 1:
             songs += await loader.load_local_songs(tracks[:1])
             tail = tracks[1:]
             if songs[0] is not None:
@@ -973,25 +781,7 @@ class AudioController(object):
 
     def stop(self):
         """Stops the player and removes all songs from the queue"""
-        # whatever starts after this is a new session, not a track
-        # change - see play_song()
-        self._playing = False
-        self._pickle_playlist()
-        self.playlist.loop = LoopMode.OFF
-        self.playlist.clear()
-        self.playlist.next()
-        # a pending start would otherwise play once its preload ends;
-        # a playing track needs no bump - its teardown hop must stay
-        # current
-        self._invalidate_start()
-
-        if not self.is_active():
-            return
-
-        # stopping an active voice client runs an `after` callback;
-        # its _advance() finds the queue empty and idle, so
-        # _pickle_playlist() keeps this snapshot
-        self.guild.voice_client.stop()
+        self.playback.stop()
 
     def prev_song(self) -> bool:
         """Loads the last song from the history into the queue and starts it"""
@@ -1000,12 +790,8 @@ class AudioController(object):
         if not prev_song:
             return False
 
-        if not self.is_active():
-            self.add_task(self.play_song(prev_song, self._claim_start()))
-        else:
-            self._next_song = prev_song
-            self.guild.voice_client.stop()
-        self._pickle_playlist()
+        self.playback.back(prev_song)
+        self.playback.queue_changed()
         return True
 
     async def timeout_handler(self):
@@ -1017,7 +803,7 @@ class AudioController(object):
         if sett.vc_timeout and (
             (
                 not self.guild.voice_client.is_playing()
-                and not self._start_pending
+                and self.playback.state is not PlaybackState.STARTING
             )
             or all(m.bot for m in self.guild.voice_client.channel.members)
         ):
@@ -1027,22 +813,13 @@ class AudioController(object):
         """Starts the idle timer, unless a disconnect is in flight.
         The check runs when this coroutine does, not when it was
         scheduled. Loop only."""
-        if self._disconnecting:
-            return
-        await self.timer.start(restart)
+        await self.playback.start_idle_timer(restart)
 
     async def udisconnect(self, reason: str):
-        self._disconnecting = True
-        try:
-            return await self._udisconnect(reason)
-        finally:
-            self._disconnecting = False
+        async with self.playback.teardown() as had_session:
+            return await self._udisconnect(reason, had_session)
 
-    async def _udisconnect(self, reason: str):
-        # sampled before the teardown below wipes both - see the
-        # no-connection branch
-        had_session = self._playing or bool(self.playlist)
-        self.stop()
+    async def _udisconnect(self, reason: str, had_session: bool):
         await self.update_view(None)
         # Cancelled here rather than after the disconnect below, so
         # the no-connection branch cancels it too. timeout_handler()
