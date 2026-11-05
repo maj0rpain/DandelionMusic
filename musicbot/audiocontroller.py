@@ -459,17 +459,7 @@ class AudioController(object):
         return history_string
 
     def pause(self):
-        self.playback.queue_changed()
-        client = self.guild.voice_client
-        if client:
-            if client.is_playing():
-                client.pause()
-                self.add_task(self.start_idle_timer(True))
-                return PauseState.PAUSED
-            elif client.is_paused():
-                client.resume()
-                return PauseState.RESUMED
-        return PauseState.NOTHING_TO_PAUSE
+        return self.playback.toggle_pause()
 
     def loop(self, mode=None):
         if mode is None:

@@ -16,6 +16,8 @@ from typing import Awaitable, Callable, Optional
 
 import discord
 
+from musicbot.playlist import PauseState
+
 
 class PlaybackState(Enum):
     """IDLE: nothing playing, paused or pending. STARTING: a track is
@@ -199,6 +201,22 @@ class Playback:
         # its _advance() finds the queue empty and idle, so
         # queue_changed() keeps this snapshot
         self._voice_client().stop()
+
+    def toggle_pause(self) -> PauseState:
+        """Writes the backup (as pause always has), then pauses a
+        playing client or resumes a paused one. A pause restarts the
+        idle timer."""
+        self.queue_changed()
+        client = self._voice_client()
+        if client:
+            if client.is_playing():
+                client.pause()
+                self._spawn(self.start_idle_timer(True))
+                return PauseState.PAUSED
+            elif client.is_paused():
+                client.resume()
+                return PauseState.RESUMED
+        return PauseState.NOTHING_TO_PAUSE
 
     def queue_changed(self):
         """Writes the playlist backup. An idle playback with an empty
