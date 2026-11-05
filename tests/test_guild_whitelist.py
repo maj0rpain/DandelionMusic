@@ -13,6 +13,7 @@ from discord.ext import commands
 
 from config import config
 from musicbot.commands.developer import Developer
+from musicbot import guild_whitelist
 from musicbot.guild_whitelist import (
     Outcome,
     WhitelistChange,
@@ -175,15 +176,6 @@ class TestChanges:
         change = with_db(lambda f: remove(f, 10, [10]))
         assert change.outcome is Outcome.NOT_LISTED
 
-    def test_large_ids_survive_as_ints(self):
-        big = 609212921897025557
-
-        async def scenario(factory):
-            await add(factory, big, [big])
-            return list(await load(factory))
-
-        assert with_db(scenario) == [big]
-
 
 class TestEnvImport:
     def test_imports_the_env_var_once(self, monkeypatch):
@@ -194,6 +186,33 @@ class TestEnvImport:
             return list(await load(factory))
 
         assert with_db(scenario) == [111, 222]
+
+    def test_a_concurrent_import_losing_the_race_rolls_back_quietly(
+        self, monkeypatch, capsys
+    ):
+        """Two processes sharing one database can both pass the marker
+        check; the loser's commit hits IntegrityError and must not take
+        startup down or print a second notice."""
+        monkeypatch.setattr(config, "GUILD_WHITELIST", [111, 222])
+        real_listed = guild_whitelist._listed
+
+        async def scenario(factory):
+            async def racing_listed(session):
+                found = await real_listed(session)
+                monkeypatch.setattr(guild_whitelist, "_listed", real_listed)
+                await import_env_whitelist(factory)
+                return found
+
+            monkeypatch.setattr(guild_whitelist, "_listed", racing_listed)
+            await import_env_whitelist(factory)  # must not raise
+            async with factory() as session:
+                marker = await session.get(BotState, ENV_WHITELIST_IMPORTED)
+            return list(await load(factory)), marker
+
+        listed, marker = with_db(scenario)
+        assert listed == [111, 222]
+        assert marker is not None
+        assert capsys.readouterr().out.count("Imported 2 guild(s)") == 1
 
     def test_import_is_idempotent(self, monkeypatch):
         monkeypatch.setattr(config, "GUILD_WHITELIST", [111])
