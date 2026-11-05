@@ -1022,13 +1022,42 @@ def test_covers_are_held_within_32_mb(
     assert (reads.artwork_reads.count(first) == 2) is reread
 
 
-def test_an_index_rebuild_clears_the_lookups(rig, lastfm, no_spotify):
-    session = lastfm({"album.getInfo": {"album": {"listeners": "1"}}})
-    rig.album()
-    rig.album()
-    assert len(session.queries) == 1  # same generation: nothing cleared
+def test_an_index_rebuild_clears_all_six_lookups(
+    rig, reads, lastfm, spotify
+):
+    session = lastfm(
+        {
+            "artist.getInfo": {"artist": {"stats": {"listeners": "1"}}},
+            "album.getInfo": {"album": {"listeners": "1"}},
+        }
+    )
+    client = spotify(
+        FakeSpotify(
+            artists=[{"popularity": 1, "images": []}],
+            albums=[{"images": [], "release_date": "2000"}],
+        )
+    )
+
+    def visit():
+        rig.artist()
+        rig.album()
+
+    def hits():
+        return (
+            len(session.queries),
+            len(client.searches),
+            len(reads.tag_reads),
+            len(reads.artwork_reads),
+        )
+
+    visit()
+    first = hits()
+    visit()
+    assert hits() == first  # same generation: nothing cleared
 
     rig.index = library.build_index()
-    rig.album()
+    visit()
 
-    assert len(session.queries) == 2
+    assert all(after > before for before, after in zip(first, hits()))
+    assert len(session.queries) == 4
+    assert len(client.searches) == 4

@@ -513,8 +513,3 @@ async def get_enrichment(
     """The enrichment for a scope of a library snapshot, from the
     default `Enricher`."""
     return await default_enricher.get_enrichment(index, artist, album)
-
-
-def clear_caches() -> None:
-    """Drops every memoized lookup of the default `Enricher`."""
-    default_enricher.clear()
