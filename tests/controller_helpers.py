@@ -136,9 +136,10 @@ class ProcessController:
         return self.result
 
 
-def command_ctx(controller=None, on_send=None):
+def command_ctx(controller=None, on_send=None, announce_songs=False):
     """The fake command context for `Music` callbacks, and the list of
-    its replies (what `send` was given, as strings).
+    its replies (what `send` was given, as strings; an embed reply is
+    its title). `announce_songs` is the guild's setting of that name.
 
     `controller` is what the callback reads from `ctx.audiocontroller`;
     `controller=None` for a command that reads no controller.
@@ -149,7 +150,8 @@ def command_ctx(controller=None, on_send=None):
     sent = []
 
     async def send(message=None, **kwargs):
-        sent.append(str(message))
+        embed = kwargs.get("embed")
+        sent.append(str(message) if embed is None else embed.title)
         if on_send is not None:
             await on_send(sent)
 
@@ -165,6 +167,13 @@ def command_ctx(controller=None, on_send=None):
         defer=defer,
         author=None,
         guild=guild,
-        bot=types.SimpleNamespace(DbSession=None),
+        bot=types.SimpleNamespace(
+            DbSession=None,
+            sessions=types.SimpleNamespace(
+                settings=lambda _guild: types.SimpleNamespace(
+                    announce_songs=announce_songs
+                )
+            ),
+        ),
     )
     return ctx, sent

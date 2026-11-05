@@ -7,11 +7,11 @@ from discord.ext import commands
 
 from config import config
 from musicbot import admission, utils, loader, playlists
+from musicbot.outcome import send_outcome
 from musicbot.song import Song
 from musicbot.bot import MusicBot, Context
 from musicbot.utils import dj_check, chunks, joining_command, SimplePaginator
 from musicbot.audiocontroller import (
-    QueuedPlaylist,
     AudioController,
     MusicButton,
     RestoreResult,
@@ -199,29 +199,16 @@ class Music(commands.Cog):
         await ctx.audiocontroller.start_idle_timer(True)
 
         try:
-            song = await ctx.audiocontroller.process_song(
+            outcome = await ctx.audiocontroller.process_song(
                 track, user=ctx.author, playnext=playnext
             )
         except SongError as e:
             await ctx.send(e)
             return
 
-        if isinstance(song, QueuedPlaylist):
-            notice = song.notice()
-            if notice is not None:
-                await ctx.send(notice)
-            else:
-                await ctx.send(config.SONGINFO_PLAYLIST_QUEUED)
-        else:
-            if len(ctx.audiocontroller.playlist) != 1:
-                await ctx.send(
-                    embed=song.format_output(config.SONGINFO_QUEUE_ADDED)
-                )
-            elif not utils.get_settings(ctx).announce_songs:
-                # auto-announce is disabled, announce here
-                await ctx.send(
-                    embed=song.format_output(config.SONGINFO_NOW_PLAYING)
-                )
+        await send_outcome(
+            ctx, outcome, utils.get_settings(ctx).announce_songs
+        )
 
     @commands.hybrid_command(
         name="playnext",
@@ -529,16 +516,21 @@ class Music(commands.Cog):
         if contents is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
-        await ctx.audiocontroller.enqueue(
-            Song(
-                get_site_type(entry.url),
-                entry.url,
-                title=entry.title,
-                saved_entry=playlists.SavedEntry(contents.ref, entry.url),
-            )
-            for entry in contents.entries
+        outcome = await ctx.audiocontroller.enqueue(
+            (
+                Song(
+                    get_site_type(entry.url),
+                    entry.url,
+                    title=entry.title,
+                    saved_entry=playlists.SavedEntry(contents.ref, entry.url),
+                )
+                for entry in contents.entries
+            ),
+            batch=True,
         )
-        await ctx.send(config.SONGINFO_PLAYLIST_QUEUED)
+        await send_outcome(
+            ctx, outcome, utils.get_settings(ctx).announce_songs
+        )
 
     @_playlist.command(
         name="remove",

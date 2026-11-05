@@ -6,29 +6,26 @@ network or Discord is involved.
 """
 
 import asyncio
-import sys
-
 
 from config import config
 from musicbot import playlists
-from musicbot.audiocontroller import QueuedPlaylist
 from musicbot.commands import music
 from musicbot.commands.music import Music
 from musicbot.linkutils import SiteTypes
+from musicbot.outcome import EnqueueOutcome, OutcomeKind
 from musicbot.song import LoadResult, Song
 from musicbot.truncation import Truncation, TruncationReason
 from controller_helpers import ProcessController, _songs, command_ctx
 from helpers import run
 
 
-def _queued_playlist_class(controller):
-    # the controller fixture loads its own copy of the module
-    return sys.modules[type(controller).__module__].QueuedPlaylist
-
-
 def test_truncated_playlist_reply_holds_numbers_and_reason_text():
     cut = Truncation(50, TruncationReason.NO_API)
-    ctx, sent = command_ctx(ProcessController(QueuedPlaylist(30, cut)))
+    ctx, sent = command_ctx(
+        ProcessController(
+            EnqueueOutcome(OutcomeKind.PLAYLIST, count=30, truncation=cut)
+        )
+    )
 
     run(Music(None)._play_song(ctx, "t"))
 
@@ -36,7 +33,9 @@ def test_truncated_playlist_reply_holds_numbers_and_reason_text():
 
 
 def test_untruncated_playlist_reply_is_queued_playlist():
-    ctx, sent = command_ctx(ProcessController(QueuedPlaylist(30)))
+    ctx, sent = command_ctx(
+        ProcessController(EnqueueOutcome(OutcomeKind.PLAYLIST, count=30))
+    )
 
     run(Music(None)._play_song(ctx, "t"))
 
@@ -51,7 +50,7 @@ def _process(controller):
     return run(main())
 
 
-def test_one_song_partial_playlist_is_reported_as_queued_playlist(
+def test_one_song_partial_playlist_is_reported_as_a_playlist_outcome(
     controller, stub_loader
 ):
     songs = _songs(controller, "a")
@@ -60,8 +59,8 @@ def test_one_song_partial_playlist_is_reported_as_queued_playlist(
 
     result = _process(controller)
 
-    assert isinstance(result, _queued_playlist_class(controller))
-    assert result.queued == 1
+    assert result.kind is OutcomeKind.PLAYLIST
+    assert result.count == 1
     assert result.truncation == cut
 
 
@@ -74,12 +73,12 @@ def test_multi_song_partial_playlist_keeps_its_truncation(
 
     result = _process(controller)
 
-    assert isinstance(result, _queued_playlist_class(controller))
-    assert result.queued == 3
+    assert result.kind is OutcomeKind.PLAYLIST
+    assert result.count == 3
     assert result.truncation == cut
 
 
-def test_plain_list_becomes_queued_playlist_without_truncation(
+def test_plain_list_becomes_a_playlist_outcome_without_truncation(
     controller, stub_loader
 ):
     stub_loader.results["load_song"] = LoadResult(
@@ -88,8 +87,8 @@ def test_plain_list_becomes_queued_playlist_without_truncation(
 
     result = _process(controller)
 
-    assert isinstance(result, _queued_playlist_class(controller))
-    assert result.truncation is None and result.notice() is None
+    assert result.kind is OutcomeKind.PLAYLIST
+    assert result.truncation is None
 
 
 def _add(monkeypatch, loaded, add_songs):

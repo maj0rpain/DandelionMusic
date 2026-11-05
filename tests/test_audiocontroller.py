@@ -36,7 +36,6 @@ from db_seam import in_memory_db
 from discord_fakes import PLAYER_BUTTONS
 from helpers import run
 
-
 MIX = playlists.PlaylistRef("1234", "mix")
 
 
@@ -1549,7 +1548,14 @@ def test_a_song_loaded_from_a_saved_playlist_keeps_its_title_refresh(
             pass
 
         ctx = types.SimpleNamespace(
-            bot=types.SimpleNamespace(DbSession=factory),
+            bot=types.SimpleNamespace(
+                DbSession=factory,
+                sessions=types.SimpleNamespace(
+                    settings=lambda _guild: types.SimpleNamespace(
+                        announce_songs=True
+                    )
+                ),
+            ),
             guild=controller.guild,
             audiocontroller=controller,
             defer=noop,

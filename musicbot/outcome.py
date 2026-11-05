@@ -80,3 +80,14 @@ def render(outcome: EnqueueOutcome, announce_songs: bool) -> Optional[Reply]:
     if outcome.truncation is not None:
         return Reply(text=outcome.truncation.notice(outcome.count))
     return Reply(text=config.SONGINFO_PLAYLIST_QUEUED)
+
+
+async def send_outcome(ctx, outcome: EnqueueOutcome, announce_songs: bool):
+    """Sends through `ctx.send` only what `render` returns."""
+    reply = render(outcome, announce_songs)
+    if reply is None:
+        return
+    if reply.embed is not None:
+        await ctx.send(reply.text, embed=reply.embed)
+    else:
+        await ctx.send(reply.text)

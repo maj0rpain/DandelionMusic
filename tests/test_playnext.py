@@ -5,13 +5,13 @@ Queue order is what the user sees in d!queue: titles by index.
 """
 
 import asyncio
-import sys
 import types
 
 import pytest
 
 from musicbot.commands.music import Music
 from musicbot.loader import SongError
+from musicbot.outcome import OutcomeKind
 from musicbot.song import LoadResult
 from controller_helpers import (
     ProcessController,
@@ -123,9 +123,8 @@ def test_playnext_multi_track_playlist_is_appended(controller, stub_loader):
     )
 
     assert _titles(controller) == ["current", "a", "x", "y"]
-    assert isinstance(
-        result, sys.modules[type(controller).__module__].QueuedPlaylist
-    )
+    assert result.kind is OutcomeKind.PLAYLIST
+    assert result.count == 2
 
 
 def test_unloadable_playnext_leaves_everything_alone(
