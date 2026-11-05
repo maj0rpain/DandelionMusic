@@ -2190,9 +2190,7 @@ def test_a_local_batch_reports_the_tracks_it_could_not_load(
     monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
 
     async def scenario():
-        return await controller.process_local_tracks(
-            ["a", "b", "c"], "test"
-        )
+        return await controller.process_local_tracks(["a", "b", "c"], "test")
 
     outcome = _run(controller, scenario)
 
