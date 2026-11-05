@@ -174,11 +174,12 @@ class Playback:
     def back(self, song):
         """Starts `song`, the track the queue stepped back to: at once
         when nothing is playing, otherwise after the current one is
-        stopped."""
+        stopped. Then writes the backup."""
         if not self._active():
             self._spawn_start(song)
         else:
             self._hand_over_to(song)
+        self.queue_changed()
 
     def stop(self):
         """Stops the player and empties the queue. Loop only."""

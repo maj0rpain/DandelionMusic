@@ -781,7 +781,6 @@ class AudioController(object):
             return False
 
         self.playback.back(prev_song)
-        self.playback.queue_changed()
         return True
 
     async def timeout_handler(self):

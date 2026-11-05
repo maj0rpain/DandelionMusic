@@ -2137,7 +2137,6 @@ def test_start_idle_timer_starts_the_timer(controller):
 
 def test_start_idle_timer_starts_none_while_disconnecting(controller):
     async def scenario():
-        controller.bot.loop = asyncio.get_running_loop()
         observed = []
 
         async def attempt():
@@ -2146,10 +2145,9 @@ def test_start_idle_timer_starts_none_while_disconnecting(controller):
 
         _during_disconnect(controller, lambda: controller.add_task(attempt()))
         await controller.udisconnect("test")
-        await _settle()
         return observed
 
-    assert run(scenario()) == [None]
+    assert _run(controller, scenario) == [None]
 
 
 def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
