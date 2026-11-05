@@ -5,9 +5,10 @@ import types
 
 
 class FakeBot:
-    def __init__(self, guilds, owner_id=1):
+    def __init__(self, guilds, owner_id=1, DbSession=None):
         self.guilds = guilds
         self.owner_id = owner_id
+        self.DbSession = DbSession
 
     def get_guild(self, id_):
         return next((g for g in self.guilds if g.id == id_), None)
@@ -17,8 +18,9 @@ class FakeBot:
 
 
 class FakeCtx:
-    def __init__(self, bot, author_id=1):
+    def __init__(self, bot, author_id=1, guild=None):
         self.bot = bot
+        self.guild = guild
         self.author = types.SimpleNamespace(id=author_id)
         self.sent = []
         self.channel = types.SimpleNamespace(last_message=None)

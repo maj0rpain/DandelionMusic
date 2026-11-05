@@ -11,7 +11,6 @@ from typing import (
     Dict,
     List,
     Optional,
-    Set,
     Union,
 )
 
@@ -26,8 +25,7 @@ from discord import (
     utils,
 )
 import sqlalchemy
-from sqlalchemy import String, delete, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy import String, select
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from alembic.migration import MigrationContext
 from alembic.autogenerate import produce_migrations, render_python_code
@@ -441,47 +439,6 @@ class BotState(Base):
 
 # marker key for guild_whitelist.import_env_whitelist()
 ENV_WHITELIST_IMPORTED = "env_guild_whitelist_imported"
-
-
-async def get_guild_whitelist(bot: "MusicBot") -> Set[int]:
-    """Guild ids the bot may stay in. Empty means "no whitelist".
-
-    Read straight from the database on every use rather than cached on
-    the bot. The whitelist is consulted only on connect and on joining
-    a guild, so the query is free at that rate - and a cache would have
-    to be kept in step with the commands that edit it, which is exactly
-    the kind of second copy that produced the bugs this table replaces.
-    """
-    async with bot.DbSession() as session:
-        rows = (
-            (await session.execute(select(WhitelistedGuild.guild_id)))
-            .scalars()
-            .all()
-        )
-    return {int(guild_id) for guild_id in rows}
-
-
-async def add_to_guild_whitelist(bot: "MusicBot", guild_id: int) -> bool:
-    """Returns False if the guild was already whitelisted."""
-    async with bot.DbSession() as session:
-        session.add(WhitelistedGuild(guild_id=str(guild_id)))
-        try:
-            await session.commit()
-        except IntegrityError:
-            return False
-    return True
-
-
-async def remove_from_guild_whitelist(bot: "MusicBot", guild_id: int) -> bool:
-    """Returns False if the guild was not whitelisted."""
-    async with bot.DbSession() as session:
-        result = await session.execute(
-            delete(WhitelistedGuild).where(
-                WhitelistedGuild.guild_id == str(guild_id)
-            )
-        )
-        await session.commit()
-    return result.rowcount > 0
 
 
 # Operation types that only ever add to the schema (new table,
