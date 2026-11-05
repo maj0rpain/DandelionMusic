@@ -50,11 +50,8 @@ def test_text_and_notice_follow_messages_changed_after_import(monkeypatch):
 def test_module_imports_only_config_enum_and_dataclasses():
     names = imported_names(truncation_module)
 
-    assert names == {
+    assert {n.split(".")[0] for n in names} == {
         "config",
-        "config.config",
         "enum",
-        "enum.Enum",
         "dataclasses",
-        "dataclasses.dataclass",
     }

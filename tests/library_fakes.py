@@ -3,7 +3,7 @@
 from musicbot.library import LibrarySong
 
 
-def library_song(title, **fields):
+def library_song(title, **fields) -> LibrarySong:
     """A LibrarySong; `fields` go straight to LibrarySong, so an
     unknown keyword raises TypeError."""
     fields.setdefault("filename", title + ".flac")
