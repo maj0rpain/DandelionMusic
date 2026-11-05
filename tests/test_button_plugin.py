@@ -99,8 +99,8 @@ def react(
 ):
     """Drive one reaction over links whose load gives `outcomes`
     against real admission and the voice fakes; returns what the
-    controller processed and what was sent. `guild` and `ctx` are on
-    the function afterwards, for the voice events."""
+    controller processed and what was sent. `guild` is on the
+    function afterwards, for the voice events."""
     sent = []
     message = SimpleNamespace(content=content or " ".join(outcomes))
     channel = FakeChannel(message)
