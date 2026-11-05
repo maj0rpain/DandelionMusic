@@ -17,7 +17,7 @@ import discord
 from config import config
 
 from musicbot import admission, loader, playlists, utils
-from musicbot.song import PartialPlaylist, Song
+from musicbot.song import Song
 from musicbot.truncation import Truncation
 from musicbot.linkutils import SiteTypes
 from musicbot.playback import Playback, PlaybackState
@@ -580,47 +580,29 @@ class AudioController(object):
         # raises SongError, which the caller turns into a Discord reply
         # and nothing else.
         try:
-            loaded_song = await loader.load_song(track)
+            result = await loader.load_song(track)
         except loader.SongError:
             print(
                 f"{user} queued {track!r} in guild {self.guild.name!r}"
                 " - could not be loaded"
             )
             raise
-        if isinstance(loaded_song, Song):
-            added = [loaded_song]
+        added = result.songs
+        if result.single:
+            loaded_song = added[0]
             print(
                 f"{user} queued {loaded_song.display_name!r}"
                 f" by {loaded_song.uploader or 'unknown'}"
                 f" ({loaded_song.host.name}) in guild {self.guild.name!r}"
             )
         else:
-            added = list(loaded_song)
-            count = len(loaded_song)
-            if count == 1 and not isinstance(loaded_song, PartialPlaylist):
-                # special-case one-item playlists
-                loaded_song = loaded_song[0]
-                print(
-                    f"{user} queued {loaded_song.display_name!r}"
-                    f" by {loaded_song.uploader or 'unknown'}"
-                    f" ({loaded_song.host.name})"
-                    f" in guild {self.guild.name!r}"
-                )
-            else:
-                # a resolved playlist has no single title to show -
-                # the input is the only useful identifier left
-                print(
-                    f"{user} queued a playlist ({count} track(s))"
-                    f" via {track!r} in guild {self.guild.name!r}"
-                )
-                loaded_song = QueuedPlaylist(
-                    count,
-                    (
-                        loaded_song.truncation
-                        if isinstance(loaded_song, PartialPlaylist)
-                        else None
-                    ),
-                )
+            # a resolved playlist has no single title to show -
+            # the input is the only useful identifier left
+            print(
+                f"{user} queued a playlist ({len(added)} track(s))"
+                f" via {track!r} in guild {self.guild.name!r}"
+            )
+            loaded_song = QueuedPlaylist(len(added), result.truncation)
 
         if playnext and len(added) == 1:
             await self.enqueue_next(added[0])

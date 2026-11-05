@@ -15,7 +15,7 @@ from musicbot.audiocontroller import QueuedPlaylist
 from musicbot.commands import music
 from musicbot.commands.music import Music
 from musicbot.linkutils import SiteTypes
-from musicbot.song import PartialPlaylist, Song
+from musicbot.song import LoadResult, Song
 from musicbot.truncation import Truncation, TruncationReason
 from controller_helpers import ProcessController, _songs, command_ctx
 from helpers import run
@@ -56,7 +56,7 @@ def test_one_song_partial_playlist_is_reported_as_queued_playlist(
 ):
     songs = _songs(controller, "a")
     cut = Truncation(50, TruncationReason.API_ERROR)
-    stub_loader.results["load_song"] = PartialPlaylist(songs, cut)
+    stub_loader.results["load_song"] = LoadResult(songs, False, cut)
 
     result = _process(controller)
 
@@ -70,7 +70,7 @@ def test_multi_song_partial_playlist_keeps_its_truncation(
 ):
     songs = _songs(controller, "a", "b", "c")
     cut = Truncation(50, TruncationReason.NO_API)
-    stub_loader.results["load_song"] = PartialPlaylist(songs, cut)
+    stub_loader.results["load_song"] = LoadResult(songs, False, cut)
 
     result = _process(controller)
 
@@ -82,7 +82,9 @@ def test_multi_song_partial_playlist_keeps_its_truncation(
 def test_plain_list_becomes_queued_playlist_without_truncation(
     controller, stub_loader
 ):
-    stub_loader.results["load_song"] = _songs(controller, "a", "b")
+    stub_loader.results["load_song"] = LoadResult(
+        _songs(controller, "a", "b"), False
+    )
 
     result = _process(controller)
 
@@ -102,7 +104,9 @@ def _add(monkeypatch, loaded, add_songs):
 
 
 def _partial():
-    return PartialPlaylist([_song()], Truncation(50, TruncationReason.NO_API))
+    return LoadResult(
+        [_song()], False, Truncation(50, TruncationReason.NO_API)
+    )
 
 
 def _song():
@@ -110,21 +114,24 @@ def _song():
 
 
 def test_playlist_add_reports_truncation_and_update(monkeypatch):
-    async def add_songs(*a):
-        pass
+    saved = []
+
+    async def add_songs(db, ref, entries):
+        saved.extend(entries)
 
     sent = _add(monkeypatch, _partial(), add_songs)
 
     assert len(sent) == 2
     assert sent[0] == _partial().truncation.notice(1)
     assert sent[1] == config.PLAYLIST_UPDATED
+    assert [e.title for e in saved] == ["a"]
 
 
 def test_playlist_add_untruncated_sends_only_update(monkeypatch):
     async def add_songs(*a):
         pass
 
-    sent = _add(monkeypatch, [_song(), _song()], add_songs)
+    sent = _add(monkeypatch, LoadResult([_song(), _song()], False), add_songs)
 
     assert sent == [config.PLAYLIST_UPDATED]
 

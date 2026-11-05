@@ -7,7 +7,7 @@ from discord.ext import commands
 
 from config import config
 from musicbot import admission, utils, loader, playlists
-from musicbot.song import PartialPlaylist, Song
+from musicbot.song import Song
 from musicbot.bot import MusicBot, Context
 from musicbot.utils import dj_check, chunks, joining_command, SimplePaginator
 from musicbot.audiocontroller import (
@@ -633,25 +633,24 @@ class Music(commands.Cog):
     ):
         await ctx.defer()
         try:
-            song = await loader.load_song(track)
+            result = await loader.load_song(track)
         except SongError as e:
             await ctx.send(e)
             return
-        songs = [song] if isinstance(song, Song) else song
         try:
             await playlists.add_songs(
                 ctx.bot.DbSession,
                 _playlist_ref(ctx, playlist),
                 [
                     playlists.PlaylistEntry(s.webpage_url, s.title)
-                    for s in songs
+                    for s in result.songs
                 ],
             )
         except playlists.SavedPlaylistError as e:
             await ctx.send(_saved_playlist_error_reply(e))
             return
-        if isinstance(song, PartialPlaylist):
-            await ctx.send(song.notice())
+        if result.truncation is not None:
+            await ctx.send(result.truncation.notice(len(result.songs)))
         await ctx.send(config.PLAYLIST_UPDATED)
 
     @_playlist.command(

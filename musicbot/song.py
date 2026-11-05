@@ -1,6 +1,7 @@
 from __future__ import annotations
 import datetime
-from typing import TYPE_CHECKING, Optional, Union
+from dataclasses import dataclass
+from typing import TYPE_CHECKING, List, Optional, Union
 
 import discord
 
@@ -99,18 +100,13 @@ class Song:
                 setattr(self, k, v)
 
 
-class PartialPlaylist(list):
-    """Songs of a playlist that was cut short; `truncation` says by how
-    much and why. Module-level so it pickles across the worker process
-    boundary."""
+@dataclass
+class LoadResult:
+    """What loading one input produced: `songs`; `single`, when the input
+    named one track rather than a playlist (a truncated playlist is never
+    single); and `truncation`, when a Spotify playlist was cut short.
+    Module-level so it pickles across the worker process boundary."""
 
-    def __init__(self, songs, truncation: Truncation):
-        super().__init__(songs)
-        self.truncation = truncation
-
-    def notice(self) -> str:
-        """The truncation notice for the songs it holds."""
-        return self.truncation.notice(len(self))
-
-    def __reduce__(self):
-        return (type(self), (list(self), self.truncation))
+    songs: List[Song]
+    single: bool
+    truncation: Optional[Truncation] = None

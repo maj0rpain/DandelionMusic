@@ -8,7 +8,8 @@ import pytest
 from config import config
 from musicbot import loader
 from musicbot.linkutils import SpotifyTracks
-from musicbot.loader import PartialPlaylist, SongError
+from musicbot.loader import SongError
+from musicbot.song import LoadResult
 from musicbot.truncation import Truncation, TruncationReason
 
 URL = "https://open.spotify.com/playlist/p"
@@ -30,23 +31,43 @@ def _links(n):
     return [f"https://open.spotify.com/track/{i}" for i in range(n)]
 
 
-def test_known_larger_total_gives_partial_playlist(monkeypatch, worker_loop):
+def test_known_larger_total_gives_truncated_result(monkeypatch, worker_loop):
     cut = Truncation(5, TruncationReason.NO_API)
     _fetch(monkeypatch, SpotifyTracks(_links(3), cut))
 
     result = loader._load_song(URL)
 
-    assert isinstance(result, PartialPlaylist)
-    assert len(result) == 3
+    assert len(result.songs) == 3
+    assert result.single is False
     assert result.truncation == cut
 
 
-def test_no_truncation_gives_plain_list(monkeypatch, worker_loop):
+def test_no_truncation_gives_untruncated_playlist(monkeypatch, worker_loop):
     _fetch(monkeypatch, SpotifyTracks(_links(3), None))
 
     result = loader._load_song(URL)
 
-    assert type(result) is list and len(result) == 3
+    assert len(result.songs) == 3
+    assert (result.single, result.truncation) == (False, None)
+
+
+def test_truncated_one_track_playlist_is_never_single(
+    monkeypatch, worker_loop
+):
+    cut = Truncation(5, TruncationReason.NO_API)
+    _fetch(monkeypatch, SpotifyTracks(_links(1), cut))
+
+    result = loader._load_song(URL)
+
+    assert (len(result.songs), result.single) == (1, False)
+
+
+def test_untruncated_one_track_playlist_is_single(monkeypatch, worker_loop):
+    _fetch(monkeypatch, SpotifyTracks(_links(1), None))
+
+    result = loader._load_song(URL)
+
+    assert (len(result.songs), result.single) == (1, True)
 
 
 def test_no_links_is_could_not_load_whatever_the_total(
@@ -71,15 +92,13 @@ def test_any_fetch_exception_is_could_not_load(monkeypatch, worker_loop):
     assert info.value.args[0] == config.SONGINFO_ERROR
 
 
-def test_partial_playlist_survives_pickling():
+def test_load_result_survives_pickling():
     cut = Truncation(9, TruncationReason.API_ERROR)
-    partial = PartialPlaylist(["a", "b"], cut)
+    result = LoadResult(["a", "b"], False, cut)
 
-    copy = pickle.loads(pickle.dumps(partial))
+    copy = pickle.loads(pickle.dumps(result))
 
-    assert isinstance(copy, PartialPlaylist)
-    assert list(copy) == ["a", "b"]
-    assert copy.truncation == cut
+    assert copy == LoadResult(["a", "b"], False, cut)
 
 
 def test_load_song_classifies_and_loads_the_cleaned_text(

@@ -97,7 +97,7 @@ def test_spotify_track_is_searched_by_the_loader_with_its_query(
     monkeypatch.setattr(loader, "_search_youtube", search)
     monkeypatch.setattr(loader.YT_IE, "suitable", lambda u: False)
     track = "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
-    song = loader._load_song(track)
+    song = loader._load_song(track).songs[0]
     assert queries == ['T - A "Topic"']
     assert (song.title, song.host) == ("T", SiteTypes.YT_DLP)
 

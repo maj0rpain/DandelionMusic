@@ -14,7 +14,7 @@ from musicbot import playlists
 from musicbot.commands import music
 from musicbot.commands.music import Music
 from musicbot.linkutils import SiteTypes
-from musicbot.song import Song
+from musicbot.song import LoadResult, Song
 from controller_helpers import command_ctx
 from helpers import run
 
@@ -32,7 +32,7 @@ def _fail_with(error):
 
 def _run_playlist_command(monkeypatch, command, function, error, *args):
     async def load_song(track):
-        return _song()
+        return LoadResult([_song()], True)
 
     monkeypatch.setattr(music.loader, "load_song", load_song)
     monkeypatch.setattr(playlists, function, _fail_with(error))
