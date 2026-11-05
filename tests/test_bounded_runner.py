@@ -57,9 +57,10 @@ def _asyncio_names(tree):
             for a in node.names:
                 if a.name == "asyncio":
                     names[a.asname or "asyncio"] = "asyncio"
-                elif a.name == "asyncio.runners":
+                elif a.name.startswith("asyncio."):
+                    # a plain ``import asyncio.<sub>`` binds ``asyncio``
                     if a.asname:
-                        names[a.asname] = "asyncio.runners"
+                        names[a.asname] = a.name
                     else:
                         names["asyncio"] = "asyncio"
         elif isinstance(node, ast.ImportFrom) and node.module in (
@@ -212,11 +213,7 @@ def _lines(violations):
 def _check(src, line, what):
     (v,) = scan(src, "t.py")
     assert v.line == line
-    assert str(v) == f"t.py:{line}: {what} without '# unbounded: <reason>'"
-
-
-RUNNER = "asyncio.Runner()"
-RUN = "asyncio.runners.run()"
+    assert str(v) == f"t.py:{line}: {what} {SUFFIX}"
 
 
 def test_runner_forms_are_flagged():
@@ -237,18 +234,23 @@ def test_runner_forms_are_flagged():
 
 def test_runners_run_forms_are_flagged():
     cases = [
-        ("import asyncio.runners\nasyncio.runners.run(c)\n", RUN),
-        ("import asyncio.runners as x\nx.run(c)\n", RUN),
-        ("from asyncio import runners as x\nx.run(c)\n", RUN),
-        ("from asyncio.runners import run as r\nr(c)\n", RUN),
-        ("from asyncio.runners import run\nrun(c)\n", RUN),
+        ("import asyncio.runners\nasyncio.runners.run(c)\n", RUNNERS_RUN),
+        ("import asyncio.runners as x\nx.run(c)\n", RUNNERS_RUN),
+        ("from asyncio import runners as x\nx.run(c)\n", RUNNERS_RUN),
+        ("from asyncio.runners import run as r\nr(c)\n", RUNNERS_RUN),
+        ("from asyncio.runners import run\nrun(c)\n", RUNNERS_RUN),
     ]
     for src, what in cases:
         _check(src, 2, what)
 
 
 def test_plain_import_of_runners_binds_asyncio():
-    _check("import asyncio.runners\nasyncio.run(c)\n", 2, "asyncio.run()")
+    _check("import asyncio.runners\nasyncio.run(c)\n", 2, RUN)
+
+
+def test_plain_import_of_any_submodule_binds_asyncio():
+    _check("import asyncio.events\nasyncio.run(c)\n", 2, RUN)
+    _check("import asyncio.subprocess\nasyncio.Runner()\n", 2, RUNNER)
 
 
 def test_inline_runner_run_is_flagged_at_construction():
