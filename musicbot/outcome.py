@@ -84,8 +84,12 @@ def render(outcome: EnqueueOutcome, announce_songs: bool) -> Optional[Reply]:
     return Reply(text=config.SONGINFO_PLAYLIST_QUEUED)
 
 
-async def send_outcome(ctx, outcome: EnqueueOutcome, announce_songs: bool):
-    """Sends through `ctx.send` only what `render` returns."""
+async def send_outcome(ctx, outcome: EnqueueOutcome):
+    """Sends through `ctx.send` only what `render` returns, announcing
+    songs as the context guild's `announce_songs` setting says (off when
+    the guild has no settings)."""
+    settings = ctx.bot.sessions.settings(ctx.guild)
+    announce_songs = settings is not None and settings.announce_songs
     reply = render(outcome, announce_songs)
     if reply is None:
         return
