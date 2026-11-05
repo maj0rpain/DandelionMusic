@@ -103,6 +103,7 @@ def react(
     sent = []
     message = SimpleNamespace(content=content or " ".join(outcomes))
     channel = FakeChannel(message)
+    known = {channel.id: channel}
     controller = FakeController(outcomes)
     sett = SimpleNamespace(
         button_emote="x",
@@ -117,8 +118,12 @@ def react(
             # a plain channel lookup does not see threads
             return None if thread or not resolves else channel
 
-        def get_channel_or_thread(self, _id):
-            return channel if resolves else None
+        def get_channel_or_thread(self, channel_id):
+            # a channel with the id asked for, so the id passed on shows
+            if not resolves:
+                return None
+            fresh = FakeChannel(message, channel_id)
+            return known.setdefault(channel_id, fresh)
 
     guild = Guild()
     mine = guild.channel("mine", humans=1, **(reactor_perms or {}))
@@ -248,7 +253,7 @@ def test_a_configured_command_channel_is_the_panels_fallback_destination():
     react({A: object()}, command_channel=2)
 
     ((channel, replace),) = react.panel.directed
-    assert channel is not None and replace is False
+    assert (channel.id, replace) == (2, False)
 
 
 def test_no_configured_command_channel_directs_the_panel_nowhere():
