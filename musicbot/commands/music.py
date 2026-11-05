@@ -6,7 +6,7 @@ from discord import Attachment, Embed, app_commands
 from discord.ext import commands
 
 from config import config
-from musicbot import linkutils, utils, loader, playlists
+from musicbot import admission, linkutils, utils, loader, playlists
 from musicbot.song import PartialPlaylist, Song
 from musicbot.bot import MusicBot, Context
 from musicbot.utils import dj_check, chunks, joining_command, SimplePaginator
@@ -159,20 +159,22 @@ class Music(commands.Cog):
         cmd = ctx.command
         if cmd is not None and (cmd.root_parent or cmd) is self._playlist:
             playlists_enabled(ctx)
-        ctx.audiocontroller = utils.get_audiocontroller(ctx)
-        return await utils.play_check(ctx)
+        ctx.admission = await admission.check(ctx)
+        ctx.audiocontroller = ctx.admission.audiocontroller
+        return True
 
     async def cog_before_invoke(self, ctx):
-        ctx.audiocontroller.command_channel = ctx
         # Joining voice waits until here, after every check (command
         # level dj_check included) has passed, so a refused command
         # never makes the bot join. A slow connect must not push a
         # slash command past Discord's 3-second deadline, so it is
         # deferred first - publicly, as the reply that follows is.
         # Only a joining command (@joining_command) ever needs a join.
-        if utils.join_needed(ctx):
+        if ctx.admission.join_needed:
             await ctx.defer()
-            await utils.join_voice(ctx)
+        # the guild's current controller, not the one cog_check saw
+        ctx.audiocontroller = await ctx.admission.enter()
+        ctx.audiocontroller.command_channel = ctx
 
     @commands.hybrid_command(
         name="play",
