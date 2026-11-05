@@ -5,7 +5,6 @@ Queue order is what the user sees in d!queue: titles by index.
 """
 
 import asyncio
-import types
 
 import pytest
 
@@ -173,10 +172,6 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
 
     monkeypatch.setattr(controller, "start_idle_timer", start_idle_timer)
     music = Music(None)
-    monkeypatch.setattr(
-        "musicbot.commands.music.utils.get_settings",
-        lambda c: types.SimpleNamespace(announce_songs=False),
-    )
 
     async def go():
         await music._play_song(ctx, "pn", playnext=True)

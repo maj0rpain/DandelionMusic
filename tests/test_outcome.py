@@ -101,18 +101,18 @@ def _send(settings):
         song=Song(SiteTypes.YT_DLP, "https://example.invalid/a", title="a"),
     )
     run(send_outcome(ctx, outcome))
-    return outcome, sent
+    return sent
 
 
 @pytest.mark.parametrize("announce", [True, False])
 def test_send_outcome_follows_the_guilds_announce_songs(announce):
     settings = types.SimpleNamespace(announce_songs=announce)
-    _, sent = _send(settings)
+    sent = _send(settings)
     assert bool(sent) is (not announce)
 
 
 def test_send_outcome_with_missing_settings_is_treated_as_announcements_off():
-    _, sent = _send(None)
+    sent = _send(None)
     assert len(sent) == 1
 
 
