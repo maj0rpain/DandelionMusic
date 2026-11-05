@@ -303,7 +303,6 @@ class TestSampleTrack:
         )
 
 
-
 class TestBack:
     def test_back_from_the_album_level_returns_to_the_artist(self):
         c = at_album()

@@ -1022,9 +1022,7 @@ def test_covers_are_held_within_32_mb(
     assert (reads.artwork_reads.count(first) == 2) is reread
 
 
-def test_an_index_rebuild_clears_all_six_lookups(
-    rig, reads, lastfm, spotify
-):
+def test_an_index_rebuild_clears_all_six_lookups(rig, reads, lastfm, spotify):
     session = lastfm(
         {
             "artist.getInfo": {"artist": {"stats": {"listeners": "1"}}},
