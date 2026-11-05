@@ -53,13 +53,14 @@ class Playlist:
     def add(self, track: Song):
         self.playque.append(track)
 
-    def insert_next(self, track: Song):
+    def insert_next(self, track: Song) -> int:
         """Puts `track` directly after the current track; on an empty
-        queue it becomes the head."""
+        queue it becomes the head. Returns the index it was placed at."""
         if self.playque:
             self.playque.insert(1, track)
-        else:
-            self.playque.append(track)
+            return 1
+        self.playque.append(track)
+        return 0
 
     def has_next(self) -> bool:
         return len(self.playque) >= (2 if self.loop != LoopMode.ALL else 1)

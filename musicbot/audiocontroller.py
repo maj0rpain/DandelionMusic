@@ -530,8 +530,7 @@ class AudioController(object):
         Placement happens before the first await, so no other command
         can slip between the song and its slot."""
         triggers_start = self._would_start()
-        index = 1 if len(self.playlist) > 0 else 0
-        self.playlist.insert_next(song)
+        index = self.playlist.insert_next(song)
         self.playback.queue_changed()
         started = await self.ensure_playing()
         return self._single_outcome(song, index, triggers_start, started)

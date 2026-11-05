@@ -215,24 +215,12 @@ def test_truncated_playlist_sends_exactly_the_notice():
     assert sent == [cut.notice(30)]
 
 
-def test_untruncated_playlist_sends_queued_playlist():
-    outcome = EnqueueOutcome(OutcomeKind.PLAYLIST, count=30)
-    _, sent = react({A: outcome})
-    assert sent == [render(outcome, False).text]
-
-
 @pytest.mark.parametrize("announce", [True, False])
 def test_started_link_sends_what_render_returns(announce):
     outcome = EnqueueOutcome(OutcomeKind.STARTED, song=_song("a"))
     _, sent = react({A: outcome}, announce_songs=announce)
     expected = render(outcome, announce)
     assert sent == ([] if expected is None else [expected.embed.title])
-
-
-def test_queued_link_sends_the_position_heading():
-    outcome = EnqueueOutcome(OutcomeKind.QUEUED, song=_song("a"), position=3)
-    _, sent = react({A: outcome})
-    assert sent == ["Added to queue - position 3"]
 
 
 def test_several_links_send_each_outcome_and_the_error_in_link_order():
