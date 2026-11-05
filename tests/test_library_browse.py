@@ -270,26 +270,44 @@ class TestTracks:
 
 
 class TestSampleTrack:
-    def test_the_root_has_no_sample(self):
-        assert cursor().sample_track() is None
+    def test_a_missing_artist_has_no_sample(self):
+        assert library.sample_track(INDEX, "Nobody", None) is None
 
     def test_the_artist_level_samples_the_first_album(self):
-        c = cursor()
-        c.descend("Radiohead")
-        assert c.sample_track() == ("Radiohead", "Kid A", "01 - Zoo.flac")
+        assert library.sample_track(INDEX, "Radiohead", None) == (
+            "Radiohead",
+            "Kid A",
+            "01 - Zoo.flac",
+        )
 
     def test_the_album_level_samples_its_first_track(self):
-        c = at_album()
-        assert c.sample_track() == (
+        assert library.sample_track(INDEX, "Radiohead", "OK Computer") == (
             "Radiohead",
             "OK Computer",
             "01 - Airbag.flac",
         )
 
+    def test_a_missing_album_has_no_sample(self):
+        assert library.sample_track(INDEX, "Radiohead", "Nope") is None
+
     def test_an_empty_scope_has_no_sample(self):
-        c = cursor({"Empty": {}})
-        c.descend("Empty")
-        assert c.sample_track() is None
+        assert library.sample_track({"Empty": {}}, "Empty", None) is None
+        assert library.sample_track({"E": {"A": []}}, "E", "A") is None
+
+    def test_albums_are_ordered_case_insensitively(self):
+        index = {"X": {"b": [make_song("b1")], "A": [make_song("a1")]}}
+        assert library.sample_track(index, "X", None) == (
+            "X",
+            "A",
+            "a1.flac",
+        )
+
+    def test_the_cursor_delegates_to_it(self):
+        assert cursor().sample_track() is None
+        c = at_album()
+        assert c.sample_track() == library.sample_track(
+            INDEX, "Radiohead", "OK Computer"
+        )
 
 
 class TestBack:
