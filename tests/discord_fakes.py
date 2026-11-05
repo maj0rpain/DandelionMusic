@@ -227,8 +227,6 @@ PLAYER_BUTTONS = [
 
 
 ADMISSION_CHANNEL = 7
-# HERE differs from PEOPLE only when used with author="a" (the author
-# is then the one human with the bot); both build the same channel.
 HERE = "here"  # the bot's channel when the author is with it
 BOTS_ONLY = "bots"
 PEOPLE = "people"
@@ -281,7 +279,11 @@ def situation(
     custom_id="queue",
     registered=True,
 ):
-    """Builds (guild, ctx) for one row."""
+    """Builds (guild, ctx) for one row.
+
+    HERE differs from PEOPLE only when used with author="a" (the author
+    is then the one human with the bot); both build the same channel.
+    """
     guild = VoiceGuild()
     members = {
         PEOPLE: {"humans": 1},
