@@ -206,16 +206,29 @@ print(json.dumps({"raised": raised}))
 """
 
 
+# Run first in every probe, before anything imports config: config.config
+# does `from dotenv import find_dotenv`, so the stub must already be on
+# dotenv when it does. At module level, so a spawn worker re-importing
+# the probe file runs it too.
+NO_DOTENV_PRELUDE = """\
+import os
+import dotenv
+
+dotenv.find_dotenv = lambda *a, **kw: os.devnull
+"""
+
+
 def _run_in_fresh_interpreter(cwd: Path, script: str, as_file=False):
-    # without the settings exported in the shell that runs pytest - a
-    # half-set Spotify credential, say, would reach the child and make
-    # the import print a traceback
+    # without the settings exported in the shell that runs pytest, and
+    # with find_dotenv stubbed to os.devnull by NO_DOTENV_PRELUDE - a
+    # probe run as a file, and each worker it spawns, would otherwise
+    # find the developer's real .env by walking up from config/config.py
     leaked = {*Config.as_dict(), *ENV_ALIASES}
     env = {k: v for k, v in os.environ.items() if k not in leaked}
     env["PYTHONPATH"] = os.pathsep.join(
         filter(None, [str(REPO_ROOT), env.get("PYTHONPATH")])
     )
-    script = textwrap.dedent(script)
+    script = NO_DOTENV_PRELUDE + textwrap.dedent(script)
     if as_file:
         # spawn workers re-import the parent's main module, which -c
         # does not leave them to find
@@ -357,3 +370,44 @@ def test_loader_lifecycle_call_outside_init_uses_no_thread_pool(
 
 def test_loader_lifecycle_run_sync_reaches_the_worker_after_init(lifecycle):
     assert lifecycle["run_sync_reaches_worker"] is True
+
+
+ENV_PATH_PROBE = """
+import json
+import multiprocessing
+from concurrent.futures import ProcessPoolExecutor
+
+from config import config
+
+
+def worker_env_path():
+    from config import config
+
+    return config._env_path
+
+
+if __name__ == "__main__":
+    ctx = multiprocessing.get_context("spawn")
+    with ProcessPoolExecutor(1, mp_context=ctx) as pool:
+        worker = pool.submit(worker_env_path).result()
+    print(json.dumps({"main": config._env_path, "worker": worker}))
+"""
+
+ENV_PATH_C_PROBE = """
+import json
+
+from config import config
+
+print(json.dumps({"main": config._env_path}))
+"""
+
+
+@pytest.mark.parametrize("as_file", [True, False], ids=["file", "-c"])
+def test_probe_and_its_workers_resolve_no_dotenv(tmp_path, as_file):
+    script = ENV_PATH_PROBE if as_file else ENV_PATH_C_PROBE
+    observed = _observed(
+        _run_in_fresh_interpreter(tmp_path, script, as_file=as_file)
+    )
+    assert observed["main"] == os.devnull
+    if as_file:
+        assert observed["worker"] == os.devnull

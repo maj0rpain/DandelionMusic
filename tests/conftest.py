@@ -12,6 +12,21 @@ import dotenv  # noqa: E402
 import dotenv.main  # noqa: E402
 
 
+def _stub_find_dotenv(path):
+    """A find_dotenv stand-in that always resolves to `path`."""
+    return lambda *a, **kw: path
+
+
+def _config_module():
+    """The config.config submodule.
+
+    sys.modules, not `import config.config as ...`: the package's
+    __init__ binds the name `config` to the Config *instance*, which
+    shadows the submodule of the same name.
+    """
+    return sys.modules["config.config"]
+
+
 def _import_config_without_dotenv():
     """Imports `config` with find_dotenv stubbed to os.devnull.
 
@@ -24,14 +39,13 @@ def _import_config_without_dotenv():
     one build sees the stub.
     """
     real = dotenv.main.find_dotenv
-    dotenv.find_dotenv = lambda *a, **kw: os.devnull
+    dotenv.find_dotenv = _stub_find_dotenv(os.devnull)
     try:
         import config.config  # noqa: F401
     finally:
         dotenv.find_dotenv = real
-        module = sys.modules.get("config.config")
-        if module is not None:
-            module.find_dotenv = real
+        if "config.config" in sys.modules:
+            _config_module().find_dotenv = real
 
 
 _import_config_without_dotenv()
@@ -74,16 +88,12 @@ def config_factory(tmp_path, monkeypatch):
     # load_dotenv have to be redirected - patching one and not the
     # other is how an earlier version of this fixture read, and back
     # when Config could still write, overwrote the real .env.
-    #
-    # sys.modules, not `import config.config as ...`: the package's
-    # __init__ binds the name `config` to the Config *instance*, which
-    # shadows the submodule of the same name.
-    config_module = sys.modules["config.config"]
+    config_module = _config_module()
     from dotenv import dotenv_values
 
     env_path = tmp_path / ".env"
     monkeypatch.setattr(
-        config_module, "find_dotenv", lambda *a, **kw: str(env_path)
+        config_module, "find_dotenv", _stub_find_dotenv(str(env_path))
     )
 
     def load_dotenv(*a, **kw):
