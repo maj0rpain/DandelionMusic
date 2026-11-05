@@ -411,19 +411,3 @@ def test_probe_and_its_workers_resolve_no_dotenv(tmp_path, as_file):
     assert observed["main"] == os.devnull
     if as_file:
         assert observed["worker"] == os.devnull
-
-
-def test_linkutils_does_not_import_the_loader():
-    import ast
-    from pathlib import Path
-
-    from musicbot import linkutils
-
-    names = set()
-    for node in ast.walk(ast.parse(Path(linkutils.__file__).read_text())):
-        if isinstance(node, ast.Import):
-            names.update(a.name for a in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            names.add(node.module)
-            names.update(f"{node.module}.{a.name}" for a in node.names)
-    assert "musicbot.loader" not in names
