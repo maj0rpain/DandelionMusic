@@ -24,26 +24,23 @@ MESSAGE = {"author": {"username": "alice"}, "attachments": []}
 
 class _Http:
     def __init__(self, loop=None):
-        self.login_delay = 0
-        self.fetch_delay = 0
+        self.login_stalls = False
+        self.fetch_stalls = False
         self.login_exc = None
 
     async def close(self):
         pass
 
     async def static_login(self, token):
-        await _pause(self.login_delay)
+        if self.login_stalls:
+            await asyncio.Event().wait()
         if self.login_exc:
             raise self.login_exc
 
     async def get_message(self, channel_id, message_id):
-        await _pause(self.fetch_delay)
+        if self.fetch_stalls:
+            await asyncio.Event().wait()
         return MESSAGE
-
-
-async def _pause(delay):
-    if delay is None:
-        await asyncio.Event().wait()
 
 
 @pytest.fixture
@@ -71,12 +68,12 @@ def _fails(message):
 
 
 def test_a_stalled_login_is_a_download_error(http):
-    http.login_delay = None
+    http.login_stalls = True
     _fails("TimeoutError")
 
 
 def test_a_stalled_fetch_is_a_download_error(http):
-    http.fetch_delay = None
+    http.fetch_stalls = True
     _fails("TimeoutError")
 
 
@@ -86,7 +83,7 @@ def test_a_failed_discord_link_is_a_could_not_load_error(
 ):
     monkeypatch.setattr(loader, "_downloader", loader._new_downloader())
     if fault == "stalled-fetch":
-        http.fetch_delay = None
+        http.fetch_stalls = True
     else:
         http.login_exc = RuntimeError("bad token")
     with pytest.raises(SongError) as info:
