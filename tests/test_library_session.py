@@ -209,6 +209,7 @@ class TestFrameText:
         assert f.kind == "song"
         assert f.labels == ["Airbag"]
         assert dict(f.fields)["Year"] == "1997"
+        assert f.description == "*Rock*"
 
     def test_enrichment_tags_override_genres(self):
         s = at_album()
