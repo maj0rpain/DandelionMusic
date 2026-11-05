@@ -18,7 +18,7 @@ import discord
 import pytest
 
 from config import config
-from musicbot.audiocontroller import MusicButton
+from musicbot.views import MusicButton
 from musicbot.admission import RequestKind
 from musicbot.bot import Context
 from discord_fakes import (
@@ -26,6 +26,7 @@ from discord_fakes import (
     ADMISSION_DJ_ROLE,
     FakeInteraction,
     VoiceGuild,
+    FakePanel,
     make_bot,
 )
 from helpers import run
@@ -193,3 +194,52 @@ def test_a_failed_join_is_an_ephemeral_followup_and_skips_the_action(
         (config.VOICE_CONNECT_FAILED, {"ephemeral": True})
     ]
     assert ran == []
+
+
+def click_with_panel(custom_id):
+    """A click on the button `custom_id` in a guild with a player
+    panel: (the click's interaction, its context, the panel)."""
+    ctx = FakeContext()
+    panel = FakePanel()
+    inter = FakeInteraction(ctx, custom_id, panel=panel)
+    ctx.interaction = inter
+    ctx.bot.sessions.panel = lambda guild: panel
+    return inter, ctx, panel
+
+
+@pytest.mark.parametrize("custom_id", ["next", "prev"])
+def test_a_skip_click_posts_the_skip_notice_and_does_not_refresh(custom_id):
+    inter, ctx, panel = click_with_panel(custom_id)
+    ctx.settings.dj_role = None
+
+    run(MusicButton(lambda ctx: None, custom_id=custom_id).callback(inter))
+
+    assert sent_texts_and_kwargs(inter.followups) == [
+        (f"{inter.user} Skipped a Song", {})
+    ]
+    assert panel.refreshes == 0
+
+
+@pytest.mark.parametrize("custom_id", ["pause", "shuffle", "queue", "x"])
+def test_every_other_successful_click_refreshes_the_panel(custom_id):
+    inter, ctx, panel = click_with_panel(custom_id)
+    ctx.settings.dj_role = None
+
+    run(MusicButton(lambda ctx: None, custom_id=custom_id).callback(inter))
+
+    assert panel.refreshes == 1
+    assert inter.followups == []
+
+
+def test_a_refused_click_changes_nothing():
+    inter, ctx, panel = click_with_panel("pause")
+    ctx.out_of_voice()
+    ran = []
+
+    run(MusicButton(ran.append, custom_id="pause").callback(inter))
+
+    assert ran == []
+    assert panel.refreshes == 0
+    assert sent_texts_and_kwargs(inter.followups) == [
+        (config.NOT_CONNECTED_MESSAGE, {"ephemeral": True})
+    ]

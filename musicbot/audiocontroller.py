@@ -2,7 +2,6 @@ import sys
 import asyncio
 from dataclasses import dataclass
 from itertools import islice
-from inspect import isawaitable
 from traceback import print_exc
 from typing import (
     TYPE_CHECKING,
@@ -16,16 +15,14 @@ from typing import (
 import discord
 from config import config
 
-from musicbot import admission, loader, playlists, utils
+from musicbot import loader, playlists, utils
 from musicbot.song import PartialPlaylist, Song
 from musicbot.truncation import Truncation
 from musicbot.linkutils import SiteTypes
+from musicbot.panel_snapshot import PanelSnapshot
 from musicbot.playback import Playback, PlaybackState
 from musicbot.playlist import Playlist, LoopMode, LoopState
-from musicbot.utils import (
-    CheckError,
-    asset,
-)
+from musicbot.utils import asset
 from pathlib import Path
 import pickle
 from enum import Enum, auto
@@ -51,68 +48,6 @@ class QueuedPlaylist:
         return self.truncation.notice(self.queued)
 
 
-_not_provided = object()
-
-
-class MusicButton(discord.ui.Button):
-    """A button running `callback` once admission admits the click as
-    its request `kind`. A player button (the default kind) never
-    touches voice and is refused while the bot is out of voice; a
-    pick (`RequestKind.PICK`) acts in a joining command's name, so
-    `enter()` joins voice before its action."""
-
-    def __init__(
-        self, callback, kind=admission.RequestKind.PLAYER_BUTTON, **kwargs
-    ):
-        super().__init__(**kwargs)
-        self._callback = callback
-        self._kind = kind
-
-    async def callback(self, inter: discord.Interaction):
-        # Build ctx first, then acknowledge: get_context makes no HTTP
-        # call for an interaction (Context.from_interaction awaits
-        # nothing), so awaiting it ahead of the defer cannot delay the
-        # response, and a failure at any later step still has a ctx to
-        # report through. Acknowledge before the checks and the join:
-        # a join can be slow, and it must not push the response past
-        # Discord's 3-second deadline. Refusals then go out as
-        # ephemeral followups. enter() runs only once the check has
-        # passed, so a refused click never makes the bot join.
-        ctx = await inter.client.get_context(inter)
-        try:
-            await inter.response.defer()
-            try:
-                admitted = await admission.check(ctx, self._kind)
-                ctx.audiocontroller = await admitted.enter()
-            except CheckError as e:
-                self.on_refused()
-                await ctx.send(e, ephemeral=True)
-                return
-            res = self._callback(ctx)
-            if isawaitable(res):
-                await res
-
-            controller = inter.client.sessions.controller(inter.guild)
-            if controller:
-                if inter.data.get("custom_id") in ["next", "prev"]:
-                    await ctx.send(f"{inter.user} Skipped a Song")
-                else:
-                    await controller.update_view()
-        except Exception as e:
-            await self.on_failure(ctx, e)
-
-    async def on_failure(self, ctx, error):
-        """Called for any failure that is not a refusal: a failed
-        defer, or an exception (a CheckError included) from the
-        action or the controller update. Re-raises by default."""
-        raise error
-
-    def on_refused(self):
-        """Called for every CheckError that refuses a click (its
-        check, the DJ check or a failed voice join), before the
-        ephemeral refusal goes out. Does nothing by default."""
-
-
 class RestoreResult(Enum):
     """What AudioController.restore() did."""
 
@@ -131,8 +66,12 @@ class AudioController(object):
         guild: The guild in which the Audiocontroller operates.
     """
 
-    def __init__(self, bot: "MusicBot", guild: discord.Guild):
+    def __init__(self, bot: "MusicBot", guild: discord.Guild, panel):
+        """`panel` is the controller's panel port, which for now has
+        one method: `playback_ended()`."""
         self.bot = bot
+        self.panel = panel
+        self.command_channel: Optional[discord.abc.Messageable] = None
         self.playlist = Playlist()
         self.pickle_file = Path("backup") / f"playlist_{guild.id}.pickle"
         self.pickle_file.parent.mkdir(parents=True, exist_ok=True)
@@ -165,16 +104,9 @@ class AudioController(object):
             guild_id=guild.id,
         )
 
-        self.command_channel: Optional[discord.abc.Messageable] = None
-
-        self._last_message = None
-        self._last_view = None
-
         # according to Python documentation, we need
         # to keep strong references to all tasks
         self._tasks = set()
-
-        self.message_lock = asyncio.Lock()
 
     @property
     def current_song(self) -> Optional[Song]:
@@ -260,167 +192,25 @@ class AudioController(object):
         connect_to."""
         await utils.connect_to(self.guild, channel)
 
-    def make_view(self):
+    def panel_snapshot(self) -> PanelSnapshot:
+        """What the player panel draws: read-only, and inactive when
+        nothing is playing or paused."""
         if not self.is_active():
-            return None
-
-        is_empty = len(self.playlist) == 0
-
-        view = discord.ui.View(timeout=None)
-        view.add_item(
-            MusicButton(
-                lambda _: self.prev_song(),
-                custom_id="prev",
-                disabled=not self.playlist.has_prev(),
-                emoji="⏮️",
-            )
-        )
-        view.add_item(
-            MusicButton(
-                lambda _: self.pause(),
-                custom_id="pause",
-                emoji="⏸️" if self.guild.voice_client.is_playing() else "▶️",
-            )
-        )
-        view.add_item(
-            MusicButton(
-                lambda _: self.skip(),
-                custom_id="next",
-                disabled=not self.playlist.has_next(),
-                emoji="⏭️",
-            )
-        )
-        view.add_item(
-            MusicButton(
-                lambda _: self.loop(),
-                custom_id="loop",
-                disabled=is_empty,
-                emoji="🔁",
-                label="Loop: " + self.playlist.loop,
-            )
-        )
-        view.add_item(
-            MusicButton(
-                self.current_song_callback,
-                custom_id="current_song",
-                row=1,
-                disabled=self.current_song is None,
-                emoji="💿",
-            )
-        )
-        view.add_item(
-            MusicButton(
-                lambda _: self.shuffle(),
-                custom_id="shuffle",
-                row=1,
-                disabled=is_empty,
-                emoji="🔀",
-            )
-        )
-        view.add_item(
-            MusicButton(
-                self.queue_callback,
-                custom_id="queue",
-                row=1,
-                disabled=is_empty,
-                emoji="📜",
-            )
-        )
-        view.add_item(
-            MusicButton(
-                lambda _: self.stop(),
-                custom_id="stop",
-                row=1,
-                emoji="⏹️",
-                style=discord.ButtonStyle.red,
-            )
-        )
-        view.add_item(
-            MusicButton(
-                lambda _: self.volume_down(),
-                custom_id="volume_down",
-                row=2,
-                disabled=self.volume == 0,
-                emoji="🔉",
-            )
-        )
-        view.add_item(
-            MusicButton(
-                lambda _: self.volume_up(),
-                custom_id="volume_up",
-                row=2,
-                disabled=self.volume == 100,
-                emoji="🔊",
-            )
+            return PanelSnapshot.inactive(self.volume)
+        return PanelSnapshot(
+            active=True,
+            paused=not self.guild.voice_client.is_playing(),
+            has_previous=self.playlist.has_prev(),
+            has_next=self.playlist.has_next(),
+            queue_empty=len(self.playlist) == 0,
+            loop_mode=self.playlist.loop,
+            volume=self.volume,
+            current_song=self.playlist[0] if self.playlist else None,
         )
 
-        return view
-
-    async def current_song_callback(self, ctx):
-        if self.current_song is None:
-            await ctx.send(config.QUEUE_EMPTY)
-            return
-        await ctx.send(
-            embed=self.current_song.format_output(config.SONGINFO_SONGINFO),
-        )
-
-    async def queue_callback(self, ctx):
-        await ctx.send(
-            embed=self.playlist.queue_embed(),
-        )
-
-    async def attach_view(self, send):
-        """Moves the playback buttons onto the message `send` sends.
-
-        `send(view)` is an async callable that sends the message,
-        carrying `view` when it is not None, and returns what it sent.
-        That becomes the message whose buttons later refreshes edit; an
-        interaction stands for its original response. Returns what
-        `send` returned.
-        """
-        async with self.message_lock:
-            await self.update_view(None)
-            view = self.make_view()
-            res = await send(view)
-            self._last_view = view
-            if isinstance(res, discord.Interaction):
-                self._last_message = await res.original_response()
-            else:
-                self._last_message = res
-        return res
-
-    async def update_view(self, view=_not_provided):
-        msg = self._last_message
-        if not msg:
-            return
-        old_view = self._last_view
-        if view is None:
-            self._last_message = None
-        elif view is _not_provided:
-            view = self.make_view()
-        if view is old_view:
-            return
-        elif (
-            old_view
-            and view
-            and old_view.to_components() == view.to_components()
-        ):
-            return
-        try:
-            await msg.edit(view=view)
-            self._last_view = view
-        except discord.HTTPException as e:
-            if e.code == 50027:  # Invalid Webhook Token
-                try:
-                    self._last_message = await msg.channel.fetch_message(
-                        msg.id
-                    )
-                    await self.update_view(view)
-                except discord.NotFound:
-                    self._last_message = None
-            else:
-                print("Failed to update view:", file=sys.stderr)
-                print_exc(file=sys.stderr)
+    def queue_embed(self) -> discord.Embed:
+        """The queue's embed, read when a queue button is clicked."""
+        return self.playlist.queue_embed()
 
     def is_active(self) -> bool:
         client = self.guild.voice_client
@@ -792,7 +582,7 @@ class AudioController(object):
             return await self._udisconnect(reason, had_session)
 
     async def _udisconnect(self, reason: str, had_session: bool):
-        await self.update_view(None)
+        await self.panel.playback_ended()
         # Cancelled here rather than after the disconnect below, so
         # the no-connection branch cancels it too. timeout_handler()
         # reads self.guild.voice_client, which is guild-global and not

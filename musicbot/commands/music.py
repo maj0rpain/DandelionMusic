@@ -13,13 +13,12 @@ from musicbot.utils import dj_check, chunks, joining_command, SimplePaginator
 from musicbot.audiocontroller import (
     QueuedPlaylist,
     AudioController,
-    MusicButton,
     RestoreResult,
 )
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
 from musicbot.linkutils import get_site_type, url_regex
-from musicbot.views import OwnedView
+from musicbot.views import MusicButton, OwnedView
 
 
 def _attachment_track(ctx, file) -> Optional[str]:
@@ -171,6 +170,7 @@ class Music(commands.Cog):
         # the guild's current controller, not the one cog_check saw
         ctx.audiocontroller = await ctx.admission.enter()
         ctx.audiocontroller.command_channel = ctx
+        ctx.bot.sessions.panel(ctx.guild).direct_to(ctx.channel)
 
     @commands.hybrid_command(
         name="play",

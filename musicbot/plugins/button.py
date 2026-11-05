@@ -102,10 +102,14 @@ class Button(commands.Cog):
                 audiocontroller = await entry.enter()
             except utils.CheckError:
                 return
-            if not audiocontroller.command_channel and sett.command_channel:
-                audiocontroller.command_channel = serv.get_channel_or_thread(
-                    int(sett.command_channel)
-                )
+            if sett.command_channel:
+                channel = serv.get_channel_or_thread(int(sett.command_channel))
+                if channel is not None:
+                    if not audiocontroller.command_channel:
+                        audiocontroller.command_channel = channel
+                    self.bot.sessions.panel(serv).direct_to(
+                        channel, replace=False
+                    )
             for url in links:
                 try:
                     song = await audiocontroller.process_song(url, user=member)

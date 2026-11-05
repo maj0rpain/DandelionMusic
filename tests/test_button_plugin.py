@@ -153,6 +153,7 @@ def react(
         emoji=SimpleNamespace(name="x", id=None),
     )
     react.guild = guild
+    react.panel = bot.sessions.panel(guild)
     run(Button(bot).on_raw_reaction_add(event))
     return controller.processed, sent
 
@@ -242,3 +243,22 @@ def test_reaction_while_the_bot_sits_alone_elsewhere_moves_it(no_sleep):
     processed, _ = react({A: object()}, bot_in="other")
     assert processed == [A]
     assert react.guild.events == [("move", "mine")]
+
+
+def test_a_configured_command_channel_is_the_panels_fallback_destination():
+    react({A: object()}, command_channel=2)
+
+    ((channel, replace),) = react.panel.directed
+    assert channel is not None and replace is False
+
+
+def test_no_configured_command_channel_directs_the_panel_nowhere():
+    react({A: object()}, command_channel=None)
+
+    assert react.panel.directed == []
+
+
+def test_an_unresolved_command_channel_directs_the_panel_nowhere():
+    react({A: object()}, command_channel=2, resolves=False)
+
+    assert react.panel.directed == []

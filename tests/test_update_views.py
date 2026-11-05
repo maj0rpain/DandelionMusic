@@ -1,5 +1,5 @@
-"""MusicBot.update_views runs every guild's view update even when one
-guild's update fails, and names the failing guild in the log.
+"""MusicBot.update_views refreshes every guild's player panel even when
+one guild's refresh fails, and names the failing guild in the log.
 """
 
 import discord
@@ -8,31 +8,51 @@ from musicbot.bot import MusicBot
 from helpers import run
 
 
-class _Controller:
-    def __init__(self, name, updated, error=None):
+class _Panel:
+    def __init__(self, name, refreshed, error=None):
         self.guild = type("G", (), {"name": name})()
         self.error = error
-        self.updated = updated
+        self.refreshed = refreshed
 
-    async def update_view(self):
+    async def refresh(self):
         if self.error:
             raise self.error
-        self.updated.append(self.guild.name)
+        self.refreshed.append(self.guild.name)
 
 
-def test_failing_view_update_does_not_stop_other_guilds_and_names_the_guild(
+class _Sessions:
+    def __init__(self, panels):
+        self._panels = panels
+
+    def panels(self):
+        return iter(self._panels)
+
+
+def test_failing_refresh_does_not_stop_other_guilds_and_names_the_guild(
     capsys,
 ):
-    updated = []
+    refreshed = []
     bot = MusicBot([], command_prefix="d!", intents=discord.Intents.default())
-    bot.sessions = [
-        _Controller("Broken Guild", updated, RuntimeError("boom")),
-        _Controller("ok", updated),
-    ]
+    bot.sessions = _Sessions(
+        [
+            _Panel("Broken Guild", refreshed, RuntimeError("boom")),
+            _Panel("ok", refreshed),
+        ]
+    )
     run(MusicBot.update_views.coro(bot))
     err = capsys.readouterr().err
     assert (
-        updated,
+        refreshed,
         "View update failed for guild Broken Guild:" in err,
         "Traceback" in err,
     ) == (["ok"], True, True)
+
+
+def test_one_tick_refreshes_every_registered_panel():
+    refreshed = []
+    bot = MusicBot([], command_prefix="d!", intents=discord.Intents.default())
+    bot.sessions = _Sessions([_Panel("a", refreshed), _Panel("b", refreshed)])
+
+    run(MusicBot.update_views.coro(bot))
+
+    assert refreshed == ["a", "b"]

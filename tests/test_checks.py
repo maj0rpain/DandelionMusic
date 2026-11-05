@@ -17,7 +17,7 @@ from config import config
 from musicbot.bot import Context
 from musicbot.commands.general import General
 from musicbot.commands.library import Library, queue_songs
-from musicbot.audiocontroller import MusicButton
+from musicbot.views import MusicButton
 from musicbot.commands.music import Music, SearchView, SongButton
 from musicbot import admission
 from musicbot.utils import (
@@ -253,6 +253,12 @@ class TestMusicBeforeInvoke:
         run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == []
         assert ctx.audiocontroller.command_channel is ctx
+
+    def test_directs_the_panel_to_the_channel_not_the_context(self):
+        guild = VoiceGuild()
+        ctx = slash_ctx(guild, guild.channel("a"))
+        run(invoke_music_hooks(Music(None), ctx))
+        assert ctx.bot.sessions.panel(guild).directed == [(ctx.channel, True)]
 
     def test_a_second_defer_in_the_body_does_not_raise(self):
         guild = VoiceGuild()
@@ -634,3 +640,16 @@ def test_cog_check_admits_a_button_context_with_no_command(
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)
     ctx = types.SimpleNamespace(command=None)
     assert run(Music(None).cog_check(ctx)) is True
+
+
+def test_the_library_hook_directs_the_panel_to_the_channel():
+    from musicbot.commands.library import Library
+
+    guild = VoiceGuild()
+    ctx = slash_ctx(guild, guild.channel("a"))
+    ctx.audiocontroller = types.SimpleNamespace(command_channel=None)
+
+    run(Library(None).cog_before_invoke(ctx))
+
+    assert ctx.bot.sessions.panel(guild).directed == [(ctx.channel, True)]
+    assert ctx.audiocontroller.command_channel is ctx

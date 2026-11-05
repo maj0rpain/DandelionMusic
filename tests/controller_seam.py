@@ -77,6 +77,17 @@ class StubLoader(types.ModuleType):
         return self._record("load_local_songs", tracks, default=[])
 
 
+class RecordingPanel:
+    """The controller's panel port, recording its calls: `ended` counts
+    playback_ended() calls. No `discord.ui` is needed."""
+
+    def __init__(self):
+        self.ended = 0
+
+    async def playback_ended(self):
+        self.ended += 1
+
+
 class ControllerSettings:
     def __init__(self, default_volume=70):
         self.default_volume = default_volume
@@ -215,7 +226,9 @@ def controller_seam(workdir: Path) -> Iterator[Tuple[object, StubLoader]]:
         guild = ControllerGuild(voice_client=voice_client)
         bot = ControllerBot()
         bot.sessions.add_settings(guild, ControllerSettings())
-        yield audiocontroller.AudioController(bot, guild), stub
+        yield audiocontroller.AudioController(
+            bot, guild, RecordingPanel()
+        ), stub
     finally:
         config.ANNOUNCE_DISCONNECT = old_announce
         os.chdir(old_cwd)

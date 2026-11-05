@@ -1,6 +1,10 @@
+from inspect import isawaitable
 from typing import Optional
 
 import discord
+
+from musicbot import admission
+from musicbot.utils import CheckError
 
 
 class OwnedView(discord.ui.View):
@@ -89,3 +93,62 @@ class OwnedView(discord.ui.View):
                 await self.ctx.interaction.edit_original_response(view=self)
         except discord.HTTPException:
             pass
+
+
+class MusicButton(discord.ui.Button):
+    """A button running `callback` once admission admits the click as
+    its request `kind`. A player button (the default kind) never
+    touches voice and is refused while the bot is out of voice; a
+    pick (`RequestKind.PICK`) acts in a joining command's name, so
+    `enter()` joins voice before its action."""
+
+    def __init__(
+        self, callback, kind=admission.RequestKind.PLAYER_BUTTON, **kwargs
+    ):
+        super().__init__(**kwargs)
+        self._callback = callback
+        self._kind = kind
+
+    async def callback(self, inter: discord.Interaction):
+        # Build ctx first, then acknowledge: get_context makes no HTTP
+        # call for an interaction (Context.from_interaction awaits
+        # nothing), so awaiting it ahead of the defer cannot delay the
+        # response, and a failure at any later step still has a ctx to
+        # report through. Acknowledge before the checks and the join:
+        # a join can be slow, and it must not push the response past
+        # Discord's 3-second deadline. Refusals then go out as
+        # ephemeral followups. enter() runs only once the check has
+        # passed, so a refused click never makes the bot join.
+        ctx = await inter.client.get_context(inter)
+        try:
+            await inter.response.defer()
+            try:
+                admitted = await admission.check(ctx, self._kind)
+                ctx.audiocontroller = await admitted.enter()
+            except CheckError as e:
+                self.on_refused()
+                await ctx.send(e, ephemeral=True)
+                return
+            res = self._callback(ctx)
+            if isawaitable(res):
+                await res
+
+            panel = inter.client.sessions.panel(inter.guild)
+            if panel:
+                if inter.data.get("custom_id") in ["next", "prev"]:
+                    await ctx.send(f"{inter.user} Skipped a Song")
+                else:
+                    await panel.refresh()
+        except Exception as e:
+            await self.on_failure(ctx, e)
+
+    async def on_failure(self, ctx, error):
+        """Called for any failure that is not a refusal: a failed
+        defer, or an exception (a CheckError included) from the
+        action or the panel refresh. Re-raises by default."""
+        raise error
+
+    def on_refused(self):
+        """Called for every CheckError that refuses a click (its
+        check, the DJ check or a failed voice join), before the
+        ephemeral refusal goes out. Does nothing by default."""

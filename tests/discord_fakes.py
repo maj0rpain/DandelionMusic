@@ -16,6 +16,31 @@ from musicbot.utils import joining_command
 from helpers import run
 
 
+class FakePanel:
+    """A guild's player panel as its callers see it: records what it
+    is asked. `carries` answers `carries_buttons`; `attach` runs the
+    sender with no view, as a panel over an inactive controller does."""
+
+    def __init__(self, carries=True):
+        self.carries = carries
+        self.refreshes = 0
+        self.directed = []
+        self.attached = 0
+
+    async def refresh(self):
+        self.refreshes += 1
+
+    def direct_to(self, channel, *, replace=True):
+        self.directed.append((channel, replace))
+
+    def carries_buttons(self, *, channel, ephemeral, has_view):
+        return self.carries and not ephemeral and not has_view
+
+    async def attach(self, send):
+        self.attached += 1
+        return await send(None)
+
+
 def make_bot(controllers=None, is_owner=False, settings=None):
     """A bot whose registry is seeded through its own interface:
     `settings` alone are bulk-loaded, and each of `controllers` is
@@ -38,7 +63,11 @@ def make_bot(controllers=None, is_owner=False, settings=None):
         for guild in controllers:
             await sessions.get_or_create(guild)
 
-    sessions = GuildSessions(controllers.__getitem__, load)
+    sessions = GuildSessions(
+        lambda guild: FakePanel(),
+        lambda guild, panel: controllers[guild],
+        load,
+    )
     try:
         asyncio.get_running_loop()
     except RuntimeError:
@@ -106,10 +135,10 @@ class VoiceGuild:
 class FakeInteraction:
     """A component click. Records `deferred`, `messages` (direct
     responses) and `followups`. Its client answers get_context with
-    the context and has no controller for any guild, so a click ends
-    after its action."""
+    the context and has no controller or player panel for any guild
+    (unless a `panel` is given), so a click ends after its action."""
 
-    def __init__(self, ctx, custom_id="x", user_id=1):
+    def __init__(self, ctx, custom_id="x", user_id=1, panel=None):
         self.guild = ctx.guild
         self.user = types.SimpleNamespace(id=user_id)
         self.data = {"custom_id": custom_id}
@@ -139,7 +168,9 @@ class FakeInteraction:
 
         self.client = types.SimpleNamespace(
             get_context=get_context,
-            sessions=types.SimpleNamespace(controller=lambda guild: None),
+            sessions=types.SimpleNamespace(
+                controller=lambda guild: None, panel=lambda guild: panel
+            ),
         )
 
 
@@ -168,7 +199,7 @@ def http_error():
 
 
 # The player view's button ids, in its order. Hand-written because
-# parametrize reads it at collection; test_audiocontroller checks it
+# parametrize reads it at collection; test_player_panel checks it
 # against the real view.
 PLAYER_BUTTONS = [
     "prev",
