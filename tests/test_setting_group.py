@@ -9,7 +9,6 @@ that is checked.
 for leaving the view where it was.
 """
 
-import asyncio
 import types
 
 import discord
@@ -30,6 +29,7 @@ from setting_fakes import (
     stored_settings,
     stored_values,
 )
+from helpers import run
 
 
 class RecordingContext(commands.Context):
@@ -78,7 +78,7 @@ def invoke(text, is_dj=True, sett=None):
     ctx.invoked_parents = []
     error = None
     try:
-        asyncio.run(group.invoke(ctx))
+        run(group.invoke(ctx))
     except commands.CommandError as e:
         error = e
     return ctx.sent, error, sett

@@ -4,7 +4,6 @@ Drives the command callback on a fake context whose controller reports
 a fixed outcome, so nothing here needs Discord or playback.
 """
 
-import asyncio
 import types
 
 import pytest
@@ -12,6 +11,7 @@ import pytest
 from config import config
 from musicbot.audiocontroller import RestoreResult
 from musicbot.commands.music import Music
+from helpers import run
 
 
 class OutcomeController:
@@ -48,7 +48,7 @@ def test_restore_command_replies_with_the_outcome(outcome, reply):
         defer=defer,
     )
 
-    asyncio.run(Music._restore.callback(Music(None), ctx))
+    run(Music._restore.callback(Music(None), ctx))
 
     assert events == [("defer", False), "restore"]
     assert sent == [reply]

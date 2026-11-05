@@ -21,22 +21,25 @@ from controller_helpers import (
     _backup_path,
     _fake_ffmpeg,
     _preloaded,
+    play_ctx,
     _queue,
     _run,
-    _run_intent,
+    _run_while_playing,
     _settle,
+    _song,
     _songs,
     _titles,
 )
 from controller_seam import PlaybackVoiceClient, StubLoader, controller_seam
 from db_seam import in_memory_db
 from discord_fakes import PLAYER_BUTTONS
+from helpers import run
 
 
 MIX = playlists.PlaylistRef("1234", "mix")
 
 
-class _FakeChannel:
+class _RecordingChannel:
     """A channel or context: records what the controller sends."""
 
     def __init__(self):
@@ -93,9 +96,7 @@ def test_controller_starts_at_the_guild_default_volume(controller):
 
 def test_stub_loader_records_preload_calls(controller, stub_loader):
     song = object()
-    assert (
-        asyncio.run(stub_loader.preload(song)) is stub_loader.Preload.EXTRACTED
-    )
+    assert run(stub_loader.preload(song)) is stub_loader.Preload.EXTRACTED
     assert stub_loader.calls == [("preload", (song,))]
 
 
@@ -366,7 +367,7 @@ def test_shuffle_refreshes_backup_and_preload(
 ):
     _queue(controller, "current", "a", "b", "c", "d", "e")
 
-    _run_intent(controller, controller.shuffle)
+    _run_while_playing(controller, controller.shuffle)
 
     titles = _titles(controller)
     assert sorted(titles) == ["a", "b", "c", "current", "d", "e"]
@@ -379,7 +380,7 @@ def test_move_reorders_the_queue_and_refreshes_backup_and_preload(
 ):
     _queue(controller, "current", "a", "b", "c")
 
-    _run_intent(controller, lambda: controller.move(3, 1))
+    _run_while_playing(controller, lambda: controller.move(3, 1))
 
     assert _titles(controller) == ["current", "c", "a", "b"]
     assert _backup(controller, tmp_path) == ["current", "c", "a", "b"]
@@ -391,7 +392,7 @@ def test_remove_drops_a_track_and_refreshes_backup_and_preload(
 ):
     _queue(controller, "current", "a", "b", "c")
 
-    removed = _run_intent(controller, lambda: controller.remove(2))
+    removed = _run_while_playing(controller, lambda: controller.remove(2))
 
     assert removed.title == "b"
     assert _titles(controller) == ["current", "a", "c"]
@@ -404,7 +405,7 @@ def test_clear_keeps_the_current_track_refreshes_backup_and_preloads_nothing(
 ):
     _queue(controller, "current", "a", "b")
 
-    _run_intent(controller, controller.clear)
+    _run_while_playing(controller, controller.clear)
 
     assert _titles(controller) == ["current"]
     assert _backup(controller, tmp_path) == ["current"]
@@ -495,7 +496,7 @@ def test_attach_view_moves_the_buttons_onto_the_new_message(controller):
     assert len(sent) == 1 and isinstance(sent[0], discord.ui.View)
     assert result is new_message
     # the next attach_view takes the buttons off the new message
-    asyncio.run(controller.attach_view(lambda view: _resolved(_FakeMessage())))
+    run(controller.attach_view(lambda view: _resolved(_FakeMessage())))
     assert new_message.edits == [None]
 
 
@@ -518,7 +519,7 @@ def test_attach_view_records_an_interactions_original_response(controller):
     async def send(view):
         return interaction
 
-    result = asyncio.run(controller.attach_view(send))
+    result = run(controller.attach_view(send))
 
     assert result is interaction
     # the buttons the next attach_view takes off are the response's
@@ -526,7 +527,7 @@ def test_attach_view_records_an_interactions_original_response(controller):
     async def send_plain(view):
         return _FakeMessage()
 
-    asyncio.run(controller.attach_view(send_plain))
+    run(controller.attach_view(send_plain))
     assert response.edits == [None]
 
 
@@ -638,7 +639,7 @@ def test_the_after_callback_only_hands_the_track_end_to_the_loop(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
-    after = asyncio.run(_start_and_end_first_track(controller))
+    after = run(_start_and_end_first_track(controller))
     seen = _record_threads(controller, monkeypatch)
     fake_loop = controller.bot.loop = _RecordingLoop()
 
@@ -813,8 +814,8 @@ def test_the_after_callback_drops_the_track_end_once_the_loop_is_closed(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
 
-    # asyncio.run() closes its loop on the way out, as bot shutdown does
-    after = asyncio.run(_start_and_end_first_track(controller))
+    # run() closes its loop on the way out, as bot shutdown does
+    after = run(_start_and_end_first_track(controller))
     assert controller.bot.loop.is_closed()
 
     _, error = _in_thread(after, None)
@@ -1404,9 +1405,9 @@ def test_a_current_song_click_with_no_current_song_replies_queue_empty(
 ):
     from config import config
 
-    ctx = _FakeChannel()
+    ctx = _RecordingChannel()
 
-    asyncio.run(controller.current_song_callback(ctx))
+    run(controller.current_song_callback(ctx))
 
     assert ctx.sent == [((config.QUEUE_EMPTY,), {})]
 
@@ -1416,9 +1417,9 @@ def test_a_current_song_click_while_a_track_plays_shows_the_song_info(
 ):
     _queue(controller, "current")
     controller.guild.voice_client.playing = True
-    ctx = _FakeChannel()
+    ctx = _RecordingChannel()
 
-    asyncio.run(controller.current_song_callback(ctx))
+    run(controller.current_song_callback(ctx))
 
     assert len(ctx.sent) == 1 and "embed" in ctx.sent[0][1]
 
@@ -1565,7 +1566,7 @@ def _pending_start(controller, stub_loader, monkeypatch, *titles, result=None):
     """Queues `titles` and starts the first one with its preload held.
     Returns (release event, the start's task, its song)."""
     _fake_ffmpeg(monkeypatch)
-    controller.command_channel = _FakeChannel()
+    controller.command_channel = _RecordingChannel()
     _queue(controller, *titles)
     slow = controller.playlist[0]
     release = stub_loader.hold(slow, result)
@@ -1574,13 +1575,13 @@ def _pending_start(controller, stub_loader, monkeypatch, *titles, result=None):
 
 
 def _without_url(controller, title):
-    song = _songs(controller, title)[0]
+    song = _song(controller, title)
     song.url = None
     return song
 
 
 def _old_track(controller):
-    song = _songs(controller, "old")[0]
+    song = _song(controller, "old")
     controller.playlist.playhistory.append(song)
     return song
 
@@ -1873,7 +1874,7 @@ def test_a_stale_start_without_a_url_moves_nothing(
     async def scenario():
         controller.playlist.add(_without_url(controller, "slow"))
         _queue(controller, "next")
-        controller.command_channel = _FakeChannel()
+        controller.command_channel = _RecordingChannel()
         _fake_ffmpeg(monkeypatch)
         release = stub_loader.hold(controller.playlist[0])
         task = asyncio.ensure_future(controller.ensure_playing())
@@ -2037,7 +2038,7 @@ def test_disconnecting_while_playing_leaves_the_backup_holding_the_queue(
 
 
 def _title_less_song(controller):
-    song = _songs(controller, "untitled")[0]
+    song = _song(controller, "untitled")
     song.title = None
     controller.playlist.add(song)
     return song
@@ -2058,7 +2059,7 @@ def test_a_title_less_song_whose_preload_fails_is_skipped_by_its_url(
     controller, stub_loader, monkeypatch
 ):
     async def scenario():
-        controller.command_channel = _FakeChannel()
+        controller.command_channel = _RecordingChannel()
         song = _title_less_song(controller)
         stub_loader.results["preload"] = stub_loader.Preload.FAILED
         await controller.play_song(song)
@@ -2073,12 +2074,7 @@ def test_a_title_less_song_whose_preload_fails_is_skipped_by_its_url(
 def test_remove_names_a_title_less_song_by_its_webpage_url(controller):
     _queue(controller, "current")
     song = _title_less_song(controller)
-    sent = []
-
-    async def send(text):
-        sent.append(text)
-
-    ctx = types.SimpleNamespace(audiocontroller=controller, send=send)
+    ctx, sent = play_ctx(controller)
 
     async def scenario():
         await Music._remove.callback(Music(None), ctx, 2)
@@ -2098,24 +2094,24 @@ def test_the_player_view_buttons_are_the_player_buttons_in_order(controller):
 
 
 def test_start_idle_timer_starts_the_timer(controller):
-    async def run():
+    async def scenario():
         await controller.start_idle_timer(True)
         return controller.timer._task
 
-    assert asyncio.run(run()) is not None
+    assert run(scenario()) is not None
 
 
 def test_start_idle_timer_starts_none_while_disconnecting(controller):
-    async def run():
+    async def scenario():
         controller._disconnecting = True
         await controller.start_idle_timer(True)
         return controller.timer._task
 
-    assert asyncio.run(run()) is None
+    assert run(scenario()) is None
 
 
 def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
-    async def run():
+    async def scenario():
         controller.bot.loop = asyncio.get_running_loop()
         controller.guild.voice_client.playing = True
         reached = asyncio.Event()
@@ -2134,4 +2130,4 @@ def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
         await _settle()
         return controller.timer._task
 
-    assert asyncio.run(run()) is None
+    assert run(scenario()) is None

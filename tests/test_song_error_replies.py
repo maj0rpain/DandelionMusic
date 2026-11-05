@@ -1,7 +1,6 @@
 """A SongError reaches the user as its own message: from d!playlist
 add_song, and, as a backstop, from the command error handler."""
 
-import asyncio
 import types
 
 import discord
@@ -16,6 +15,7 @@ from musicbot.loader import SongError
 from musicbot import bot as bot_module
 from musicbot.commands import music as music_module
 from discord_fakes import RecordingCtx
+from helpers import run
 
 
 def make_music_bot():
@@ -36,7 +36,7 @@ def test_add_song_replies_with_the_song_error_and_saves_nothing(monkeypatch):
     group = next(c for c in Music(None).get_commands() if c.name == "playlist")
     command = group.get_command("add_song")
     ctx = RecordingCtx(types.SimpleNamespace(DbSession=object()))
-    asyncio.run(command.callback(Music(None), ctx, "mine", "bad link"))
+    run(command.callback(Music(None), ctx, "mine", "bad link"))
     assert [str(m) for m in ctx.sent] == ["unsupported link"]
     assert add_calls == []
     assert config.PLAYLIST_UPDATED not in ctx.sent
@@ -71,6 +71,6 @@ def test_command_error_handler_answers_a_song_error(monkeypatch, wrap):
         await bot.on_command_error(ctx, wrapped)
         return ctx.sent
 
-    sent = asyncio.run(scenario())
+    sent = run(scenario())
     assert [str(m) for m in sent] == ["unsupported link"]
     assert printed == []

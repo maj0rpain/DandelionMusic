@@ -4,12 +4,12 @@ player view's button ids. Import them rather than writing a per-file
 copy.
 """
 
-import asyncio
 import types
 
 import discord
 
 from musicbot.sessions import GuildSessions
+from helpers import run
 
 
 def make_bot(controllers=None, is_owner=False, settings=None):
@@ -35,7 +35,7 @@ def make_bot(controllers=None, is_owner=False, settings=None):
             await sessions.get_or_create(guild)
 
     sessions = GuildSessions(controllers.__getitem__, load)
-    asyncio.run(seed())
+    run(seed())
     return types.SimpleNamespace(sessions=sessions, is_owner=_is_owner)
 
 

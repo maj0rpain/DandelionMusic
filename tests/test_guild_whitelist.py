@@ -55,7 +55,7 @@ def bot(tmp_path):
         async with engine.connect() as conn:
             await conn.run_sync(run_migrations)
 
-    asyncio.run(setup())
+    asyncio.run(setup())  # unbounded: runs before any test coroutine
     return stub
 
 
@@ -217,7 +217,7 @@ def group(bot=None):
 def run_sub(name, bot, arg):
     cog, grp = group(bot)
     ctx = FakeCtx(bot)
-    asyncio.run(grp.get_command(name).callback(cog, ctx, id=arg))
+    run(grp.get_command(name).callback(cog, ctx, id=arg))
     return ctx.sent
 
 
@@ -276,7 +276,7 @@ def test_whitelist_commands_admit_every_owner_and_refuse_others(
         for c in cmd.checks:
             await c(ctx)
 
-    asyncio.run(check(5))
-    asyncio.run(check(1))
+    run(check(5))
+    run(check(1))
     with pytest.raises(commands.NotOwner):
-        asyncio.run(check(99))
+        run(check(99))

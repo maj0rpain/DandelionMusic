@@ -2,11 +2,10 @@
 guild's update fails, and names the failing guild in the log.
 """
 
-import asyncio
-
 import discord
 
 from musicbot.bot import MusicBot
+from helpers import run
 
 
 class _Controller:
@@ -30,7 +29,7 @@ def test_failing_view_update_does_not_stop_other_guilds_and_names_the_guild(
         _Controller("Broken Guild", updated, RuntimeError("boom")),
         _Controller("ok", updated),
     ]
-    asyncio.run(MusicBot.update_views.coro(bot))
+    run(MusicBot.update_views.coro(bot))
     err = capsys.readouterr().err
     assert (
         updated,

@@ -1,11 +1,10 @@
 """d!search tells a failed search apart from one that found nothing."""
 
-import asyncio
-
 from config import config
 from musicbot.commands import music
 from musicbot.commands.music import Music
 from discord_fakes import RecordingCtx
+from helpers import run
 
 
 def run_search(results, monkeypatch):
@@ -14,7 +13,7 @@ def run_search(results, monkeypatch):
 
     monkeypatch.setattr(music, "search_youtube", search_youtube)
     ctx = RecordingCtx()
-    asyncio.run(Music._search.callback(Music(None), ctx, query="q"))
+    run(Music._search.callback(Music(None), ctx, query="q"))
     return ctx.sent
 
 
