@@ -7,11 +7,11 @@ next to the Discord calls. Here it is synchronous and Discord-free: the
 session builds one `Frame` per draw and the view turns it into
 Discord objects.
 
-Imports only `musicbot.library`, `musicbot.library_browse` and
-`typing`. The enrichment type is named under TYPE_CHECKING alone and
-read by duck-typing (`.art`, `.stats`), because importing
-`musicbot.library_metadata` would pull in linkutils, the loader and
-yt_dlp. The session does no I/O.
+Imports only `musicbot.library`, `musicbot.library_browse`,
+`musicbot.library_display` and `typing`. The enrichment type is named
+under TYPE_CHECKING alone and read by duck-typing (`.art`, `.stats`),
+because importing `musicbot.library_metadata` would pull in linkutils,
+the loader and yt_dlp. The session does no I/O.
 
 The no-await rule is "build the frame, then await the edit": a frame
 is built from the state in one synchronous call, so it cannot describe
@@ -20,36 +20,10 @@ two levels.
 
 from typing import TYPE_CHECKING, List, NamedTuple, Optional, Tuple
 
-from musicbot import library, library_browse
+from musicbot import library, library_browse, library_display
 
 if TYPE_CHECKING:
     from musicbot import library_metadata
-
-# One icon per kind of thing the library holds, shared by the browser
-# and the search results so the two can't drift apart.
-KIND_EMOJI = {
-    "artist": "\U0001f464",
-    "album": "\U0001f4bf",
-    "song": "\U0001f3b5",
-}
-
-# An embed title holds 256 UTF-16 code units: the icon is two of them,
-# the space one and the "…" one, leaving 252 for the name. trim()
-# measures in UTF-16 units too, so a non-BMP name counts double.
-NAME_TITLE_LIMIT = 252
-
-
-def trim(text: str, limit: int) -> str:
-    """Cuts to `limit` UTF-16 code units plus an ellipsis. A character
-    that would straddle the limit is dropped whole. A lone surrogate
-    (an undecodable filename byte) counts as one unit."""
-    units = 0
-    for end, char in enumerate(text):
-        units += 2 if ord(char) > 0xFFFF else 1
-        if units > limit:
-            return text[:end] + "…"
-    return text
-
 
 def _fmt_duration(seconds: Optional[int]) -> Optional[str]:
     """Renders as "42:39" under an hour and "11h 23m" above it - an
@@ -282,12 +256,14 @@ class BrowseSession:
         scope is - the path to it lives in the footer."""
         cursor = self.cursor
         if cursor.artist is None:
-            return f"{KIND_EMOJI['artist']} Artists"
+            return f"{library_display.KIND_EMOJI['artist']} Artists"
         if cursor.album is None:
             name, kind = cursor.artist, "artist"
         else:
             name, kind = cursor.album, "album"
-        return f"{KIND_EMOJI[kind]} {trim(name, NAME_TITLE_LIMIT)}"
+        icon = library_display.KIND_EMOJI[kind]
+        trimmed = library_display.trim(name, library_display.NAME_TITLE_LIMIT)
+        return f"{icon} {trimmed}"
 
     def _footer(self) -> Optional[str]:
         """In the breadcrumb the icons mark entities only - the leading
@@ -295,10 +271,11 @@ class BrowseSession:
         cursor = self.cursor
         if cursor.artist is None:
             return None
-        artist = f"{KIND_EMOJI['artist']} {cursor.artist}"
+        artist = f"{library_display.KIND_EMOJI['artist']} {cursor.artist}"
         if cursor.album is None:
             return f"Artists › {artist}"
-        return f"{artist} › {KIND_EMOJI['album']} {cursor.album}"
+        icon = library_display.KIND_EMOJI["album"]
+        return f"{artist} › {icon} {cursor.album}"
 
     def frame(self) -> Frame:
         cursor = self.cursor

@@ -293,6 +293,7 @@ class TestTheSeam:
             "musicbot",
             "musicbot.library",
             "musicbot.library_browse",
+            "musicbot.library_display",
         }
         assert {n.split(".")[0] for n in names} == {"typing", "musicbot"}
         # and the one allowed exception really is TYPE_CHECKING-only,
@@ -309,26 +310,6 @@ class TestTheSeam:
 
 
 class TestTrimAndFormat:
-    def test_trim_drops_whole_char_when_budget_ends_in_surrogate_pair(self):
-        text = "x" + "\U0001f600" * 10
-        assert library_session.trim(text, 4) == "x\U0001f600…"
-
-    def test_trim_cuts_bmp_text_at_the_limit(self):
-        assert library_session.trim("abcdef", 4) == "abcd…"
-
-    def test_trim_returns_text_within_budget_unchanged(self):
-        assert library_session.trim("abcd", 4) == "abcd"
-        assert library_session.trim("\U0001f600\U0001f600", 4) == (
-            "\U0001f600\U0001f600"
-        )
-
-    def test_trim_counts_a_lone_surrogate_as_one_unit(self):
-        lone = "\udc80"  # an undecodable filename byte
-        assert library_session.trim("ab" + lone, 3) == "ab" + lone
-        assert library_session.trim("ab" + lone + "cd", 3) == (
-            "ab" + lone + "…"
-        )
-
     def test_non_bmp_title_fits_the_embed_title_limit(self):
         name = "x" + "\U0001f600" * 255
         s = session({name: {"Album": [song("S")]}})

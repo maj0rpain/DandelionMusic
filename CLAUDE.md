@@ -36,7 +36,8 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/library_metadata.py` - library enrichment (Last.fm/Spotify stats and art, embedded covers): `Enricher(clock, spotify, lastfm_session)` holds the six `CachedLookup` lookups (Last.fm and Spotify artist and album, the tag read and the artwork read, the latter with a `ByteBoundedStore`), and the public `get_enrichment(index, artist, album)` delegates to `default_enricher`; an index rebuild clears them by itself (the generation check).
 - `musicbot/cached_lookup.py` - `CachedLookup`: a remote lookup's cache, in-flight dedup (shielded), timeout and failure cooldown, around a backend passed in and an optional passed-in store (a `dict` by default; `ByteBoundedStore` keeps the art cache's byte-budget and entry-cap eviction); imports only the standard library.
 - `musicbot/library_browse.py` - the library browse cursor.
-- `musicbot/library_session.py` - `BrowseSession` and `Frame`: the browse cursor plus what the browse message shows (drawn enrichment, attachment key, undo, one synchronous frame per draw); Discord-free. `LibraryBrowseView` is its Discord adapter.
+- `musicbot/library_session.py` - `BrowseSession` and `Frame`: the browse cursor (private to the session) plus what the browse message shows (drawn enrichment, attachment key, undo, one synchronous frame per draw, each from one screen); Discord-free. `LibraryBrowseView` is its Discord adapter.
+- `musicbot/library_display.py` - the library display helpers: `KIND_EMOJI` and `trim()` (UTF-16 code units), which the browser and the search results share, and `NAME_TITLE_LIMIT`, the browse title's trim limit; Discord-free, imports nothing from the project.
 - `musicbot/views.py` - `OwnedView`: a single-owner view's owner check, silent refusal, message and message edit; `SearchView` and `LibraryView` subclass it. `MusicButton`: the admission-checked button the player panel and search picks use.
 - `musicbot/settings.py` - SQLAlchemy models, auto-migrations; the `SETTINGS` table of `SettingDescriptor`s is the single place a guild setting is described (its column aside): it drives defaults, conversion, the `d!setting show` embed and the generated `d!setting` subcommands.
 - `musicbot/guild_whitelist.py` - the guild whitelist: admission (`load` -> `Whitelist.admits`), `add`/`remove` returning a `WhitelistChange` (outcome and guilds to leave), and the one-time `GUILD_WHITELIST` env import; the `WhitelistedGuild` table stays in `settings.py`.
@@ -52,7 +53,8 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - discord.py's `after=` callback runs on its audio thread; it only hops to the loop (`call_soon_threadsafe`). `Playback`'s track-ended handling and everything it calls are loop-only (`musicbot/playback.py`).
 - `musicbot/audiocontroller.py` imports nothing from `discord.ui`, and sends no user-facing message; the player panel does (a test asserts the import).
 - `musicbot/library_browse.py` imports only `musicbot.library` and `typing` (`tests/test_library_browse.py` asserts it) - don't add imports.
-- `musicbot/library_session.py` imports only `musicbot.library`, `musicbot.library_browse` and `typing`, plus `musicbot.library_metadata` inside `if TYPE_CHECKING:` only (`tests/test_library_session.py` asserts it) - don't add imports.
+- `musicbot/library_session.py` imports only `musicbot.library`, `musicbot.library_browse`, `musicbot.library_display` and `typing`, plus `musicbot.library_metadata` inside `if TYPE_CHECKING:` only (`tests/test_library_session.py` asserts it) - don't add imports.
+- `musicbot/library_display.py` imports nothing from the project (`tests/test_library_display.py` asserts it) - don't add imports.
 
 ## Agent skills
 

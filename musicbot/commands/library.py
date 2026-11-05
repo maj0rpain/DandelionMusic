@@ -20,12 +20,8 @@ from musicbot.utils import (
     owner_check,
     joining_command,
 )
-from musicbot.library_session import (
-    KIND_EMOJI,
-    BrowseSession,
-    Frame,
-    trim,
-)
+from musicbot.library_display import KIND_EMOJI, trim
+from musicbot.library_session import BrowseSession, Frame
 from musicbot.views import OwnedView
 
 PAGE_SIZE = 25
