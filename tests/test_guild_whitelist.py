@@ -435,3 +435,12 @@ def test_whitelist_commands_admit_every_owner_and_refuse_others(
     run(check(1))
     with pytest.raises(commands.NotOwner):
         run(check(99))
+
+
+def test_leave_guilds_skips_an_id_the_bot_is_not_in_silently(capsys):
+    present = LeavingGuild(10)
+    bot = FakeBot([present])
+    run(bot.leave_guilds([99, 10]))
+    assert present.left
+    captured = capsys.readouterr()
+    assert captured.out == "" and captured.err == ""
