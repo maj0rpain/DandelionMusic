@@ -247,14 +247,6 @@ class Music(commands.Cog):
     async def _search(self, ctx, *, query: str):
         await ctx.defer()
         results = await search_youtube(query, config.SEARCH_RESULTS)
-        # None: extraction failed outright (yt-dlp error, rate limit,
-        # blocked request); [] means the search ran and found nothing
-        if results is None:
-            await ctx.send(config.SONGINFO_ERROR)
-            return
-        if not results:
-            await ctx.send(config.SEARCH_NO_RESULTS)
-            return
         songs = []
         for data in results:
             song = Song(

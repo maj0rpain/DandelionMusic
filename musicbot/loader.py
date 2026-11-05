@@ -181,18 +181,23 @@ def extract_info(url: str, ie: Optional[ExtractorT] = None) -> Optional[dict]:
         return None
 
 
-async def search_youtube(title: str, count: int = 1) -> Optional[dict]:
+async def search_youtube(title: str, count: int = 1) -> list[dict]:
+    """See _search_youtube: a non-empty list of entries, or SongError."""
     return await _run_sync(Lane.LOAD, _search_youtube, title, count)
 
 
-def _search_youtube(title: str, count: int = 1) -> Optional[dict]:
-    """Searches youtube for the video title
-    Returns the first results video link"""
+def _search_youtube(title: str, count: int = 1) -> list[dict]:
+    """Searches youtube for the video title.
+    Returns the search's entries, never empty. Raises SongError with
+    SONGINFO_ERROR when extraction failed, or SEARCH_NO_RESULTS when
+    nothing was found."""
 
     r = extract_info(f"ytsearch{count}:{title}")
 
-    if not r:
-        return None
+    if r is None:
+        raise SongError(config.SONGINFO_ERROR)
+    if not r["entries"]:
+        raise SongError(config.SEARCH_NO_RESULTS)
 
     return r["entries"]
 
@@ -267,12 +272,7 @@ def _load_song(track: str) -> Union[Song, List[Song]]:
     host = identify_url(track)
 
     if host == SiteTypes.NOT_URL:
-        data = _search_youtube(track)
-        if data is None:
-            raise SongError(config.SONGINFO_ERROR)
-        if not data:
-            raise SongError(config.SEARCH_NO_RESULTS)
-        data = data[0]
+        data = _search_youtube(track)[0]
         host = SiteTypes.YT_DLP
 
     elif host == SiteTypes.UNKNOWN:
