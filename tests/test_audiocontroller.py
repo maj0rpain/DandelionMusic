@@ -2177,3 +2177,45 @@ def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
         return controller.timer._task
 
     assert run(scenario()) is None
+
+
+def test_a_local_batch_reports_the_tracks_it_could_not_load(
+    controller, stub_loader, monkeypatch
+):
+    by_title = {s.title: s for s in _songs(controller, "a", "c")}
+
+    async def load_local_songs(tracks):
+        return [by_title.get(t) for t in tracks]
+
+    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
+
+    async def scenario():
+        return await controller.process_local_tracks(
+            ["a", "b", "c"], "test"
+        )
+
+    outcome = _run(controller, scenario)
+
+    assert (outcome.kind.value, outcome.count, outcome.skipped) == (
+        "playlist",
+        2,
+        ["b"],
+    )
+
+
+def test_a_local_batch_that_loads_completely_skips_nothing(
+    controller, stub_loader, monkeypatch
+):
+    by_title = {s.title: s for s in _songs(controller, "a", "b")}
+
+    async def load_local_songs(tracks):
+        return [by_title[t] for t in tracks]
+
+    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
+
+    async def scenario():
+        return await controller.process_local_tracks(["a", "b"], "test")
+
+    outcome = _run(controller, scenario)
+
+    assert (outcome.count, outcome.skipped) == (2, [])

@@ -1,4 +1,5 @@
 import asyncio
+import dataclasses
 import io
 import sys
 from contextlib import contextmanager
@@ -12,6 +13,7 @@ from discord.ext import commands
 from config import config
 from musicbot import admission, library, library_metadata
 from musicbot.bot import MusicBot
+from musicbot.outcome import render
 from musicbot.utils import (
     CheckError,
     get_audiocontroller,
@@ -211,7 +213,7 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
         admitted = await admission.check(ctx, admission.RequestKind.PICK)
         controller = await admitted.enter()
         tracks = [library.song_uri(*triple) for triple in triples]
-        songs = await controller.process_local_tracks(
+        outcome = await controller.process_local_tracks(
             tracks, source, user=ctx.author
         )
     except CheckError as e:
@@ -222,25 +224,11 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
         await reply(config.SONGINFO_ERROR)
         return
 
-    missing = [
-        filename
-        for (_, _, filename), song in zip(triples, songs)
-        if song is None
-    ]
-    queued = len(songs) - len(missing)
-
-    message = f"Queued {queued} song(s)."
-    if missing:
-        shown = ", ".join(missing[:5])
-        message += f" {len(missing)} skipped (file not found): {shown}"
-        if len(missing) > 5:
-            message += f", and {len(missing) - 5} more"
-        # refresh is owner-only, so this can't tell whoever hit it to
-        # just run it themselves
-        message += ". The index may be stale - ask the bot owner to run"
-        message += " `d!lib refresh`."
-
-    await reply(message)
+    filenames = {library.song_uri(*triple): triple[2] for triple in triples}
+    outcome = dataclasses.replace(
+        outcome, skipped=[filenames[uri] for uri in outcome.skipped]
+    )
+    await reply(render(outcome, announce_songs=False).text)
 
 
 class LibraryView(OwnedView):

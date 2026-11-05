@@ -31,6 +31,7 @@ from musicbot.commands.library import (
     PageButton,
     QueueLevelButton,
 )
+from musicbot.outcome import EnqueueOutcome, OutcomeKind
 from musicbot.library import LibrarySong, SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 from config import config
@@ -1135,7 +1136,9 @@ class LibraryController:
 
     async def process_local_tracks(self, tracks, source, user=None):
         self.queued.append(tracks)
-        return [object() for _ in tracks]
+        return EnqueueOutcome(
+            OutcomeKind.PLAYLIST, count=len(tracks), skipped=[]
+        )
 
 
 def test_a_library_pick_made_after_a_reset_queues_on_the_new_controller():

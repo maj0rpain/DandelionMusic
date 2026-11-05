@@ -638,11 +638,11 @@ class AudioController(object):
         tracks: List[str],
         source: str,
         user: Optional[discord.abc.User] = None,
-    ) -> List[Optional[Song]]:
+    ) -> EnqueueOutcome:
         """Queues a batch of local-library files and settles the
-        playlist once at the end. Returns a list parallel to `tracks`,
-        None wherever a file could not be loaded, so the caller can
-        name what it skipped.
+        playlist once at the end. Returns a PLAYLIST outcome: `count`
+        the songs queued, `skipped` the tracks that could not be
+        loaded (empty when all were).
 
         `source` names the browse/search action that produced `tracks`
         (e.g. "browse: entire album Artist - Album") - unlike a single
@@ -686,12 +686,16 @@ class AudioController(object):
         songs += loaded_tail
 
         added = [song for song in loaded_tail if song is not None]
-        if not added:
-            return songs
+        if added:
+            await self.enqueue(added)
 
-        await self.enqueue(added)
-
-        return songs
+        return EnqueueOutcome(
+            OutcomeKind.PLAYLIST,
+            count=len([song for song in songs if song is not None]),
+            skipped=[
+                track for track, song in zip(tracks, songs) if song is None
+            ],
+        )
 
     def add_task(self, coro: Coroutine):
         # loop only: discord.py's audio thread never reaches this - its
