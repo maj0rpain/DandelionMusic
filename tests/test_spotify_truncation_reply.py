@@ -11,12 +11,11 @@ from config import config
 from musicbot import playlists
 from musicbot.commands import music
 from musicbot.commands.music import Music
-from musicbot.linkutils import SiteTypes
 from musicbot.outcome import EnqueueOutcome, OutcomeKind
-from musicbot.song import LoadResult, Song
+from musicbot.song import LoadResult
 from musicbot.truncation import Truncation, TruncationReason
 from controller_helpers import ProcessController, _songs, command_ctx
-from helpers import run
+from helpers import plain_song, run
 
 
 def test_truncated_playlist_reply_holds_numbers_and_reason_text():
@@ -104,12 +103,8 @@ def _add(monkeypatch, loaded, add_songs):
 
 def _partial():
     return LoadResult(
-        [_song()], False, Truncation(50, TruncationReason.NO_API)
+        [plain_song()], False, Truncation(50, TruncationReason.NO_API)
     )
-
-
-def _song():
-    return Song(SiteTypes.YT_DLP, "https://example.invalid/a", title="a")
 
 
 def test_playlist_add_reports_truncation_and_update(monkeypatch):
@@ -130,7 +125,9 @@ def test_playlist_add_untruncated_sends_only_update(monkeypatch):
     async def add_songs(*a):
         pass
 
-    sent = _add(monkeypatch, LoadResult([_song(), _song()], False), add_songs)
+    sent = _add(
+        monkeypatch, LoadResult([plain_song(), plain_song()], False), add_songs
+    )
 
     assert sent == [config.PLAYLIST_UPDATED]
 

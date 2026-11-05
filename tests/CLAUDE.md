@@ -24,7 +24,7 @@ Race tests drive `Playback` through this controller seam (the fake voice port an
 
 ## Shared helpers
 
-`tests/helpers.py` holds `run()`, the suite's one bounded coroutine runner (a coroutine run through `asyncio.run` with a 5 s bound), and `FakeClock`. Import them with `from helpers import ...`; never define a per-file `run(coro)`. `tests/test_bounded_runner.py` enforces this: it fails on a bare `asyncio.run`, `asyncio.runners.run`, `asyncio.Runner` construction or `run_until_complete` call, or a module-level `run` definition, outside `helpers.py`. A deliberately unbounded call carries `# unbounded: <reason>` on the line where the call starts.
+`tests/helpers.py` holds `run()`, the suite's one bounded coroutine runner (a coroutine run through `asyncio.run` with a 5 s bound), `FakeClock` and `plain_song` (a plain titled YT-DLP `Song`, the title defaulting to "a"). Import them with `from helpers import ...`; never define a per-file `run(coro)`. `tests/test_bounded_runner.py` enforces this: it fails on a bare `asyncio.run`, `asyncio.runners.run`, `asyncio.Runner` construction or `run_until_complete` call, or a module-level `run` definition, outside `helpers.py`. A deliberately unbounded call carries `# unbounded: <reason>` on the line where the call starts.
 
 Import each shared test-helper module (listed below) in a single `from <module> import ...` statement, in one final block after the third-party, `config` and `musicbot` imports. The one exception: where the import depends on setup code (a `sys.path` or monkeypatch prelude), the helper block, still one block, goes directly after that setup code.
 

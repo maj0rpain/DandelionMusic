@@ -3,6 +3,9 @@
 
 import asyncio
 
+from musicbot.linkutils import SiteTypes
+from musicbot.song import Song
+
 
 def run(coro):
     """Run a coroutine to completion, bounded by a 5 s timeout.
@@ -14,6 +17,13 @@ def run(coro):
     """
     # bounded, so a waiter left unresolved fails the test, not the run
     return asyncio.run(asyncio.wait_for(coro, timeout=5))
+
+
+def plain_song(title="a"):
+    """A plain YT-DLP `Song` with a title."""
+    return Song(
+        SiteTypes.YT_DLP, f"https://example.invalid/{title}", title=title
+    )
 
 
 class FakeClock:
