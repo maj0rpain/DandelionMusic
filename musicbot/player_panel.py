@@ -26,12 +26,17 @@ INVALID_WEBHOOK_TOKEN = 50027
 
 
 def build_view(
-    snapshot: PanelSnapshot, on_current_song, on_queue
+    snapshot: PanelSnapshot,
+    on_current_song,
+    on_queue,
+    after_skip,
+    after_other,
 ) -> Optional[discord.ui.View]:
     """The player buttons, a pure function of `snapshot`: `None` while
     inactive. The playback buttons call the clicking context's
     controller; the current-song and queue buttons run the callbacks
-    given."""
+    given. After a successful click, `prev` and `next` await
+    `after_skip(ctx)` and every other button `after_other(ctx)`."""
     if not snapshot.active:
         return None
 
@@ -39,23 +44,27 @@ def build_view(
     for button in (
         MusicButton(
             lambda ctx: ctx.audiocontroller.prev_song(),
+            after=after_skip,
             custom_id="prev",
             disabled=not snapshot.has_previous,
             emoji="⏮️",
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.pause(),
+            after=after_other,
             custom_id="pause",
             emoji="▶️" if snapshot.paused else "⏸️",
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.skip(),
+            after=after_skip,
             custom_id="next",
             disabled=not snapshot.has_next,
             emoji="⏭️",
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.loop(),
+            after=after_other,
             custom_id="loop",
             disabled=snapshot.queue_empty,
             emoji="🔁",
@@ -63,6 +72,7 @@ def build_view(
         ),
         MusicButton(
             on_current_song,
+            after=after_other,
             custom_id="current_song",
             row=1,
             disabled=snapshot.current_song is None,
@@ -70,6 +80,7 @@ def build_view(
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.shuffle(),
+            after=after_other,
             custom_id="shuffle",
             row=1,
             disabled=snapshot.queue_empty,
@@ -77,6 +88,7 @@ def build_view(
         ),
         MusicButton(
             on_queue,
+            after=after_other,
             custom_id="queue",
             row=1,
             disabled=snapshot.queue_empty,
@@ -84,6 +96,7 @@ def build_view(
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.stop(),
+            after=after_other,
             custom_id="stop",
             row=1,
             emoji="⏹️",
@@ -91,6 +104,7 @@ def build_view(
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.volume_down(),
+            after=after_other,
             custom_id="volume_down",
             row=2,
             disabled=snapshot.volume == 0,
@@ -98,6 +112,7 @@ def build_view(
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.volume_up(),
+            after=after_other,
             custom_id="volume_up",
             row=2,
             disabled=snapshot.volume == 100,
@@ -153,7 +168,19 @@ class PlayerPanel:
         return controller.panel_snapshot()
 
     def _layout(self, snapshot: PanelSnapshot):
-        return build_view(snapshot, self.current_song, self.queue)
+        async def after_skip(ctx):
+            await ctx.send(f"{ctx.author} Skipped a Song")
+
+        async def after_other(ctx):
+            await self.refresh()
+
+        return build_view(
+            snapshot,
+            self.current_song,
+            self.queue,
+            after_skip,
+            after_other,
+        )
 
     # -- the player message --------------------------------------------
 
