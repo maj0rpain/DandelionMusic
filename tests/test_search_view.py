@@ -20,8 +20,13 @@ import discord
 from config import config
 from musicbot.bot import MusicBot
 from musicbot.commands.music import SearchView, SongButton
-from musicbot.utils import CheckError
-from discord_fakes import FakeInteraction, VoiceGuild, http_error
+from discord_fakes import (
+    ADMISSION_CHANNEL,
+    FakeInteraction,
+    VoiceGuild,
+    http_error,
+    make_bot,
+)
 from helpers import run
 
 OWNER = 1
@@ -57,6 +62,14 @@ class FakeFollowup:
         self.edits.append((message_id, kwargs))
 
 
+class Controller:
+    async def dispose(self, reason=None):
+        pass
+
+    def __init__(self, name):
+        self.name = name
+
+
 class FakeContext:
     """The bot is already in voice, so a pick needs no join."""
 
@@ -71,24 +84,35 @@ class FakeContext:
             # nothing of self
             await MusicBot.on_command_error(None, ctx, error)
 
-        self.bot = SimpleNamespace(
-            on_command_error=on_command_error,
-            sessions=SimpleNamespace(
-                settings=lambda guild: SimpleNamespace(
-                    user_must_be_in_vc=False
-                )
-            ),
+        self.settings = SimpleNamespace(
+            command_channel=None,
+            user_must_be_in_vc=False,
+            vc_timeout=True,
         )
+        self.controllers = {self.guild: Controller("first")}
+        self.bot = make_bot(
+            self.controllers, settings={self.guild: self.settings}
+        )
+        self.bot.on_command_error = on_command_error
         self.sent = []
 
         @asynccontextmanager
         async def typing():
             yield
 
-        self.channel = SimpleNamespace(typing=typing)
+        self.channel = SimpleNamespace(typing=typing, id=ADMISSION_CHANNEL)
 
     async def send(self, *args, **kwargs):
         self.sent.append((args, kwargs))
+
+    def refuse_by_command_channel(self):
+        """The guild only takes commands in another channel."""
+        self.settings.command_channel = ADMISSION_CHANNEL + 1
+
+    async def reset_controller(self):
+        """d!reset: the guild gets a new controller."""
+        self.controllers[self.guild] = Controller("second")
+        await self.bot.sessions.reset(self.guild)
 
     def bot_out_of_voice(self, connect_error):
         """The bot is in no voice channel, so a pick has to join the
@@ -101,23 +125,18 @@ class FakeContext:
 
 
 class FakeCog:
-    """Records _play_song calls; its cog_check raises `check_error`
-    while it is set."""
+    """Records _play_song calls, and the controller each was made on."""
 
     def __init__(self):
         self.played = []
-        self.check_error = None
+        self.controllers = []
         self.play_error = None
-
-    async def cog_check(self, ctx):
-        if self.check_error is not None:
-            raise self.check_error
-        return True
 
     async def _play_song(self, ctx, track):
         if self.play_error is not None:
             raise self.play_error
         self.played.append(track)
+        self.controllers.append(ctx.audiocontroller.name)
 
 
 class SearchInteraction(FakeInteraction):
@@ -134,6 +153,7 @@ class SearchInteraction(FakeInteraction):
     ):
         ctx = FakeContext(user_id)
         super().__init__(ctx, custom_id, user_id)
+        ctx.interaction = self
         self.ctx = ctx
         self.message = SimpleNamespace(id=99)
         self.followup = FakeFollowup(fail=followup_fails)
@@ -237,22 +257,22 @@ def test_the_owners_pick_queues_its_url_and_disables_the_buttons():
 def test_a_pick_failing_the_play_check_is_refused_and_can_be_retried():
     async def go():
         view, cog = make_view(message=EditRecordingMessage())
-        cog.check_error = CheckError("Join a voice channel first.")
-        inter = await click(view, 0)
+        inter = SearchInteraction()
+        inter.ctx.refuse_by_command_channel()
+        await click(view, 0, inter=inter)
         state = (
             list(cog.played),
             inter.ctx.sent,
             view.is_finished(),
             buttons_enabled(view),
         )
-        cog.check_error = None
         await click(view, 1)
         return state, list(cog.played)
 
     (played, sent, finished, enabled), retried = run(go())
     assert played == []
     assert [(str(a[0]), k) for a, k in sent] == [
-        ("Join a voice channel first.", {"ephemeral": True})
+        (config.WRONG_CHANNEL_MESSAGE, {"ephemeral": True})
     ]
     assert not finished
     assert enabled
@@ -288,14 +308,13 @@ def test_a_pick_failing_after_the_claim_is_used_up_and_reported():
     async def go():
         message = EditRecordingMessage()
         view, cog = make_view(message=message)
-        cog.check_error = discord.ClientException("voice join failed")
-        inter = await click(view, 0)
+        inter = SearchInteraction()
+        inter.ctx.bot_out_of_voice(connect_error=RuntimeError("boom"))
+        await click(view, 0, inter=inter)
         return view, cog, message, inter
 
     view, cog, message, inter = run(go())
-    assert [(str(a[0]), k) for a, k in inter.ctx.sent] == [
-        ("voice join failed", {})
-    ]
+    assert [(str(a[0]), k) for a, k in inter.ctx.sent] == [("boom", {})]
     assert cog.played == []
     assert view.is_finished()
     assert buttons_disabled(view)
@@ -337,6 +356,17 @@ def test_a_failed_message_edit_still_queues_the_pick():
         return cog
 
     assert run(go()).played == [URLS[0]]
+
+
+def test_a_pick_made_after_a_reset_acts_on_the_new_controller():
+    async def go():
+        view, cog = make_view(message=EditRecordingMessage())
+        inter = SearchInteraction()
+        await inter.ctx.reset_controller()
+        await click(view, 0, inter=inter)
+        return cog
+
+    assert run(go()).controllers == ["second"]
 
 
 # --- Timeout ---

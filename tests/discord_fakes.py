@@ -4,11 +4,15 @@ player view's button ids. Import them rather than writing a per-file
 copy.
 """
 
+import asyncio
 import types
+from concurrent.futures import ThreadPoolExecutor
 
 import discord
 
+from musicbot.admission import RequestKind
 from musicbot.sessions import GuildSessions
+from musicbot.utils import joining_command
 from helpers import run
 
 
@@ -35,7 +39,15 @@ def make_bot(controllers=None, is_owner=False, settings=None):
             await sessions.get_or_create(guild)
 
     sessions = GuildSessions(controllers.__getitem__, load)
-    run(seed())
+    try:
+        asyncio.get_running_loop()
+    except RuntimeError:
+        run(seed())
+    else:
+        # built from inside a running test coroutine: seed on a loop of
+        # its own, off this thread
+        with ThreadPoolExecutor(1) as pool:
+            pool.submit(run, seed()).result()
     return types.SimpleNamespace(sessions=sessions, is_owner=_is_owner)
 
 
@@ -170,3 +182,105 @@ PLAYER_BUTTONS = [
     "volume_down",
     "volume_up",
 ]
+
+
+ADMISSION_CHANNEL = 7
+HERE = "here"  # the bot's channel when the author is with it
+BOTS_ONLY = "bots"
+PEOPLE = "people"
+ADMISSION_DJ_ROLE = 99
+
+
+@joining_command
+async def _joining_callback(ctx):
+    pass
+
+
+async def _plain_callback(ctx):
+    pass
+
+
+def _command(joining):
+    callback = _joining_callback if joining else _plain_callback
+    return types.SimpleNamespace(callback=callback)
+
+
+def fake_controller():
+    async def dispose(reason):
+        pass
+
+    return types.SimpleNamespace(dispose=dispose)
+
+
+def situation(
+    kind,
+    bot=None,  # None (out of voice), HERE, BOTS_ONLY or PEOPLE
+    author="b",  # None (not in voice), "a" (bot's channel) or "b"
+    rule=True,
+    wrong_channel=False,
+    perms=None,
+    role=None,  # None, "admin", "owner" or "dj"
+    dj_role=None,
+    custom_id="queue",
+    registered=True,
+):
+    """Builds (guild, ctx) for one row."""
+    guild = VoiceGuild()
+    a = guild.channel("a", **{"humans": 1} if bot == PEOPLE else {})
+    if bot == BOTS_ONLY:
+        a = guild.channel("a", bots=1)
+    if bot == HERE:
+        a = guild.channel("a", humans=1)
+    if bot is not None:
+        guild.put_bot_in(a)
+    b = guild.channel("b", humans=1, **(perms or {}))
+    voice = {"a": a, "b": b}.get(author)
+    sett = types.SimpleNamespace(
+        command_channel=ADMISSION_CHANNEL + 1 if wrong_channel else None,
+        user_must_be_in_vc=rule,
+        dj_role=dj_role,
+        vc_timeout=True,
+    )
+    controllers = {guild: fake_controller()} if registered else {}
+    bot_obj = make_bot(
+        controllers,
+        is_owner=role == "owner",
+        settings={guild: sett},
+    )
+    roles = (
+        [types.SimpleNamespace(id=ADMISSION_DJ_ROLE)] if role == "dj" else []
+    )
+    ctx = types.SimpleNamespace(
+        bot=bot_obj,
+        guild=guild,
+        author=types.SimpleNamespace(
+            id=1,
+            roles=roles,
+            voice=types.SimpleNamespace(channel=voice) if voice else None,
+        ),
+        channel=types.SimpleNamespace(
+            id=ADMISSION_CHANNEL,
+            permissions_for=lambda m: types.SimpleNamespace(
+                administrator=role == "admin"
+            ),
+        ),
+        command=(
+            _command(kind is RequestKind.JOINING_COMMAND)
+            if kind in (RequestKind.COMMAND, RequestKind.JOINING_COMMAND)
+            else None
+        ),
+        interaction=types.SimpleNamespace(data={"custom_id": custom_id}),
+        controllers=controllers,
+    )
+    return guild, ctx
+
+
+async def invoke_music_hooks(cog, ctx):
+    """The Music cog's hooks in discord.py's order: cog_check, the
+    command's own checks (none for a command-less ctx), then
+    cog_before_invoke."""
+    await cog.cog_check(ctx)
+    command = getattr(ctx, "command", None)
+    for command_check in command.checks if command else ():
+        await command_check(ctx)
+    await cog.cog_before_invoke(ctx)

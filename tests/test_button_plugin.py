@@ -1,13 +1,15 @@
 """Which links the reaction-button plugin offers a button for."""
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
 
-from musicbot import loader, utils
+from musicbot import loader
 from musicbot.audiocontroller import QueuedPlaylist
 from musicbot.plugins.button import Button
 from musicbot.truncation import Truncation, TruncationReason
+from discord_fakes import ADMISSION_DJ_ROLE, VoiceGuild, make_bot
 from helpers import run
 
 YOUTUBE = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -39,20 +41,28 @@ def test_unsupported_text_returns_nothing(text):
     assert Button.get_links(text) == []
 
 
-class FakeChannel:
-    def __init__(self, message):
-        self.message = message
+CMD_CHANNEL = 2
 
-    def permissions_for(self, _me):
-        return SimpleNamespace(manage_messages=False)
+
+class FakeChannel:
+    def __init__(self, message, id=CMD_CHANNEL):
+        self.message = message
+        self.id = id
+
+    def permissions_for(self, _member):
+        return SimpleNamespace(manage_messages=False, administrator=False)
 
     async def fetch_message(self, _id):
         return self.message
 
 
 class FakeContext:
-    def __init__(self, sent):
+    def __init__(self, sent, bot, guild, channel):
         self.sent = sent
+        self.bot = bot
+        self.guild = guild
+        self.channel = channel
+        self.command = None
         self.author = None
 
     async def send(self, content=None, **kwargs):
@@ -65,9 +75,6 @@ class FakeController:
         self.processed = []
         self.command_channel = object()
 
-    async def register_voice_channel(self, _channel):
-        pass
-
     async def process_song(self, url, user=None):
         self.processed.append(url)
         outcome = self.outcomes[url]
@@ -76,18 +83,37 @@ class FakeController:
         return outcome
 
 
-def react(monkeypatch, outcomes, *, resolves=True, thread=False, content=None):
-    """Drive one reaction over links whose load gives `outcomes`;
-    returns what the controller processed and what was sent."""
+def react(
+    outcomes,
+    *,
+    resolves=True,
+    thread=False,
+    content=None,
+    bot_in=None,  # None (idle), "mine" (the reactor's), "other" or "busy"
+    reactor_in="mine",  # "mine" or None (out of voice)
+    command_channel=None,
+    reactor_perms=None,
+    role=None,
+    user_must_be_in_vc=True,
+    fail=None,
+):
+    """Drive one reaction over links whose load gives `outcomes`
+    against real admission and the voice fakes; returns what the
+    controller processed and what was sent. `guild` is on the
+    function afterwards, for the voice events."""
     sent = []
     message = SimpleNamespace(content=content or " ".join(outcomes))
     channel = FakeChannel(message)
     controller = FakeController(outcomes)
-    sett = SimpleNamespace(button_emote="x", command_channel=None)
+    sett = SimpleNamespace(
+        button_emote="x",
+        command_channel=command_channel,
+        user_must_be_in_vc=user_must_be_in_vc,
+        dj_role=ADMISSION_DJ_ROLE if role == "dj" else None,
+        vc_timeout=True,
+    )
 
-    class Guild:
-        me = object()
-
+    class Guild(VoiceGuild):
         def get_channel(self, _id):
             # a plain channel lookup does not see threads
             return None if thread or not resolves else channel
@@ -96,23 +122,29 @@ def react(monkeypatch, outcomes, *, resolves=True, thread=False, content=None):
             return channel if resolves else None
 
     guild = Guild()
+    mine = guild.channel("mine", humans=1, **(reactor_perms or {}))
+    if bot_in == "mine":
+        guild.put_bot_in(mine)
+    elif bot_in == "other":
+        guild.put_bot_in(guild.channel("other", bots=1))
+    elif bot_in == "busy":
+        guild.put_bot_in(guild.channel("busy", humans=1))
+    guild.fail = fail
+
+    bot = make_bot({guild: controller}, settings={guild: sett})
+    bot.get_guild = lambda _id: guild
 
     async def get_context(_message):
-        return FakeContext(sent)
+        return FakeContext(sent, bot, guild, channel)
 
-    bot = SimpleNamespace(
-        get_guild=lambda _id: guild,
-        get_context=get_context,
-        sessions=SimpleNamespace(
-            settings=lambda _g: sett, controller=lambda _g: controller
-        ),
+    bot.get_context = get_context
+    roles = [SimpleNamespace(id=ADMISSION_DJ_ROLE)] if role == "dj" else []
+    member = SimpleNamespace(
+        id=5,
+        bot=False,
+        roles=roles,
+        voice=SimpleNamespace(channel=mine) if reactor_in else None,
     )
-
-    async def ok(_ctx):
-        return True
-
-    monkeypatch.setattr(utils, "voice_check", ok)
-    member = SimpleNamespace(bot=False, voice=SimpleNamespace(channel=1))
     event = SimpleNamespace(
         guild_id=1,
         channel_id=2,
@@ -120,6 +152,7 @@ def react(monkeypatch, outcomes, *, resolves=True, thread=False, content=None):
         member=member,
         emoji=SimpleNamespace(name="x", id=None),
     )
+    react.guild = guild
     run(Button(bot).on_raw_reaction_add(event))
     return controller.processed, sent
 
@@ -128,21 +161,19 @@ A = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
 B = "https://www.youtube.com/watch?v=bbbbbbbbbbb"
 
 
-def test_failing_link_replies_and_next_link_is_processed(monkeypatch):
-    processed, sent = react(
-        monkeypatch, {A: loader.SongError("bad link"), B: object()}
-    )
+def test_failing_link_replies_and_next_link_is_processed():
+    processed, sent = react({A: loader.SongError("bad link"), B: object()})
     assert processed == [A, B]
     assert sent == ["bad link"]
 
 
-def test_reaction_in_a_thread_is_processed(monkeypatch):
-    processed, _ = react(monkeypatch, {A: object()}, thread=True)
+def test_reaction_in_a_thread_is_processed():
+    processed, _ = react({A: object()}, thread=True)
     assert processed == [A]
 
 
-def test_unresolvable_channel_does_nothing(monkeypatch):
-    processed, sent = react(monkeypatch, {A: object()}, resolves=False)
+def test_unresolvable_channel_does_nothing():
+    processed, sent = react({A: object()}, resolves=False)
     assert processed == []
     assert sent == []
 
@@ -155,21 +186,59 @@ def test_spotify_uri_returns_the_open_link(kind):
     ]
 
 
-def test_reacting_to_a_spotify_uri_processes_the_open_link(monkeypatch):
+def test_reacting_to_a_spotify_uri_processes_the_open_link():
     processed, _sent = react(
-        monkeypatch,
         {SPOTIFY: object()},
         content=f"spotify:track:{SPOTIFY_ID}",
     )
     assert processed == [SPOTIFY]
 
 
-def test_truncated_playlist_sends_exactly_the_notice(monkeypatch):
+def test_truncated_playlist_sends_exactly_the_notice():
     cut = Truncation(50, TruncationReason.NO_API)
-    _, sent = react(monkeypatch, {A: QueuedPlaylist(30, cut)})
+    _, sent = react({A: QueuedPlaylist(30, cut)})
     assert sent == [cut.notice(30)]
 
 
-def test_untruncated_playlist_sends_nothing(monkeypatch):
-    _, sent = react(monkeypatch, {A: QueuedPlaylist(30)})
+def test_untruncated_playlist_sends_nothing():
+    _, sent = react({A: QueuedPlaylist(30)})
     assert sent == []
+
+
+def test_reaction_outside_the_command_channel_is_refused_silently():
+    processed, sent = react({A: object()}, command_channel=3)
+    assert (processed, sent) == ([], [])
+    assert react.guild.events == []
+
+
+def test_dj_reacting_from_another_channel_does_not_move_the_bot():
+    processed, _ = react({A: object()}, bot_in="busy", role="dj")
+    assert processed == [A]
+    assert react.guild.events == []
+
+
+@pytest.mark.parametrize(
+    "kwargs",
+    [
+        {"reactor_perms": {"connect": False}},
+        {"reactor_perms": {"speak": False}},
+        {"reactor_in": None},
+        {"fail": asyncio.TimeoutError()},
+    ],
+    ids=["no connect", "no speak", "not in voice", "failed join"],
+)
+def test_refused_reaction_is_silent(kwargs):
+    processed, sent = react({A: object()}, **kwargs)
+    assert (processed, sent) == ([], [])
+
+
+def test_reaction_while_idle_connects_and_queues():
+    processed, _ = react({A: object()})
+    assert processed == [A]
+    assert react.guild.events == [("connect", "mine")]
+
+
+def test_reaction_while_the_bot_sits_alone_elsewhere_moves_it(no_sleep):
+    processed, _ = react({A: object()}, bot_in="other")
+    assert processed == [A]
+    assert react.guild.events == [("move", "mine")]

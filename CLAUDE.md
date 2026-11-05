@@ -21,7 +21,8 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 
 - `musicbot/__main__.py` / `run.py` - entrypoint; `run.py` is a thin forwarder (PyInstaller entry).
 - `musicbot/bot.py` - `MusicBot`, custom `Context`; user-facing replies go through `ctx.send(...)`, not raw channel sends.
-- `musicbot/utils.py` - command and button checks (`play_check`, `player_check`, `voice_check`), the joining-command marker (`joining_command`), and voice connect/join (`join_needed`, `join_target`, `join_voice`, `connect_to`).
+- `musicbot/admission.py` - request admission: per request kind, the checks, the join and the current controller; every command, button, pick and reaction goes through it.
+- `musicbot/utils.py` - the joining-command marker (`joining_command`), the DJ and owner checks, `CheckError`, and the voice connect port (`connect_to`, `check_voice_permissions`).
 - `musicbot/sessions.py` - `GuildSessions` (`bot.sessions`): each guild's settings and controller, their creation, lookup (`None` when not registered) and disposal.
 - `musicbot/audiocontroller.py` - per-guild playback state machine (volume, loop, inactivity timer, playlist backup).
 - `musicbot/playlist.py` / `musicbot/song.py` - queue/history and per-track metadata.

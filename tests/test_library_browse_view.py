@@ -25,7 +25,6 @@ import pytest
 from musicbot.commands import library as library_commands
 from musicbot.commands.library import (
     BackButton,
-    CheckError,
     LibraryBrowseView,
     LibrarySearchView,
     LibrarySelect,
@@ -34,7 +33,8 @@ from musicbot.commands.library import (
 )
 from musicbot.library import LibrarySong, SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
-from discord_fakes import http_error
+from config import config
+from discord_fakes import VoiceGuild, http_error, make_bot
 from helpers import run
 
 
@@ -1101,16 +1101,79 @@ def test_timeout_after_a_click_edits_by_id_through_its_followup():
     assert all(item.disabled for item in view.children)
 
 
-def test_timeout_after_a_bulk_queue_click_edits_the_view_not_the_placeholder(
-    monkeypatch,
-):
-    async def refuse(ctx):
-        raise CheckError("nope")
+def voice_ctx_for(view, in_voice):
+    """Gives the view's context a real guild, bot and sessions: the
+    bot is in voice, or out of it with the author in no channel."""
+    guild = VoiceGuild()
+    view.ctx.guild = guild
+    view.ctx.channel = SimpleNamespace(id=1)
+    view.ctx.command = None
+    view.ctx.controllers = {guild: LibraryController("first")}
+    view.ctx.bot = make_bot(
+        view.ctx.controllers,
+        settings={
+            guild: SimpleNamespace(
+                command_channel=None,
+                user_must_be_in_vc=False,
+                vc_timeout=True,
+            )
+        },
+    )
+    view.ctx.author.voice = None
+    if in_voice:
+        guild.put_bot_in(guild.channel("a"))
+    return guild
 
-    monkeypatch.setattr(library_commands, "play_check", refuse)
 
+class LibraryController:
+    def __init__(self, name):
+        self.name = name
+        self.queued = []
+
+    async def dispose(self, reason=None):
+        pass
+
+    async def process_local_tracks(self, tracks, source, user=None):
+        self.queued.append(tracks)
+        return [object() for _ in tracks]
+
+
+def test_a_library_pick_made_after_a_reset_queues_on_the_new_controller():
     async def go():
         view = timeout_view(SimpleNamespace())
+        voice_ctx_for(view, in_voice=True)
+        old = view.ctx.controllers[view.ctx.guild]
+        new = view.ctx.controllers[view.ctx.guild] = LibraryController("new")
+        await view.ctx.bot.sessions.reset(view.ctx.guild)
+        click = ClickInteraction()
+        assert await view.interaction_check(click)
+        await view.queue(click, [("A", "B", "c.mp3")], "test")
+        return old, new
+
+    old, new = run(go())
+    assert old.queued == []
+    assert len(new.queued) == 1
+
+
+def test_a_refused_library_pick_replies_in_its_placeholder():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        guild = voice_ctx_for(view, in_voice=False)
+        click = ClickInteraction()
+        assert await view.interaction_check(click)
+        await view.queue(click, [("A", "B", "c.mp3")], "test")
+        return guild, click
+
+    guild, click = run(go())
+    assert click.sent == [("Queueing...",)]
+    assert click.original_edits == [{"content": config.USER_NOT_IN_VC_MESSAGE}]
+    assert guild.events == []
+
+
+def test_timeout_after_a_bulk_queue_click_edits_the_view_not_the_placeholder():
+    async def go():
+        view = timeout_view(SimpleNamespace())
+        voice_ctx_for(view, in_voice=False)
         click = ClickInteraction()
         assert await view.interaction_check(click)
         await view.queue(click, [("A", "B", "c.mp3")], "test")

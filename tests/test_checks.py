@@ -19,7 +19,7 @@ from musicbot.commands.general import General
 from musicbot.commands.library import Library, queue_songs
 from musicbot.audiocontroller import MusicButton
 from musicbot.commands.music import Music, SearchView, SongButton
-from musicbot import utils
+from musicbot import admission
 from musicbot.utils import (
     CheckError,
     chunks,
@@ -27,12 +27,14 @@ from musicbot.utils import (
     get_audiocontroller,
     get_settings,
     owner_check,
-    join_needed,
-    join_voice,
-    play_check,
-    voice_check,
 )
-from discord_fakes import PLAYER_BUTTONS, FakeInteraction, VoiceGuild, make_bot
+from discord_fakes import (
+    PLAYER_BUTTONS,
+    FakeInteraction,
+    VoiceGuild,
+    invoke_music_hooks,
+    make_bot,
+)
 from helpers import run
 
 
@@ -73,7 +75,7 @@ class TestGetSettings:
     """The twin of get_audiocontroller. Until on_ready has loaded a
     guild's settings, a path that finds its controller missing finds
     its settings missing too, so guarding only the controller just
-    moved the KeyError one line down into play_check()."""
+    moved the KeyError one line down into the admission check."""
 
     def test_returns_the_registered_settings(self):
         guild = Guild()
@@ -152,7 +154,9 @@ def voice_ctx(
         vc_timeout=True,  # get_or_create() does not autojoin
     )
     bot = make_bot(
-        {guild: "controller"}, is_owner=owner, settings={guild: sett}
+        {guild: types.SimpleNamespace(command_channel=None)},
+        is_owner=owner,
+        settings={guild: sett},
     )
     author = types.SimpleNamespace(
         id=1,
@@ -170,82 +174,14 @@ def voice_ctx(
     )
 
 
-@pytest.fixture
-def no_sleep(monkeypatch):
-    """A move waits a second before returning; time is a boundary."""
-
-    async def sleep(_seconds):
-        pass
-
-    monkeypatch.setattr(asyncio, "sleep", sleep)
+async def join(ctx):
+    await (await admission.check(ctx)).enter()
 
 
 def refusal(coro):
     with pytest.raises(CheckError) as exc:
         run(coro)
     return str(exc.value)
-
-
-class TestPlayCheck:
-    """play_check only refuses: it never connects or moves."""
-
-    def test_refuses_the_wrong_command_channel(self):
-        guild = VoiceGuild()
-        ctx = voice_ctx(
-            guild, guild.channel("a"), command_channel=COMMAND_CHANNEL + 1
-        )
-        assert refusal(play_check(ctx)) == config.WRONG_CHANNEL_MESSAGE
-        assert guild.events == []
-
-    def test_refuses_a_user_not_in_voice_when_a_join_is_needed(self):
-        guild = VoiceGuild()
-        ctx = voice_ctx(guild, None)
-        assert refusal(play_check(ctx)) == config.USER_NOT_IN_VC_MESSAGE
-        assert guild.events == []
-
-    @pytest.mark.parametrize("perms", [{"connect": False}, {"speak": False}])
-    def test_refuses_missing_voice_permissions_when_a_join_is_needed(
-        self, perms
-    ):
-        guild = VoiceGuild()
-        ctx = voice_ctx(guild, guild.channel("a", humans=1, **perms))
-        assert refusal(play_check(ctx)) == config.VOICE_PERMISSIONS_MISSING
-        assert guild.events == []
-
-    def test_refuses_missing_permissions_for_a_move(self):
-        guild = VoiceGuild()
-        guild.put_bot_in(guild.channel("a"))
-        ctx = voice_ctx(guild, guild.channel("b", humans=1, speak=False))
-        assert refusal(play_check(ctx)) == config.VOICE_PERMISSIONS_MISSING
-        assert guild.events == []
-
-    def test_does_not_refuse_missing_permissions_without_a_join(self):
-        guild = VoiceGuild()
-        here = guild.channel("a", humans=1, connect=False, speak=False)
-        guild.put_bot_in(here)
-        assert run(play_check(voice_ctx(guild, here))) is True
-        assert guild.events == []
-
-    def test_refuses_the_voice_rule(self):
-        """The bot is with someone else, and the user is not a DJ."""
-        guild = VoiceGuild()
-        guild.put_bot_in(guild.channel("a", humans=1))
-        ctx = voice_ctx(guild, guild.channel("b", humans=1), dj_role=99)
-        assert refusal(play_check(ctx)) == config.USER_NOT_IN_VC_MESSAGE
-        assert guild.events == []
-
-    def test_admits_without_connecting(self):
-        guild = VoiceGuild()
-        ctx = voice_ctx(guild, guild.channel("a", humans=1))
-        assert run(play_check(ctx)) is True
-        assert guild.events == []
-
-    def test_admits_a_bots_only_channel_without_moving(self):
-        guild = VoiceGuild()
-        guild.put_bot_in(guild.channel("a", bots=1))
-        ctx = voice_ctx(guild, guild.channel("b", humans=1))
-        assert run(play_check(ctx)) is True
-        assert guild.events == []
 
 
 class TestDjCheck:
@@ -262,99 +198,6 @@ class TestDjCheck:
     def test_refuses_a_member_without_the_set_dj_role(self):
         ctx = self.ctx(dj_role=99, roles=[5])
         assert refusal(dj_check(ctx)) == config.NOT_A_DJ
-
-
-class TestVoiceCheckBypass:
-    def ctx(self, **kwargs):
-        guild = VoiceGuild()
-        guild.put_bot_in(guild.channel("a", humans=1))
-        return voice_ctx(guild, guild.channel("b", humans=1), **kwargs)
-
-    def test_refuses_a_member_when_no_dj_role_is_set(self):
-        ctx = self.ctx()
-        assert refusal(voice_check(ctx)) == config.USER_NOT_IN_VC_MESSAGE
-
-    def test_admits_an_admin(self):
-        assert run(voice_check(self.ctx(admin=True))) is True
-
-    def test_admits_the_bot_owner(self):
-        assert run(voice_check(self.ctx(owner=True))) is True
-
-    def test_admits_a_dj_role_holder(self):
-        ctx = self.ctx(dj_role=99, roles=[99])
-        assert run(voice_check(ctx)) is True
-
-    def test_refuses_a_member_without_the_set_dj_role(self):
-        ctx = self.ctx(dj_role=99, roles=[5])
-        assert refusal(voice_check(ctx)) == config.USER_NOT_IN_VC_MESSAGE
-
-    def test_extra_owners_get_no_bypass(self, monkeypatch):
-        monkeypatch.setattr(config, "EXTRA_OWNERS", [1])
-        assert refusal(voice_check(self.ctx())) == (
-            config.USER_NOT_IN_VC_MESSAGE
-        )
-
-
-class TestJoinVoice:
-    def test_connects_when_the_bot_is_out_of_voice(self):
-        guild = VoiceGuild()
-        run(join_voice(voice_ctx(guild, guild.channel("a"))))
-        assert guild.events == [("connect", "a")]
-
-    def test_moves_out_of_a_bots_only_channel_under_the_rule(self, no_sleep):
-        guild = VoiceGuild()
-        guild.put_bot_in(guild.channel("a", bots=1))
-        run(join_voice(voice_ctx(guild, guild.channel("b"))))
-        assert guild.events == [("move", "b")]
-
-    def test_does_not_move_out_of_a_bots_only_channel_without_the_rule(
-        self,
-    ):
-        guild = VoiceGuild()
-        guild.put_bot_in(guild.channel("a", bots=1))
-        ctx = voice_ctx(guild, guild.channel("b"), rule=False)
-        run(join_voice(ctx))
-        assert guild.events == []
-
-    def test_does_not_move_out_of_a_channel_with_people(self):
-        guild = VoiceGuild()
-        guild.put_bot_in(guild.channel("a", humans=1))
-        run(join_voice(voice_ctx(guild, guild.channel("b"))))
-        assert guild.events == []
-
-    def test_does_nothing_when_already_with_the_user(self):
-        guild = VoiceGuild()
-        here = guild.channel("a", humans=1)
-        guild.put_bot_in(here)
-        run(join_voice(voice_ctx(guild, here)))
-        assert guild.events == []
-
-    def test_refuses_a_user_who_left_voice(self):
-        guild = VoiceGuild()
-        ctx = voice_ctx(guild, None)
-        assert refusal(join_voice(ctx)) == config.USER_NOT_IN_VC_MESSAGE
-        assert guild.events == []
-
-    @pytest.mark.parametrize(
-        "error", [asyncio.TimeoutError(), discord.ClientException("x")]
-    )
-    def test_a_failed_connect_is_a_check_error_and_is_logged(
-        self, capsys, error
-    ):
-        guild = VoiceGuild()
-        guild.fail = error
-        ctx = voice_ctx(guild, guild.channel("a"))
-        assert refusal(join_voice(ctx)) == config.VOICE_CONNECT_FAILED
-        assert type(error).__name__ in capsys.readouterr().err
-
-    def test_a_failed_move_is_a_check_error_and_is_logged(self, capsys):
-        guild = VoiceGuild()
-        guild.put_bot_in(guild.channel("a", bots=1))
-        guild.fail = discord.ClientException("Not connected to voice")
-        ctx = voice_ctx(guild, guild.channel("b"))
-        assert refusal(join_voice(ctx)) == config.VOICE_CONNECT_FAILED
-        assert guild.events == [("move", "b")]
-        assert "Not connected to voice" in capsys.readouterr().err
 
 
 def slash_ctx(guild, author_in, **kwargs):
@@ -375,7 +218,7 @@ def slash_ctx(guild, author_in, **kwargs):
             defer=defer, is_done=lambda: bool(deferred)
         )
     )
-    ctx.audiocontroller = types.SimpleNamespace(command_channel=None)
+    ctx.command = None
 
     async def ctx_defer(**kw):
         return await Context.defer(ctx, **kw)
@@ -392,14 +235,14 @@ class TestMusicBeforeInvoke:
     def test_defers_publicly_before_connecting(self):
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a"))
-        run(Music(None).cog_before_invoke(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == [("defer", False), ("connect", "a")]
 
     def test_defers_before_moving(self, no_sleep):
         guild = VoiceGuild()
         guild.put_bot_in(guild.channel("a", bots=1))
         ctx = slash_ctx(guild, guild.channel("b"))
-        run(Music(None).cog_before_invoke(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == [("defer", False), ("move", "b")]
 
     def test_neither_defers_nor_joins_without_a_join(self):
@@ -407,7 +250,7 @@ class TestMusicBeforeInvoke:
         here = guild.channel("a", humans=1)
         guild.put_bot_in(here)
         ctx = slash_ctx(guild, here)
-        run(Music(None).cog_before_invoke(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == []
         assert ctx.audiocontroller.command_channel is ctx
 
@@ -416,7 +259,7 @@ class TestMusicBeforeInvoke:
         ctx = slash_ctx(guild, guild.channel("a"))
 
         async def scenario():
-            await Music(None).cog_before_invoke(ctx)
+            await invoke_music_hooks(Music(None), ctx)
             await ctx.defer()
 
         run(scenario())
@@ -443,7 +286,7 @@ def test_commands_outside_the_music_cog_that_join_keep_joining(cog, name):
     guild = VoiceGuild()
     ctx = voice_ctx(guild, guild.channel("a"))
     ctx.command = command_of(cog, name)
-    run(join_voice(ctx))
+    run(join(ctx))
     assert guild.events == [("connect", "a")]
 
 
@@ -470,7 +313,6 @@ def test_connect_moves_the_bot_out_of_a_bots_only_channel(no_sleep):
     ctx.send = send
 
     async def scenario():
-        assert await voice_check(ctx)
         await General._connect.callback(General(None), ctx)
 
     run(scenario())
@@ -480,7 +322,7 @@ def test_connect_moves_the_bot_out_of_a_bots_only_channel(no_sleep):
 
 def test_a_failed_join_from_the_library_says_so():
     """Queueing from the library browser joins voice itself, after
-    play_check; a failed connect is reported as one, not as a
+    the admission check; a failed connect is reported as one, not as a
     song-info error."""
     guild = VoiceGuild()
     guild.fail = asyncio.TimeoutError()
@@ -521,7 +363,7 @@ def test_the_joining_music_commands_are_exactly_the_marked_ones():
         guild = VoiceGuild()
         ctx = voice_ctx(guild, guild.channel("a"))
         ctx.command = cmd
-        if join_needed(ctx):
+        if run(admission.check(ctx)).join_needed:
             joining.add(cmd.qualified_name)
     assert joining == JOINING
 
@@ -530,24 +372,17 @@ class TestNonJoiningCommand:
     """An unmarked music command never touches voice, so while the bot
     is idle it has no voice requirement to refuse on."""
 
-    def test_admits_a_user_outside_voice_while_idle(self):
-        guild = VoiceGuild()
-        ctx = voice_ctx(guild, None)
-        ctx.command = command_of(Music, "history")
-        assert run(play_check(ctx)) is True
-        assert guild.events == []
-
     def test_skips_the_voice_permission_check_while_idle(self):
         guild = VoiceGuild()
         ctx = voice_ctx(guild, guild.channel("a", connect=False, speak=False))
         ctx.command = command_of(Music, "playlist list")
-        assert run(play_check(ctx)) is True
+        assert run(admission.check(ctx)).audiocontroller is not None
 
     def test_does_not_connect_while_idle(self):
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a", humans=1))
         ctx.command = command_of(Music, "history")
-        run(Music(None).cog_before_invoke(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == []
 
     def test_does_not_move_out_of_a_bots_only_channel(self, no_sleep):
@@ -555,14 +390,14 @@ class TestNonJoiningCommand:
         guild.put_bot_in(guild.channel("a", bots=1))
         ctx = slash_ctx(guild, guild.channel("b", humans=1))
         ctx.command = command_of(Music, "pause")
-        run(Music(None).cog_before_invoke(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == []
 
     def test_a_playlist_subcommand_other_than_load_does_not_connect(self):
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a"))
         ctx.command = command_of(Music, "playlist show")
-        run(Music(None).cog_before_invoke(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == []
 
 
@@ -571,7 +406,7 @@ class TestJoiningCommand:
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a"))
         ctx.command = command_of(Music, "play")
-        run(Music(None).cog_before_invoke(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == [("defer", False), ("connect", "a")]
 
     def test_defers_and_moves_out_of_a_bots_only_channel(self, no_sleep):
@@ -579,28 +414,25 @@ class TestJoiningCommand:
         guild.put_bot_in(guild.channel("a", bots=1))
         ctx = slash_ctx(guild, guild.channel("b"))
         ctx.command = command_of(Music, "prev")
-        run(Music(None).cog_before_invoke(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == [("defer", False), ("move", "b")]
 
     def test_playlist_load_connects(self):
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a"))
         ctx.command = command_of(Music, "playlist load")
-        run(Music(None).cog_before_invoke(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == [("defer", False), ("connect", "a")]
-
-    def test_still_refuses_a_user_outside_voice_while_idle(self):
-        guild = VoiceGuild()
-        ctx = voice_ctx(guild, None)
-        ctx.command = command_of(Music, "search")
-        assert refusal(play_check(ctx)) == config.USER_NOT_IN_VC_MESSAGE
 
 
 def click(button, ctx, custom_id):
     """What discord.py does with a component click: the context it
     builds for one has no command."""
     ctx.command = None
-    return run(button.callback(FakeInteraction(ctx, custom_id)))
+    inter = FakeInteraction(ctx, custom_id)
+    if not hasattr(ctx, "interaction"):
+        ctx.interaction = inter
+    return run(button.callback(inter))
 
 
 def recording_send(ctx):
@@ -719,7 +551,7 @@ class TestButtons:
         async def play_song(ctx, track):
             played.append(track)
 
-        cog = types.SimpleNamespace(cog_check=play_check, _play_song=play_song)
+        cog = types.SimpleNamespace(_play_song=play_song)
         view = SearchView(ctx)
         view.add_item(SongButton(cog, 1, "https://example.com/a"))
         click(view.children[0], ctx, "pick")
@@ -757,11 +589,10 @@ def registered(cmd):
 @pytest.fixture
 def admitting_play_check(monkeypatch):
     # every check behind the playlist gate admits
-    async def passing(ctx):
-        return True
+    async def admit(ctx, kind=None):
+        return types.SimpleNamespace(audiocontroller=None)
 
-    monkeypatch.setattr(utils, "get_audiocontroller", lambda ctx: None)
-    monkeypatch.setattr(utils, "play_check", passing)
+    monkeypatch.setattr(admission, "check", admit)
 
 
 @pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
