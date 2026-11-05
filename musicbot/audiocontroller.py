@@ -21,7 +21,7 @@ from musicbot.song import PartialPlaylist, Song
 from musicbot.truncation import Truncation
 from musicbot.linkutils import SiteTypes
 from musicbot.playback import Playback, PlaybackState
-from musicbot.playlist import Playlist, LoopMode, LoopState, PauseState
+from musicbot.playlist import Playlist, LoopMode, LoopState
 from musicbot.utils import (
     CheckError,
     asset,
