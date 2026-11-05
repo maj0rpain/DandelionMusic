@@ -273,3 +273,14 @@ def situation(
         controllers=controllers,
     )
     return guild, ctx
+
+
+async def invoke_music_hooks(cog, ctx):
+    """The Music cog's hooks in discord.py's order: cog_check, the
+    command's own checks (none for a command-less ctx), then
+    cog_before_invoke."""
+    await cog.cog_check(ctx)
+    command = getattr(ctx, "command", None)
+    for command_check in command.checks if command else ():
+        await command_check(ctx)
+    await cog.cog_before_invoke(ctx)

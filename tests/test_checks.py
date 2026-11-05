@@ -28,7 +28,13 @@ from musicbot.utils import (
     get_settings,
     owner_check,
 )
-from discord_fakes import PLAYER_BUTTONS, FakeInteraction, VoiceGuild, make_bot
+from discord_fakes import (
+    PLAYER_BUTTONS,
+    FakeInteraction,
+    VoiceGuild,
+    invoke_music_hooks,
+    make_bot,
+)
 from helpers import run
 
 
@@ -221,13 +227,6 @@ def slash_ctx(guild, author_in, **kwargs):
     return ctx
 
 
-async def invoke_music(ctx):
-    """The Music cog's hooks in discord.py's order."""
-    cog = Music(None)
-    await cog.cog_check(ctx)
-    await cog.cog_before_invoke(ctx)
-
-
 class TestMusicBeforeInvoke:
     """Music.cog_before_invoke defers a slash command just before a
     join it needs, so a slow connect cannot time the interaction
@@ -236,14 +235,14 @@ class TestMusicBeforeInvoke:
     def test_defers_publicly_before_connecting(self):
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a"))
-        run(invoke_music(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == [("defer", False), ("connect", "a")]
 
     def test_defers_before_moving(self, no_sleep):
         guild = VoiceGuild()
         guild.put_bot_in(guild.channel("a", bots=1))
         ctx = slash_ctx(guild, guild.channel("b"))
-        run(invoke_music(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == [("defer", False), ("move", "b")]
 
     def test_neither_defers_nor_joins_without_a_join(self):
@@ -251,7 +250,7 @@ class TestMusicBeforeInvoke:
         here = guild.channel("a", humans=1)
         guild.put_bot_in(here)
         ctx = slash_ctx(guild, here)
-        run(invoke_music(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == []
         assert ctx.audiocontroller.command_channel is ctx
 
@@ -260,7 +259,7 @@ class TestMusicBeforeInvoke:
         ctx = slash_ctx(guild, guild.channel("a"))
 
         async def scenario():
-            await invoke_music(ctx)
+            await invoke_music_hooks(Music(None), ctx)
             await ctx.defer()
 
         run(scenario())
@@ -383,7 +382,7 @@ class TestNonJoiningCommand:
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a", humans=1))
         ctx.command = command_of(Music, "history")
-        run(invoke_music(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == []
 
     def test_does_not_move_out_of_a_bots_only_channel(self, no_sleep):
@@ -391,14 +390,14 @@ class TestNonJoiningCommand:
         guild.put_bot_in(guild.channel("a", bots=1))
         ctx = slash_ctx(guild, guild.channel("b", humans=1))
         ctx.command = command_of(Music, "pause")
-        run(invoke_music(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == []
 
     def test_a_playlist_subcommand_other_than_load_does_not_connect(self):
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a"))
         ctx.command = command_of(Music, "playlist show")
-        run(invoke_music(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == []
 
 
@@ -407,7 +406,7 @@ class TestJoiningCommand:
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a"))
         ctx.command = command_of(Music, "play")
-        run(invoke_music(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == [("defer", False), ("connect", "a")]
 
     def test_defers_and_moves_out_of_a_bots_only_channel(self, no_sleep):
@@ -415,14 +414,14 @@ class TestJoiningCommand:
         guild.put_bot_in(guild.channel("a", bots=1))
         ctx = slash_ctx(guild, guild.channel("b"))
         ctx.command = command_of(Music, "prev")
-        run(invoke_music(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == [("defer", False), ("move", "b")]
 
     def test_playlist_load_connects(self):
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a"))
         ctx.command = command_of(Music, "playlist load")
-        run(invoke_music(ctx))
+        run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == [("defer", False), ("connect", "a")]
 
 

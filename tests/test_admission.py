@@ -21,6 +21,7 @@ from discord_fakes import (
     PLAYER_BUTTONS,
     PEOPLE,
     fake_controller,
+    invoke_music_hooks,
     situation,
 )
 from helpers import run
@@ -362,30 +363,23 @@ def music_ctx(name, **spec):
     return guild, ctx, cog
 
 
-async def invoke_hooks(cog, ctx):
-    await cog.cog_check(ctx)
-    for command_check in ctx.command.checks:
-        await command_check(ctx)
-    await cog.cog_before_invoke(ctx)
-
-
 def test_a_joining_command_refused_by_its_dj_check_never_joins():
     guild, ctx, cog = music_ctx("prev", dj_role=ADMISSION_DJ_ROLE)
     with pytest.raises(CheckError) as exc:
-        run(invoke_hooks(cog, ctx))
+        run(invoke_music_hooks(cog, ctx))
     assert str(exc.value) == NOT_DJ
     assert guild.events == []
 
 
 def test_a_joining_command_defers_then_joins_after_its_dj_check():
     guild, ctx, cog = music_ctx("prev", dj_role=ADMISSION_DJ_ROLE, role="dj")
-    run(invoke_hooks(cog, ctx))
+    run(invoke_music_hooks(cog, ctx))
     assert guild.events == [("defer",), ("connect", "b")]
 
 
 def test_a_command_without_a_join_neither_defers_nor_joins():
     guild, ctx, cog = music_ctx("history")
-    run(invoke_hooks(cog, ctx))
+    run(invoke_music_hooks(cog, ctx))
     assert guild.events == []
 
 
