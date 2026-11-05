@@ -85,7 +85,6 @@ class FakeController:
 
 
 def react(
-    monkeypatch,
     outcomes,
     *,
     resolves=True,
@@ -163,21 +162,19 @@ A = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
 B = "https://www.youtube.com/watch?v=bbbbbbbbbbb"
 
 
-def test_failing_link_replies_and_next_link_is_processed(monkeypatch):
-    processed, sent = react(
-        monkeypatch, {A: loader.SongError("bad link"), B: object()}
-    )
+def test_failing_link_replies_and_next_link_is_processed():
+    processed, sent = react({A: loader.SongError("bad link"), B: object()})
     assert processed == [A, B]
     assert sent == ["bad link"]
 
 
-def test_reaction_in_a_thread_is_processed(monkeypatch):
-    processed, _ = react(monkeypatch, {A: object()}, thread=True)
+def test_reaction_in_a_thread_is_processed():
+    processed, _ = react({A: object()}, thread=True)
     assert processed == [A]
 
 
-def test_unresolvable_channel_does_nothing(monkeypatch):
-    processed, sent = react(monkeypatch, {A: object()}, resolves=False)
+def test_unresolvable_channel_does_nothing():
+    processed, sent = react({A: object()}, resolves=False)
     assert processed == []
     assert sent == []
 
@@ -190,38 +187,33 @@ def test_spotify_uri_returns_the_open_link(kind):
     ]
 
 
-def test_reacting_to_a_spotify_uri_processes_the_open_link(monkeypatch):
+def test_reacting_to_a_spotify_uri_processes_the_open_link():
     processed, _sent = react(
-        monkeypatch,
         {SPOTIFY: object()},
         content=f"spotify:track:{SPOTIFY_ID}",
     )
     assert processed == [SPOTIFY]
 
 
-def test_truncated_playlist_sends_exactly_the_notice(monkeypatch):
+def test_truncated_playlist_sends_exactly_the_notice():
     cut = Truncation(50, TruncationReason.NO_API)
-    _, sent = react(monkeypatch, {A: QueuedPlaylist(30, cut)})
+    _, sent = react({A: QueuedPlaylist(30, cut)})
     assert sent == [cut.notice(30)]
 
 
-def test_untruncated_playlist_sends_nothing(monkeypatch):
-    _, sent = react(monkeypatch, {A: QueuedPlaylist(30)})
+def test_untruncated_playlist_sends_nothing():
+    _, sent = react({A: QueuedPlaylist(30)})
     assert sent == []
 
 
-def test_reaction_outside_the_command_channel_is_refused_silently(
-    monkeypatch,
-):
-    processed, sent = react(monkeypatch, {A: object()}, command_channel=3)
+def test_reaction_outside_the_command_channel_is_refused_silently():
+    processed, sent = react({A: object()}, command_channel=3)
     assert (processed, sent) == ([], [])
     assert react.guild.events == []
 
 
-def test_dj_reacting_from_another_channel_does_not_move_the_bot(
-    monkeypatch,
-):
-    processed, _ = react(monkeypatch, {A: object()}, bot_in="busy", role="dj")
+def test_dj_reacting_from_another_channel_does_not_move_the_bot():
+    processed, _ = react({A: object()}, bot_in="busy", role="dj")
     assert processed == [A]
     assert react.guild.events == []
 
@@ -236,20 +228,18 @@ def test_dj_reacting_from_another_channel_does_not_move_the_bot(
     ],
     ids=["no connect", "no speak", "not in voice", "failed join"],
 )
-def test_refused_reaction_is_silent(monkeypatch, kwargs):
-    processed, sent = react(monkeypatch, {A: object()}, **kwargs)
+def test_refused_reaction_is_silent(kwargs):
+    processed, sent = react({A: object()}, **kwargs)
     assert (processed, sent) == ([], [])
 
 
-def test_reaction_while_idle_connects_and_queues(monkeypatch):
-    processed, _ = react(monkeypatch, {A: object()})
+def test_reaction_while_idle_connects_and_queues():
+    processed, _ = react({A: object()})
     assert processed == [A]
     assert react.guild.events == [("connect", "mine")]
 
 
-def test_reaction_while_the_bot_sits_alone_elsewhere_moves_it(
-    monkeypatch, no_sleep
-):
-    processed, _ = react(monkeypatch, {A: object()}, bot_in="other")
+def test_reaction_while_the_bot_sits_alone_elsewhere_moves_it(no_sleep):
+    processed, _ = react({A: object()}, bot_in="other")
     assert processed == [A]
     assert react.guild.events == [("move", "mine")]

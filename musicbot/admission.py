@@ -114,16 +114,10 @@ def _marked_joining(ctx: Context) -> bool:
     )
 
 
-def join_needed(ctx: Context, joining: Optional[bool] = None) -> bool:
+def _join_needed(ctx: Context) -> bool:
     """Whether the bot has to join the user's voice channel: it has no
     voice client (a connect), or user_must_be_in_vc is on, its channel
-    has only bots and the user is in another one (a move). Only a
-    joining request ever needs to; `joining` None reads that off
-    ctx's command marker."""
-    if joining is None:
-        joining = _marked_joining(ctx)
-    if not joining:
-        return False
+    has only bots and the user is in another one (a move)."""
     bot_vc = ctx.guild.voice_client
     if not bot_vc:
         return True
@@ -141,7 +135,7 @@ def _join_target(ctx: Context) -> Optional[discord.VoiceChannel]:
     """The channel the bot has to join or move to, or None when no
     join is needed. Raises CheckError (USER_NOT_IN_VC_MESSAGE) when a
     join is needed but the author is not in voice."""
-    if not join_needed(ctx, True):
+    if not _join_needed(ctx):
         return None
     author_voice = ctx.author.voice
     if not author_voice:
@@ -180,12 +174,10 @@ class Admission:
     def __init__(
         self,
         ctx: Context,
-        kind: RequestKind,
         audiocontroller: AudioController,
         target: Optional[discord.VoiceChannel],
     ):
         self._ctx = ctx
-        self.kind = kind
         # the guild's controller when the request was checked
         self.audiocontroller = audiocontroller
         self._target = target
@@ -222,7 +214,7 @@ async def check(ctx: Context, kind: Optional[RequestKind] = None):
         await _player_check(ctx)
         if ctx.interaction.data.get("custom_id") in _DJ_BUTTONS:
             await dj_check(ctx)
-        return Admission(ctx, kind, controller, None)
+        return Admission(ctx, controller, None)
 
     _check_command_channel(ctx, sett)
     target = None
@@ -232,4 +224,4 @@ async def check(ctx: Context, kind: Optional[RequestKind] = None):
             check_voice_permissions(ctx.guild, target)
     if ctx.guild.voice_client and sett.user_must_be_in_vc:
         await _voice_check(ctx)
-    return Admission(ctx, kind, controller, target)
+    return Admission(ctx, controller, target)
