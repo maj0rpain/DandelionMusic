@@ -7,16 +7,14 @@ from discord.ext import commands
 from discord.ext.commands.view import StringView
 
 from config import config
+from musicbot import admission
 from musicbot.bot import MusicBot
 from musicbot.settings import SETTINGS, ConversionError, SettingDescriptor
 from musicbot.utils import (
     CheckError,
     dj_check,
-    get_audiocontroller,
     get_settings,
-    join_voice,
     joining_command,
-    voice_check,
 )
 
 # the group's default subcommand, and the one word that is not an
@@ -111,14 +109,13 @@ class General(commands.Cog):
         help=config.HELP_CONNECT_SHORT,
         aliases=["c", "cc"],  # this command replaces removed changechannel
     )
-    @commands.check(voice_check)
     @joining_command
     async def _connect(self, ctx):
         await ctx.defer()  # a connect or move can outlast the deadline
         # connects, or moves the bot out of a channel with only bots
         # in it; otherwise the bot stays where it is
-        get_audiocontroller(ctx)  # CheckError while the bot is starting
-        await join_voice(ctx)
+        # CheckError while the bot is starting, or on a refusal
+        await (await admission.check(ctx)).enter()
         await ctx.send("Connected.")
 
     @commands.hybrid_command(
@@ -127,10 +124,9 @@ class General(commands.Cog):
         help=config.HELP_DISCONNECT_SHORT,
         aliases=["dc"],
     )
-    @commands.check(voice_check)
     async def _disconnect(self, ctx):
         await ctx.defer()  # ANNOUNCE_DISCONNECT will take a while
-        audiocontroller = get_audiocontroller(ctx)
+        audiocontroller = await (await admission.check(ctx)).enter()
         if await audiocontroller.udisconnect("command"):
             await ctx.send("Disconnected.")
         else:
@@ -142,11 +138,11 @@ class General(commands.Cog):
         help=config.HELP_RESET_SHORT,
         aliases=["rs", "restart"],
     )
-    @commands.check(voice_check)
     @joining_command
     async def _reset(self, ctx):
         await ctx.defer()
-        get_audiocontroller(ctx)  # CheckError while the bot is starting
+        # a refused user resets nothing
+        await admission.check(ctx)
         was_connected = ctx.guild.voice_client is not None
         # reset() disposes of the old controller, which disconnects it -
         # so not here as well: a second udisconnect() would back the
@@ -157,9 +153,10 @@ class General(commands.Cog):
             await asyncio.sleep(1)
 
         if ctx.guild.voice_client is not None:
-            # join_voice() would do nothing, or move the bot
+            # enter() would do nothing, or move the bot
             raise CheckError(config.ALREADY_CONNECTED_MESSAGE)
-        await join_voice(ctx)
+        # a refusal here refuses only the join: the reset stands
+        await (await admission.check(ctx)).enter()
         await ctx.send(
             "{} Connected to {}".format(
                 ":white_check_mark:", ctx.author.voice.channel.name

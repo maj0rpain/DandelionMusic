@@ -33,6 +33,8 @@ class FakeSettings:
         # a vc_timeout means no autojoin when the controller is built
         self.vc_timeout = True
         self.start_voice_channel = None
+        self.command_channel = None
+        self.user_must_be_in_vc = False
 
 
 class FakeController:
