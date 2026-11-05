@@ -20,10 +20,9 @@ from musicbot.settings import (
     GuildSettings,
     run_migrations,
     extract_legacy_settings,
-    get_guild_whitelist,
-    import_env_whitelist,
     migrate_old_playlists,
 )
+from musicbot import guild_whitelist
 from musicbot.sessions import GuildSessions
 from musicbot.utils import VC_CONNECT_TIMEOUT, CheckError
 
@@ -109,7 +108,7 @@ class MusicBot(commands.Bot):
             await connection.run_sync(run_migrations)
         await extract_legacy_settings(self)
         await migrate_old_playlists(self)
-        await import_env_whitelist(self)
+        await guild_whitelist.import_env_whitelist(self.DbSession)
 
         loader.init()
         return await super().start(*args, **kwargs)
@@ -169,11 +168,11 @@ class MusicBot(commands.Bot):
         await self.sessions.load_settings(self.guilds)
 
         # read once for the whole sweep rather than per guild
-        whitelist = await get_guild_whitelist(self)
+        whitelist = await guild_whitelist.load(self.DbSession)
         for guild in self.guilds:
-            if whitelist and guild.id not in whitelist:
+            if not whitelist.admits(guild.id):
                 print(f"{guild.name} is not whitelisted, leaving.")
-                await guild.leave()
+                await self._leave(guild)
                 continue
             await self.register(guild)
             print("Joined {}".format(guild.name))
@@ -186,12 +185,25 @@ class MusicBot(commands.Bot):
         if not self.absolutely_ready.done():
             self.absolutely_ready.set_result(True)
 
+    async def _leave(self, guild):
+        """Leave an unadmitted guild; a failure is logged with the
+        guild's name and never propagates."""
+        try:
+            await guild.leave()
+        except Exception as e:
+            print(
+                f"Leaving guild {guild.name} failed:",
+                file=sys.stderr,
+                flush=True,
+            )
+            print_exception(e)
+
     async def on_guild_join(self, guild):
         print(guild.name)
-        whitelist = await get_guild_whitelist(self)
-        if whitelist and guild.id not in whitelist:
+        whitelist = await guild_whitelist.load(self.DbSession)
+        if not whitelist.admits(guild.id):
             print("Not whitelisted, leaving.")
-            await guild.leave()
+            await self._leave(guild)
             return
         await self.register(guild)
 

@@ -439,7 +439,7 @@ class BotState(Base):
     value: Mapped[str] = mapped_column(String(255))
 
 
-# marker key for import_env_whitelist() below
+# marker key for guild_whitelist.import_env_whitelist()
 ENV_WHITELIST_IMPORTED = "env_guild_whitelist_imported"
 
 
@@ -482,50 +482,6 @@ async def remove_from_guild_whitelist(bot: "MusicBot", guild_id: int) -> bool:
         )
         await session.commit()
     return result.rowcount > 0
-
-
-async def import_env_whitelist(bot: "MusicBot"):
-    """Seed the whitelist table from the deprecated GUILD_WHITELIST
-    environment variable, once.
-
-    Guarded by a marker row rather than by the table being empty:
-    emptying the whitelist through d!guild_whitelist is a legitimate
-    state, and re-importing whenever the table is empty would resurrect
-    every id on the next restart - the same failure the move to the
-    database is meant to end.
-    """
-    async with bot.DbSession() as session:
-        if await session.get(BotState, ENV_WHITELIST_IMPORTED) is not None:
-            return
-        # Skip ids the table already holds rather than assuming a
-        # missing marker means an empty table. Two processes sharing
-        # one database can both pass the check above, and a restored
-        # backup can have rows without the marker; inserting blindly
-        # then raises IntegrityError out of MusicBot.start() and the
-        # bot never logs in.
-        existing = set(
-            (await session.execute(select(WhitelistedGuild.guild_id)))
-            .scalars()
-            .all()
-        )
-        for guild_id in config.GUILD_WHITELIST:
-            if str(guild_id) not in existing:
-                session.add(WhitelistedGuild(guild_id=str(guild_id)))
-        session.add(
-            BotState(
-                key=ENV_WHITELIST_IMPORTED,
-                value=str(len(config.GUILD_WHITELIST)),
-            )
-        )
-        await session.commit()
-    if config.GUILD_WHITELIST:
-        print(
-            f"Imported {len(config.GUILD_WHITELIST)} guild(s) from the"
-            " GUILD_WHITELIST environment variable into the database."
-            " That variable is no longer read after this point - manage"
-            " the whitelist with d!guild_whitelist and remove it from"
-            " your .env."
-        )
 
 
 # Operation types that only ever add to the schema (new table,

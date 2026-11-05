@@ -7,3 +7,5 @@
 **Joining command**: a command that may bring the bot into the invoker's voice channel, or move it there: before it runs, or later, when a pick in a view it opened acts in its name. Every other command answers without touching voice.
 
 **Truncated playlist**: a Spotify playlist or album that loaded fewer tracks than Spotify reports it has, because the bot has no Spotify API credentials or the API failed partway through. The user is told how many of how many were queued, and why.
+
+**Guild whitelist** - The guilds the bot may stay in. When it is empty the whitelist is *disabled* and every guild is *admitted*; otherwise a guild is admitted only if it is listed. A change that leaves a present guild unadmitted makes the bot leave it.

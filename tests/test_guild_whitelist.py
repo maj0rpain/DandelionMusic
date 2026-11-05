@@ -22,12 +22,15 @@ from musicbot.commands.developer import Developer
 from musicbot.settings import (
     ENV_WHITELIST_IMPORTED,
     BotState,
+    WhitelistedGuild,
     add_to_guild_whitelist,
     get_guild_whitelist,
-    import_env_whitelist,
     remove_from_guild_whitelist,
     run_migrations,
 )
+from musicbot import settings
+from musicbot.guild_whitelist import import_env_whitelist, load
+from db_seam import in_memory_db
 from developer_fakes import FakeBot, FakeCtx
 from helpers import run
 
@@ -89,67 +92,131 @@ class TestAddAndRemove:
         assert run(get_guild_whitelist(bot)) == {big}
 
 
+def with_db(scenario):
+    """Run `scenario(factory)` against a fresh in-memory database."""
+
+    async def go():
+        async with in_memory_db(settings) as factory:
+            return await scenario(factory)
+
+    return run(go())
+
+
+async def seed(factory, *ids):
+    async with factory() as session:
+        for guild_id in ids:
+            session.add(WhitelistedGuild(guild_id=str(guild_id)))
+        await session.commit()
+
+
+class TestAdmission:
+    def test_empty_whitelist_is_disabled_and_admits_every_guild(self):
+        whitelist = with_db(load)
+        assert not whitelist.enabled
+        assert whitelist.admits(111)
+        assert list(whitelist) == []
+
+    def test_listed_whitelist_admits_only_listed_guilds(self):
+        async def scenario(factory):
+            await seed(factory, 222, 111)
+            return await load(factory)
+
+        whitelist = with_db(scenario)
+        assert whitelist.enabled
+        assert whitelist.admits(111) and whitelist.admits(222)
+        assert not whitelist.admits(333)
+        assert list(whitelist) == [111, 222]
+
+    def test_ids_survive_as_ints(self):
+        """Stored as strings to dodge integer overflow, like every
+        other Discord id in the schema - but callers compare against
+        guild.id, which is an int."""
+        big = 609212921897025557
+
+        async def scenario(factory):
+            await seed(factory, big)
+            return await load(factory)
+
+        whitelist = with_db(scenario)
+        assert list(whitelist) == [big]
+        assert whitelist.admits(big)
+
+
 class TestEnvImport:
-    def test_imports_the_env_var_once(self, bot, monkeypatch):
+    def test_imports_the_env_var_once(self, monkeypatch):
         monkeypatch.setattr(config, "GUILD_WHITELIST", [111, 222])
-        run(import_env_whitelist(bot))
-        assert run(get_guild_whitelist(bot)) == {111, 222}
 
-    def test_import_is_idempotent(self, bot, monkeypatch):
+        async def scenario(factory):
+            await import_env_whitelist(factory)
+            return list(await load(factory))
+
+        assert with_db(scenario) == [111, 222]
+
+    def test_import_is_idempotent(self, monkeypatch):
         monkeypatch.setattr(config, "GUILD_WHITELIST", [111])
-        run(import_env_whitelist(bot))
-        run(import_env_whitelist(bot))
-        assert run(get_guild_whitelist(bot)) == {111}
 
-    def test_emptying_the_whitelist_survives_a_restart(self, bot, monkeypatch):
+        async def scenario(factory):
+            await import_env_whitelist(factory)
+            await import_env_whitelist(factory)
+            return list(await load(factory))
+
+        assert with_db(scenario) == [111]
+
+    def test_emptying_the_whitelist_survives_a_restart(self, monkeypatch):
         """The reason the marker row exists. Keying the import off "the
         table is empty" would resurrect every id from .env the next time
         the bot started, which is the same class of bug as the removal
         that used not to persist."""
         monkeypatch.setattr(config, "GUILD_WHITELIST", [111, 222])
-        run(import_env_whitelist(bot))
-        for guild_id in (111, 222):
-            run(remove_from_guild_whitelist(bot, guild_id))
 
-        run(import_env_whitelist(bot))  # the next startup
+        async def scenario(factory):
+            await import_env_whitelist(factory)
+            for guild_id in (111, 222):
+                await remove_from_guild_whitelist(
+                    types.SimpleNamespace(DbSession=factory), guild_id
+                )
+            await import_env_whitelist(factory)  # the next startup
+            return await load(factory)
 
-        assert run(get_guild_whitelist(bot)) == set()
+        assert not with_db(scenario).enabled
 
-    def test_tolerates_rows_that_already_exist(self, bot, monkeypatch):
+    def test_tolerates_rows_that_already_exist(self, monkeypatch):
         """A missing marker does not imply an empty table: two processes
         sharing one database can both pass the guard, and a restored
         backup can have rows without the marker. Inserting blindly
         raised IntegrityError out of MusicBot.start() and the bot never
         logged in."""
-        run(add_to_guild_whitelist(bot, 111))
         monkeypatch.setattr(config, "GUILD_WHITELIST", [111, 222])
 
-        run(import_env_whitelist(bot))  # must not raise
+        async def scenario(factory):
+            await seed(factory, 111)
+            await import_env_whitelist(factory)  # must not raise
+            return list(await load(factory))
 
-        assert run(get_guild_whitelist(bot)) == {111, 222}
+        assert with_db(scenario) == [111, 222]
 
-    def test_marker_is_written_even_with_an_empty_env_var(
-        self, bot, monkeypatch
-    ):
+    def test_marker_is_written_even_with_an_empty_env_var(self, monkeypatch):
         monkeypatch.setattr(config, "GUILD_WHITELIST", [])
-        run(import_env_whitelist(bot))
 
-        async def marker():
-            async with bot.DbSession() as session:
+        async def scenario(factory):
+            await import_env_whitelist(factory)
+            async with factory() as session:
                 return await session.get(BotState, ENV_WHITELIST_IMPORTED)
 
-        assert run(marker()) is not None
+        assert with_db(scenario) is not None
 
-    def test_a_later_env_edit_is_ignored(self, bot, monkeypatch):
+    def test_a_later_env_edit_is_ignored(self, monkeypatch):
         """Once imported the variable is inert - the database owns the
         whitelist, and two sources of truth is what this replaced."""
         monkeypatch.setattr(config, "GUILD_WHITELIST", [111])
-        run(import_env_whitelist(bot))
 
-        monkeypatch.setattr(config, "GUILD_WHITELIST", [111, 333])
-        run(import_env_whitelist(bot))
+        async def scenario(factory):
+            await import_env_whitelist(factory)
+            monkeypatch.setattr(config, "GUILD_WHITELIST", [111, 333])
+            await import_env_whitelist(factory)
+            return list(await load(factory))
 
-        assert run(get_guild_whitelist(bot)) == {111}
+        assert with_db(scenario) == [111]
 
 
 def test_config_no_longer_writes_anything():

@@ -33,7 +33,8 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/cached_lookup.py` - `CachedLookup`: a remote lookup's cache, in-flight dedup (shielded), timeout and failure cooldown, around a backend passed in; imports only the standard library.
 - `musicbot/library_browse.py` - the library browse cursor; `LibraryBrowseView` is its Discord adapter.
 - `musicbot/views.py` - `OwnedView`: a single-owner view's owner check, silent refusal, message and message edit; `SearchView` and `LibraryView` subclass it.
-- `musicbot/settings.py` - SQLAlchemy models, auto-migrations, guild whitelist; the `SETTINGS` table of `SettingDescriptor`s is the single place a guild setting is described (its column aside): it drives defaults, conversion, the `d!setting show` embed and the generated `d!setting` subcommands.
+- `musicbot/settings.py` - SQLAlchemy models, auto-migrations; the `SETTINGS` table of `SettingDescriptor`s is the single place a guild setting is described (its column aside): it drives defaults, conversion, the `d!setting show` embed and the generated `d!setting` subcommands.
+- `musicbot/guild_whitelist.py` - the guild whitelist: admission (`load` -> `Whitelist.admits`) and the one-time `GUILD_WHITELIST` env import; the `WhitelistedGuild` table stays in `settings.py`.
 - `musicbot/commands/` - the `music`, `general`, `developer` cogs.
 - `musicbot/plugins/button.py` - optional reaction-button plugin (`ENABLE_BUTTON_PLUGIN`).
 - `config/config.py` - `Config`: class attributes are the settings schema and defaults, overridden from `.env`.
