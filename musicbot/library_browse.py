@@ -37,10 +37,7 @@ class Screen(NamedTuple):
     definition nothing has changed.
 
     `counts` is non-None exactly at the root, and `stats` exactly
-    below it. That is a cross-module contract now, not an adjacent
-    line: LibraryBrowseView._add_stat_fields() unpacks `counts` into
-    three names without a guard, having tested `cursor.artist is None`
-    rather than the field itself.
+    below it.
     """
 
     entries: List[str]  # filenames at the song level, folder names above
@@ -49,6 +46,15 @@ class Screen(NamedTuple):
     scope: Tuple[Optional[str], Optional[str]]  # the (artist, album) shown
     counts: Optional[Tuple[int, int, int]]  # root level only
     stats: Optional[library.LevelStats]  # every level below the root
+
+
+class Position(NamedTuple):
+    """Where a cursor is: the three fields a level change or a page turn
+    moves. `level_revision` is deliberately not part of it."""
+
+    artist: Optional[str]
+    album: Optional[str]
+    page: int
 
 
 class Descent(NamedTuple):
@@ -162,6 +168,16 @@ class BrowseCursor:
         ):
             self._screen = self._build_screen()
         return self._screen
+
+    def position(self) -> Position:
+        return Position(self.artist, self.album, self.page)
+
+    def restore(self, position: Position) -> None:
+        """Sets the position directly. Leaves level_revision as it is:
+        when a failed level change is undone, the bumped revision stays
+        bumped, so an enrichment started before the move is still
+        dropped."""
+        self.artist, self.album, self.page = position
 
     # -- paging ----------------------------------------------------
 

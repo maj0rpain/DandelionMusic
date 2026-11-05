@@ -322,6 +322,33 @@ class TestBack:
         assert (c.artist, c.album, c.page, c.level_revision) == state
 
 
+class TestPosition:
+    def test_position_names_artist_album_and_page(self):
+        c = at_album()
+        c.page_by(1)
+        pos = c.position()
+        assert isinstance(pos, library_browse.Position)
+        assert tuple(pos) == ("Radiohead", "OK Computer", c.page)
+        assert pos._fields == ("artist", "album", "page")
+
+    def test_restore_sets_the_position_directly(self):
+        c = at_album()
+        pos = c.position()
+        c.back()
+        c.back()
+        c.restore(pos)
+        assert c.position() == pos
+        assert c.screen().scope == ("Radiohead", "OK Computer")
+
+    def test_restore_leaves_the_level_revision_unchanged(self):
+        c = at_album()
+        pos = c.position()
+        c.back()
+        revision = c.level_revision
+        c.restore(pos)
+        assert c.level_revision == revision
+
+
 class TestTheSeam:
     """What stops the cursor drifting back into the view.
 

@@ -32,6 +32,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/library_metadata.py` - library enrichment (Last.fm/Spotify stats and art, embedded covers); the four remote lookups are `CachedLookup` instances, and `clear_caches()` clears them with the local caches.
 - `musicbot/cached_lookup.py` - `CachedLookup`: a remote lookup's cache, in-flight dedup (shielded), timeout and failure cooldown, around a backend passed in; imports only the standard library.
 - `musicbot/library_browse.py` - the library browse cursor; `LibraryBrowseView` is its Discord adapter.
+- `musicbot/library_session.py` - `BrowseSession` and `Frame`: the browse cursor plus what the browse message shows (drawn enrichment, attachment key, undo, one synchronous frame per draw); Discord-free.
 - `musicbot/views.py` - `OwnedView`: a single-owner view's owner check, silent refusal, message and message edit; `SearchView` and `LibraryView` subclass it.
 - `musicbot/settings.py` - SQLAlchemy models, auto-migrations, guild whitelist; the `SETTINGS` table of `SettingDescriptor`s is the single place a guild setting is described (its column aside): it drives defaults, conversion, the `d!setting show` embed and the generated `d!setting` subcommands.
 - `musicbot/commands/` - the `music`, `general`, `developer` cogs.
@@ -45,6 +46,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - Don't move `_help`/`_help_autocomplete` into `MusicBot`; they stay module-level (`musicbot/bot.py`).
 - discord.py's `after=` callback runs on its audio thread; it only hops to the loop (`call_soon_threadsafe`). `next_song` and everything it calls are loop-only (`musicbot/audiocontroller.py`).
 - `musicbot/library_browse.py` imports only `musicbot.library` and `typing` (`tests/test_library_browse.py` asserts it) - don't add imports.
+- `musicbot/library_session.py` imports only `musicbot.library`, `musicbot.library_browse` and `typing`, plus `musicbot.library_metadata` inside `if TYPE_CHECKING:` only (`tests/test_library_session.py` asserts it) - don't add imports.
 
 ## Agent skills
 
