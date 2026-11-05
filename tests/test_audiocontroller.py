@@ -14,6 +14,8 @@ import types
 
 import pytest
 
+from musicbot import playlists
+from musicbot.commands.music import Music
 from controller_helpers import (
     _backup,
     _backup_path,
@@ -28,9 +30,7 @@ from controller_helpers import (
     _songs,
     _titles,
 )
-from musicbot import playlists
-from musicbot.commands.music import Music
-from controller_seam import FakeVoiceClient, StubLoader, controller_seam
+from controller_seam import PlaybackVoiceClient, StubLoader, controller_seam
 from db_seam import in_memory_db
 from discord_fakes import PLAYER_BUTTONS
 from helpers import run
@@ -507,14 +507,14 @@ def test_attach_view_records_an_interactions_original_response(controller):
     controller.guild.voice_client.playing = True
     response = _FakeMessage()
 
-    class FakeInteraction(discord.Interaction):
+    class RespondedInteraction(discord.Interaction):
         def __init__(self):
             pass
 
         async def original_response(self):
             return response
 
-    interaction = FakeInteraction()
+    interaction = RespondedInteraction()
 
     async def send(view):
         return interaction
@@ -936,7 +936,7 @@ async def _start_then_disconnect(controller):
 
 
 def _fresh_voice_client(controller):
-    controller.guild.voice_client = FakeVoiceClient()
+    controller.guild.voice_client = PlaybackVoiceClient()
 
 
 def test_an_external_disconnect_leaves_the_queue_history_and_backup(

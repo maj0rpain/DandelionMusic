@@ -1,5 +1,5 @@
 """Shared Discord stand-ins for the tests: the click FakeInteraction,
-make_bot, the voice fakes, http_error and the
+make_bot, the voice fakes, RecordingCtx, http_error and the
 player view's button ids. Import them rather than writing a per-file
 copy.
 """
@@ -129,6 +129,24 @@ class FakeInteraction:
             get_context=get_context,
             sessions=types.SimpleNamespace(controller=lambda guild: None),
         )
+
+
+class RecordingCtx:
+    """A context recording each `send` in `sent` and whether it was
+    deferred. `bot` is whatever the command reads off `ctx.bot`."""
+
+    def __init__(self, bot=None):
+        self.sent = []
+        self.deferred = False
+        self.interaction = None
+        self.bot = bot
+        self.message = types.SimpleNamespace(attachments=[], reference=None)
+
+    async def defer(self):
+        self.deferred = True
+
+    async def send(self, message=None, **kwargs):
+        self.sent.append(message)
 
 
 def http_error():
