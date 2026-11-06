@@ -95,10 +95,10 @@ class Button(commands.Cog):
             # not the one who sent the message
             ctx.author = member
             try:
-                entry = await admission.check(
+                admitted = await admission.check(
                     ctx, admission.RequestKind.REACTION
                 )
-                audiocontroller = await entry.enter()
+                audiocontroller = await admitted.enter()
             except utils.CheckError:
                 return
             if sett.command_channel:

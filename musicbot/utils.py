@@ -183,13 +183,13 @@ def get_settings(ctx: Context) -> "GuildSettings":
     return sett
 
 
-async def _admin_or_owner(ctx: Context) -> bool:
+async def admin_or_owner(ctx: Context) -> bool:
     if ctx.channel.permissions_for(ctx.author).administrator:
         return True
     return bool(await ctx.bot.is_owner(ctx.author))
 
 
-def _holds_role(ctx: Context, role_id) -> bool:
+def holds_role(ctx: Context, role_id) -> bool:
     """True when the author holds the role with this id. A missing id
     (no role set) is held by nobody."""
     if not role_id:
@@ -199,11 +199,11 @@ def _holds_role(ctx: Context, role_id) -> bool:
 
 async def dj_check(ctx: Context):
     """Check if the user has DJ permissions"""
-    if await _admin_or_owner(ctx):
+    if await admin_or_owner(ctx):
         return True
 
     sett = get_settings(ctx)
-    if sett.dj_role and not _holds_role(ctx, sett.dj_role):
+    if sett.dj_role and not holds_role(ctx, sett.dj_role):
         raise CheckError(config.NOT_A_DJ)
     return True
 

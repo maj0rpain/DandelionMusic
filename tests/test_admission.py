@@ -36,10 +36,10 @@ NOT_DJ = config.NOT_A_DJ
 
 def run_request(ctx, kind):
     async def go():
-        entry = await admission.check(
+        admitted = await admission.check(
             ctx, None if kind in admission.COMMAND_KINDS else kind
         )
-        return await entry.enter()
+        return await admitted.enter()
 
     return run(go())
 
@@ -335,12 +335,12 @@ def test_a_passed_command_kind_is_a_programming_error(kind):
 
 def test_enter_returns_the_controller_current_when_it_acts():
     guild, ctx = situation(K.JOINING_COMMAND)
-    entry = run(admission.check(ctx))
-    assert entry.audiocontroller is ctx.bot.sessions.controller(guild)
+    admitted = run(admission.check(ctx))
+    assert admitted.audiocontroller is ctx.bot.sessions.controller(guild)
     ctx.controllers[guild] = fake_controller()
     run(ctx.bot.sessions.reset(guild))
-    assert run(entry.enter()) is ctx.bot.sessions.controller(guild)
-    assert run(entry.enter()) is not entry.audiocontroller
+    assert run(admitted.enter()) is ctx.bot.sessions.controller(guild)
+    assert run(admitted.enter()) is not admitted.audiocontroller
 
 
 # --- the Music cog's hooks ------------------------------------------

@@ -104,9 +104,9 @@ async def _voice_check(ctx: Context):
     # Admins and the application owner always pass; a DJ passes only
     # when the guild has set a DJ role and the member holds it. With no
     # DJ role set, nobody else bypasses (EXTRA_OWNERS included).
-    if await utils._admin_or_owner(ctx):
+    if await utils.admin_or_owner(ctx):
         return True
-    if utils._holds_role(ctx, get_settings(ctx).dj_role):
+    if utils.holds_role(ctx, get_settings(ctx).dj_role):
         return True
 
     raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
