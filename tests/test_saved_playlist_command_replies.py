@@ -36,20 +36,6 @@ def _run_playlist_command(monkeypatch, command, function, error, *args):
     return sent
 
 
-def test_save_with_a_too_long_name_replies_name_too_long(monkeypatch):
-    monkeypatch.setattr(
-        playlists, "save", _fail_with(playlists.PlaylistNameTooLong())
-    )
-    controller = types.SimpleNamespace(
-        playlist=types.SimpleNamespace(playque=[plain_song()])
-    )
-    ctx, sent = command_ctx(controller)
-
-    run(Music._playlist_save.callback(Music(None), ctx, "p"))
-
-    assert sent == [config.PLAYLIST_NAME_TOO_LONG]
-
-
 @pytest.mark.parametrize(
     "command, function, args",
     [
@@ -101,10 +87,19 @@ def test_remove_song_refuses_the_only_song(monkeypatch):
     assert sent == ["Can't remove the only song from playlist."]
 
 
-def test_save_with_an_existing_name_replies_already_exists(monkeypatch):
-    monkeypatch.setattr(
-        playlists, "save", _fail_with(playlists.PlaylistExists())
-    )
+@pytest.mark.parametrize(
+    "error, reply",
+    [
+        (playlists.PlaylistExists(), config.PLAYLIST_ALREADY_EXISTS),
+        (
+            playlists.PlaylistNameTooLong(),
+            config.PLAYLIST_NAME_TOO_LONG.format(max_length=255),
+        ),
+    ],
+    ids=["already_exists", "name_too_long"],
+)
+def test_save_that_fails_replies_with_the_reason(monkeypatch, error, reply):
+    monkeypatch.setattr(playlists, "save", _fail_with(error))
     controller = types.SimpleNamespace(
         playlist=types.SimpleNamespace(playque=[plain_song()])
     )
@@ -112,7 +107,7 @@ def test_save_with_an_existing_name_replies_already_exists(monkeypatch):
 
     run(Music._playlist_save.callback(Music(None), ctx, "p"))
 
-    assert sent == [config.PLAYLIST_ALREADY_EXISTS]
+    assert sent == [reply]
 
 
 @pytest.mark.parametrize(

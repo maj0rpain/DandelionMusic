@@ -9,6 +9,7 @@ from config import config
 from musicbot import admission, utils, loader, playlists
 from musicbot.outcome import BatchReport, send_outcome
 from musicbot.player_panel import send_song_info
+from musicbot.settings import PLAYLIST_NAME_MAX_LENGTH
 from musicbot.song import Song
 from musicbot.bot import MusicBot, Context
 from musicbot.utils import dj_check, chunks, joining_command, SimplePaginator
@@ -134,7 +135,9 @@ def _saved_playlist_error_reply(e: playlists.SavedPlaylistError) -> str:
     if isinstance(e, playlists.PlaylistExists):
         return config.PLAYLIST_ALREADY_EXISTS
     if isinstance(e, playlists.PlaylistNameTooLong):
-        return config.PLAYLIST_NAME_TOO_LONG
+        return config.PLAYLIST_NAME_TOO_LONG.format(
+            max_length=PLAYLIST_NAME_MAX_LENGTH
+        )
     if isinstance(e, playlists.OnlySongInPlaylist):
         return "Can't remove the only song from playlist."
     raise e

@@ -92,7 +92,7 @@
   "HELP_SAVE_PLAYLIST_LONG": "Saves current playlist with the specified name to replay it later",
   "PLAYLIST_SAVED_MESSAGE": "Playlist saved.",
   "PLAYLIST_ALREADY_EXISTS": "Playlist with this name already exists.",
-  "PLAYLIST_NAME_TOO_LONG": "Playlist names can be at most 255 characters.",
+  "PLAYLIST_NAME_TOO_LONG": "Playlist names can be at most {max_length} characters.",
   "HELP_LOAD_PLAYLIST_SHORT": "Load and play playlist",
   "HELP_LOAD_PLAYLIST_LONG": "Loads playlist with the specified name and plays it",
   "PLAYLIST_NOT_FOUND": "Playlist not found.",
