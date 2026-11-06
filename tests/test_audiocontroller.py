@@ -2310,6 +2310,12 @@ def test_two_concurrent_disconnects_both_succeed(controller, monkeypatch):
 
     _fake_ffmpeg(monkeypatch)
     monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", True)
+    real_sleep = asyncio.sleep
+
+    async def quick_sleep(delay, *args):
+        await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", quick_sleep)
     guild = controller.guild
     client = guild.voice_client = _UnregisteringVoiceClient(guild)
 
@@ -2321,7 +2327,6 @@ def test_two_concurrent_disconnects_both_succeed(controller, monkeypatch):
         client.playing = False
         return await both
 
-    # the real one-second poll: the loop waits it out
     assert _run(controller, scenario) == [True, True]
     assert guild.voice_client is None
 
