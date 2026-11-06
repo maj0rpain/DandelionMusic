@@ -183,14 +183,6 @@ class Developer(commands.Cog):
         commands.check(owner_check)(_show_guild_whitelist_callback)
     )
 
-    async def _leave_guilds(self, ctx, guild_ids):
-        """Leave each guild; one failing does not stop the rest."""
-        for guild_id in guild_ids:
-            guild = ctx.bot.get_guild(guild_id)
-            if guild is None:
-                continue
-            await ctx.bot._leave(guild)
-
     @_guild_whitelist.command(name="add")
     @commands.check(owner_check)
     async def _guild_whitelist_add(self, ctx, *, id: str):
@@ -219,7 +211,7 @@ class Developer(commands.Cog):
         else:
             message = "Whitelist updated."
         await ctx.send(message)
-        await self._leave_guilds(ctx, change.to_leave)
+        await ctx.bot.leave_guilds(change.to_leave)
 
     async def _guild_whitelist_remove_autocomplete(
         self, interaction: discord.Interaction, current: str
@@ -257,7 +249,7 @@ class Developer(commands.Cog):
                 if change.to_leave
                 else "Whitelist updated."
             )
-        await self._leave_guilds(ctx, change.to_leave)
+        await ctx.bot.leave_guilds(change.to_leave)
 
 
 async def setup(bot: MusicBot):

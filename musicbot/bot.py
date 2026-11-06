@@ -206,6 +206,15 @@ class MusicBot(commands.Bot):
             )
             print_exception(e)
 
+    async def leave_guilds(self, guild_ids):
+        """Leave each of these guilds the bot is in; ids it is not in
+        are skipped, and one failing does not stop the rest."""
+        for guild_id in guild_ids:
+            guild = self.get_guild(guild_id)
+            if guild is None:
+                continue
+            await self._leave(guild)
+
     async def on_guild_join(self, guild):
         print(guild.name)
         whitelist = await guild_whitelist.load(self.DbSession)
