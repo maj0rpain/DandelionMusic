@@ -196,18 +196,13 @@ def test_a_255_character_name_saves_and_a_256_one_is_refused():
     assert run_with_db(test) == ["x" * 255]
 
 
+STORED = '[{"url": "https://a.example/1", "title": "a"}]'
+
+
 def test_an_existing_256_character_name_still_works():
     async def test(factory):
         long_ref = PlaylistRef(GUILD, "y" * 256)
-        async with factory() as session:
-            session.add(
-                SavedPlaylist(
-                    guild_id=GUILD,
-                    name=long_ref.name,
-                    songs_json=playlists._encode([A]),
-                )
-            )
-            await session.commit()
+        await _seed(factory, STORED, name=long_ref.name)
         assert await playlists.get(factory, long_ref) is not None
         await playlists.add_songs(factory, long_ref, [B])
         await playlists.delete(factory, long_ref)
