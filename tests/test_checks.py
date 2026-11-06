@@ -311,7 +311,7 @@ def test_connect_moves_the_bot_out_of_a_bots_only_channel(no_sleep):
 
     run(scenario())
     assert guild.events == [("defer", False), ("move", "b")]
-    assert sent == ["Connected."]
+    assert sent == ["Moved to your voice channel."]
 
 
 def test_a_failed_join_from_the_library_says_so():
