@@ -286,9 +286,9 @@ def test_restore_brings_back_the_queue_a_stop_cleared(
     assert _played(controller) == ["first", "first"]
     assert _titles(controller) == ["first", "second"]
     assert _backup(controller, tmp_path) == ["first", "second"]
-    # "first" each time it starts; "second" by both queue preloads,
-    # which run only once restore() has brought it back
-    assert _preloaded(stub_loader) == ["first", "first", "second", "second"]
+    # "first" each time it starts; "second" by the one sweep that
+    # survives: stop() ended the first, and restore() started the next
+    assert _preloaded(stub_loader) == ["first", "first", "second"]
 
 
 def test_restore_with_no_backup_and_an_empty_queue_plays_nothing(
@@ -834,8 +834,8 @@ def test_preloading_a_saved_playlist_song_refreshes_its_stored_title(
     "outcome, queue",
     [
         ("CURRENT", ["playing", "fresh title"]),
-        # a failed preload drops the song, as before
-        ("FAILED", ["playing"]),
+        # a failed preload leaves the song queued
+        ("FAILED", ["playing", "fresh title"]),
     ],
 )
 def test_a_preload_that_extracted_nothing_leaves_the_stored_title_stale(
@@ -1205,7 +1205,7 @@ def test_a_background_preload_failing_after_the_song_became_head_skips_only_it(
     assert _played(controller) == ["a", "c"]
 
 
-def test_a_failed_non_head_preload_still_removes_the_song(
+def test_a_failed_non_head_preload_leaves_the_song_queued(
     controller, stub_loader, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
@@ -1218,7 +1218,198 @@ def test_a_failed_non_head_preload_still_removes_the_song(
 
     _run(controller, scenario)
 
-    assert _titles(controller) == ["a", "c"]
+    assert _titles(controller) == ["a", "b", "c"]
+
+
+def test_every_preload_failing_leaves_a_long_queue_whole_and_silent(
+    controller, stub_loader
+):
+    _queue(controller, "current")
+    songs = _songs(controller, *[f"s{i}" for i in range(100)])
+    stub_loader.results["preload"] = stub_loader.Preload.FAILED
+
+    async def scenario():
+        controller.guild.voice_client.playing = True
+        await controller.enqueue(songs)
+
+    _run(controller, scenario)
+
+    assert len(_titles(controller)) == 101
+    assert controller.panel.skipped == []
+
+
+def test_a_song_failing_in_the_background_plays_when_its_own_preload_works(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "a", "b", "c")
+
+    async def scenario():
+        futures = _gated_preload(stub_loader, "b")
+        await _start_playing(controller)
+        futures[0].set_result(stub_loader.Preload.FAILED)
+        await _settle()
+        controller.skip()
+        await _settle()
+        futures[1].set_result(stub_loader.Preload.EXTRACTED)
+
+    _run(controller, scenario)
+
+    assert _played(controller) == ["a", "b"]
+    assert controller.panel.skipped == []
+
+
+def test_a_song_failing_in_the_background_and_at_the_head_is_reported_once(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "a", "b", "c")
+
+    async def scenario():
+        futures = _gated_preload(stub_loader, "b")
+        await _start_playing(controller)
+        futures[0].set_result(stub_loader.Preload.FAILED)
+        await _settle()
+        controller.skip()
+        await _settle()
+        futures[1].set_result(stub_loader.Preload.FAILED)
+
+    _run(controller, scenario)
+
+    assert _played(controller) == ["a", "c"]
+    assert [song.title for song in controller.panel.skipped] == ["b"]
+
+
+def test_stop_ends_a_sweep_even_when_songs_are_queued_again(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    songs = _songs(controller, "a", "b", "c")
+    for song in songs:
+        controller.playlist.add(song)
+
+    async def scenario():
+        futures = _gated_preload(stub_loader, "b")
+        await _start_playing(controller)
+        controller.stop()
+        await controller.enqueue([songs[0], songs[2]])
+        await _settle()
+        futures[0].set_result(stub_loader.Preload.EXTRACTED)
+
+    _run(controller, scenario)
+
+    assert _preloaded(stub_loader).count("c") == 1
+
+
+def test_a_new_sweep_supersedes_the_running_one(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "a", "b", "c")
+    extra = _songs(controller, "d")
+
+    async def scenario():
+        futures = _gated_preload(stub_loader, "b")
+        await _start_playing(controller)
+        await controller.enqueue(extra)
+        await _settle()
+        for future in futures:
+            future.set_result(stub_loader.Preload.EXTRACTED)
+
+    _run(controller, scenario)
+
+    assert _preloaded(stub_loader).count("c") == 1
+
+
+def test_teardown_ends_a_sweep_awaiting_a_preload(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    songs = _songs(controller, "a", "b", "c")
+    for song in songs:
+        controller.playlist.add(song)
+
+    async def scenario():
+        futures = _gated_preload(stub_loader, "b")
+        await _start_playing(controller)
+        await controller.udisconnect("test")
+        controller.playlist.add(songs[2])
+        futures[0].set_result(stub_loader.Preload.EXTRACTED)
+
+    _run(controller, scenario)
+
+    assert "c" not in _preloaded(stub_loader)
+
+
+def _shared_gated_preload(stub_loader, title):
+    """Like loader.preload for `title`: one in-flight future per song
+    shared by its callers, resolved as failed when the caller that
+    started it is cancelled. Returns the in-flight futures by song."""
+    inflight = {}
+    original = stub_loader.preload
+
+    async def preload(song):
+        if song.title != title:
+            return await original(song)
+        future = inflight.get(song)
+        if future is not None:
+            return await asyncio.shield(future)
+        stub_loader.calls.append(("preload", (song,)))
+        future = inflight[song] = asyncio.get_running_loop().create_future()
+        try:
+            return await asyncio.shield(future)
+        except asyncio.CancelledError:
+            if not future.done():
+                future.set_result(stub_loader.Preload.FAILED)
+            raise
+
+    stub_loader.preload = preload
+    return inflight
+
+
+def test_ending_a_sweep_does_not_fail_the_head_play_sharing_its_preload(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "a", "b")
+    extra = _songs(controller, "c")
+
+    async def scenario():
+        inflight = _shared_gated_preload(stub_loader, "b")
+        await _start_playing(controller)
+        controller.skip()
+        await _settle()
+        # a new sweep supersedes the one awaiting "b"
+        await controller.enqueue(extra)
+        await _settle()
+        for future in inflight.values():
+            if not future.done():
+                future.set_result(stub_loader.Preload.EXTRACTED)
+
+    _run(controller, scenario)
+
+    assert _played(controller) == ["a", "b"]
+    assert controller.panel.skipped == []
+
+
+def test_a_sweep_skips_a_song_removed_while_it_awaited_an_earlier_one(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    songs = _songs(controller, "a", "b", "c", "d")
+    for song in songs:
+        controller.playlist.add(song)
+
+    async def scenario():
+        futures = _gated_preload(stub_loader, "b")
+        await _start_playing(controller)
+        controller.playlist.playque.remove(songs[2])
+        futures[0].set_result(stub_loader.Preload.EXTRACTED)
+
+    _run(controller, scenario)
+
+    assert "c" not in _preloaded(stub_loader)
+    assert "d" in _preloaded(stub_loader)
 
 
 def _idle_timer_that_fires_at_once(controller, monkeypatch):
@@ -1785,9 +1976,9 @@ def test_a_stale_failed_preload_skips_nothing_and_moves_nothing(
     _run(controller, scenario)
     assert _played(controller) == ["old"]
     assert controller.panel.skipped == []
-    # "slow" is gone because the queue preload behind "old" met its
-    # FAILED result; "next" was not started or dropped by the stale one
-    assert _titles(controller) == ["old", "next"]
+    # the queue preload behind "old" met a FAILED result for "slow" and
+    # left it queued; "next" was not started or dropped by the stale one
+    assert _titles(controller) == ["old", "slow", "next"]
 
 
 def test_a_current_failed_preload_skips_to_the_next_track(
