@@ -151,3 +151,15 @@ def test_outcome_module_imports_neither_utils_nor_the_controller():
     names = imported_names(outcome_module)
     assert "musicbot.utils" not in names
     assert "musicbot.audiocontroller" not in names
+
+
+def test_refused_disconnecting_says_the_disconnecting_message():
+    outcome = EnqueueOutcome(OutcomeKind.REFUSED_DISCONNECTING)
+    assert render(outcome, True).text == config.DISCONNECTING_MESSAGE
+    assert render(outcome, False).text == config.DISCONNECTING_MESSAGE
+
+
+def test_refused_disconnecting_says_the_disconnecting_message():
+    outcome = EnqueueOutcome(OutcomeKind.REFUSED_DISCONNECTING)
+    assert render(outcome, True).text == config.DISCONNECTING_MESSAGE
+    assert render(outcome, False).text == config.DISCONNECTING_MESSAGE
