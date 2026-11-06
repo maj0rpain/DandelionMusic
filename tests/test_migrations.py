@@ -85,3 +85,33 @@ def test_not_null_add_with_server_default_migrates(engine):
     )
     migrate(engine)
     assert "flag" in columns(engine, "probe")
+
+
+def _reflected(engine):
+    insp = sa.inspect(engine)
+    return {
+        t: [
+            (c["name"], str(c["type"]), c["nullable"])
+            for c in insp.get_columns(t)
+        ]
+        for t in insp.get_table_names()
+    }
+
+
+def test_legacy_sqlite_schema_passes_through_migration_unchanged(engine):
+    legacy = sa.MetaData()
+    for table in Base.metadata.sorted_tables:
+        if table.name == "playlists":
+            continue
+        table.to_metadata(legacy)
+    sa.Table(
+        "playlists",
+        legacy,
+        sa.Column("guild_id", sa.String(25), primary_key=True),
+        sa.Column("name", sa.String, primary_key=True),
+        sa.Column("songs_json", sa.String, nullable=False),
+    )
+    legacy.create_all(engine)
+    before = _reflected(engine)
+    migrate(engine)
+    assert _reflected(engine) == before

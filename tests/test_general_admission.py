@@ -142,3 +142,28 @@ def test_a_refusal_after_the_reset_keeps_the_reset():
     assert sent == []
     assert guild.events == []
     assert disposed == ["reset command"]
+
+
+def test_reset_recovers_a_disconnecting_controller():
+    guild, ctx, sent, _ = prepare(
+        "reset", K.JOINING_COMMAND, bot=None, author="b"
+    )
+    controller = ctx.bot.sessions.controller(guild)
+    controller.is_disconnecting = lambda: True
+
+    async def dispose(reason):
+        # the fresh controller is not disconnecting
+        controller.is_disconnecting = lambda: False
+
+    controller.dispose = dispose
+    assert invoke("reset", ctx) is None
+    assert guild.events == [("connect", "b")]
+
+
+def test_connect_while_disconnecting_is_refused():
+    guild, ctx, sent, _ = prepare(
+        "connect", K.JOINING_COMMAND, bot=None, author="b"
+    )
+    ctx.bot.sessions.controller(guild).is_disconnecting = lambda: True
+    assert invoke("connect", ctx) == config.DISCONNECTING_MESSAGE
+    assert guild.events == []
