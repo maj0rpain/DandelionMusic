@@ -75,7 +75,7 @@ def _bot_alone(bot_vc) -> bool:
     return all(m.bot for m in bot_vc.channel.members)
 
 
-async def _voice_check(ctx: Context):
+async def _voice_check(ctx: Context, sett):
     """Check if the user can use the bot now. Only refuses: a bot
     sitting in a channel with only bots admits the user, and the join
     moves it later."""
@@ -98,7 +98,7 @@ async def _voice_check(ctx: Context):
     # DJ role set, nobody else bypasses (EXTRA_OWNERS included).
     if await utils.admin_or_owner(ctx):
         return True
-    if utils.holds_role(ctx, get_settings(ctx).dj_role):
+    if utils.holds_role(ctx, sett.dj_role):
         return True
 
     raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
@@ -114,14 +114,14 @@ def _marked_joining(ctx: Context) -> bool:
     )
 
 
-def _join_needed(ctx: Context) -> bool:
+def _join_needed(ctx: Context, sett) -> bool:
     """Whether the bot has to join the user's voice channel: it has no
     voice client (a connect), or user_must_be_in_vc is on, its channel
     has only bots and the user is in another one (a move)."""
     bot_vc = ctx.guild.voice_client
     if not bot_vc:
         return True
-    if not get_settings(ctx).user_must_be_in_vc:
+    if not sett.user_must_be_in_vc:
         return False
     author_voice = ctx.author.voice
     return (
@@ -131,31 +131,16 @@ def _join_needed(ctx: Context) -> bool:
     )
 
 
-def _join_target(ctx: Context) -> Optional[discord.VoiceChannel]:
+def _join_target(ctx: Context, sett) -> Optional[discord.VoiceChannel]:
     """The channel the bot has to join or move to, or None when no
     join is needed. Raises CheckError (USER_NOT_IN_VC_MESSAGE) when a
     join is needed but the author is not in voice."""
-    if not _join_needed(ctx):
+    if not _join_needed(ctx, sett):
         return None
     author_voice = ctx.author.voice
     if not author_voice:
         raise CheckError(config.USER_NOT_IN_VC_MESSAGE)
     return author_voice.channel
-
-
-async def _player_check(ctx: Context):
-    """Refuses a player button that may not run: never one while the
-    bot has no voice client."""
-    if not ctx.guild.voice_client:
-        raise CheckError(config.NOT_CONNECTED_MESSAGE)
-
-    sett = get_settings(ctx)
-    _check_command_channel(ctx, sett)
-
-    if sett.user_must_be_in_vc:
-        return await _voice_check(ctx)
-
-    return True
 
 
 async def _connect(ctx: Context, target: discord.VoiceChannel):
@@ -210,18 +195,16 @@ async def check(ctx: Context, kind: Optional[RequestKind] = None):
         )
     sett = get_settings(ctx)
 
-    if kind in _PLAYER_KINDS:
-        await _player_check(ctx)
-        if kind is RequestKind.DJ_PLAYER_BUTTON:
-            await dj_check(ctx)
-        return Admission(ctx, controller, None)
-
+    if kind in _PLAYER_KINDS and not ctx.guild.voice_client:
+        raise CheckError(config.NOT_CONNECTED_MESSAGE)
     _check_command_channel(ctx, sett)
     target = None
     if kind in _JOINING_KINDS:
-        target = _join_target(ctx)
+        target = _join_target(ctx, sett)
         if target is not None:
             check_voice_permissions(ctx.guild, target)
     if ctx.guild.voice_client and sett.user_must_be_in_vc:
-        await _voice_check(ctx)
+        await _voice_check(ctx, sett)
+    if kind is RequestKind.DJ_PLAYER_BUTTON:
+        await dj_check(ctx)
     return Admission(ctx, controller, target)

@@ -45,8 +45,6 @@ def run_request(ctx, kind):
     return run(go())
 
 
-
-
 def _panel_buttons():
     """(custom_id, kind) of each button the player panel builds."""
     snapshot = PanelSnapshot(
@@ -315,6 +313,48 @@ def rows():
                 "dj_role": ADMISSION_DJ_ROLE,
             },
             "admitted",
+        ),
+    ]
+    # a non-DJ under a set DJ role who also fails an earlier check gets
+    # the earlier refusal
+    dj = {"dj_role": ADMISSION_DJ_ROLE}
+    out += [
+        (
+            "dj_player_button: bot out of voice",
+            K.DJ_PLAYER_BUTTON,
+            {},
+            NOT_CONNECTED,
+        ),
+        (
+            "dj_player_button: wrong channel",
+            K.DJ_PLAYER_BUTTON,
+            {"bot": HERE, "author": "a", "wrong_channel": True},
+            WRONG_CH,
+        ),
+        (
+            "dj_player_button: rule on, author outside",
+            K.DJ_PLAYER_BUTTON,
+            {"bot": PEOPLE},
+            NOT_IN_VC,
+        ),
+        (
+            "dj_player_button: out of voice, non-DJ under a DJ role",
+            K.DJ_PLAYER_BUTTON,
+            dj,
+            NOT_CONNECTED,
+        ),
+        (
+            "dj_player_button: wrong channel, non-DJ under a DJ role",
+            K.DJ_PLAYER_BUTTON,
+            {"bot": HERE, "author": "a", "wrong_channel": True, **dj},
+            WRONG_CH,
+        ),
+        (
+            "dj_player_button: rule on, author outside, non-DJ under a "
+            "DJ role",
+            K.DJ_PLAYER_BUTTON,
+            {"bot": PEOPLE, **dj},
+            NOT_IN_VC,
         ),
     ]
     return out
