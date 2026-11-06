@@ -34,7 +34,6 @@ def extracted(monkeypatch):
         return out["data"]
 
     monkeypatch.setattr(loader, "extract_info", extract_info)
-    monkeypatch.setattr(loader.YT_IE, "suitable", lambda u: False)
     return calls, out
 
 
