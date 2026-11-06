@@ -65,7 +65,8 @@ def test_failed_registration_is_isolated(monkeypatch, capsys):
     assert out.registered == [1, 3]
     assert "Registration failed for guild two:" in cap.err
     assert "Traceback" in cap.err
-    assert "Joined one" in cap.out and "Joined two" not in cap.out
+    assert "Joined one" in cap.out and "Joined guild3" in cap.out
+    assert "Joined two" not in cap.out
     assert out.ready and out.started
 
 

@@ -130,12 +130,10 @@ class MusicBot(commands.Bot):
         )
         for target, result in zip(targets, results):
             if isinstance(result, BaseException):
-                print(
+                self._log_failure(
                     f"{action} failed for guild {target.guild.name}:",
-                    file=sys.stderr,
-                    flush=True,
+                    result,
                 )
-                print_exception(result)
 
     async def close(self):
         print(config.SHUTDOWN_MESSAGE, flush=True)
@@ -224,12 +222,7 @@ class MusicBot(commands.Bot):
         try:
             await guild.leave()
         except Exception as e:
-            print(
-                f"Leaving guild {guild.name} failed:",
-                file=sys.stderr,
-                flush=True,
-            )
-            print_exception(e)
+            MusicBot._log_failure(f"Leaving guild {guild.name} failed:", e)
 
     async def leave_guilds(self, guild_ids):
         """Leave each of these guilds the bot is in; ids it is not in
