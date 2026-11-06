@@ -28,6 +28,7 @@ from discord import (
 )
 import sqlalchemy
 from sqlalchemy import String, select
+from sqlalchemy.dialects import mysql
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from alembic.migration import MigrationContext
@@ -402,12 +403,30 @@ class GuildSettings(Base):
         return await self._store_setting(setting, ctx, lambda d: d.default)
 
 
+# The longest saved-playlist name `playlists.save` accepts; also the
+# length of the name column on MySQL.
+PLAYLIST_NAME_MAX_LENGTH = 255
+
+
 class SavedPlaylist(Base):
     __tablename__ = "playlists"
 
+    # MySQL-only type variants, the base types stay length-less so
+    # existing sqlite/Postgres schemas see no alter (run_migrations
+    # refuses AlterColumnOp). utf8mb4_bin keeps name comparison
+    # byte-exact, as on the other backends; MEDIUMTEXT because
+    # playlists have no size cap (TEXT holds only 64 KB).
     guild_id: Mapped[DiscordIdStr] = mapped_column(primary_key=True)
-    name: Mapped[str] = mapped_column(primary_key=True)
-    songs_json: Mapped[str]
+    name: Mapped[str] = mapped_column(
+        String().with_variant(
+            String(PLAYLIST_NAME_MAX_LENGTH, collation="utf8mb4_bin"),
+            "mysql",
+        ),
+        primary_key=True,
+    )
+    songs_json: Mapped[str] = mapped_column(
+        String().with_variant(mysql.MEDIUMTEXT(), "mysql")
+    )
 
 
 class WhitelistedGuild(Base):
@@ -438,12 +457,7 @@ class BotState(Base):
     __tablename__ = "bot_state"
 
     key: Mapped[str] = mapped_column(String(64), primary_key=True)
-    # explicit length: MySQL rejects VARCHAR without one. The same
-    # applies to SavedPlaylist.name/songs_json above, which have
-    # always lacked it - so the mysql extra has never been able to
-    # create a schema. Fixing those needs a reviewed migration
-    # (run_migrations refuses AlterColumnOp by design), so it is left
-    # alone here rather than breaking every sqlite deployment.
+    # explicit length: MySQL rejects VARCHAR without one
     value: Mapped[str] = mapped_column(String(255))
 
 
@@ -533,7 +547,7 @@ def run_migrations(connection):
         # debug mode
         print(code)
     with Operations.context(ctx) as op:
-        variables = {"op": op, "sa": sqlalchemy}
+        variables = {"op": op, "sa": sqlalchemy, "mysql": mysql}
         exec("def run():\n" + code, variables)
         variables["run"]()
     connection.commit()

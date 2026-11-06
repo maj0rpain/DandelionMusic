@@ -21,6 +21,7 @@ config/cookies/cookies.txt
 # by docker-compose.yaml at run time.
 settings.db
 data/
+music/
 backup/
 log.txt
 

@@ -235,6 +235,31 @@ def test_compose_bgutil_provider_publishes_no_host_port():
     assert "ports" not in _compose_services()["bgutil-provider"]
 
 
+def test_compose_library_mount_defaults_to_relative_music_dir():
+    volumes = _compose_services()["doybot"]["volumes"]
+    mounts = [v for v in volumes if ":/music" in v]
+    assert len(mounts) == 1
+    source, target, mode = mounts[0].rsplit(":", 2)
+    assert (target, mode) == ("/music", "ro")
+    match = re.fullmatch(r"\$\{MUSIC_LIBRARY_HOST_PATH:-(.*)\}", source)
+    assert match and match.group(1) == "./music"
+
+
+def test_default_library_dir_is_tracked_and_kept_out_of_git_and_image():
+    assert (REPO_ROOT / "music" / ".gitkeep").is_file()
+    ignored = (REPO_ROOT / ".gitignore").read_text().splitlines()
+    assert "/music/*" in ignored and "!/music/.gitkeep" in ignored
+    assert "music/" in (REPO_ROOT / ".dockerignore").read_text().splitlines()
+
+
+def test_env_sample_documents_compose_only_library_host_path():
+    from config.config import parse_env_file
+
+    text, keys = parse_env_file(str(REPO_ROOT / ".env.sample"))
+    assert "MUSIC_LIBRARY_HOST_PATH" in text
+    assert "MUSIC_LIBRARY_HOST_PATH" not in keys
+
+
 def test_compose_pulled_images_are_pinned():
     for name, service in _compose_services().items():
         if "image" not in service or "build" in service:

@@ -40,6 +40,9 @@ class FakeSettings:
 
 
 class FakeController:
+    def is_disconnecting(self):
+        return False
+
     def __init__(self, guild, panel=None):
         self.guild = guild
         self.panel = panel
