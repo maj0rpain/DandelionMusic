@@ -222,8 +222,10 @@ def slash_ctx(guild, author_in, **kwargs):
 class TestMusicBeforeInvoke:
     """Music.cog_before_invoke directs the player panel to the
     command's channel, and a defer in the command body after it does
-    not raise. The deferral before a join is covered by the
-    tests/test_admission.py table and TestJoiningCommand."""
+    not raise. The deferral before a join is covered by
+    tests/test_admission.py::
+    test_a_joining_command_defers_then_joins_after_its_dj_check and
+    TestJoiningCommand."""
 
     def test_directs_the_panel_to_the_channel_not_the_context(self):
         guild = VoiceGuild()
