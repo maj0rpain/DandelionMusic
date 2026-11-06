@@ -12,6 +12,7 @@ from config import config
 from musicbot.bot import MusicBot
 from musicbot.commands.music import Music
 from musicbot.loader import SongError
+from musicbot.utils import CheckError
 from musicbot import bot as bot_module
 from musicbot.commands import music as music_module
 from discord_fakes import RecordingCtx
@@ -77,4 +78,23 @@ def test_command_error_handler_answers_a_song_error(monkeypatch, wrap):
 
     sent = run(scenario())
     assert [str(m) for m in sent] == ["unsupported link"]
+    assert printed == []
+
+
+def test_command_error_handler_replies_with_a_check_refusal(monkeypatch):
+    printed = []
+    monkeypatch.setattr(
+        bot_module, "print_exception", lambda e: printed.append(e)
+    )
+
+    async def scenario():
+        bot = make_music_bot()
+        ctx = db_ctx()
+        await bot.on_command_error(
+            ctx, CheckError(config.USER_MISSING_PERMISSIONS)
+        )
+        return ctx.sent
+
+    sent = run(scenario())
+    assert [str(m) for m in sent] == [config.USER_MISSING_PERMISSIONS]
     assert printed == []

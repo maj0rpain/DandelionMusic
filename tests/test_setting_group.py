@@ -17,12 +17,9 @@ from discord.ext import commands
 from discord.ext.commands.view import StringView
 
 from config import config
-from musicbot import bot as bot_module
-from musicbot.bot import MusicBot
 from musicbot.commands.general import General, _unmatched_word
 from musicbot.settings import SETTINGS
 from musicbot.utils import CheckError
-from discord_fakes import RecordingCtx
 from setting_fakes import (
     FakeDbSession,
     FakeMessage,
@@ -221,20 +218,6 @@ def test_the_slash_setting_group_has_no_default_permissions():
     app_group = setting_group(General(None)).app_command
 
     assert app_group.default_permissions is None
-
-
-def test_the_command_error_handler_replies_with_the_refusal(monkeypatch):
-    printed = []
-    monkeypatch.setattr(
-        bot_module, "print_exception", lambda e: printed.append(e)
-    )
-    ctx = RecordingCtx(types.SimpleNamespace(DbSession=object()))
-    bot = MusicBot([], command_prefix="d!", intents=discord.Intents.default())
-
-    run(bot.on_command_error(ctx, CheckError(config.USER_MISSING_PERMISSIONS)))
-
-    assert [str(m) for m in ctx.sent] == [config.USER_MISSING_PERMISSIONS]
-    assert printed == []
 
 
 def test_a_bad_value_gives_only_the_conversion_error():
