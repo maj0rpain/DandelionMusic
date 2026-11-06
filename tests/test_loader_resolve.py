@@ -25,7 +25,7 @@ class _Target(InfoExtractor):
         return {"id": "t", "title": "target title", "url": STREAM}
 
 
-class _FailingTarget(_Target):
+class _FailingTarget(InfoExtractor):
     IE_NAME = "fakefailing"
     _VALID_URL = r"https://failing\.test/.*"
 
@@ -92,7 +92,7 @@ def test_short_link_loads_as_the_targets_stream(downloader, monkeypatch):
 
 
 def test_chain_of_several_hops_loads_the_final_stream(downloader, monkeypatch):
-    class Middle(_Shortener):
+    class Middle(InfoExtractor):
         _VALID_URL = r"https://middle\.test/.*"
         IE_NAME = "fakemiddle"
 
