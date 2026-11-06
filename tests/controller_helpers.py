@@ -46,8 +46,10 @@ def _song(controller, title):
 
 
 def _queue(controller, *titles):
-    for song in _songs(controller, *titles):
+    songs = _songs(controller, *titles)
+    for song in songs:
         controller.playlist.add(song)
+    return songs
 
 
 def _run(controller, scenario):

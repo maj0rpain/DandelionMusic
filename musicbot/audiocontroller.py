@@ -98,6 +98,8 @@ class AudioController(object):
         # according to Python documentation, we need
         # to keep strong references to all tasks
         self._tasks = set()
+        # the number of the sweep allowed to start preloads
+        self._sweep = 0
 
     @property
     def current_song(self) -> Optional[Song]:
@@ -569,35 +571,36 @@ class AudioController(object):
                 print_exc(file=sys.stderr)
         return True
 
-    async def _preload_songs(self):
-        rerun_needed = False
+    async def _preload_songs(self, sweep: int):
+        """The warm-up sweep: preloads the songs behind the head and
+        nothing else. It never removes a song, whatever a preload
+        returns: a failure may be temporary, and a song that cannot be
+        played is reported and skipped when it reaches the head. It
+        ends, between songs, once `sweep` is no longer the current
+        sweep; it is never cancelled, so a preload shared with the
+        head play is not failed under it."""
         for song in list(
             islice(self.playlist.playque, 1, config.MAX_SONG_PRELOAD)
         ):
-            if not await self._preload(song):
-                # Not the head: while this preload ran, the song may
-                # have become the current one, and the failed-track
-                # path (Playback's drop_head) is the only owner of the
-                # head. Removing it here too would make that path drop
-                # the song behind it.
-                queue = self.playlist.playque
-                if queue and queue[0] is song:
-                    continue
-                try:
-                    queue.remove(song)
-                    rerun_needed = True
-                except ValueError:
-                    # already removed
-                    pass
-        if rerun_needed:
-            self.add_task(self._preload_songs())
+            if sweep != self._sweep:
+                return
+            if song not in self.playlist.playque:
+                continue
+            await self._preload(song)
 
     def _schedule_preload(self):
-        """Preloads the first MAX_SONG_PRELOAD songs asynchronously"""
-        self.add_task(self._preload_songs())
+        """Preloads the first MAX_SONG_PRELOAD songs asynchronously,
+        superseding any sweep already running."""
+        self.add_task(self._preload_songs(self._end_sweep()))
+
+    def _end_sweep(self) -> int:
+        """Ends the running preload sweep; returns the new sweep number."""
+        self._sweep += 1
+        return self._sweep
 
     def stop(self):
         """Stops the player and removes all songs from the queue"""
+        self._end_sweep()
         self.playback.stop()
 
     def prev_song(self) -> bool:
@@ -632,6 +635,7 @@ class AudioController(object):
         await self.playback.start_idle_timer(restart)
 
     async def udisconnect(self, reason: str):
+        self._end_sweep()
         async with self.playback.teardown() as had_session:
             return await self._udisconnect(reason, had_session)
 
