@@ -983,7 +983,103 @@ def test_two_skips_before_the_end_hops_back_record_each_started_song_once(
 
     _run_playing(controller, scenario)
 
-    assert _history(controller) == ["first", "second"]
+    assert _history(controller) == ["first", "third"]
+
+
+def _announced(controller):
+    return [song.title for song in controller.panel.announced]
+
+
+def test_a_stop_right_after_a_skip_plays_nothing_more(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second", "third")
+    backup = _backup_path(controller, tmp_path)
+    snapshots = []
+
+    async def scenario(c):
+        c.skip()
+        c.stop()
+        snapshots.append(backup.read_bytes() if backup.exists() else None)
+
+    _run_playing(controller, scenario)
+
+    assert _played(controller) == ["first"]
+    assert _announced(controller) == ["first"]
+    assert _titles(controller) == []
+    assert controller.is_idle()
+    after = backup.read_bytes() if backup.exists() else None
+    assert after == snapshots[0]
+
+
+def test_a_disconnect_right_after_a_skip_starts_nothing(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second", "third")
+
+    async def scenario(c):
+        c.skip()
+        await c.udisconnect("test")
+
+    _run_playing(controller, scenario)
+
+    assert _played(controller) == ["first"]
+    assert _announced(controller) == ["first"]
+    assert controller.is_idle()
+    assert not controller.guild.voice_client.is_playing()
+
+
+def test_a_stop_right_after_prev_starts_nothing_new(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def scenario(c):
+        c.skip()
+        await _settle()
+        c.prev_song()
+        c.stop()
+
+    _run_playing(controller, scenario)
+
+    assert _played(controller) == ["first", "second"]
+    assert _titles(controller) == []
+    assert controller.is_idle()
+
+
+def test_two_quick_skips_play_the_third_song_never_the_second(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second", "third")
+
+    async def scenario(c):
+        c.skip()
+        c.skip()
+
+    _run_playing(controller, scenario)
+
+    assert _played(controller) == ["first", "third"]
+    assert _announced(controller) == ["first", "third"]
+
+
+def test_a_skip_after_a_kick_plays_the_current_queue(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second", "third")
+
+    async def scenario(c):
+        c.skip()
+        await c.udisconnect("removed from voice channel")
+        await _settle()
+        _queue(c, "old", "fresh")
+        c.skip()
+        await _settle()
+
+    _run_playing(controller, scenario)
+
+    assert "second" not in _played(controller)
+    assert _played(controller)[-1] == "fresh"
 
 
 def test_prev_while_playing_records_the_outgoing_song(controller, monkeypatch):
