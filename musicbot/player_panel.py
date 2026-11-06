@@ -287,6 +287,13 @@ class PlayerPanel:
         except discord.HTTPException as e:
             if e.code == INVALID_WEBHOOK_TOKEN:
                 await self._recover(message, view, snapshot)
+            elif isinstance(e, (discord.NotFound, discord.Forbidden)):
+                # The message can never be edited again: stop retrying
+                # it every tick. Deleting it is normal, so only a lost
+                # access is logged.
+                if isinstance(e, discord.Forbidden):
+                    _log("Lost access to the player message:")
+                self._forget_if_current(message)
             else:
                 _log("Failed to update the player buttons:")
 
