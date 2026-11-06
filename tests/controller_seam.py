@@ -150,6 +150,8 @@ class PlaybackVoiceClient:
         self.disconnected = False
         self.connected = True
         self._after = None
+        # set before play(): the next track produces no audio
+        self.produces_nothing = False
 
     def is_connected(self):
         return self.connected
@@ -174,6 +176,9 @@ class PlaybackVoiceClient:
         self.source = source
         self.playing = True
         self._after = after
+        silent, self.produces_nothing = self.produces_nothing, False
+        if not silent:
+            source.read()
 
     def detach_after(self):
         """Takes the playing track's `after` callback without running
