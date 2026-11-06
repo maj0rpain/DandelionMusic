@@ -29,8 +29,8 @@ from controller_helpers import (
     _settle,
     _song,
     _songs,
-    _titles,
     _save_backup,
+    _titles,
     sleep_forever,
 )
 from controller_seam import PlaybackVoiceClient, StubLoader, controller_seam
@@ -1608,7 +1608,9 @@ def test_the_inactivity_timeout_of_a_paused_bot_disconnects(
 def test_a_local_batch_during_a_pending_start_starts_nothing_new(
     controller, stub_loader, monkeypatch
 ):
-    batch = _local_batch(controller, stub_loader, monkeypatch, "ab", "ab")
+    batch = _local_batch(
+        controller, stub_loader, monkeypatch, ("a", "b"), ["a", "b"]
+    )
 
     async def scenario():
         release, task, _ = _pending_start(
