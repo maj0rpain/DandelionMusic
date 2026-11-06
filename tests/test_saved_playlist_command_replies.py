@@ -140,10 +140,10 @@ def test_show_lists_an_untitled_entry_by_its_url(monkeypatch):
     shown = []
 
     class Paginator:
-        def __init__(self, pages):
+        def __init__(self, ctx, pages):
             shown.extend(pages)
 
-        async def send(self, ctx):
+        async def send(self):
             pass
 
     monkeypatch.setattr(playlists, "get", get)
