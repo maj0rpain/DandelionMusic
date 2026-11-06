@@ -49,11 +49,17 @@ def fake_ctx(sent, sett, message=None):
     )
 
 
+NO_VALUE = object()
+
+
 def invoke_setting(name, arg, sett, message=None):
+    """Runs the subcommand; with `arg` left as `NO_VALUE` it is called
+    without a value, which resets the setting."""
     cog = General(None)
     sent = []
     ctx = fake_ctx(sent, sett, message)
-    run(subcommand(cog, name).callback(cog, ctx, arg))
+    args = () if arg is NO_VALUE else (arg,)
+    run(subcommand(cog, name).callback(cog, ctx, *args))
     return sent
 
 
@@ -330,13 +336,6 @@ def reset_text(name):
     return f"Setting `{name}` reset to {shown}!"
 
 
-def invoke_reset(name, sett):
-    cog = General(None)
-    sent = []
-    run(subcommand(cog, name).callback(cog, fake_ctx(sent, sett)))
-    return sent
-
-
 @pytest.mark.parametrize("name", list(ARGS))
 def test_a_subcommand_without_a_value_resets_the_setting(name):
     sett = stored_settings()
@@ -344,14 +343,14 @@ def test_a_subcommand_without_a_value_resets_the_setting(name):
         setattr(sett, name, True)  # announce_songs defaults to False
     assert getattr(sett, name) != SETTINGS[name].default
 
-    sent = invoke_reset(name, sett)
+    sent = invoke_setting(name, NO_VALUE, sett)
 
     assert sent[-1] == reset_text(name)
     assert getattr(sett, name) == SETTINGS[name].default
 
 
 def test_a_reset_is_confirmed_with_the_value_the_embed_shows():
-    sent = invoke_reset("command_channel", stored_settings())
+    sent = invoke_setting("command_channel", NO_VALUE, stored_settings())
 
     assert sent[-1] == "Setting `command_channel` reset to Not Set!"
 
@@ -405,7 +404,7 @@ def test_a_vc_timeout_reset_is_refused_while_its_edit_is_disabled(
     sett.vc_timeout = False
     assert SETTINGS["vc_timeout"].default is not False
 
-    sent = invoke_reset("vc_timeout", sett)
+    sent = invoke_setting("vc_timeout", NO_VALUE, sett)
 
     assert sent == [config.VC_TIMEOUT_EDIT_DISABLED]
     assert sett.vc_timeout is False
@@ -417,7 +416,7 @@ def test_a_button_emote_reset_succeeds_with_the_plugin_disabled(
     monkeypatch.setattr(config, "ENABLE_BUTTON_PLUGIN", False)
     sett = stored_settings()
 
-    sent = invoke_reset("button_emote", sett)
+    sent = invoke_setting("button_emote", NO_VALUE, sett)
 
     assert sent[-1] == reset_text("button_emote")
     assert sett.button_emote is None
@@ -427,6 +426,6 @@ def test_an_unknown_setting_reset_is_reported(monkeypatch):
     monkeypatch.delitem(SETTINGS, "dj_role")
     sett = stored_settings()
 
-    sent = invoke_reset("dj_role", sett)
+    sent = invoke_setting("dj_role", NO_VALUE, sett)
 
     assert_failed(sent, sett, "`Error: Setting dj_role could not be updated.`")
