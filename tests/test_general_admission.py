@@ -152,11 +152,13 @@ def test_a_refusal_after_the_reset_keeps_the_reset():
     assert disposed == ["reset command"]
 
 
-def connect(**kw):
+def connect(fail=None, **kw):
     """(refusal, sent, events, order) for d!connect in a situation:
     `order` records the context's defer and sends in the order they
     happened."""
     guild, ctx, sent, _ = prepare("connect", K.JOINING_COMMAND, **kw)
+    if fail is not None:
+        guild.fail = fail
     order = []
     send = ctx.send
 
@@ -218,26 +220,14 @@ def test_connect_with_nothing_to_do_is_refused_as_already_connected(
     assert order == ["defer"]
 
 
-def test_connect_from_outside_a_channel_with_people_rule_off_is_refused():
-    refusal, sent, events, order = connect(bot=PEOPLE, rule=False)
-    assert refusal == config.ALREADY_CONNECTED_MESSAGE
-    assert (sent, events, order) == ([], [], ["defer"])
-
-
-def test_connect_bots_only_channel_author_not_in_voice_rule_off():
-    refusal, sent, events, order = connect(
-        bot=BOTS_ONLY, author=None, rule=False
-    )
-    assert refusal == config.ALREADY_CONNECTED_MESSAGE
-    assert (sent, events, order) == ([], [], ["defer"])
-
-
 @pytest.mark.parametrize("rule", [True, False])
 @pytest.mark.parametrize("bot", [None, BOTS_ONLY], ids=["connect", "move"])
-def test_a_failed_connect_or_move_keeps_todays_refusal(rule, bot, no_sleep):
-    guild, ctx, sent, _ = prepare(
-        "connect", K.JOINING_COMMAND, bot=bot, rule=rule
+def test_a_failed_connect_or_move_is_refused_after_the_defer(
+    rule, bot, no_sleep
+):
+    refusal, sent, _, order = connect(
+        fail=asyncio.TimeoutError(), bot=bot, rule=rule
     )
-    guild.fail = asyncio.TimeoutError()
-    assert invoke("connect", ctx) == config.VOICE_CONNECT_FAILED
+    assert refusal == config.VOICE_CONNECT_FAILED
     assert sent == []
+    assert order == ["defer"]

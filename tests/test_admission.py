@@ -383,22 +383,10 @@ def test_a_failed_connect_is_refused_and_logged(kind, capsys):
     assert "TimeoutError" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("rule", [True, False])
 @pytest.mark.parametrize("kind", JOINING, ids=lambda k: k.name)
-def test_a_failed_move_is_refused_and_logged(kind, capsys, no_sleep):
-    guild, ctx = situation(kind, bot=BOTS_ONLY)
-    guild.fail = discord.ClientException("Not connected to voice")
-    with pytest.raises(CheckError) as exc:
-        run_request(ctx, kind)
-    assert str(exc.value) == config.VOICE_CONNECT_FAILED
-    assert guild.events == [("move", "b")]
-    assert "Not connected to voice" in capsys.readouterr().err
-
-
-@pytest.mark.parametrize("kind", JOINING, ids=lambda k: k.name)
-def test_a_failed_move_rule_off_is_refused_and_the_bot_stays(
-    kind, capsys, no_sleep
-):
-    guild, ctx = situation(kind, bot=BOTS_ONLY, rule=False)
+def test_a_failed_move_is_refused_and_logged(kind, rule, capsys, no_sleep):
+    guild, ctx = situation(kind, bot=BOTS_ONLY, rule=rule)
     guild.fail = discord.ClientException("Not connected to voice")
     with pytest.raises(CheckError) as exc:
         run_request(ctx, kind)
