@@ -39,8 +39,10 @@ class RequestKind(enum.Enum):
     # a command marked @joining_command: may join
     JOINING_COMMAND = enum.auto()
     # a player button: never joins; refused while the bot is out of
-    # voice; the playback buttons need a DJ
+    # voice
     PLAYER_BUTTON = enum.auto()
+    # a player button that also needs a DJ
+    DJ_PLAYER_BUTTON = enum.auto()
     # a search or library pick, acting in a joining command's name
     PICK = enum.auto()
     # the button plugin's reaction; admitted as a joining command
@@ -52,22 +54,12 @@ _JOINING_KINDS = frozenset(
     {RequestKind.JOINING_COMMAND, RequestKind.PICK, RequestKind.REACTION}
 )
 
+_PLAYER_KINDS = frozenset(
+    {RequestKind.PLAYER_BUTTON, RequestKind.DJ_PLAYER_BUTTON}
+)
+
 # the kinds whose kind is derived from the command, never passed
 COMMAND_KINDS = frozenset({RequestKind.COMMAND, RequestKind.JOINING_COMMAND})
-
-# the custom ids of the player's playback buttons, which need a DJ
-_DJ_BUTTONS = frozenset(
-    {
-        "prev",
-        "pause",
-        "next",
-        "loop",
-        "shuffle",
-        "stop",
-        "volume_down",
-        "volume_up",
-    }
-)
 
 
 def _check_command_channel(ctx: Context, sett):
@@ -218,9 +210,9 @@ async def check(ctx: Context, kind: Optional[RequestKind] = None):
         )
     sett = get_settings(ctx)
 
-    if kind is RequestKind.PLAYER_BUTTON:
+    if kind in _PLAYER_KINDS:
         await _player_check(ctx)
-        if ctx.interaction.data.get("custom_id") in _DJ_BUTTONS:
+        if kind is RequestKind.DJ_PLAYER_BUTTON:
             await dj_check(ctx)
         return Admission(ctx, controller, None)
 

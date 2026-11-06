@@ -140,7 +140,9 @@ def test_a_dj_only_button_is_refused_to_a_non_dj():
     inter, ctx = click_interaction(custom_id="next")
     ran = []
 
-    run(MusicButton(ran.append).callback(inter))
+    run(
+        MusicButton(ran.append, RequestKind.DJ_PLAYER_BUTTON).callback(inter)
+    )
     assert sent_texts_and_kwargs(inter.followups) == [
         (config.NOT_A_DJ, {"ephemeral": True})
     ]

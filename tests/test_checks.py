@@ -20,6 +20,7 @@ from musicbot.commands.library import Library, queue_songs
 from musicbot.views import MusicButton
 from musicbot.commands.music import Music, SearchView, SongButton
 from musicbot import admission
+from musicbot.admission import RequestKind
 from musicbot.utils import (
     CheckError,
     chunks,
@@ -451,11 +452,11 @@ def recording_send(ctx):
     return sent
 
 
-def press(ctx, custom_id):
+def press(ctx, custom_id, kind=RequestKind.PLAYER_BUTTON):
     """Clicks a MusicButton: (what was sent, what ran)."""
     sent = recording_send(ctx)
     ran = []
-    click(MusicButton(ran.append, custom_id=custom_id), ctx, custom_id)
+    click(MusicButton(ran.append, kind, custom_id=custom_id), ctx, custom_id)
     return sent, ran
 
 
@@ -537,7 +538,7 @@ class TestButtons:
         here = guild.channel("a", humans=1)
         guild.put_bot_in(here)
         ctx = voice_ctx(guild, here, dj_role=99)
-        sent, ran = press(ctx, "next")
+        sent, ran = press(ctx, "next", RequestKind.DJ_PLAYER_BUTTON)
         assert sent == [config.NOT_A_DJ]
         assert ran == []
 

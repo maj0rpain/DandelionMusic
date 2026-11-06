@@ -13,12 +13,13 @@ import pytest
 from config import config
 from musicbot import admission
 from musicbot.admission import RequestKind as K
+from musicbot.panel_snapshot import PanelSnapshot
+from musicbot.player_panel import build_view
 from musicbot.utils import CheckError
 from discord_fakes import (
     BOTS_ONLY,
     ADMISSION_DJ_ROLE,
     HERE,
-    PLAYER_BUTTONS,
     PEOPLE,
     fake_controller,
     invoke_music_hooks,
@@ -44,10 +45,36 @@ def run_request(ctx, kind):
     return run(go())
 
 
-OPEN_BUTTONS = ["current_song", "queue"]
-DJ_BUTTONS = [b for b in PLAYER_BUTTONS if b not in OPEN_BUTTONS]
+
+
+def _panel_buttons():
+    """(custom_id, kind) of each button the player panel builds."""
+    snapshot = PanelSnapshot(
+        active=True,
+        paused=False,
+        has_previous=True,
+        has_next=True,
+        queue_empty=False,
+        loop_mode="off",
+        volume=70,
+        current_song=object(),
+    )
+    view = build_view(snapshot, None, None, None, None)
+    return [(b.custom_id, b._kind) for b in view.children]
+
+
+PANEL_BUTTONS = _panel_buttons()
+OPEN_BUTTONS = [c for c, k in PANEL_BUTTONS if k is K.PLAYER_BUTTON]
+DJ_BUTTONS = [c for c, k in PANEL_BUTTONS if k is K.DJ_PLAYER_BUTTON]
 JOINING = [K.JOINING_COMMAND, K.PICK, K.REACTION]
-EVERY = [K.COMMAND, K.JOINING_COMMAND, K.PLAYER_BUTTON, K.PICK, K.REACTION]
+EVERY = [
+    K.COMMAND,
+    K.JOINING_COMMAND,
+    K.PLAYER_BUTTON,
+    K.DJ_PLAYER_BUTTON,
+    K.PICK,
+    K.REACTION,
+]
 
 
 def rows():
@@ -125,7 +152,7 @@ def rows():
         ]
     for kind in EVERY:
         n = kind.name.lower()
-        if kind is K.PLAYER_BUTTON:
+        if kind in (K.PLAYER_BUTTON, K.DJ_PLAYER_BUTTON):
             continue
         out += [
             (
@@ -228,8 +255,8 @@ def rows():
     for cid in DJ_BUTTONS:
         out += [
             (
-                f"player_button {cid}: plain member under a DJ role",
-                K.PLAYER_BUTTON,
+                f"dj_player_button {cid}: plain member under a DJ role",
+                K.DJ_PLAYER_BUTTON,
                 {
                     "bot": HERE,
                     "author": "a",
@@ -239,8 +266,8 @@ def rows():
                 NOT_DJ,
             ),
             (
-                f"player_button {cid}: DJ-role holder",
-                K.PLAYER_BUTTON,
+                f"dj_player_button {cid}: DJ-role holder",
+                K.DJ_PLAYER_BUTTON,
                 {
                     "bot": HERE,
                     "author": "a",
@@ -265,6 +292,31 @@ def rows():
                 "admitted",
             )
         )
+    # the kind decides, whatever the custom_id says
+    out += [
+        (
+            "dj_player_button queue: plain member under a DJ role",
+            K.DJ_PLAYER_BUTTON,
+            {
+                "bot": HERE,
+                "author": "a",
+                "custom_id": "queue",
+                "dj_role": ADMISSION_DJ_ROLE,
+            },
+            NOT_DJ,
+        ),
+        (
+            "player_button next: plain member under a DJ role",
+            K.PLAYER_BUTTON,
+            {
+                "bot": HERE,
+                "author": "a",
+                "custom_id": "next",
+                "dj_role": ADMISSION_DJ_ROLE,
+            },
+            "admitted",
+        ),
+    ]
     return out
 
 
