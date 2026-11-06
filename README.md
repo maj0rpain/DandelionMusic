@@ -202,7 +202,7 @@ d!settings / d!setting / d!set
 ```
 * No Arguments: Lists server settings
 * Arguments: (setting) (value)
-* Omit the value to reset a setting
+* Omit the value to reset a setting to its default (Not Set for channels, the DJ role and the button emote)
 * Example: d!setting start_voice_channel ChannelName
 * Administrators only
 

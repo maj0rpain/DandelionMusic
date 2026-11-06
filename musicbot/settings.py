@@ -62,12 +62,9 @@ class ConversionError(Exception):
     pass
 
 
-async def convert_emoji(ctx: "Context", value: Optional[str]) -> Optional[str]:
+async def convert_emoji(ctx: "Context", value: str) -> str:
     if not config.ENABLE_BUTTON_PLUGIN:
         raise ConversionError(ConversionErrorText.BUTTON_DISABLED)
-
-    if value is None:
-        return None
 
     ids = re.findall(r"\d{15,20}", value)
     emoji = (
@@ -93,12 +90,7 @@ async def convert_emoji(ctx: "Context", value: Optional[str]) -> Optional[str]:
     return emoji
 
 
-def convert_object(
-    ctx: "Context", value: Optional[discord.Object]
-) -> Optional[str]:
-    if value is None:
-        return None
-
+def convert_object(ctx: "Context", value: discord.Object) -> str:
     return str(value.id)
 
 
@@ -386,6 +378,18 @@ class GuildSettings(Base):
         if isawaitable(value):
             value = await value
         setattr(self, setting, value)
+        async with ctx.bot.DbSession() as session:
+            session.add(self)
+            await session.commit()
+        return True
+
+    async def reset_setting(self, setting: str, ctx: "Context") -> bool:
+        "Stores the setting's descriptor default, bypassing its converter"
+        descriptor = SETTINGS.get(setting)
+        if descriptor is None:
+            return False
+
+        setattr(self, setting, descriptor.default)
         async with ctx.bot.DbSession() as session:
             session.add(self)
             await session.commit()

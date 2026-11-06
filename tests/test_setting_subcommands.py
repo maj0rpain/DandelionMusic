@@ -13,6 +13,7 @@ import types
 import discord
 import pytest
 from discord import AppCommandOptionType, ChannelType
+from discord.ext import commands
 from discord.ext.commands.view import StringView
 
 from config import config
@@ -317,3 +318,111 @@ def test_every_generated_subcommand_takes_only_its_value_parameter():
         assert list(command.clean_params) == [
             SETTINGS[command.name].param_name
         ]
+
+
+def reset_text(name):
+    shown = SETTINGS[name].show(None, SETTINGS[name].default)
+    return f"Setting `{name}` reset to {shown}!"
+
+
+def invoke_reset(name, sett):
+    cog = General(None)
+    sent = []
+    run(subcommand(cog, name).callback(cog, fake_ctx(sent, sett)))
+    return sent
+
+
+@pytest.mark.parametrize("name", list(ARGS))
+def test_a_subcommand_without_a_value_resets_the_setting(name):
+    sett = stored_settings()
+    setattr(sett, name, ARGS[name] if name != "dj_role" else "22")
+
+    sent = invoke_reset(name, sett)
+
+    assert sent[-1] == reset_text(name)
+    assert getattr(sett, name) == SETTINGS[name].default
+
+
+def test_a_reset_is_confirmed_with_the_value_the_embed_shows():
+    sent = invoke_reset("command_channel", stored_settings())
+
+    assert sent[-1] == "Setting `command_channel` reset to Not Set!"
+
+
+def test_a_prefix_subcommand_without_a_value_resets_the_setting():
+    cog = General(None)
+    command = subcommand(cog, "dj_role")
+    command.cog = cog
+    sett = stored_settings()
+    sent = []
+
+    run(command.invoke(prefix_ctx(sent, sett, "")))
+
+    assert sent[-1] == reset_text("dj_role")
+    assert sett.dj_role is None
+
+
+def test_a_prefix_value_that_does_not_convert_is_not_a_reset():
+    cog = General(None)
+    command = subcommand(cog, "dj_role")
+    command.cog = cog
+    sett = stored_settings()
+    sent = []
+
+    ctx = prefix_ctx(sent, sett, "Typo")
+    ctx.guild._roles = {}  # no role by that name
+    with pytest.raises(commands.BadArgument):
+        run(command.invoke(ctx))
+
+    assert stored_values(sett) == stored_values(stored_settings())
+
+
+@pytest.mark.parametrize("name", list(ARGS))
+def test_a_slash_subcommand_value_is_optional(name):
+    group = setting_group(General(None)).app_command
+
+    [parameter] = group.get_command(name).parameters
+
+    assert not parameter.required
+
+
+def test_the_generated_annotation_is_not_optional():
+    for command in setting_group(General(None)).commands:
+        annotation = command.callback.__annotations__[
+            SETTINGS[command.name].param_name
+        ]
+        assert annotation is SETTINGS[command.name].param_type
+
+
+def test_a_vc_timeout_reset_is_refused_while_its_edit_is_disabled(
+    monkeypatch,
+):
+    monkeypatch.setattr(config, "ALLOW_VC_TIMEOUT_EDIT", False)
+    sett = stored_settings()
+    sett.vc_timeout = True
+
+    sent = invoke_reset("vc_timeout", sett)
+
+    assert sent == [config.VC_TIMEOUT_EDIT_DISABLED]
+    assert sett.vc_timeout is True
+
+
+def test_a_button_emote_reset_succeeds_with_the_plugin_disabled(
+    monkeypatch,
+):
+    monkeypatch.setattr(config, "ENABLE_BUTTON_PLUGIN", False)
+    sett = stored_settings()
+
+    sent = invoke_reset("button_emote", sett)
+
+    assert sent[-1] == reset_text("button_emote")
+    assert sett.button_emote is None
+
+
+def test_an_unknown_setting_reset_is_reported(monkeypatch):
+    monkeypatch.delitem(SETTINGS, "dj_role")
+    sett = stored_settings()
+
+    sent = invoke_reset("dj_role", sett)
+
+    assert_failed(sent, sett, "`Error: Setting dj_role could not be updated.`")
