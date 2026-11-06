@@ -2,21 +2,57 @@
 connection: which track is starting or playing, which comes next, and
 when the playlist backup is written.
 
-Playback depends only on the narrow callables its owner injects, never
-on the bot, the guild or the queue. discord.py's `after=` callback runs
-on its audio thread and only hops to the loop (`call_soon_threadsafe`);
-everything else here is loop-only.
+Playback depends only on the narrow ports its owner injects (callables,
+a timer and a log label), never on the bot, the guild or the queue.
+discord.py's `after=` callback runs on its audio thread and only hops
+to the loop (`call_soon_threadsafe`); everything else here is
+loop-only.
 """
 
 import asyncio
 import sys
 from contextlib import asynccontextmanager
 from enum import Enum, auto
-from typing import Awaitable, Callable, Optional
+from typing import TYPE_CHECKING, Awaitable, Callable, Optional, Protocol
 
 import discord
 
 from musicbot.playlist import PauseState
+
+if TYPE_CHECKING:
+    from musicbot.song import Song
+
+
+class VoicePort(Protocol):
+    """The voice client calls Playback makes, and no others."""
+
+    def play(self, source, *, after) -> None:
+        pass
+
+    def stop(self) -> None:
+        pass
+
+    def pause(self) -> None:
+        pass
+
+    def resume(self) -> None:
+        pass
+
+    def is_playing(self) -> bool:
+        pass
+
+    def is_paused(self) -> bool:
+        pass
+
+
+class TimerPort(Protocol):
+    """The idle timer: started with a restart flag, and reporting
+    whether it has fired."""
+
+    triggered: bool
+
+    async def start(self, restart: bool = False) -> None:
+        pass
 
 
 class PlaybackState(Enum):
@@ -39,25 +75,23 @@ class Playback:
     def __init__(
         self,
         *,
-        voice_client: Callable[[], object],
-        preload: Callable[[object], Awaitable[bool]],
-        make_source: Callable[[object], object],
-        next_track: Callable[[bool], Optional[object]],
+        voice_client: Callable[[], Optional[VoicePort]],
+        preload: Callable[["Song"], Awaitable[bool]],
+        make_source: Callable[["Song"], object],
+        next_track: Callable[[bool], Optional["Song"]],
         clear_queue: Callable[[], None],
         schedule_preload: Callable[[], None],
-        announce: Callable[[object], Awaitable[None]],
-        report_skipped: Callable[[object], Awaitable[None]],
+        announce: Callable[["Song"], Awaitable[None]],
+        report_skipped: Callable[["Song"], Awaitable[None]],
         record_history: Callable[[str], None],
         write_backup: Callable[[], None],
         queue_is_empty: Callable[[], bool],
         spawn: Callable[[object], None],
-        start_timer: Callable[[bool], Awaitable[None]],
-        timer_triggered: Callable[[], bool],
+        timer: TimerPort,
         humans_present: Callable[[], bool],
         on_play_failed: Callable[[], Awaitable[None]],
         get_loop: Callable[[], asyncio.AbstractEventLoop],
-        guild_name: str,
-        guild_id: int,
+        log_label: str,
     ):
         self._voice_client = voice_client
         self._preload = preload
@@ -71,15 +105,13 @@ class Playback:
         self._write_backup = write_backup
         self._queue_is_empty = queue_is_empty
         self._spawn = spawn
-        self._start_timer = start_timer
-        self._timer_triggered = timer_triggered
+        self._timer = timer
         self._humans_present = humans_present
         self._on_play_failed = on_play_failed
         self._get_loop = get_loop
-        self._guild_name = guild_name
-        self._guild_id = guild_id
+        self._log_label = log_label
 
-        self._next_song = None
+        self._next_song: Optional["Song"] = None
         # The start token: bumped when a start is committed to (see
         # _claim_start()), before its preload. A track end carries the
         # generation it was started as; a start whose generation is no
@@ -100,7 +132,9 @@ class Playback:
 
     # -- state -------------------------------------------------------
 
-    def _active(self) -> bool:
+    def is_active(self) -> bool:
+        """True when the voice client exists and is playing or paused.
+        A pending start does not count."""
         client = self._voice_client()
         return client is not None and (
             client.is_playing() or client.is_paused()
@@ -110,7 +144,7 @@ class Playback:
     def state(self) -> PlaybackState:
         if self._start_pending:
             return PlaybackState.STARTING
-        if self._active():
+        if self.is_active():
             return PlaybackState.ACTIVE
         return PlaybackState.IDLE
 
@@ -149,7 +183,7 @@ class Playback:
 
     # -- intents -----------------------------------------------------
 
-    async def start(self, song) -> bool:
+    async def start(self, song: "Song") -> bool:
         """Claims a start for `song` and plays it. Once the preload
         returns, a start that was overtaken - a stop, a disconnect or a
         newer start replaced it, or the bot left voice - is dropped:
@@ -165,48 +199,48 @@ class Playback:
         start. Loop only."""
         _require_loop()
 
-        if self._active():
+        if self.is_active():
             self._hand_over_to(self._next_track(forced))
             return
 
         self._invalidate_start()
         self._advance(forced)
 
-    def back(self, song):
+    def back(self, song: "Song"):
         """Starts `song`, the track the queue stepped back to: at once
         when nothing is playing, otherwise after the current one is
         stopped. Then writes the backup."""
-        if not self._active():
+        if not self.is_active():
             self._spawn_start(song)
         else:
             self._hand_over_to(song)
-        self.queue_changed()
+        self.save_backup()
 
     def stop(self):
         """Stops the player and empties the queue. Loop only."""
         # whatever starts after this is a new session, not a track
         # change
         self._playing = False
-        self.queue_changed()
+        self.save_backup()
         self._clear_queue()
         # a pending start would otherwise play once its preload ends;
         # a playing track needs no bump - its teardown hop must stay
         # current
         self._invalidate_start()
 
-        if not self._active():
+        if not self.is_active():
             return
 
         # stopping an active voice client runs an `after` callback;
         # its _advance() finds the queue empty and idle, so
-        # queue_changed() keeps this snapshot
+        # save_backup() keeps this snapshot
         self._voice_client().stop()
 
     def toggle_pause(self) -> PauseState:
         """Writes the backup (as pause always has), then pauses a
         playing client or resumes a paused one. A pause restarts the
         idle timer."""
-        self.queue_changed()
+        self.save_backup()
         client = self._voice_client()
         if client:
             if client.is_playing():
@@ -218,7 +252,7 @@ class Playback:
                 return PauseState.RESUMED
         return PauseState.NOTHING_TO_PAUSE
 
-    def queue_changed(self):
+    def save_backup(self):
         """Writes the playlist backup. An idle playback with an empty
         queue has nothing to save, and writing it would wipe the last
         real backup d!restore reloads. The playing flag keeps the save
@@ -247,7 +281,7 @@ class Playback:
         scheduled. Loop only."""
         if self._disconnecting:
             return
-        await self._start_timer(restart)
+        await self._timer.start(restart)
 
     # -- internals ---------------------------------------------------
 
@@ -260,7 +294,7 @@ class Playback:
         def after(error):
             if error is not None:
                 print(
-                    f"Playback error in guild {self._guild_id}: {error!r}",
+                    f"Playback error in guild {self._log_label}: {error!r}",
                     file=sys.stderr,
                 )
             try:
@@ -307,30 +341,30 @@ class Playback:
         else:
             next_song = self._next_track(forced)
 
-        self.queue_changed()
+        self.save_backup()
 
         if next_song is None:
             # nothing left to advance to - the next song to start is a
             # fresh one
             self._playing = False
-            if not self._timer_triggered() and self._voice_client():
+            if not self._timer.triggered and self._voice_client():
                 self._spawn(self.start_idle_timer(self._humans_present()))
             return
 
         self._spawn_start(next_song)
 
-    def _hand_over_to(self, song):
+    def _hand_over_to(self, song: "Song"):
         """With a track active, picks `song` as the next one and stops
         the voice client: the after= hop of the track does the advance.
         """
         self._next_song = song
         self._voice_client().stop()
 
-    def _spawn_start(self, song):
+    def _spawn_start(self, song: "Song"):
         """Claims a start for `song` and spawns its play."""
         self._spawn(self._play(song, self._claim_start()))
 
-    async def _play(self, song, generation: int) -> bool:
+    async def _play(self, song: "Song", generation: int) -> bool:
         """True when `song` was handed to the voice client; False for a
         failed preload, a song without a direct url, an overtaken start
         or a play() that raised."""
@@ -386,7 +420,7 @@ class Playback:
             # queue stays silent
             print(
                 f"Started playing {song.display_name!r}"
-                f" in guild {self._guild_name!r}"
+                f" in guild {self._log_label}"
             )
 
         await self._announce(song)

@@ -245,19 +245,11 @@ def test_an_inactive_snapshot_strips_the_buttons_and_forgets_the_message(
     assert message.edits == [None]
 
 
-def test_a_missing_controller_reads_as_inactive():
-    settings = types.SimpleNamespace(announce_songs=True)
-    controllers = [PanelController(snap())]
-    panel = PlayerPanel(object(), lambda: controllers[0], lambda: settings)
-    message = PanelMessage()
+def test_a_missing_controller_reads_as_inactive(attached):
+    rig, message = attached
+    rig.controller = None
 
-    async def send(view):
-        return message
-
-    run(panel.attach(send))
-    controllers[0] = None
-
-    run(panel.refresh())
+    rig.refresh()
 
     assert message.edits == [None]
 
@@ -429,10 +421,11 @@ def test_another_refetch_error_is_logged_and_drops_the_message(
     assert stale.edits == [] and channel.fetches == 1
 
 
-def test_another_http_error_keeps_the_message_for_the_next_tick(capsys):
-    rig = Rig()
-    message = PanelMessage(errors=[http_error()])
-    rig.attach(message)
+def test_another_http_error_keeps_the_message_for_the_next_tick(
+    attached, capsys
+):
+    rig, message = attached
+    message.errors = [http_error()]
     rig.controller.snapshot = snap(volume=0)
 
     rig.refresh()
@@ -462,14 +455,10 @@ def attach_during(rig, message, target, attr, new_snapshot=None):
     setattr(target, attr, replaced)
 
 
-def test_a_message_attached_during_a_refetch_survives_its_failure():
-    rig = Rig()
-    channel = PanelChannel()
+def test_a_message_attached_during_a_refetch_survives_its_failure(expired):
+    rig, channel, stale = expired
     channel.fetch_error = coded_error(discord.NotFound, 404, 10008)
-    stale = PanelMessage(channel, errors=[EXPIRED])
     newer = PanelMessage()
-    rig.attach(stale)
-    rig.controller.snapshot = snap(volume=0)
     attach_during(rig, newer, channel, "fetch_message")
 
     rig.refresh()

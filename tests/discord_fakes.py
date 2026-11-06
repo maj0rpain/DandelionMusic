@@ -12,18 +12,20 @@ import discord
 
 from musicbot import admission
 from musicbot.admission import RequestKind
+from musicbot.player_panel import PlayerPanel
 from musicbot.sessions import GuildSessions
 from musicbot.utils import joining_command
 from helpers import run
 
 
-class FakePanel:
-    """A guild's player panel as its callers see it: records what it
-    is asked. `carries` answers `carries_buttons`; `attach` runs the
-    sender with no view, as a panel over an inactive controller does."""
+class FakePanel(PlayerPanel):
+    """A real player panel over no controller, recording `refresh`,
+    `direct_to` and `attach`; `carries_buttons` is the real one.
+    `attach` runs the sender with no view, as a panel over an inactive
+    controller does."""
 
-    def __init__(self, carries=True):
-        self.carries = carries
+    def __init__(self, guild=None):
+        super().__init__(guild, lambda: None, lambda: None)
         self.refreshes = 0
         self.directed = []
         self.attached = 0
@@ -33,9 +35,7 @@ class FakePanel:
 
     def direct_to(self, channel, *, replace=True):
         self.directed.append((channel, replace))
-
-    def carries_buttons(self, *, channel, ephemeral, has_view):
-        return self.carries and not ephemeral and not has_view
+        super().direct_to(channel, replace=replace)
 
     async def attach(self, send):
         self.attached += 1

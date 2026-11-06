@@ -31,7 +31,7 @@ from musicbot.commands.library import (
     PageButton,
     QueueLevelButton,
 )
-from musicbot.outcome import EnqueueOutcome, OutcomeKind
+from musicbot.outcome import EnqueueOutcome, OutcomeKind, render
 from musicbot.library import SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 from config import config
@@ -476,15 +476,18 @@ class Gated(NamedTuple):
     result: Optional[Enrichment]
 
 
-def stub_enrichment(monkeypatch, results=None, default=None):
+def stub_enrichment(monkeypatch, results=None, default=None, indexes=None):
     """Replaces library_metadata.get_enrichment with a fake answering
     per the (artist, album) it receives from `results`, `default` for
     a level it does not name. Returns the list each *finished*
-    resolution's level is appended to."""
+    resolution's level is appended to. `indexes`, when given, is a list
+    each received `index` is appended to."""
     results = results or {}
     finished = []
 
     async def get_enrichment(index, artist, album):
+        if indexes is not None:
+            indexes.append(index)
         level = (artist, album)
         result = results.get(level, default)
         if isinstance(result, Gated):
@@ -701,7 +704,7 @@ def test_second_select_click_during_first_draw_is_turned_away(monkeypatch):
     assert level_of(view) == ("Radiohead", None)
 
 
-def test_second_click_during_page_turn_is_turned_away(monkeypatch):
+def test_second_click_during_page_turn_is_turned_away():
     async def scenario():
         view = make_view(PAGED)
         clicks = Clicks(view)
@@ -1380,9 +1383,12 @@ async def _collect(replies, content):
 
 
 def test_a_library_pick_names_the_skipped_files_by_filename(monkeypatch):
+    expected = EnqueueOutcome(
+        OutcomeKind.LIBRARY_PICK, count=1, skipped=("y.mp3",)
+    )
+
     assert _pick_replies(monkeypatch, [("A", "B", "y.mp3")]) == [
-        "Queued 1 song(s). 1 skipped (file not found): y.mp3. "
-        "The index may be stale - ask the bot owner to run `d!lib refresh`."
+        render(expected, announce_songs=False).text
     ]
 
 
@@ -1422,7 +1428,11 @@ def test_a_library_pick_with_no_reply_and_no_placeholder_sends_nothing(
 
 
 def test_a_library_pick_that_loads_everything_reports_the_count(monkeypatch):
-    assert _pick_replies(monkeypatch, []) == ["Queued 2 song(s)."]
+    expected = EnqueueOutcome(OutcomeKind.LIBRARY_PICK, count=2)
+
+    assert _pick_replies(monkeypatch, []) == [
+        render(expected, announce_songs=False).text
+    ]
 
 
 def test_enrichment_is_resolved_on_the_cursors_index_not_the_librarys(
@@ -1434,16 +1444,7 @@ def test_enrichment_is_resolved_on_the_cursors_index_not_the_librarys(
     async def scenario():
         view = make_view()
         seen = []
-
-        async def get_enrichment(index, artist, album):
-            seen.append(index)
-            return COVER
-
-        monkeypatch.setattr(
-            library_commands.library_metadata,
-            "get_enrichment",
-            get_enrichment,
-        )
+        stub_enrichment(monkeypatch, default=COVER, indexes=seen)
         await view.descend(EditingInteraction(), "Radiohead")
         return seen
 

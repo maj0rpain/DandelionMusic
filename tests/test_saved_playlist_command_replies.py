@@ -13,14 +13,9 @@ from config import config
 from musicbot import playlists
 from musicbot.commands import music
 from musicbot.commands.music import Music
-from musicbot.linkutils import SiteTypes
-from musicbot.song import LoadResult, Song
+from musicbot.song import LoadResult
 from controller_helpers import command_ctx
-from helpers import run
-
-
-def _song():
-    return Song(SiteTypes.YT_DLP, "https://example.invalid/a", title="a")
+from helpers import plain_song, run
 
 
 def _fail_with(error):
@@ -32,7 +27,7 @@ def _fail_with(error):
 
 def _run_playlist_command(monkeypatch, command, function, error, *args):
     async def load_song(track):
-        return LoadResult.of_song(_song())
+        return LoadResult.of_song(plain_song())
 
     monkeypatch.setattr(music.loader, "load_song", load_song)
     monkeypatch.setattr(playlists, function, _fail_with(error))
@@ -97,7 +92,7 @@ def test_save_with_an_existing_name_replies_already_exists(monkeypatch):
         playlists, "save", _fail_with(playlists.PlaylistExists())
     )
     controller = types.SimpleNamespace(
-        playlist=types.SimpleNamespace(playque=[_song()])
+        playlist=types.SimpleNamespace(playque=[plain_song()])
     )
     ctx, sent = command_ctx(controller)
 
