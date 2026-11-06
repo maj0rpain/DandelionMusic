@@ -309,14 +309,15 @@ def test_lastfm_placeholder_image_is_rejected(rig, lastfm, no_spotify):
     assert result.stats.listeners == 10
 
 
+@pytest.mark.parametrize("listeners", ["0", "lots"])
 def test_lastfm_zero_and_unparseable_counters_are_absent(
-    rig, lastfm, no_spotify
+    rig, lastfm, no_spotify, listeners
 ):
     lastfm(
         {
             "artist.getInfo": {
                 "artist": {
-                    "stats": {"listeners": "0"},
+                    "stats": {"listeners": listeners},
                     "tags": {"tag": [{"name": "jazz"}]},
                 }
             }
