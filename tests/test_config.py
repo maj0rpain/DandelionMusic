@@ -158,8 +158,9 @@ def _uv_sync_index(commands):
 def test_dockerfile_installs_db_drivers_without_dev():
     commands = _dockerfile_commands()
     run = commands[_uv_sync_index(commands)]
+    assert "--frozen" not in run
     for flag in (
-        "--frozen",
+        "--locked",
         "--no-cache",
         "--no-dev",
         "--extra postgres",

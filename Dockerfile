@@ -11,7 +11,7 @@ COPY --from=denoland/deno:bin-2.9.8 /deno /usr/local/bin/deno
 
 COPY pyproject.toml uv.lock ./
 
-RUN uv sync --frozen --no-cache --no-dev \
+RUN uv sync --locked --no-cache --no-dev \
         --extra postgres --extra mysql
 
 ARG HEROKU_DB
