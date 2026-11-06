@@ -311,17 +311,33 @@ class AudioController(object):
         playing and the queue is empty."""
         return self.is_idle() and len(self.playlist) == 0
 
+    def _refusal(self) -> Optional[OutcomeKind]:
+        """The one guard every placement passes: the refusal kind when
+        a request's songs may not be placed now, else `None`. Out of
+        voice means the guild has no voice client at all; a client that
+        exists but is not connected (a move, a reconnect) is not."""
+        if self.guild.voice_client is None:
+            return OutcomeKind.REFUSED_NOT_IN_VOICE
+        return None
+
     async def _place_and_start(
         self, place: Callable[[], _T]
-    ) -> Tuple[_T, Optional[OutcomeKind]]:
+    ) -> Tuple[Optional[_T], Optional[OutcomeKind]]:
         """The one step that decides whether a request claimed the
         start of playback. Reads whether it would start, runs `place`,
         marks the queue changed and starts playback if idle. Returns
         `place`'s result and the start: STARTED or START_FAILED when
         this request claimed it, else `None`.
 
+        A refused request (see _refusal()) places nothing, writes no
+        backup and starts nothing: the result is `None` and the start
+        is the refusal kind.
+
         Placement happens before the first await, so nothing can slip
         between the request's songs and their slots."""
+        refusal = self._refusal()
+        if refusal is not None:
+            return None, refusal
         would_start = self._would_start()
         placed = place()
         self.playback.save_backup()
@@ -370,6 +386,8 @@ class AudioController(object):
         index, start = await self._place_and_start(
             lambda: self.playlist.insert_next(song)
         )
+        if start is OutcomeKind.REFUSED_NOT_IN_VOICE:
+            return EnqueueOutcome(start)
         return self._outcome([song], index, start, batch)
 
     async def enqueue(
@@ -392,6 +410,8 @@ class AudioController(object):
             return first_index
 
         first_index, start = await self._place_and_start(place)
+        if start is OutcomeKind.REFUSED_NOT_IN_VOICE:
+            return EnqueueOutcome(start)
         return self._outcome(placed, first_index, start, batch)
 
     async def restore(self) -> RestoreResult:
@@ -496,6 +516,10 @@ class AudioController(object):
             f" in guild {self.guild.name!r}"
         )
 
+        refused = EnqueueOutcome(OutcomeKind.REFUSED_NOT_IN_VOICE)
+        if self._refusal() is not None:
+            return refused
+
         uris = [track.uri for track in tracks]
         songs: List[Optional[Song]] = []
         tail = uris
@@ -514,14 +538,18 @@ class AudioController(object):
             songs += await loader.load_local_songs(uris[:1])
             tail = uris[1:]
             if songs[0] is not None:
-                await self.enqueue(songs[:1])
+                first = await self.enqueue(songs[:1])
+                if first.kind is OutcomeKind.REFUSED_NOT_IN_VOICE:
+                    return refused
 
         loaded_tail = await loader.load_local_songs(tail)
         songs += loaded_tail
 
         added = [song for song in loaded_tail if song is not None]
         if added:
-            await self.enqueue(added)
+            rest = await self.enqueue(added)
+            if rest.kind is OutcomeKind.REFUSED_NOT_IN_VOICE:
+                return refused
 
         return EnqueueOutcome(
             OutcomeKind.LIBRARY_PICK,
