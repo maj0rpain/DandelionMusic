@@ -12,6 +12,7 @@ import types
 
 from musicbot.library import LocalTrack
 
+from discord_fakes import admission_without_join
 from helpers import run
 
 
@@ -184,8 +185,11 @@ def command_ctx(
     guild = types.SimpleNamespace(id=1)
     if controller is not None:
         guild = getattr(controller, "guild", None) or guild
+
     ctx = types.SimpleNamespace(
         audiocontroller=controller,
+        # no join is needed; enter() returns the same controller
+        admitted=admission_without_join(lambda: controller),
         send=send,
         defer=defer,
         author=None,

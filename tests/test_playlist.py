@@ -162,3 +162,31 @@ class TestDropHead:
         assert playlist.drop_head() is None
         assert len(playlist) == 0
         assert list(playlist.playhistory) == []
+
+
+class TestHasPrev:
+    def test_false_with_empty_history(self):
+        assert filled("a", "b").has_prev() is False
+
+    def test_true_with_history(self):
+        playlist = filled("a", "b")
+        playlist.next()
+        assert playlist.has_prev() is True
+
+    def test_loop_all_is_false_with_an_empty_queue(self):
+        playlist = Playlist()
+        playlist.loop = LoopMode.ALL
+        assert playlist.has_prev() is False
+
+    def test_loop_all_is_true_with_a_queue(self):
+        playlist = filled("a")
+        playlist.loop = LoopMode.ALL
+        assert playlist.has_prev() is True
+
+    def test_changes_nothing(self):
+        playlist = filled("a", "b")
+        playlist.next()
+        queue, history = list(playlist.playque), list(playlist.playhistory)
+        playlist.has_prev()
+        assert list(playlist.playque) == queue
+        assert list(playlist.playhistory) == history
