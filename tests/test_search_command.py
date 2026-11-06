@@ -6,8 +6,8 @@ import pytest
 from config import config
 from musicbot.commands import music
 from musicbot.commands.music import Music
-from discord_fakes import RecordingCtx
 from musicbot.loader import SongError
+from discord_fakes import RecordingCtx
 from helpers import plain_song, run
 
 
