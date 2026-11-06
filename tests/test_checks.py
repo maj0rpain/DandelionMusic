@@ -587,7 +587,14 @@ def test_the_library_hook_directs_the_panel_to_the_channel():
     assert ctx.bot.sessions.panel(guild).directed == [(ctx.channel, True)]
 
 
-def test_a_library_command_in_an_unregistered_guild_is_not_ready():
+@pytest.fixture
+def library_path(monkeypatch):
+    monkeypatch.setattr(config, "MUSIC_LIBRARY_PATH", "/x")
+
+
+def test_a_library_command_in_an_unregistered_guild_is_not_ready(
+    library_path,
+):
     ctx = make_ctx(make_bot(), Guild())
     with pytest.raises(CheckError) as exc:
         run(Library(None).cog_check(ctx))
@@ -595,11 +602,24 @@ def test_a_library_command_in_an_unregistered_guild_is_not_ready():
     assert not hasattr(ctx, "audiocontroller")
 
 
-def test_a_library_command_in_a_registered_guild_is_admitted():
+def test_a_library_command_in_a_registered_guild_is_admitted(library_path):
     guild = Guild()
     ctx = make_ctx(make_bot({guild: "controller"}), guild)
     assert run(Library(None).cog_check(ctx)) is True
     assert not hasattr(ctx, "audiocontroller")
+
+
+@pytest.mark.parametrize("registered", [True, False])
+def test_a_library_command_without_a_library_path_is_not_configured(
+    monkeypatch, registered
+):
+    monkeypatch.setattr(config, "MUSIC_LIBRARY_PATH", "")
+    guild = Guild()
+    bot = make_bot({guild: "controller"} if registered else {})
+    ctx = make_ctx(bot, guild)
+    with pytest.raises(CheckError) as exc:
+        run(Library(None).cog_check(ctx))
+    assert str(exc.value) == config.LIBRARY_NOT_CONFIGURED
 
 
 # --- which commands need a DJ ------------------------------------------

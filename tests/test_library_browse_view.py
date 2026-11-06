@@ -1312,7 +1312,6 @@ def test_timeout_swallows_a_failed_followup_edit():
 
 
 def test_first_message_is_drawn_from_one_frame(monkeypatch):
-    monkeypatch.setattr(library_commands.config, "MUSIC_LIBRARY_PATH", "/x")
     monkeypatch.setattr(library_commands.library, "get_index", lambda: INDEX)
     sent = []
 
