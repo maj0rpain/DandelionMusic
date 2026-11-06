@@ -14,7 +14,7 @@
 # Secrets and per-host state. .env is the reason this file exists:
 # it holds BOT_TOKEN, and without this it lands in the image.
 .env
-config/cookies/cookies.txt
+config/cookies/*
 
 # Runtime data - the live guild settings DB and the pickled playlists
 # are the host's, not the image's. Both are bind-mounted or volumed in

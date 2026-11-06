@@ -54,8 +54,9 @@ services:
       # renaming a file (a file bind mount pins the inode, so the
       # container would keep using the replaced one).
       - ./data:/app/data
-      # cookies.txt is excluded from the image by .dockerignore - it is
-      # a credential file once filled in - so mount it back in, or
+      # The whole cookies directory is excluded from the image by
+      # .dockerignore - it holds your own cookies file, a credential - so
+      # mount it back in, or
       # restricted-content playback silently loses its cookies (yt-dlp
       # skips an unreadable cookiefile rather than failing).
       - ./config/cookies:/app/config/cookies:ro
