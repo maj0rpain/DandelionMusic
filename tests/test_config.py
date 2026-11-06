@@ -295,6 +295,15 @@ def test_library_hint_without_a_prefix(config_factory, slash, shown):
     assert f"`{shown}library refresh`" in cfg.LIBRARY_PICK_STALE_INDEX
 
 
+@pytest.mark.parametrize(
+    "key",
+    ["LIBRARY_EMPTY", "LIBRARY_FILE_MISSING", "LIBRARY_PICK_STALE_INDEX"],
+)
+def test_library_hints_name_a_bang_prefix(config_factory, key):
+    cfg = config_factory("BOT_TOKEN=x\nBOT_PREFIX=!\n")
+    assert "`!library refresh`" in getattr(cfg, key)
+
+
 def test_no_language_file_string_holds_a_literal_d_bang():
     def strings(node):
         if isinstance(node, str):

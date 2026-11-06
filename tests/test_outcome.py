@@ -100,14 +100,6 @@ def test_library_pick_wording_comes_from_the_language_file(monkeypatch):
 
 def test_library_hints_name_a_bang_prefix(config_factory, monkeypatch):
     cfg = config_factory("BOT_TOKEN=x\nBOT_PREFIX=!\n")
-    for key in (
-        "LIBRARY_EMPTY",
-        "LIBRARY_FILE_MISSING",
-        "LIBRARY_PICK_STALE_INDEX",
-    ):
-        text = getattr(cfg, key)
-        assert "`!library refresh`" in text
-        assert "d!" not in text
     assert _library_under(cfg, monkeypatch, ["a.mp3"]).endswith(
         "run `!library refresh`."
     )
