@@ -227,11 +227,6 @@ class TestTracks:
             "OK Computer",
             "Kid A",
         }
-        albums = []
-        for _, album, _ in c.tracks():
-            if album not in albums:
-                albums.append(album)
-        assert albums == library.albums_of(INDEX, "Radiohead")
 
     def test_the_discography_queues_albums_in_browse_order(self):
         index = {
@@ -242,6 +237,12 @@ class TestTracks:
             }
         }
         got = library.tracks_for(index, "Radiohead")
+        albums = []
+        for _, album, _ in got:
+            if album not in albums:
+                albums.append(album)
+        assert albums == library.albums_of(index, "Radiohead")
+        assert albums == ["Amnesiac", "kid A", "OK Computer"]
         assert [(a, f) for _, a, f in got] == [
             ("Amnesiac", "01 - a.flac"),
             ("Amnesiac", "02 - b.flac"),
