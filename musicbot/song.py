@@ -15,6 +15,12 @@ if TYPE_CHECKING:
     from musicbot.playlists import SavedEntry
 
 
+def _whole_seconds(value):
+    """A duration as whole seconds; yt-dlp reports floats for some
+    sites."""
+    return None if value is None else round(value)
+
+
 class Song:
     # class-level, so a Song unpickled from a queue backup written
     # before songs carried a SavedEntry reads as having none
@@ -39,7 +45,7 @@ class Song:
         self.url = url
         self.title = title
         self.uploader = uploader
-        self.duration = None if duration is None else round(duration)
+        self.duration = _whole_seconds(duration)
         self.thumbnail = thumbnail
         self.saved_entry = saved_entry
 
@@ -98,8 +104,7 @@ class Song:
         for k, v in data.items():
             if hasattr(self, k) and v:
                 if k == "duration":
-                    # yt-dlp reports float seconds for some sites
-                    v = round(v)
+                    v = _whole_seconds(v)
                 setattr(self, k, v)
 
 

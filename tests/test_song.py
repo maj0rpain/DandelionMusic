@@ -1,11 +1,11 @@
 """Song: per-track metadata, and how it refers to a saved playlist."""
 
 import pickle
+from datetime import datetime, timezone
 
 import pytest
 
 from config import config
-from datetime import datetime, timezone
 
 from musicbot.linkutils import SiteTypes
 from musicbot.playlists import PlaylistRef, SavedEntry
@@ -93,7 +93,7 @@ def test_of_song_is_a_single_untruncated_result():
 
 
 def _song(**kw):
-    return Song(SiteTypes.YT_DLP, "https://example.com/w", **kw)
+    return Song(SiteTypes.YT_DLP, URL, **kw)
 
 
 def _duration_field(song):
