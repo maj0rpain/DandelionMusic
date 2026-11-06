@@ -430,10 +430,10 @@ def test_a_joining_command_refused_by_its_dj_check_never_joins():
     assert guild.events == []
 
 
-def test_a_joining_command_defers_then_joins_after_its_dj_check():
+def test_the_hooks_never_join_a_joining_command_that_passed_its_checks():
     guild, ctx, cog = music_ctx("prev", dj_role=ADMISSION_DJ_ROLE, role="dj")
     run(invoke_music_hooks(cog, ctx))
-    assert guild.events == [("defer",), ("connect", "b")]
+    assert guild.events == []
 
 
 def test_the_command_acts_on_the_controller_enter_returns():
@@ -442,7 +442,7 @@ def test_the_command_acts_on_the_controller_enter_returns():
     first = ctx.audiocontroller
     ctx.controllers[guild] = fake_controller()
     run(ctx.bot.sessions.reset(guild))
-    run(cog.cog_before_invoke(ctx))
+    run(cog._enter(ctx))
     assert ctx.audiocontroller is not first
     assert ctx.audiocontroller is ctx.bot.sessions.controller(guild)
 

@@ -181,6 +181,14 @@ class RecordingCtx:
         self.interaction = None
         self.bot = bot
         self.message = types.SimpleNamespace(attachments=[], reference=None)
+        self.audiocontroller = None
+        self.joined = []
+
+        async def enter():
+            self.joined.append("enter")
+            return self.audiocontroller
+
+        self.admitted = types.SimpleNamespace(join_needed=False, enter=enter)
 
     async def defer(self):
         self.deferred = True

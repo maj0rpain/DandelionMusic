@@ -52,8 +52,15 @@ def test_restore_command_replies_with_the_outcome(outcome, reply):
     async def defer(**kwargs):
         events.append(("defer", kwargs.get("ephemeral", False)))
 
+    controller = OutcomeController(outcome, events)
+
+    async def enter():
+        events.append("enter")
+        return controller
+
     ctx = types.SimpleNamespace(
-        audiocontroller=OutcomeController(outcome, events),
+        audiocontroller=controller,
+        admitted=types.SimpleNamespace(join_needed=False, enter=enter),
         send=send,
         defer=defer,
     )
@@ -62,6 +69,6 @@ def test_restore_command_replies_with_the_outcome(outcome, reply):
 
     expected = [("defer", False), "load_backup"]
     if outcome is RestoreResult.RESTORED:
-        expected.append("start_restored")
+        expected += ["enter", "start_restored"]
     assert events == expected
     assert sent == [reply]

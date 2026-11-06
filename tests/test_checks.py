@@ -235,11 +235,9 @@ def slash_ctx(guild, author_in, **kwargs):
 
 class TestMusicBeforeInvoke:
     """Music.cog_before_invoke directs the player panel to the
-    command's channel, and a defer in the command body after it does
-    not raise. The deferral before a join is covered by
-    tests/test_admission.py::
-    test_a_joining_command_defers_then_joins_after_its_dj_check and
-    TestJoiningCommand."""
+    command's channel and never defers or joins: a joining command
+    does that in its body, after its input checks (see
+    tests/test_joining_after_checks.py)."""
 
     def test_directs_the_panel_to_the_channel_not_the_context(self):
         guild = VoiceGuild()
@@ -250,9 +248,12 @@ class TestMusicBeforeInvoke:
     def test_a_second_defer_in_the_body_does_not_raise(self):
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a"))
+        ctx.command = command_of(Music, "play")
 
         async def scenario():
-            await invoke_music_hooks(Music(None), ctx)
+            cog = Music(None)
+            await invoke_music_hooks(cog, ctx)
+            await cog._enter(ctx)
             await ctx.defer()
 
         run(scenario())
@@ -390,27 +391,41 @@ class TestNonJoiningCommand:
 
 
 class TestJoiningCommand:
-    def test_defers_and_connects_while_idle(self):
+    """The hooks never join; the command body's _enter does."""
+
+    def test_the_hooks_do_not_connect_while_idle(self):
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a"))
         ctx.command = command_of(Music, "play")
         run(invoke_music_hooks(Music(None), ctx))
-        assert guild.events == [("defer", False), ("connect", "a")]
+        assert guild.events == []
 
-    def test_defers_and_moves_out_of_a_bots_only_channel(self, no_sleep):
+    def test_the_hooks_do_not_move_out_of_a_bots_only_channel(self, no_sleep):
         guild = VoiceGuild()
         guild.put_bot_in(guild.channel("a", bots=1))
         ctx = slash_ctx(guild, guild.channel("b"))
         ctx.command = command_of(Music, "prev")
         run(invoke_music_hooks(Music(None), ctx))
-        assert guild.events == [("defer", False), ("move", "b")]
+        assert guild.events == []
 
-    def test_playlist_load_connects(self):
+    def test_enter_defers_and_connects_while_idle(self):
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a"))
-        ctx.command = command_of(Music, "playlist load")
-        run(invoke_music_hooks(Music(None), ctx))
+        ctx.command = command_of(Music, "play")
+        cog = Music(None)
+        run(invoke_music_hooks(cog, ctx))
+        run(cog._enter(ctx))
         assert guild.events == [("defer", False), ("connect", "a")]
+
+    def test_enter_defers_and_moves_out_of_a_bots_only_channel(self, no_sleep):
+        guild = VoiceGuild()
+        guild.put_bot_in(guild.channel("a", bots=1))
+        ctx = slash_ctx(guild, guild.channel("b"))
+        ctx.command = command_of(Music, "prev")
+        cog = Music(None)
+        run(invoke_music_hooks(cog, ctx))
+        run(cog._enter(ctx))
+        assert guild.events == [("defer", False), ("move", "b")]
 
 
 def click(button, ctx, custom_id):

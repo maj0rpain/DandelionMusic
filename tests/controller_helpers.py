@@ -182,8 +182,14 @@ def command_ctx(
     guild = types.SimpleNamespace(id=1)
     if controller is not None:
         guild = getattr(controller, "guild", None) or guild
+
+    async def enter():
+        return controller
+
     ctx = types.SimpleNamespace(
         audiocontroller=controller,
+        # no join is needed; enter() returns the same controller
+        admitted=types.SimpleNamespace(join_needed=False, enter=enter),
         send=send,
         defer=defer,
         author=None,
