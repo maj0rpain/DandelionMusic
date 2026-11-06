@@ -97,7 +97,11 @@ class MusicBot(commands.Bot):
 
     async def setup_hook(self):
         if config.ENABLE_LOCAL_LIBRARY:
-            await library.build_index_async()
+            try:
+                await library.build_index_async()
+            except Exception:
+                # the library is optional: never let it stop startup
+                print_exception(sys.exception())
         for extension in self.initial_extensions:
             await self.load_extension(extension)
         if config.ENABLE_SLASH_COMMANDS:
