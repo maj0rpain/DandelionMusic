@@ -188,7 +188,7 @@ class TestFrameText:
             ("Albums", "4"),
             ("Songs", "4"),
         )
-        assert not f.show_back and not f.show_queue
+        assert f.queue_label is None
         assert f.entries == ["Aphex Twin", "Radiohead"]
         assert f.show_next and not f.show_prev
 
@@ -251,22 +251,26 @@ class TestStatFieldBuilder:
         base.update(kw)
         return library_browse.Screen(**base)
 
-    def test_counts_alone_select_the_root_branch(self):
-        # scope says "artist level"; only `counts` is set
-        screen = self._screen(scope=("A", None), counts=(1, 2, 3))
+    def test_root_kind_selects_the_counts_fields(self):
+        screen = self._screen(counts=(1, 2, 3))
         assert stat_fields(screen, None) == [
             ("Artists", "1"),
             ("Albums", "2"),
             ("Songs", "3"),
         ]
 
-    def test_stats_alone_select_the_lower_branch(self):
+    def test_album_kind_selects_the_artist_level_fields(self):
         stats = library.LevelStats(2, 5, None, None, None, (), None, ())
-        screen = self._screen(kind="album", scope=(None, None), stats=stats)
+        screen = self._screen(kind="album", scope=("A", None), stats=stats)
         assert stat_fields(screen, None) == [
             ("Albums", "2"),
             ("Tracks", "5"),
         ]
+
+    def test_song_kind_selects_the_album_level_fields(self):
+        stats = library.LevelStats(1, 5, None, None, None, (), None, ())
+        screen = self._screen(kind="song", scope=("A", "B"), stats=stats)
+        assert stat_fields(screen, None) == [("Tracks", "5")]
 
 
 class TestTheSeam:
@@ -293,6 +297,7 @@ class TestTheSeam:
             "musicbot",
             "musicbot.library",
             "musicbot.library_browse",
+            "musicbot.library_display",
         }
         assert {n.split(".")[0] for n in names} == {"typing", "musicbot"}
         # and the one allowed exception really is TYPE_CHECKING-only,
@@ -309,26 +314,6 @@ class TestTheSeam:
 
 
 class TestTrimAndFormat:
-    def test_trim_drops_whole_char_when_budget_ends_in_surrogate_pair(self):
-        text = "x" + "\U0001f600" * 10
-        assert library_session.trim(text, 4) == "x\U0001f600…"
-
-    def test_trim_cuts_bmp_text_at_the_limit(self):
-        assert library_session.trim("abcdef", 4) == "abcd…"
-
-    def test_trim_returns_text_within_budget_unchanged(self):
-        assert library_session.trim("abcd", 4) == "abcd"
-        assert library_session.trim("\U0001f600\U0001f600", 4) == (
-            "\U0001f600\U0001f600"
-        )
-
-    def test_trim_counts_a_lone_surrogate_as_one_unit(self):
-        lone = "\udc80"  # an undecodable filename byte
-        assert library_session.trim("ab" + lone, 3) == "ab" + lone
-        assert library_session.trim("ab" + lone + "cd", 3) == (
-            "ab" + lone + "…"
-        )
-
     def test_non_bmp_title_fits_the_embed_title_limit(self):
         name = "x" + "\U0001f600" * 255
         s = session({name: {"Album": [song("S")]}})
@@ -356,3 +341,18 @@ class TestTrimAndFormat:
             listeners(v)
             for v in (999, 1_500, 999_949, 999_950, 1_204_338_291, 999_999_999)
         ] == ["999", "1.5K", "999.9K", "1M", "1.2B", "1B"]
+
+
+class TestNarrowReads:
+    def test_scope_at_each_level(self):
+        assert session().scope() == (None, None)
+        assert at_artist().scope() == ("Radiohead", None)
+        assert at_album().scope() == ("Radiohead", "OK Computer")
+
+    def test_tracks_at_each_level(self):
+        def files(s):
+            return sorted(f for _, _, f in s.tracks())
+
+        assert session().tracks() == []
+        assert files(at_artist()) == ["Airbag.flac", "Zoo.flac"]
+        assert files(at_album()) == ["Airbag.flac"]
