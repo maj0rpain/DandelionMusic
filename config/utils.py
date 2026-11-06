@@ -92,7 +92,21 @@ def ensure_sqlite_parent(url: str) -> None:
 
 
 class Formatter(string.Template):
+    """Load-time substitution of braced config names, `{NAME}`, only.
+
+    A bare word is never substituted, so a message can name a setting
+    without printing its value. `escaped` is required by
+    string.Template but never matches: `{{` is not a load-time escape,
+    the runtime `.format()` calls own brace escaping.
+    """
+
     delimiter = ""
+    pattern = r"""
+        (?P<escaped>(?!))
+        | \{(?P<braced>[_a-z][_a-z0-9]*)\}
+        | (?P<named>(?!))
+        | (?P<invalid>(?!))
+    """
     format = string.Template.safe_substitute
 
 
