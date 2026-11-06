@@ -18,6 +18,7 @@ from musicbot.audiocontroller import (
 )
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
+from musicbot.message_link import check_message_link
 from musicbot.linkutils import get_site_type, url_regex
 from musicbot.views import MusicButton, OwnedView
 
@@ -620,6 +621,7 @@ class Music(commands.Cog):
     ):
         await ctx.defer()
         try:
+            await check_message_link(track, ctx.guild, ctx.author)
             result = await loader.load_song(track)
         except SongError as e:
             await ctx.send(e)

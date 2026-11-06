@@ -41,6 +41,8 @@ def test_add_song_replies_with_the_song_error_and_saves_nothing(monkeypatch):
     group = next(c for c in Music(None).get_commands() if c.name == "playlist")
     command = group.get_command("add_song")
     ctx = db_ctx()
+    ctx.guild = types.SimpleNamespace(id=1)
+    ctx.author = None
     run(command.callback(Music(None), ctx, "mine", "bad link"))
     assert [str(m) for m in ctx.sent] == ["unsupported link"]
     assert add_calls == []

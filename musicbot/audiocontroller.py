@@ -21,6 +21,7 @@ from musicbot import library, loader, playlists, utils
 from musicbot.outcome import BatchReport, EnqueueOutcome, OutcomeKind
 from musicbot.song import Song
 from musicbot.linkutils import SiteTypes
+from musicbot.message_link import check_message_link
 from musicbot.panel_snapshot import PanelSnapshot
 from musicbot.playback import Playback, PlaybackState
 from musicbot.playlist import Playlist, LoopMode, LoopState
@@ -406,6 +407,7 @@ class AudioController(object):
         # A failed load raises SongError, which the caller turns into a
         # Discord reply; it still has to leave a trace here.
         try:
+            await check_message_link(track, self.guild, user)
             result = await loader.load_song(track)
         except loader.SongError:
             print(

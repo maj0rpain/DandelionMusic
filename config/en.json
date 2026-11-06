@@ -17,6 +17,8 @@
   "VOICE_PERMISSIONS_MISSING": "The bot needs VC permissions connect and speak",
   "VOICE_CONNECT_FAILED": "Couldn't connect to your voice channel - try again.",
   "PLAY_ARGS_MISSING": "You need to specify the track, attach a file or reply to a message with the file.",
+  // Reply when a message link is refused: another server, an unresolved channel, or one the requester cannot read. One message for every case.
+  "MESSAGE_LINK_FORBIDDEN": "You can only play attachments from a message in this server, in a channel you can read.",
 
   "ADD_MESSAGE": "To add this bot to your own Server, click [here]({link})",
 

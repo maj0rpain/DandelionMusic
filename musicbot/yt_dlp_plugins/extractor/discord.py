@@ -6,6 +6,7 @@ from discord.http import HTTPClient
 from yt_dlp.extractor.common import InfoExtractor
 
 from config import config
+from musicbot.message_link import MESSAGE_LINK_PATTERN
 
 
 # The extractor's own discord.py client, created lazily on the loader's
@@ -39,10 +40,7 @@ def _get_client(loop):
 
 
 class DiscordAttachmentsIE(InfoExtractor):
-    _VALID_URL = (
-        r"^https?://(?:canary\.)?discord\.com"
-        r"/channels/(?P<guild_id>\d+)/(?P<channel_id>\d+)/(?P<message_id>\d+)"
-    )
+    _VALID_URL = MESSAGE_LINK_PATTERN
 
     def _real_extract(self, url):
         from musicbot import linkutils
