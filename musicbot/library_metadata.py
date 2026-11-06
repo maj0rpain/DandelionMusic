@@ -13,6 +13,7 @@ from musicbot.linkutils import spotify_api
 from musicbot.audiotags import read_artwork, read_tags
 from musicbot.cached_lookup import ByteBoundedStore, CachedLookup
 
+
 # prefix of every line this module logs and of its lookup labels
 _LOG_PREFIX = "library_metadata: "
 

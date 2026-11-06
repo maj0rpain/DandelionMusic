@@ -884,13 +884,12 @@ def hide(path):
 
 
 def test_a_failed_local_read_is_refused_until_the_cooldown_passes(
-    tagged_rig, lastfm_for, monkeypatch
+    tagged_rig, lastfm_for, reads
 ):
     rig = tagged_rig(
         {("Radiohead", "OK Computer", "01.mp3"): TAGGED},
     )
     session = lastfm_for(rig)
-    reads = CountingReads(monkeypatch)
     sample = library.song_path("Radiohead", "OK Computer", "01.mp3")
     restore = hide(sample)
 
