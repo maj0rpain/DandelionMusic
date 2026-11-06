@@ -2395,3 +2395,215 @@ def test_a_failed_notice_send_still_drops_and_moves_on(
     assert _played(controller) == ["next"]
     assert _titles(controller)[0] == "next"
     assert "broken" not in _titles(controller)
+
+
+# --- a track that ends on its own having produced no audio ------------
+
+
+def _silent_voice(controller):
+    controller.guild.voice_client.produces_nothing = True
+
+
+async def _silent_end(controller, error=None):
+    """Starts the head, which produces no audio, and ends it on its
+    own from the audio thread."""
+    await _end_first_track_on_audio_thread(controller, error)
+
+
+@pytest.mark.parametrize("mode", list(LoopMode))
+def test_a_track_ending_on_its_own_with_no_audio_is_a_failed_track(
+    controller, stub_loader, monkeypatch, tmp_path, mode
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "dead", "next")
+    controller.playlist.loop = mode
+    _silent_voice(controller)
+
+    _bounded(controller, lambda: _silent_end(controller))
+
+    assert [s.title for s in controller.panel.skipped] == ["dead"]
+    assert _titles(controller) == ["next"]
+    assert _played(controller) == ["dead", "next"]
+    assert _preload_counts(stub_loader)["dead"] == 1
+    assert _backup(controller, tmp_path) == ["next"]
+    assert _history_songs(controller) == []
+    assert "dead" in _history(controller)
+
+
+def test_a_lone_track_ending_with_no_audio_under_loop_single_idles(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "dead")
+    controller.playlist.loop = LoopMode.SINGLE
+    _silent_voice(controller)
+
+    _bounded(controller, lambda: _silent_end(controller))
+
+    assert [s.title for s in controller.panel.skipped] == ["dead"]
+    assert _titles(controller) == []
+    assert _played(controller) == ["dead"]
+    assert controller.timer._task is not None
+
+
+async def _end_with_notice_in_flight(controller, command):
+    """Ends the silent head on its own with the failure notice held,
+    runs `command(controller)`, then lets the notice finish."""
+    gate = asyncio.Event()
+
+    async def held_notice(song):
+        controller.panel.skipped.append(song)
+        await gate.wait()
+
+    controller.playback._report_skipped = held_notice
+    after = await _start_and_end_first_track(controller)
+    await _fire_without_raising(after)
+    assert [s.title for s in controller.panel.skipped] == ["first"]
+    await command(controller)
+    gate.set()
+    await _settle()
+
+
+async def _cmd_stop(controller):
+    controller.stop()
+
+
+async def _cmd_skip(controller):
+    controller.skip()
+
+
+async def _cmd_back(controller):
+    controller.playback.back(_old_track(controller))
+
+
+async def _cmd_newer_start(controller):
+    await controller.play_song(controller.playlist[1])
+
+
+async def _cmd_disconnect(controller):
+    controller.guild.voice_client = None
+
+
+@pytest.mark.parametrize(
+    "command, played, titles",
+    [
+        (_cmd_stop, ["first"], []),
+        (_cmd_skip, ["first", "second"], ["second"]),
+        (_cmd_back, ["first", "old"], ["first", "second"]),
+        (_cmd_newer_start, ["first", "second"], ["first", "second"]),
+    ],
+)
+def test_a_command_overtakes_a_failure_notice_in_flight(
+    controller, monkeypatch, command, played, titles
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    _silent_voice(controller)
+
+    _bounded(
+        controller, lambda: _end_with_notice_in_flight(controller, command)
+    )
+
+    assert _played(controller) == played
+    assert _titles(controller) == titles
+
+
+def test_a_disconnect_overtaking_a_failure_notice_keeps_backup_no_idle(
+    controller, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    _silent_voice(controller)
+
+    async def scenario():
+        controller.bot.loop = asyncio.get_running_loop()
+        await controller.ensure_playing()
+        _save_backup(controller)
+        await _end_with_notice_in_flight(controller, _cmd_disconnect)
+
+    _bounded(controller, scenario)
+
+    assert _titles(controller) == ["first", "second"]
+    assert _backup(controller, tmp_path) == ["first", "second"]
+    assert controller.timer._task is None
+
+
+@pytest.mark.parametrize("mode", list(LoopMode))
+@pytest.mark.parametrize("command", ["skip", "back", "stop"])
+def test_a_user_command_on_a_track_with_no_audio_is_not_a_failure(
+    controller, monkeypatch, command, mode
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    controller.playlist.loop = mode
+    _silent_voice(controller)
+    old = _old_track(controller)
+
+    async def scenario(c):
+        {
+            "skip": c.skip,
+            "back": lambda: c.playback.back(old),
+            "stop": c.stop,
+        }[command]()
+        await _settle()
+
+    _bounded(controller, lambda: _scenario_playing(controller, scenario))
+
+    assert controller.panel.skipped == []
+    assert (
+        _played(controller)[1:]
+        == {
+            "skip": ["second"],
+            "back": ["old"],
+            "stop": [],
+        }[command]
+    )
+    if command == "stop":
+        assert _titles(controller) == []
+    else:
+        assert "first" in _titles(controller) or command == "skip"
+
+
+async def _scenario_playing(controller, scenario):
+    await _start_playing(controller)
+    await scenario(controller)
+
+
+@pytest.mark.parametrize(
+    "mode, played",
+    [
+        (LoopMode.OFF, ["first", "second"]),
+        (LoopMode.SINGLE, ["first", "first"]),
+    ],
+)
+def test_a_track_with_audio_then_an_error_advances_as_finished(
+    controller, stub_loader, monkeypatch, mode, played
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    controller.playlist.loop = mode
+
+    _bounded(
+        controller,
+        lambda: _end_first_track_on_audio_thread(
+            controller, RuntimeError("boom")
+        ),
+    )
+
+    assert _played(controller) == played
+    assert controller.panel.skipped == []
+
+
+def test_a_volume_change_reaches_the_wrapped_source(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first")
+
+    async def scenario(c):
+        c.set_volume(25)
+
+    _run_playing(controller, scenario)
+
+    given = controller.guild.voice_client.source
+    assert given.volume == 0.25
+    assert given.original is not None
+    assert given._wrapped.volume == 0.25

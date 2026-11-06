@@ -55,6 +55,41 @@ class TimerPort(Protocol):
         pass
 
 
+class _AudioProbe(discord.AudioSource):
+    """A pass-through audio source: forwards `read()`, `is_opus()`,
+    `cleanup()` and every other attribute read and write (`volume`,
+    `original`) to the source it wraps, and records whether any
+    `read()` returned a non-empty frame. That flag is the only work it
+    does on discord.py's audio thread."""
+
+    _OWN = ("_wrapped", "produced_audio")
+
+    def __init__(self, wrapped):
+        object.__setattr__(self, "_wrapped", wrapped)
+        object.__setattr__(self, "produced_audio", False)
+
+    def read(self):
+        frame = self._wrapped.read()
+        if frame:
+            self.produced_audio = True
+        return frame
+
+    def is_opus(self):
+        return self._wrapped.is_opus()
+
+    def cleanup(self):
+        self._wrapped.cleanup()
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+    def __setattr__(self, name, value):
+        if name in self._OWN:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._wrapped, name, value)
+
+
 class PlaybackState(Enum):
     """IDLE: nothing playing, paused or pending. STARTING: a track is
     claimed but its preload has not finished. ACTIVE: the voice client
@@ -131,6 +166,13 @@ class Playback:
         # True for the whole of teardown(): a track-end hop that lands
         # meanwhile must not start the idle timer.
         self._disconnecting = False
+        # the playing track's song and audio probe, set when it is
+        # handed to the voice client
+        self._current_song: Optional["Song"] = None
+        self._probe: Optional[_AudioProbe] = None
+        # True once Playback itself ends the playing track (a handover
+        # or stop()): that end is never a failure
+        self._ended_by_us = False
 
     # -- state -------------------------------------------------------
 
@@ -236,6 +278,7 @@ class Playback:
         # stopping an active voice client runs an `after` callback;
         # its _advance() finds the queue empty and idle, so
         # save_backup() keeps this snapshot
+        self._ended_by_us = True
         self._voice_client().stop()
 
     def toggle_pause(self) -> PauseState:
@@ -332,6 +375,20 @@ class Playback:
             # move or reconnect, when a real track end must advance.
             return
 
+        probe = self._probe
+        if (
+            not self._ended_by_us
+            and probe is not None
+            and not probe.produced_audio
+            and self._current_song is not None
+        ):
+            # ended on its own having played nothing: a failed track,
+            # guarded like a start by a token of its own
+            self._spawn(
+                self._fail_track(self._current_song, self._claim_start())
+            )
+            return
+
         self._advance()
 
     def _advance(self, forced=False):
@@ -360,6 +417,7 @@ class Playback:
         the voice client: the after= hop of the track does the advance.
         """
         self._next_song = song
+        self._ended_by_us = True
         self._voice_client().stop()
 
     def _spawn_start(self, song: "Song"):
@@ -422,9 +480,13 @@ class Playback:
         # no longer pending once it reaches play(); the generation
         # token that guards the start is _claim_start()'s
         self._start_pending = False
+        probe = _AudioProbe(self._make_source(song))
+        self._current_song = song
+        self._probe = probe
+        self._ended_by_us = False
         try:
             self._voice_client().play(
-                self._make_source(song),
+                probe,
                 after=self._track_end_callback(generation),
             )
         except discord.ClientException:
