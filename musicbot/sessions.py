@@ -8,7 +8,9 @@ failed), and that is a legal state. `controller()`, `settings()` and
 part that is not registered.
 """
 
+import asyncio
 import sys
+from traceback import print_exc
 from typing import (
     Awaitable,
     Callable,
@@ -49,6 +51,8 @@ class GuildSessions(Generic[Guild, Panel, Controller, Settings]):
         self._load_settings = settings_loader
         self._controllers: Dict[Guild, Controller] = {}
         self._settings: Dict[Guild, Settings] = {}
+        # guilds whose settings are being loaded, to the shared load
+        self._loading: Dict[Guild, asyncio.Future] = {}
 
     def controller(self, guild: Guild) -> Optional[Controller]:
         return self._controllers.get(guild)
@@ -85,11 +89,48 @@ class GuildSessions(Generic[Guild, Panel, Controller, Settings]):
         return iter(list(self._controllers.values()))
 
     async def load_settings(self, guilds: Iterable[Guild]) -> None:
-        """Bulk-fill the settings half only."""
-        self._settings.update(await self._load_settings(list(guilds)))
+        """Bulk-fill the settings half only, for guilds with no settings
+        yet: registered settings are never replaced, and a guild
+        already being loaded shares that load."""
+        waiting = []
+        fresh = []
+        for guild in dict.fromkeys(guilds):
+            if guild in self._settings:
+                continue
+            load = self._loading.get(guild)
+            if load is not None:
+                waiting.append(load)
+            else:
+                fresh.append(guild)
+        if fresh:
+            load = asyncio.ensure_future(self._load_fresh(fresh))
+            for guild in fresh:
+                self._loading[guild] = load
+            waiting.append(load)
+        # shielded: a cancelled waiter must not cancel the shared load
+        results = await asyncio.gather(
+            *(asyncio.shield(w) for w in waiting), return_exceptions=True
+        )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+
+    async def _load_fresh(self, guilds: list) -> None:
+        me = asyncio.current_task()
+        try:
+            loaded = await self._load_settings(guilds)
+            for guild, sett in loaded.items():
+                # a guild discarded mid-load lost its entry: not registered
+                if self._loading.get(guild) is me:
+                    self._settings.setdefault(guild, sett)
+        finally:
+            for guild in guilds:
+                if self._loading.get(guild) is me:
+                    del self._loading[guild]
 
     async def _ensure_settings(self, guild: Guild) -> Settings:
-        if guild not in self._settings:
+        # a guild discarded mid-load is loaded afresh
+        while guild not in self._settings:
             await self.load_settings([guild])
         return self._settings[guild]
 
@@ -131,14 +172,19 @@ class GuildSessions(Generic[Guild, Panel, Controller, Settings]):
             self._controllers.pop(guild, None)
             self._panels.pop(guild, None)
             self._settings.pop(guild, None)
+            self._loading.pop(guild, None)
 
     async def reset(self, guild: Guild, reason: str = "reset") -> Controller:
         """Replace the guild's controller with a fresh one, keeping
-        its settings. Leaves the guild settings-only if disposing of
-        the old controller or building the new one fails."""
+        its settings. A failure disposing of the old controller is
+        logged to stderr and the new one is built regardless; the guild
+        is left settings-only only if building the new one fails."""
         await self._ensure_settings(guild)
         old = self._controllers.pop(guild, None)
         self._panels.pop(guild, None)
         if old is not None:
-            await old.dispose(reason)
+            try:
+                await old.dispose(reason)
+            except Exception:
+                print_exc(file=sys.stderr)
         return self._build(guild)
