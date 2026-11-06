@@ -296,6 +296,7 @@ class Music(commands.Cog):
         help=config.HELP_STOP_SHORT,
         aliases=["st"],
     )
+    @commands.check(dj_check)
     async def _stop(self, ctx):
         ctx.audiocontroller.stop()
         await ctx.send("Stopped all sessions :octagonal_sign:")
@@ -574,7 +575,6 @@ class Music(commands.Cog):
         description=config.HELP_PLAYLIST_SHOW_LONG,
         help=config.HELP_PLAYLIST_SHOW_SHORT,
     )
-    @commands.check(dj_check)
     @app_commands.autocomplete(playlist=_playlist_autocomplete)
     async def _playlist_show(
         self,

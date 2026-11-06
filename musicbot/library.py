@@ -5,7 +5,7 @@ import re
 import sys
 from collections import Counter
 import os
-from pathlib import Path
+from pathlib import Path, PurePath, PureWindowsPath
 from typing import Dict, List, NamedTuple, Optional, Tuple
 from urllib.parse import unquote_to_bytes
 
@@ -450,8 +450,21 @@ class LocalTrack(NamedTuple):
     name: str
 
 
-def track_path_from_uri(uri: str) -> Optional[Path]:
-    """The playable path of a local-library URI, or None if refused.
+def library_path_from_uri(uri: str, root: PurePath) -> Optional[PurePath]:
+    r"""`root / artist / album / filename` for a local-library URI, or
+    None if refused. Pure: it touches no filesystem.
+
+    The flavour (POSIX or Windows) is that of `root`, and sets the
+    path rules. POSIX: only an empty or `localhost` authority is
+    accepted, any other is refused, and only `/` separates segments
+    (`\` is an ordinary filename character). Windows: an empty or
+    `localhost` authority takes a drive URI (`file:///C:/...`, the
+    `/` before the drive dropped); any other authority is a UNC host
+    (`file://nas/share/...` is `\\nas\share\...`, never with a drive
+    after it); `/` and `\` both separate segments; and comparison
+    ignores case. Refused on both: a remainder that still starts with
+    `//` once the authority is stripped, the drive-bar form (`C|`,
+    also encoded) and a `.` or `..` segment.
 
     Containment is lexical, on the path as written, not on its
     resolved target. Symlinks under the library root are trusted as
@@ -461,38 +474,69 @@ def track_path_from_uri(uri: str) -> Optional[Path]:
     boundary - identify_url sends any user-typed file:// URI here - a
     `.` or `..` segment is refused (`Artist/../../x` would otherwise
     climb out through a symlinked folder), as is any depth other than
-    the index's own Artist/Album/file (the three parts song_path takes).
+    the index's own Artist/Album/file.
 
     The URI is decoded exactly once, by hand, and both the `.` check and
-    the containment checks run on that value: building a Path silently
+    the containment checks run on that value: building a path silently
     drops `.`, and urlparse would split a raw `?` or `#` off as
-    query/fragment. After the scheme only an empty or `localhost`
-    authority is accepted; any other authority is refused.
+    query/fragment.
     """
+    if not uri.startswith(FILE_SCHEME):
+        return None
+    windows = isinstance(root, PureWindowsPath)
+    cls = type(root)
     rest = uri[len(FILE_SCHEME) :]
-    if rest.startswith("localhost/"):
-        rest = rest[len("localhost") :]
-    elif not rest.startswith("/"):
+    slash = rest.find("/")
+    if slash < 0:
         return None
-    decoded = unquote_to_bytes(rest)
-    if any(seg in (b".", b"..") for seg in decoded.split(b"/")):
+    authority, tail = rest[:slash], rest[slash:]
+    if tail.startswith("//"):
         return None
-    path = Path(os.fsdecode(decoded))
-    root = library_root()
-    # Every accepted prefix leaves a leading "/", so no input reaches
-    # the is_absolute check today; kept as a defensive backstop on a
-    # path-containment boundary.
+    host = ""
+    if authority not in ("", "localhost"):
+        if not windows:
+            return None
+        host = os.fsdecode(unquote_to_bytes(authority))
+        if any(c in host for c in "/\\:|"):
+            return None
+    decoded = os.fsdecode(unquote_to_bytes(tail))
+    segments = decoded.split("/")
+    if windows:
+        if decoded[1:2] in ("\\", "/") or decoded[2:3] == "|":
+            return None
+        if host and decoded[2:3] == ":":
+            return None
+        segments = [part for seg in segments for part in seg.split("\\")]
+    if any(seg in (".", "..") for seg in segments):
+        return None
+    if host:
+        path = cls("\\\\" + host + decoded.replace("/", "\\"))
+    elif windows and decoded[2:3] == ":":
+        path = cls(decoded[1:])
+    else:
+        path = cls(decoded)
     if not path.is_absolute() or not path.is_relative_to(root):
         return None
     try:
         artist, album, filename = path.relative_to(root).parts
     except ValueError:
         return None
-    if song_path(artist, album, filename) != path or not _stat_ok(
-        path, Path.is_file
-    ):
+    song = root / artist / album / filename
+    return song if song == path else None
+
+
+def track_path_from_uri(uri: str) -> Optional[Path]:
+    """The playable path of a local-library URI, or None if refused.
+
+    `library_path_from_uri` does the parsing and every refusal (see
+    its doc for the per-flavour authority and separator rules); this
+    adds the one filesystem check, that the file exists.
+    """
+    path = library_path_from_uri(uri, library_root())
+    if path is None:
         return None
-    return path
+    path = Path(path)
+    return path if _stat_ok(path, Path.is_file) else None
 
 
 def tracks_for(
