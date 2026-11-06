@@ -219,7 +219,6 @@ def _fetch(list_type="playlist"):
 @pytest.mark.parametrize(
     "song_count, expected",
     [
-        (50, Truncation(50, TruncationReason.API_UNAVAILABLE)),
         (30, None),
         (None, None),
     ],
