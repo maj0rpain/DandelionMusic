@@ -33,6 +33,7 @@ from discord_fakes import (
     ADMISSION_DJ_ROLE,
     HERE,
     admission_settings,
+    fake_controller,
     situation,
     FakeInteraction,
     VoiceGuild,
@@ -161,7 +162,7 @@ def voice_ctx(
 ):
     sett = admission_settings(dj_role=dj_role)
     bot = make_bot(
-        {guild: types.SimpleNamespace(command_channel=None)},
+        {guild: fake_controller()},
         settings={guild: sett},
     )
     author = types.SimpleNamespace(

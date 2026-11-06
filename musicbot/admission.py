@@ -182,10 +182,17 @@ class Admission:
         return get_audiocontroller(self._ctx)
 
 
-async def check(ctx: Context, kind: Optional[RequestKind] = None):
+async def check(
+    ctx: Context,
+    kind: Optional[RequestKind] = None,
+    *,
+    allow_disconnecting: bool = False,
+):
     """Decides whether the request may act now. Raises CheckError on
     refusal; never touches voice. `kind` is None for a command, whose
-    kind is read off its @joining_command marker."""
+    kind is read off its @joining_command marker. A joining kind is
+    refused while the controller is disconnecting, unless
+    `allow_disconnecting` (d!reset's first check, which recovers)."""
     if kind in COMMAND_KINDS:
         raise ValueError(f"{kind} is derived from the command, not passed")
     # first, as Music.cog_check always resolved it first
@@ -201,6 +208,12 @@ async def check(ctx: Context, kind: Optional[RequestKind] = None):
     if kind in _PLAYER_KINDS and not ctx.guild.voice_client:
         raise CheckError(config.NOT_CONNECTED_MESSAGE)
     _check_command_channel(ctx, sett)
+    if (
+        kind in _JOINING_KINDS
+        and not allow_disconnecting
+        and controller.is_disconnecting()
+    ):
+        raise CheckError(config.DISCONNECTING_MESSAGE)
     target = None
     if kind in _JOINING_KINDS:
         target = _join_target(ctx, sett)
