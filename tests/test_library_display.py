@@ -1,5 +1,6 @@
-from helpers import imported_roots
 from musicbot import library_display, library_session
+
+from helpers import imported_roots
 
 
 class TestTrim:
