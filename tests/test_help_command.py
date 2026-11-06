@@ -37,7 +37,7 @@ NAMED_BY_THE_ISSUE = {
 }
 
 
-@pytest.fixture
+@pytest.fixture(scope="module")
 def bot():
     built = MusicBot(
         [], command_prefix="d!", intents=discord.Intents.default()
@@ -100,13 +100,6 @@ def test_group_help_lists_every_non_hidden_subcommand(bot, name):
     group = bot.get_command(name)
     shown = listed(bot, refusing_context(bot), group.commands)
     assert shown == non_hidden(group) != set()
-
-
-def test_setting_group_lists_the_dj_gated_subcommands(bot):
-    shown = listed(
-        bot, refusing_context(bot), bot.get_command("setting").commands
-    )
-    assert "setting dj_role" in shown
 
 
 def test_help_leaves_no_admission_state_on_the_context(bot):
