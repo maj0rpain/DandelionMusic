@@ -1,10 +1,12 @@
 """Saved playlists: the one module that reads and writes them.
 
 A saved playlist is a ``SavedPlaylist`` row whose ``songs_json`` holds
-a JSON list of ``{"url": ..., "title": ...}`` objects. That format is
-encoded and decoded only here (outside the legacy migration in
-``musicbot.settings``), so callers deal in ``PlaylistEntry`` records
-and never in the blob. Every operation on one saved playlist names it
+a JSON list of ``{"url": ..., "title": ...}`` objects. This module is
+the only reader and writer of ``SavedPlaylist.songs_json``; it also
+reads the legacy bare-string format (an entry stored as just its URL),
+and writes today's format at the next edit that changes the playlist.
+Callers deal in ``PlaylistEntry`` records and never in the blob.
+Every operation on one saved playlist names it
 by a ``PlaylistRef``; ``get`` hands back a ``PlaylistContents``, so the
 row itself never leaves this module.
 
@@ -14,6 +16,7 @@ below; ``get`` returns ``None`` for a missing playlist instead.
 
 import asyncio
 import json
+import sys
 import weakref
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional
@@ -66,6 +69,10 @@ class PlaylistNotFound(SavedPlaylistError):
     pass
 
 
+class CorruptPlaylist(SavedPlaylistError):
+    """The playlist's stored data cannot be read."""
+
+
 class PlaylistExists(SavedPlaylistError):
     pass
 
@@ -94,11 +101,32 @@ def _lock(playlist: PlaylistRef) -> asyncio.Lock:
     return lock
 
 
-def _decode(songs_json: str) -> List[PlaylistEntry]:
-    return [
-        PlaylistEntry(song["url"], song["title"])
-        for song in json.loads(songs_json)
-    ]
+def _decode_entry(song) -> PlaylistEntry:
+    if isinstance(song, str):
+        return PlaylistEntry(song, None)
+    if isinstance(song, dict) and isinstance(song.get("url"), str):
+        title = song.get("title")
+        if title is None or isinstance(title, str):
+            return PlaylistEntry(song["url"], title)
+        raise ValueError(f"entry title is not a string: {song!r}")
+    raise ValueError(f"unreadable entry: {song!r}")
+
+
+def _decode(songs_json: str, playlist: PlaylistRef) -> List[PlaylistEntry]:
+    """Raises ``CorruptPlaylist`` (after logging the row) when the blob
+    cannot be read; no entry is ever dropped."""
+    try:
+        songs = json.loads(songs_json)
+        if not isinstance(songs, list):
+            raise ValueError("not a JSON list")
+        return [_decode_entry(song) for song in songs]
+    except ValueError as e:
+        print(
+            f"Unreadable saved playlist {playlist.name!r} "
+            f"in guild {playlist.guild_id}: {e}",
+            file=sys.stderr,
+        )
+        raise CorruptPlaylist(playlist.name) from None
 
 
 def _encode(entries: Iterable[PlaylistEntry]) -> str:
@@ -129,7 +157,7 @@ async def get(
         row = await _load_row(session, playlist)
         if row is None:
             return None
-        return PlaylistContents(playlist, _decode(row.songs_json))
+        return PlaylistContents(playlist, _decode(row.songs_json, playlist))
 
 
 async def list_names(
@@ -187,7 +215,7 @@ async def _update(
         row = await _load_row(session, playlist)
         if row is None:
             raise PlaylistNotFound(playlist.name)
-        songs = _decode(row.songs_json)
+        songs = _decode(row.songs_json, playlist)
         before = list(songs)
         change(songs)
         if songs == before:

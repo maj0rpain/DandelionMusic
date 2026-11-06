@@ -23,6 +23,9 @@ class FakeDbSession:
     def add(self, obj):
         pass
 
+    async def execute(self, statement):
+        return types.SimpleNamespace(rowcount=1)
+
     async def commit(self):
         FakeDbSession.commits += 1
 

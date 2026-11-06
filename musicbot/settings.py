@@ -1,6 +1,8 @@
+import asyncio
 import json
 import os
 import re
+import weakref
 from dataclasses import dataclass
 from enum import StrEnum
 from inspect import isawaitable
@@ -26,6 +28,7 @@ from discord import (
 )
 import sqlalchemy
 from sqlalchemy import String, select
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from alembic.migration import MigrationContext
 from alembic.autogenerate import produce_migrations, render_python_code
@@ -263,6 +266,19 @@ def default_settings() -> Dict[str, Any]:
     return {name: d.default for name, d in SETTINGS.items()}
 
 
+_setting_locks: "weakref.WeakValueDictionary[str, asyncio.Lock]" = (
+    weakref.WeakValueDictionary()
+)
+
+
+def _setting_lock(guild_id: str) -> asyncio.Lock:
+    "The guild's setting-write lock; gone once nothing holds or awaits it"
+    lock = _setting_locks.get(guild_id)
+    if lock is None:
+        lock = _setting_locks[guild_id] = asyncio.Lock()
+    return lock
+
+
 class GuildSettings(Base):
     __tablename__ = "settings"
 
@@ -279,34 +295,6 @@ class GuildSettings(Base):
     )
 
     @classmethod
-    async def load(
-        cls, bot: "MusicBot", guild: discord.Guild
-    ) -> "GuildSettings":
-        "Load object from database or create a new one and commit it"
-        guild_id = str(guild.id)
-        async with bot.DbSession() as session:
-            sett = (
-                await session.execute(
-                    select(GuildSettings).where(
-                        GuildSettings.guild_id == guild_id
-                    )
-                )
-            ).scalar_one_or_none()
-            if sett:
-                return sett
-            session.add(GuildSettings(guild_id=guild_id, **default_settings()))
-            # avoiding incomplete detached object
-            sett = (
-                await session.execute(
-                    select(GuildSettings).where(
-                        GuildSettings.guild_id == guild_id
-                    )
-                )
-            ).scalar_one()
-            await session.commit()
-            return sett
-
-    @classmethod
     async def load_many(
         cls, bot: "MusicBot", guilds: List[discord.Guild]
     ) -> Dict[discord.Guild, "GuildSettings"]:
@@ -314,8 +302,9 @@ class GuildSettings(Base):
         Creates new ones when not found
         Returns dict with guilds as keys and their settings as values"""
         ids = [str(g.id) for g in guilds]
-        async with bot.DbSession() as session:
-            settings = (
+
+        async def select_all(session):
+            return (
                 (
                     await session.execute(
                         select(GuildSettings).where(
@@ -326,26 +315,30 @@ class GuildSettings(Base):
                 .scalars()
                 .fetchall()
             )
-            missing = set(ids) - {sett.guild_id for sett in settings}
-            for new_id in missing:
-                session.add(
-                    GuildSettings(guild_id=new_id, **default_settings())
-                )
-            settings.extend(
-                (
-                    await session.execute(
-                        select(GuildSettings).where(
-                            GuildSettings.guild_id.in_(missing)
-                        )
+
+        async with bot.DbSession() as session:
+            found = {s.guild_id for s in await select_all(session)}
+            missing = [i for i in dict.fromkeys(ids) if i not in found]
+            for attempt in (1, 2):
+                if not missing:
+                    break
+                for new_id in missing:
+                    session.add(
+                        GuildSettings(guild_id=new_id, **default_settings())
                     )
-                )
-                .scalars()
-                .fetchall()
-            )
-            await session.commit()
-        # ensure the correct order
-        settings.sort(key=lambda x: ids.index(x.guild_id))
-        return {g: sett for g, sett in zip(guilds, settings)}
+                try:
+                    await session.commit()
+                    break
+                except IntegrityError:
+                    # Another loader created some of these rows between
+                    # our select and insert.
+                    await session.rollback()
+                    if attempt == 2:
+                        raise
+                    found = {s.guild_id for s in await select_all(session)}
+                    missing = [i for i in missing if i not in found]
+            by_id = {s.guild_id: s for s in await select_all(session)}
+        return {g: by_id[str(g.id)] for g in guilds}
 
     def format(self, ctx: "Context"):
         embed = discord.Embed(
@@ -381,10 +374,20 @@ class GuildSettings(Base):
         value = choose(descriptor)
         if isawaitable(value):
             value = await value
-        setattr(self, setting, value)
-        async with ctx.bot.DbSession() as session:
-            session.add(self)
-            await session.commit()
+        async with _setting_lock(self.guild_id):
+            try:
+                async with ctx.bot.DbSession() as session:
+                    result = await session.execute(
+                        sqlalchemy.update(GuildSettings)
+                        .where(GuildSettings.guild_id == self.guild_id)
+                        .values({setting: value})
+                    )
+                    if result.rowcount != 1:
+                        return False
+                    await session.commit()
+            except SQLAlchemyError:
+                return False
+            setattr(self, setting, value)
         return True
 
     async def update_setting(
@@ -564,17 +567,3 @@ async def extract_legacy_settings(bot: "MusicBot"):
             session.add(GuildSettings(guild_id=guild_id, **new_settings))
         await session.commit()
     os.rename(LEGACY_SETTINGS, LEGACY_SETTINGS + ".back")
-
-
-async def migrate_old_playlists(bot: "MusicBot"):
-    async with bot.DbSession() as session:
-        playlists = (
-            (await session.execute(select(SavedPlaylist))).scalars().fetchall()
-        )
-        for playlist in playlists:
-            songs = json.loads(playlist.songs_json)
-            for i, song in enumerate(songs):
-                if isinstance(song, str):
-                    songs[i] = {"url": song, "title": None}
-            playlist.songs_json = json.dumps(songs)
-        await session.commit()

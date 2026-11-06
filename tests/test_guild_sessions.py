@@ -236,6 +236,51 @@ def test_a_reset_whose_factory_fails_leaves_the_guild_settings_only(
     assert sessions.settings(guild) is not None
 
 
+def test_a_reset_whose_dispose_fails_still_builds_a_fresh_controller(
+    sessions, capsys
+):
+    guild = FakeGuild(1)
+
+    async def failing_dispose(reason="left guild"):
+        raise RuntimeError("dispose failed")
+
+    async def scenario():
+        old = await sessions.get_or_create(guild)
+        old.dispose = failing_dispose
+        settings = sessions.settings(guild)
+        new = await sessions.reset(guild)
+        return old, settings, new
+
+    old, settings, new = run(scenario())
+
+    assert new is not old
+    assert sessions.controller(guild) is new
+    assert sessions.settings(guild) is settings
+    assert "dispose failed" in capsys.readouterr().err
+
+
+def test_a_reset_whose_dispose_and_build_fail_leaves_settings_only(
+    sessions, factory, capsys
+):
+    guild = FakeGuild(1)
+
+    async def failing_dispose(reason="left guild"):
+        raise RuntimeError("dispose failed")
+
+    async def scenario():
+        old = await sessions.get_or_create(guild)
+        old.dispose = failing_dispose
+        factory.fail = True
+        with pytest.raises(RuntimeError, match="factory failed"):
+            await sessions.reset(guild)
+
+    run(scenario())
+
+    assert "dispose failed" in capsys.readouterr().err
+    assert sessions.controller(guild) is None
+    assert sessions.settings(guild) is not None
+
+
 def test_on_guild_remove_discards_the_guilds_session(sessions):
     """Leaving a guild (kicked, banned, or a guild.leave() of our own)
     must not leak its session: MusicBot.on_guild_remove discards it."""
@@ -512,3 +557,113 @@ def test_a_failing_controller_factory_registers_no_panel(sessions, factory):
         run(sessions.get_or_create(guild))
 
     assert sessions.panel(guild) is None
+
+
+class CountingLoader:
+    """A settings loader that waits for `release`, counts its calls and
+    raises on the first `failures` calls."""
+
+    def __init__(self, failures=0):
+        self.calls = 0
+        self.failures = failures
+        self.release = None
+        self.entered = asyncio.Event()
+
+    async def __call__(self, guilds):
+        self.calls += 1
+        self.entered.set()
+        if self.release is not None:
+            await self.release.wait()
+        if self.calls <= self.failures:
+            raise RuntimeError("load failed")
+        return {guild: FakeSettings(guild) for guild in guilds}
+
+
+def _counting_sessions(loader):
+    return GuildSessions(
+        lambda guild: FakePanel(), lambda g, panel: FakeController(g), loader
+    )
+
+
+def test_concurrent_ensures_share_one_load():
+    loader = CountingLoader()
+    sessions = _counting_sessions(loader)
+    guild = FakeGuild(1)
+
+    async def scenario():
+        loader.release = asyncio.Event()
+        calls = [
+            asyncio.ensure_future(sessions._ensure_settings(guild)),
+            asyncio.ensure_future(sessions.get_or_create(guild)),
+            asyncio.ensure_future(sessions._ensure_settings(guild)),
+        ]
+        await loader.entered.wait()
+        loader.release.set()
+        await asyncio.gather(*calls)
+        return calls[0].result(), calls[2].result()
+
+    first, third = run(scenario())
+
+    assert loader.calls == 1
+    assert first is third is sessions.settings(guild)
+
+
+def test_load_settings_keeps_registered_settings():
+    loader = CountingLoader()
+    sessions = _counting_sessions(loader)
+    guild, other = FakeGuild(1), FakeGuild(2)
+
+    async def scenario():
+        await sessions.load_settings([guild])
+        registered = sessions.settings(guild)
+        await sessions.load_settings([guild, other])
+        return registered
+
+    registered = run(scenario())
+
+    assert sessions.settings(guild) is registered
+    assert sessions.settings(other) is not None
+
+
+def test_a_failed_shared_load_reaches_every_waiter_and_is_retried():
+    loader = CountingLoader(failures=1)
+    sessions = _counting_sessions(loader)
+    guild = FakeGuild(1)
+
+    async def scenario():
+        loader.release = asyncio.Event()
+        calls = [
+            asyncio.ensure_future(sessions._ensure_settings(guild))
+            for _ in range(2)
+        ]
+        await loader.entered.wait()
+        loader.release.set()
+        results = await asyncio.gather(*calls, return_exceptions=True)
+        unregistered = sessions.settings(guild) is None
+        retried = await sessions._ensure_settings(guild)
+        return results, unregistered, retried
+
+    results, unregistered, retried = run(scenario())
+
+    assert all(isinstance(r, RuntimeError) for r in results)
+    assert unregistered
+    assert retried is sessions.settings(guild)
+    assert loader.calls == 2
+
+
+def test_a_guild_discarded_during_its_load_is_not_registered():
+    loader = CountingLoader()
+    sessions = _counting_sessions(loader)
+    guild = FakeGuild(1)
+
+    async def scenario():
+        loader.release = asyncio.Event()
+        load = asyncio.ensure_future(sessions.load_settings([guild]))
+        await loader.entered.wait()
+        await sessions.discard(guild)
+        loader.release.set()
+        await load
+
+    run(scenario())
+
+    assert sessions.settings(guild) is None
