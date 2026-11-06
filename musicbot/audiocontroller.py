@@ -128,11 +128,13 @@ class AudioController(object):
         self.playlist.next()
 
     def _make_source(self, song: Song):
-        before_options = (
-            None
-            if song.host == SiteTypes.LOCAL_LIBRARY
-            else "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
-        )
+        if song.host == SiteTypes.LOCAL_LIBRARY:
+            before_options = "-protocol_whitelist file"
+        else:
+            before_options = (
+                "-protocol_whitelist http,https,tcp,tls,crypto "
+                "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
+            )
         return discord.PCMVolumeTransformer(
             discord.FFmpegPCMAudio(
                 song.url,

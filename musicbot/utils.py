@@ -129,6 +129,15 @@ async def dj_check(ctx: Context):
     return True
 
 
+async def settings_admin_check(ctx: Context):
+    """Check if the user may change a guild setting: a server
+    administrator or the application owner, DJs and EXTRA_OWNERS
+    excluded, whether or not a DJ role is set"""
+    if await admin_or_owner(ctx):
+        return True
+    raise CheckError(config.USER_MISSING_PERMISSIONS)
+
+
 async def owner_check(ctx: Context):
     """Check if the user is the owner of the bot"""
     if ctx.author.id in config.EXTRA_OWNERS:

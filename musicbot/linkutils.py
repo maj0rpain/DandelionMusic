@@ -1,5 +1,7 @@
 import re
 import sys
+import socket
+import ipaddress
 import asyncio
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -154,6 +156,42 @@ def get_session() -> ClientSession:
             headers=headers, timeout=ClientTimeout(total=HTTP_TIMEOUT)
         )
     return session
+
+
+def _legacy_ipv4(host: str) -> Optional[ipaddress.IPv4Address]:
+    """The IPv4 address a legacy spelling (`127.1`, `2130706433`,
+    `0x7f000001`, `0177.0.0.1`) stands for, as getaddrinfo reads it;
+    `None` for anything else. Parses the text only; no DNS lookup."""
+    if ":" in host or not re.fullmatch(r"[0-9a-fx.]+", host):
+        return None
+    try:
+        return ipaddress.IPv4Address(socket.inet_aton(host))
+    except OSError:
+        return None
+
+
+def _is_disallowed_host(host: Optional[str]) -> bool:
+    """True for localhost and literal loopback, private, link-local or
+    unspecified addresses. Reads the text only; no DNS lookup."""
+    if not host:
+        return True
+    host = host.rstrip(".").lower()
+    if host == "localhost":
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        address = _legacy_ipv4(host)
+        if address is None:
+            return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    return (
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address.is_unspecified
+    )
 
 
 class SiteTypes(Enum):
@@ -388,7 +426,12 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     if ie := get_ie(url):
         return ie
 
-    if urlparse(url).path.lower().endswith(config.SUPPORTED_EXTENSIONS):
+    parsed = urlparse(url)
+    if (
+        parsed.scheme.lower() in ("http", "https")
+        and not _is_disallowed_host(parsed.hostname)
+        and parsed.path.lower().endswith(config.SUPPORTED_EXTENSIONS)
+    ):
         return SiteTypes.CUSTOM
 
     # If no match

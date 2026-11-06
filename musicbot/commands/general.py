@@ -12,9 +12,9 @@ from musicbot.bot import MusicBot
 from musicbot.settings import SETTINGS, ConversionError, SettingDescriptor
 from musicbot.utils import (
     CheckError,
-    dj_check,
     get_settings,
     joining_command,
+    settings_admin_check,
 )
 
 # the group's default subcommand, and the one word that is not an
@@ -190,7 +190,7 @@ class General(commands.Cog):
         vars()[f"_set_{_descriptor.name}"] = _settings.command(
             name=_descriptor.name
         )(
-            commands.check(dj_check)(
+            commands.check(settings_admin_check)(
                 _setting_subcommand(_descriptor, __qualname__)
             )
         )
