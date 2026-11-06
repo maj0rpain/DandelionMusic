@@ -7,6 +7,7 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
+from helpers import run
 from musicbot import linkutils
 
 
@@ -35,45 +36,45 @@ async def serving():
 
 
 def test_redirect_chain_returns_the_final_url():
-    async def run():
+    async def scenario():
         async with serving() as server:
             url = await linkutils.resolve_short_link(
                 str(server.make_url("/a"))
             )
             return url, str(server.make_url("/final?si=1"))
 
-    url, expected = asyncio.run(run())
+    url, expected = run(scenario())
 
     assert url == expected
 
 
 @pytest.mark.parametrize("path", ["/gone", "/boom", "/to-gone", "/to-boom"])
 def test_error_status_raises(path):
-    async def run():
+    async def scenario():
         async with serving() as server:
             await linkutils.resolve_short_link(str(server.make_url(path)))
 
     with pytest.raises(Exception):
-        asyncio.run(run())
+        run(scenario())
 
 
 def test_refused_connection_raises():
-    async def run():
+    async def scenario():
         async with serving() as server:
             url = str(server.make_url("/a"))
             await server.close()
             await linkutils.resolve_short_link(url)
 
     with pytest.raises(Exception):
-        asyncio.run(run())
+        run(scenario())
 
 
 def test_slow_server_raises(monkeypatch):
     monkeypatch.setattr(linkutils, "HTTP_TIMEOUT", 0.2)
 
-    async def run():
+    async def scenario():
         async with serving() as server:
             await linkutils.resolve_short_link(str(server.make_url("/slow")))
 
     with pytest.raises(asyncio.TimeoutError):
-        asyncio.run(run())
+        run(scenario())

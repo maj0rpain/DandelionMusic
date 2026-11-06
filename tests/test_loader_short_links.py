@@ -93,7 +93,9 @@ def test_short_link_to_a_spotify_track(monkeypatch, worker_loop, extracted):
 
     monkeypatch.setattr(loader, "fetch_spotify", fetch_spotify)
     monkeypatch.setattr(
-        loader, "_search_youtube", lambda q: [{"url": "https://yt/v"}]
+        loader,
+        "_search_youtube",
+        lambda q: [{"url": "https://yt/v", "webpage_url": "https://yt/v"}],
     )
     _resolver(monkeypatch, resolved)
 
@@ -103,9 +105,7 @@ def test_short_link_to_a_spotify_track(monkeypatch, worker_loop, extracted):
     assert [s.webpage_url for s in result.songs] == ["https://yt/v"]
 
 
-def test_short_link_to_a_spotify_playlist(
-    monkeypatch, worker_loop, extracted
-):
+def test_short_link_to_a_spotify_playlist(monkeypatch, worker_loop, extracted):
     resolved = "https://open.spotify.com/playlist/p"
     fetched = []
     links = [f"https://open.spotify.com/track/{i}" for i in (1, 2)]
