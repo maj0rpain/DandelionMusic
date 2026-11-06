@@ -48,6 +48,9 @@ class RecordingController:
         if loop is not None:
             self.playlist.loop = loop
 
+    def is_disconnecting(self):
+        return False
+
     def load_backup(self):
         if self.active:
             return RestoreResult.REFUSED_WHILE_ACTIVE

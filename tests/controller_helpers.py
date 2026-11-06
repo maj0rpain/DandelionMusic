@@ -11,6 +11,8 @@ import sys
 import types
 
 from discord_fakes import admission_without_join
+from musicbot.library import LocalTrack
+
 from helpers import run
 
 
@@ -202,3 +204,22 @@ def command_ctx(
         ),
     )
     return ctx, sent
+
+
+def _local_batch(
+    controller, stub_loader, monkeypatch, loadable, picked, gate=None
+):
+    """Stubs the loader to load the `loadable` titles (None for any other
+    uri) and returns the local batch of the `picked` titles. With a
+    `gate`, a load of more than one uri waits for it."""
+    by_uri = {
+        f"/music/{s.title}.mp3": s for s in _songs(controller, *loadable)
+    }
+
+    async def load_local_songs(uris):
+        if gate is not None and len(uris) > 1:
+            await gate.wait()
+        return [by_uri.get(u) for u in uris]
+
+    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
+    return [LocalTrack(f"/music/{t}.mp3", f"Name {t}") for t in picked]

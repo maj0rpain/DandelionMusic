@@ -71,6 +71,9 @@ class FakeContext:
 
 
 class FakeController:
+    def is_disconnecting(self):
+        return False
+
     def __init__(self, outcomes):
         self.outcomes = outcomes
         self.processed = []

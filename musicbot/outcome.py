@@ -20,6 +20,10 @@ class OutcomeKind(Enum):
     PLAYLIST = "playlist"
     # files picked in the library browser were added as one request
     LIBRARY_PICK = "library_pick"
+    # the bot had left voice before the request's songs arrived
+    REFUSED_NOT_IN_VOICE = "refused_not_in_voice"
+    # the bot was disconnecting: nothing was placed or started
+    REFUSED_DISCONNECTING = "refused_disconnecting"
 
 
 @dataclass(frozen=True)
@@ -88,6 +92,10 @@ def render(outcome: EnqueueOutcome, announce_songs: bool) -> Optional[Reply]:
             position=outcome.position
         )
         return Reply(embed=outcome.song.format_output(title))
+    if kind is OutcomeKind.REFUSED_NOT_IN_VOICE:
+        return Reply(text=config.LEFT_VOICE_MESSAGE)
+    if kind is OutcomeKind.REFUSED_DISCONNECTING:
+        return Reply(text=config.DISCONNECTING_MESSAGE)
     if kind is OutcomeKind.LIBRARY_PICK:
         return Reply(text=_library_report(outcome))
     if outcome.truncation is not None:

@@ -32,10 +32,12 @@ NOT_CONNECTED = config.NOT_CONNECTED_MESSAGE
 NOT_DJ = config.NOT_A_DJ
 
 
-def run_request(ctx, kind):
+def run_request(ctx, kind, allow_disconnecting=False):
     async def go():
         admitted = await admission.check(
-            ctx, None if kind in admission.COMMAND_KINDS else kind
+            ctx,
+            None if kind in admission.COMMAND_KINDS else kind,
+            allow_disconnecting=allow_disconnecting,
         )
         return await admitted.enter()
 
@@ -96,9 +98,15 @@ def rows():
                 "move",
             ),
             (
-                f"{n}: bots-only channel, rule off, stays",
+                f"{n}: bots-only channel, rule off, moves",
                 kind,
                 {"bot": BOTS_ONLY, "rule": False},
+                "move",
+            ),
+            (
+                f"{n}: bots-only channel, rule off, author not in voice",
+                kind,
+                {"bot": BOTS_ONLY, "rule": False, "author": None},
                 "admitted",
             ),
             (
@@ -324,6 +332,46 @@ def rows():
             NOT_IN_VC,
         ),
     ]
+    # a controller that is disconnecting refuses a joining request
+    gone = {"disconnecting": True}
+    for kind in JOINING:
+        out.append(
+            (
+                f"{kind.name.lower()}: disconnecting, refused, no join",
+                kind,
+                gone,
+                config.DISCONNECTING_MESSAGE,
+            )
+        )
+    for kind in (K.COMMAND, K.PLAYER_BUTTON, K.DJ_PLAYER_BUTTON):
+        out.append(
+            (
+                f"{kind.name.lower()}: disconnecting, admitted",
+                kind,
+                {**gone, "bot": HERE, "author": "a", "role": "admin"},
+                "admitted",
+            )
+        )
+    out += [
+        (
+            "joining_command: disconnecting, wrong channel first",
+            K.JOINING_COMMAND,
+            {**gone, "wrong_channel": True},
+            WRONG_CH,
+        ),
+        (
+            "joining_command: disconnecting, allowed, connects as today",
+            K.JOINING_COMMAND,
+            {**gone, "allow_disconnecting": True},
+            "connect",
+        ),
+        (
+            "joining_command: disconnecting, allowed, bots-only moves",
+            K.JOINING_COMMAND,
+            {**gone, "allow_disconnecting": True, "bot": BOTS_ONLY},
+            "move",
+        ),
+    ]
     return out
 
 
@@ -336,9 +384,27 @@ ROWS = rows()
     ids=[r[0] for r in ROWS],
 )
 def test_admission_table(kind, spec, outcome, no_sleep):
+    spec = dict(spec)
+    allow = spec.pop("allow_disconnecting", False)
     guild, ctx = situation(kind, **spec)
     if outcome in ("connect", "move", "admitted"):
-        controller = run_request(ctx, kind)
+        expected_join = {
+            "connect": admission.Join.CONNECT,
+            "move": admission.Join.MOVE,
+            "admitted": admission.Join.NONE,
+        }[outcome]
+        admitted = run(
+            admission.check(
+                ctx,
+                None if kind in admission.COMMAND_KINDS else kind,
+                allow_disconnecting=allow,
+            )
+        )
+        assert admitted.join is expected_join
+        assert admitted.join_needed is (
+            expected_join is not admission.Join.NONE
+        )
+        controller = run_request(ctx, kind, allow)
         assert controller is ctx.bot.sessions.controller(guild)
         expected = {
             "connect": [("connect", "b")],
@@ -348,7 +414,7 @@ def test_admission_table(kind, spec, outcome, no_sleep):
         assert guild.events == expected
     else:
         with pytest.raises(CheckError) as exc:
-            run_request(ctx, kind)
+            run_request(ctx, kind, allow)
         assert str(exc.value) == outcome
         assert guild.events == []
 
@@ -363,15 +429,17 @@ def test_a_failed_connect_is_refused_and_logged(kind, capsys):
     assert "TimeoutError" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("rule", [True, False])
 @pytest.mark.parametrize("kind", JOINING, ids=lambda k: k.name)
-def test_a_failed_move_is_refused_and_logged(kind, capsys, no_sleep):
-    guild, ctx = situation(kind, bot=BOTS_ONLY)
+def test_a_failed_move_is_refused_and_logged(kind, rule, capsys, no_sleep):
+    guild, ctx = situation(kind, bot=BOTS_ONLY, rule=rule)
     guild.fail = discord.ClientException("Not connected to voice")
     with pytest.raises(CheckError) as exc:
         run_request(ctx, kind)
     assert str(exc.value) == config.VOICE_CONNECT_FAILED
     assert guild.events == [("move", "b")]
     assert "Not connected to voice" in capsys.readouterr().err
+    assert guild.voice_client.channel.name == "a"
 
 
 @pytest.mark.parametrize("kind", EVERY, ids=lambda k: k.name)

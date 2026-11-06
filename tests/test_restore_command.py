@@ -38,6 +38,10 @@ class OutcomeController:
         (RestoreResult.NOTHING_TO_RESTORE, config.QUEUE_EMPTY),
         (RestoreResult.REFUSED_WHILE_ACTIVE, config.RESTORE_WHILE_ACTIVE),
         (
+            RestoreResult.REFUSED_WHILE_DISCONNECTING,
+            config.DISCONNECTING_MESSAGE,
+        ),
+        (
             RestoreResult.BACKUP_UNREADABLE,
             config.RESTORE_BACKUP_UNREADABLE,
         ),

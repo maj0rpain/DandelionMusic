@@ -1,5 +1,5 @@
 from inspect import isawaitable
-from typing import Optional
+from typing import List, Optional
 
 import discord
 
@@ -95,6 +95,68 @@ class OwnedView(discord.ui.View):
             pass
 
 
+class SimplePaginator(OwnedView):
+    """`d!playlist show`'s listing: one embed per page, paged by Prev and
+    Next. Only the command's author may page it."""
+
+    def __init__(self, ctx, pages: List[discord.Embed]):
+        super().__init__(ctx)
+        self.pages = pages
+        self.current_page = 0
+        self._update_buttons()
+
+    def _update_buttons(self) -> None:
+        self.prev_page.disabled = self.current_page <= 0
+        self.next_page.disabled = self.current_page >= len(self.pages) - 1
+
+    async def send(self) -> None:
+        if not self.pages:
+            return
+        if len(self.pages) == 1:
+            await self.ctx.send(embed=self.pages[0])
+            return
+        self.message = await self.ctx.send(embed=self.pages[0], view=self)
+
+    async def _turn(self, interaction: discord.Interaction, step: int):
+        page = self.current_page + step
+        if not 0 <= page < len(self.pages):
+            # a stale client or two quick clicks: nothing to turn to
+            await interaction.response.defer()
+            return
+        self.current_page = page
+        self._update_buttons()
+        await interaction.response.edit_message(
+            embed=self.pages[page], view=self
+        )
+
+    @discord.ui.button(label="Prev", style=discord.ButtonStyle.grey)
+    async def prev_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        await self._turn(interaction, -1)
+
+    @discord.ui.button(label="Next", style=discord.ButtonStyle.grey)
+    async def next_page(
+        self, interaction: discord.Interaction, button: discord.ui.Button
+    ):
+        await self._turn(interaction, 1)
+
+
+async def admit_click(inter, kind, *, ctx=None):
+    """Admits a click as its request `kind`: builds the click's
+    context (unless the caller passes its own `ctx`), checks the
+    request, then `enter()`s it - joining voice for a pick - and
+    stores the controller on `ctx.audiocontroller`. Returns
+    `(ctx, controller)`. A refusal or a failed join is the CheckError
+    that `check`/`enter()` raise. It neither acknowledges the
+    interaction nor replies: both stay with the caller."""
+    if ctx is None:
+        ctx = await inter.client.get_context(inter)
+    admitted = await admission.check(ctx, kind)
+    ctx.audiocontroller = await admitted.enter()
+    return ctx, ctx.audiocontroller
+
+
 class MusicButton(discord.ui.Button):
     """A button running `callback` once admission admits the click as
     its request `kind`. A player button (the default kind) never
@@ -131,8 +193,7 @@ class MusicButton(discord.ui.Button):
         try:
             await inter.response.defer()
             try:
-                admitted = await admission.check(ctx, self._kind)
-                ctx.audiocontroller = await admitted.enter()
+                await admit_click(inter, self._kind, ctx=ctx)
             except CheckError as e:
                 self.on_refused()
                 await ctx.send(e, ephemeral=True)
