@@ -7,6 +7,7 @@ whitelist, which the database owns instead.
 
 from pathlib import Path
 
+import jsonc
 import pytest
 
 from config.utils import alchemize_url, ensure_sqlite_parent, get_env_var
@@ -284,6 +285,31 @@ def test_message_strings_do_not_pick_up_stray_substitutions(
     value instead of the name."""
     config = config_factory(SECRETS_ENV)
     assert "True" not in config.VC_TIMEOUT_EDIT_DISABLED
+
+
+@pytest.mark.parametrize("slash, shown", [("True", "/"), ("False", "@bot ")])
+def test_library_hint_without_a_prefix(config_factory, slash, shown):
+    cfg = config_factory(
+        f"BOT_TOKEN=x\nBOT_PREFIX=\nENABLE_SLASH_COMMANDS={slash}\n"
+    )
+    assert f"`{shown}library refresh`" in cfg.LIBRARY_PICK_STALE_INDEX
+
+
+def test_no_language_file_string_holds_a_literal_d_bang():
+    def strings(node):
+        if isinstance(node, str):
+            yield node
+        elif isinstance(node, dict):
+            for v in node.values():
+                yield from strings(v)
+        elif isinstance(node, list):
+            for v in node:
+                yield from strings(v)
+
+    path = REPO_ROOT / "config" / "en.json"
+    with open(path, encoding="utf-8") as f:
+        found = [s for s in strings(jsonc.load(f)) if "d!" in s]
+    assert found == []
 
 
 class TestEnsureSqliteParent:

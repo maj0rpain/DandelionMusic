@@ -113,14 +113,6 @@ def test_library_hints_name_a_bang_prefix(config_factory, monkeypatch):
     )
 
 
-@pytest.mark.parametrize("slash, shown", [("True", "/"), ("False", "@bot ")])
-def test_library_hint_without_a_prefix(config_factory, slash, shown):
-    cfg = config_factory(
-        f"BOT_TOKEN=x\nBOT_PREFIX=\nENABLE_SLASH_COMMANDS={slash}\n"
-    )
-    assert f"`{shown}library refresh`" in cfg.LIBRARY_PICK_STALE_INDEX
-
-
 def test_library_report_survives_braces_in_the_prefix(
     config_factory, monkeypatch
 ):
@@ -128,27 +120,6 @@ def test_library_report_survives_braces_in_the_prefix(
     assert _library_under(cfg, monkeypatch, ["a.mp3"]).endswith(
         "run `{!library refresh`."
     )
-
-
-def test_no_language_file_string_holds_a_literal_d_bang():
-    from pathlib import Path
-
-    import jsonc
-
-    def strings(node):
-        if isinstance(node, str):
-            yield node
-        elif isinstance(node, dict):
-            for v in node.values():
-                yield from strings(v)
-        elif isinstance(node, list):
-            for v in node:
-                yield from strings(v)
-
-    path = Path(__file__).parent.parent / "config" / "en.json"
-    with open(path, encoding="utf-8") as f:
-        found = [s for s in strings(jsonc.load(f)) if "d!" in s]
-    assert found == []
 
 
 def _send(settings):
