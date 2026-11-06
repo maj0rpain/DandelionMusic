@@ -617,12 +617,46 @@ def test_a_track_ended_by_an_error_logs_the_error_and_advances_once(
     )
 
     expected = (
-        f"Playback error in guild {controller.guild.id}: "
-        "RuntimeError('boom')"
+        f"Playback error in guild 'guild {controller.guild.id}' "
+        f"({controller.guild.id}): RuntimeError('boom')"
     )
     assert expected in err
     assert _played(controller) == ["first", "second"]
     assert _titles(controller) == ["second", "third"]
+
+
+def test_a_track_started_from_idle_logs_it_with_the_guild_label(
+    controller, capsys, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first")
+
+    _run(controller, lambda: _start_playing(controller))
+
+    guild = controller.guild
+    assert (
+        "Started playing 'first'" f" in guild 'guild {guild.id}' ({guild.id})"
+    ) in capsys.readouterr().out
+
+
+def test_a_pending_start_is_not_active_until_the_track_plays(
+    controller, stub_loader, monkeypatch
+):
+    seen = []
+
+    async def scenario():
+        release, task, _ = _pending_start(
+            controller, stub_loader, monkeypatch, "slow"
+        )
+        await _settle()
+        seen.append(controller.is_active())
+        release.set()
+        await _finish(task)
+        seen.append(controller.is_active())
+
+    _run(controller, scenario)
+
+    assert seen == [False, True]
 
 
 def test_a_track_ended_without_an_error_logs_no_playback_error(
@@ -2184,3 +2218,35 @@ def test_a_failed_skipped_notice_still_lets_the_queue_advance(
 
 def test_the_controller_keeps_no_command_channel(controller):
     assert not hasattr(controller, "command_channel")
+
+
+def test_playback_imports_no_song_bot_or_playlist_class_at_runtime():
+    import ast
+    from pathlib import Path
+
+    import musicbot.playback as module
+
+    tree = ast.parse(Path(module.__file__).read_text())
+
+    imported = []
+    stack = list(tree.body)
+    while stack:
+        node = stack.pop()
+        if isinstance(node, ast.If) and (
+            ast.unparse(node.test) == "TYPE_CHECKING"
+        ):
+            continue
+        if isinstance(node, ast.Import):
+            imported += [alias.name for alias in node.names]
+        elif isinstance(node, ast.ImportFrom):
+            base = node.module or ""
+            imported.append(base)
+            imported += [f"{base}.{a.name}" for a in node.names]
+        stack += [
+            c for c in ast.iter_child_nodes(node) if isinstance(c, ast.stmt)
+        ]
+
+    # PauseState, a value Playback returns, is the one thing it takes
+    # from musicbot.playlist; the Playlist class itself stays out
+    forbidden = {"musicbot.song", "musicbot.bot", "musicbot.playlist.Playlist"}
+    assert not forbidden & set(imported)
