@@ -45,6 +45,7 @@ class RestoreResult(Enum):
     NOTHING_TO_RESTORE = auto()
     REFUSED_WHILE_ACTIVE = auto()
     BACKUP_UNREADABLE = auto()
+    REFUSED_WHILE_DISCONNECTING = auto()
 
 
 class AudioController(object):
@@ -214,6 +215,10 @@ class AudioController(object):
     def is_active(self) -> bool:
         return self.playback.is_active()
 
+    def is_disconnecting(self) -> bool:
+        """True for the whole of teardown. Loop only."""
+        return self.playback.state is PlaybackState.DISCONNECTING
+
     def is_idle(self) -> bool:
         """True when a new track may be started: the voice client is
         neither playing nor paused and no start is pending. Every
@@ -311,17 +316,33 @@ class AudioController(object):
         playing and the queue is empty."""
         return self.is_idle() and len(self.playlist) == 0
 
+    def _refusal(self) -> Optional[OutcomeKind]:
+        """The one guard every placement passes: the refusal kind when
+        a request's songs may not be placed now, else `None`. Out of
+        voice means the guild has no voice client at all; a client that
+        exists but is not connected (a move, a reconnect) is not."""
+        if self.guild.voice_client is None:
+            return OutcomeKind.REFUSED_NOT_IN_VOICE
+        return None
+
     async def _place_and_start(
         self, place: Callable[[], _T]
-    ) -> Tuple[_T, Optional[OutcomeKind]]:
+    ) -> Tuple[Optional[_T], Optional[OutcomeKind]]:
         """The one step that decides whether a request claimed the
         start of playback. Reads whether it would start, runs `place`,
         marks the queue changed and starts playback if idle. Returns
         `place`'s result and the start: STARTED or START_FAILED when
         this request claimed it, else `None`.
 
+        A refused request (see _refusal()) places nothing, writes no
+        backup and starts nothing: the result is `None` and the start
+        is the refusal kind.
+
         Placement happens before the first await, so nothing can slip
         between the request's songs and their slots."""
+        refusal = self._refusal()
+        if refusal is not None:
+            return None, refusal
         would_start = self._would_start()
         placed = place()
         self.playback.save_backup()
@@ -367,9 +388,13 @@ class AudioController(object):
         """Puts `song` directly after the current track, refreshes the
         backup and starts playing if nothing is (see ensure_playing()).
         Reports as enqueue() does."""
+        if self.is_disconnecting():
+            return EnqueueOutcome(OutcomeKind.REFUSED_DISCONNECTING)
         index, start = await self._place_and_start(
             lambda: self.playlist.insert_next(song)
         )
+        if start is OutcomeKind.REFUSED_NOT_IN_VOICE:
+            return EnqueueOutcome(start)
         return self._outcome([song], index, start, batch)
 
     async def enqueue(
@@ -383,6 +408,8 @@ class AudioController(object):
 
         Returns PLAYLIST when it places more than one song or `batch`
         is given, else the single song's outcome."""
+        if self.is_disconnecting():
+            return EnqueueOutcome(OutcomeKind.REFUSED_DISCONNECTING)
         placed = list(songs)
 
         def place() -> int:
@@ -392,6 +419,8 @@ class AudioController(object):
             return first_index
 
         first_index, start = await self._place_and_start(place)
+        if start is OutcomeKind.REFUSED_NOT_IN_VOICE:
+            return EnqueueOutcome(start)
         return self._outcome(placed, first_index, start, batch)
 
     async def restore(self) -> RestoreResult:
@@ -403,6 +432,8 @@ class AudioController(object):
         Reports NOTHING_TO_RESTORE, playing nothing, when there is no
         queue to restore, and BACKUP_UNREADABLE, changing nothing, when
         the backup exists but cannot be loaded."""
+        if self.is_disconnecting():
+            return RestoreResult.REFUSED_WHILE_DISCONNECTING
         if not self.is_idle():
             return RestoreResult.REFUSED_WHILE_ACTIVE
         try:
@@ -496,6 +527,16 @@ class AudioController(object):
             f" in guild {self.guild.name!r}"
         )
 
+        def refusal() -> Optional[EnqueueOutcome]:
+            if self.is_disconnecting():
+                return EnqueueOutcome(OutcomeKind.REFUSED_DISCONNECTING)
+            kind = self._refusal()
+            return None if kind is None else EnqueueOutcome(kind)
+
+        refused = refusal()
+        if refused is not None:
+            return refused
+
         uris = [track.uri for track in tracks]
         songs: List[Optional[Song]] = []
         tail = uris
@@ -513,15 +554,31 @@ class AudioController(object):
         if self.is_idle() and len(uris) > 1:
             songs += await loader.load_local_songs(uris[:1])
             tail = uris[1:]
+            refused = refusal()
+            if refused is not None:
+                return refused
             if songs[0] is not None:
-                await self.enqueue(songs[:1])
+                placed = await self.enqueue(songs[:1])
+                if placed.kind in (
+                    OutcomeKind.REFUSED_DISCONNECTING,
+                    OutcomeKind.REFUSED_NOT_IN_VOICE,
+                ):
+                    return placed
 
         loaded_tail = await loader.load_local_songs(tail)
+        refused = refusal()
+        if refused is not None:
+            return refused
         songs += loaded_tail
 
         added = [song for song in loaded_tail if song is not None]
         if added:
-            await self.enqueue(added)
+            placed = await self.enqueue(added)
+            if placed.kind in (
+                OutcomeKind.REFUSED_DISCONNECTING,
+                OutcomeKind.REFUSED_NOT_IN_VOICE,
+            ):
+                return placed
 
         return EnqueueOutcome(
             OutcomeKind.LIBRARY_PICK,

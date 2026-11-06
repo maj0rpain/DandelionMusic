@@ -104,11 +104,13 @@ class _PlayingTrack:
 class PlaybackState(Enum):
     """IDLE: nothing playing, paused or pending. STARTING: a track is
     claimed but its preload has not finished. ACTIVE: the voice client
-    is playing or paused."""
+    is playing or paused. DISCONNECTING: teardown is under way; it
+    takes precedence over the other three."""
 
     IDLE = auto()
     STARTING = auto()
     ACTIVE = auto()
+    DISCONNECTING = auto()
 
 
 def _require_loop():
@@ -194,6 +196,8 @@ class Playback:
 
     @property
     def state(self) -> PlaybackState:
+        if self._disconnecting:
+            return PlaybackState.DISCONNECTING
         if self._start_pending:
             return PlaybackState.STARTING
         if self.is_active():
