@@ -7,7 +7,7 @@ from discord.ext import commands
 
 from config import config
 from musicbot import admission, utils, loader, playlists
-from musicbot.outcome import send_outcome
+from musicbot.outcome import BatchReport, send_outcome
 from musicbot.song import Song
 from musicbot.bot import MusicBot, Context
 from musicbot.utils import dj_check, chunks, joining_command, SimplePaginator
@@ -526,7 +526,7 @@ class Music(commands.Cog):
                 )
                 for entry in contents.entries
             ),
-            batch=True,
+            batch=BatchReport(),
         )
         await send_outcome(ctx, outcome)
 
