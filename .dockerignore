@@ -61,7 +61,6 @@ graft/
 .github/
 docs/
 tests/
-heroku-legacy/
 CLAUDE.md
 README.md
 LICENSE
