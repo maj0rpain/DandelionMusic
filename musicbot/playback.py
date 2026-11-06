@@ -79,6 +79,7 @@ class Playback:
         preload: Callable[["Song"], Awaitable[bool]],
         make_source: Callable[["Song"], object],
         next_track: Callable[[bool], Optional["Song"]],
+        drop_failed: Callable[[], Optional["Song"]],
         clear_queue: Callable[[], None],
         schedule_preload: Callable[[], None],
         announce: Callable[["Song"], Awaitable[None]],
@@ -97,6 +98,7 @@ class Playback:
         self._preload = preload
         self._make_source = make_source
         self._next_track = next_track
+        self._drop_failed = drop_failed
         self._clear_queue = clear_queue
         self._schedule_preload = schedule_preload
         self._announce = announce
@@ -364,6 +366,27 @@ class Playback:
         """Claims a start for `song` and spawns its play."""
         self._spawn(self._play(song, self._claim_start()))
 
+    async def _fail_track(self, song: "Song", generation: int):
+        """The one failed-track path: reports `song`, drops it from the
+        queue (no rotation, no play history), writes the backup without
+        it and starts the new head, or goes idle. A start overtaken
+        before or during the report drops and starts nothing."""
+        await self._report_skipped(song)
+        if self._drop_if_overtaken(generation):
+            return
+
+        next_song = self._drop_failed()
+        self._write_backup()
+
+        if next_song is None:
+            self._start_pending = False
+            self._playing = False
+            if not self._timer.triggered and self._voice_client():
+                self._spawn(self.start_idle_timer(self._humans_present()))
+            return
+
+        self._spawn_start(next_song)
+
     async def _play(self, song: "Song", generation: int) -> bool:
         """True when `song` was handed to the voice client; False for a
         failed preload, a song without a direct url, an overtaken start
@@ -373,10 +396,7 @@ class Playback:
             return False
 
         if not preloaded:
-            await self._report_skipped(song)
-            if self._drop_if_overtaken(generation):
-                return False
-            self.skip(forced=True)
+            await self._fail_track(song, generation)
             return False
 
         if song.url is None:
@@ -385,7 +405,7 @@ class Playback:
                 " Refusing to play a song without direct url.",
                 file=sys.stderr,
             )
-            self.skip(forced=True)
+            await self._fail_track(song, generation)
             return False
 
         # Claimed before play() rather than after it, because play()

@@ -16,6 +16,7 @@ import pytest
 
 from musicbot import playlists
 from musicbot.library import LocalTrack
+from musicbot.playlist import LoopMode
 from musicbot.commands.music import Music
 from controller_helpers import (
     _backup,
@@ -2214,3 +2215,183 @@ def test_a_local_library_song_opens_only_file(controller, monkeypatch):
     assert source.original.kwargs["before_options"] == (
         "-protocol_whitelist file"
     )
+
+
+def _failing_preloads(stub_loader, *titles):
+    """Makes the preload of every song titled in `titles` fail."""
+    original = stub_loader.preload
+
+    async def preload(song):
+        result = await original(song)
+        if song.title in titles:
+            return stub_loader.Preload.FAILED
+        return result
+
+    stub_loader.preload = preload
+
+
+def _preload_counts(stub_loader):
+    counts = {}
+    for title in _preloaded(stub_loader):
+        counts[title] = counts.get(title, 0) + 1
+    return counts
+
+
+def _loop_all(controller):
+    controller.playlist.loop = LoopMode.ALL
+
+
+def _bounded(controller, scenario):
+    """Runs `scenario` under a wall-clock bound, so a regression to
+    cycling fails the test instead of hanging the suite."""
+
+    async def bounded():
+        await asyncio.wait_for(scenario(), timeout=2)
+
+    _run(controller, bounded)
+
+
+def test_loop_all_one_song_whose_preload_fails_is_reported_once_and_idles(
+    controller, stub_loader, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "broken")
+    _loop_all(controller)
+    _failing_preloads(stub_loader, "broken")
+
+    async def scenario():
+        await _start_playing(controller)
+
+    _bounded(controller, scenario)
+
+    assert [s.title for s in controller.panel.skipped] == ["broken"]
+    assert _titles(controller) == []
+    assert controller.timer._task is not None
+    assert _played(controller) == []
+    assert _preload_counts(stub_loader) == {"broken": 1}
+    assert _backup(controller, tmp_path) == []
+    assert _history_songs(controller) == []
+
+
+def _history_songs(controller):
+    return [s.title for s in controller.playlist.playhistory]
+
+
+def test_loop_all_every_preload_failing_drains_to_idle(
+    controller, stub_loader, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "a", "b", "c")
+    _loop_all(controller)
+    _failing_preloads(stub_loader, "a", "b", "c")
+
+    async def scenario():
+        await _start_playing(controller)
+
+    _bounded(controller, scenario)
+
+    assert [s.title for s in controller.panel.skipped] == ["a", "b", "c"]
+    assert _titles(controller) == []
+    assert controller.timer._task is not None
+    assert _played(controller) == []
+    assert _preload_counts(stub_loader) == {"a": 1, "b": 1, "c": 1}
+    assert _backup(controller, tmp_path) == []
+    assert _history_songs(controller) == []
+
+
+def test_loop_all_song_without_a_url_is_reported_once_and_removed(
+    controller, stub_loader, monkeypatch, tmp_path
+):
+    _fake_ffmpeg(monkeypatch)
+    controller.playlist.add(_without_url(controller, "no url"))
+    _loop_all(controller)
+
+    async def scenario():
+        await _start_playing(controller)
+
+    _bounded(controller, scenario)
+
+    assert [s.title for s in controller.panel.skipped] == ["no url"]
+    assert _titles(controller) == []
+    assert controller.timer._task is not None
+    assert _played(controller) == []
+    assert _preload_counts(stub_loader) == {"no url": 1}
+    assert _backup(controller, tmp_path) == []
+    assert _history_songs(controller) == []
+
+
+def test_loop_all_mixed_queue_drops_failing_songs_and_keeps_the_rest(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "bad", "good", "worse")
+    _loop_all(controller)
+    _failing_preloads(stub_loader, "bad", "worse")
+
+    async def scenario():
+        await _start_playing(controller)
+
+    _bounded(controller, scenario)
+
+    assert [s.title for s in controller.panel.skipped] == ["bad"]
+    assert _played(controller) == ["good"]
+
+    async def next_round():
+        controller.playback.skip()
+        await _settle()
+        controller.guild.voice_client.playing = False
+        await _settle()
+
+    _bounded(controller, next_round)
+
+    # "worse" was removed by the preload sweep behind "good"; "good"
+    # keeps rotating alone
+    assert [s.title for s in controller.panel.skipped].count("bad") == 1
+    assert _titles(controller) == ["good"]
+    assert _history_songs(controller) == []
+
+
+def test_a_start_overtaken_after_its_report_drops_and_starts_nothing(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "broken", "next")
+    _failing_preloads(stub_loader, "broken")
+
+    async def report_then_stop(song):
+        controller.panel.skipped.append(song)
+        controller.playback._invalidate_start()
+
+    controller.panel.report_skipped = report_then_stop
+    controller.playback._report_skipped = report_then_stop
+
+    async def scenario():
+        await _start_playing(controller)
+
+    _bounded(controller, scenario)
+
+    assert _titles(controller) == ["broken", "next"]
+    assert _played(controller) == []
+
+
+def test_a_failed_notice_send_still_drops_and_moves_on(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "broken", "next")
+    _failing_preloads(stub_loader, "broken")
+
+    async def failing_notice(song):
+        # the panel logs a failed send and never raises
+        return None
+
+    controller.playback._report_skipped = failing_notice
+
+    async def scenario():
+        await _start_playing(controller)
+
+    _bounded(controller, scenario)
+
+    assert _played(controller) == ["next"]
+    assert _titles(controller)[0] == "next"
+    assert "broken" not in _titles(controller)
