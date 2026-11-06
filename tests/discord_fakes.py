@@ -22,10 +22,10 @@ class FakePanel(PlayerPanel):
     """A real player panel over no controller, recording `refresh`,
     `direct_to` and `attach`; `carries_buttons` is the real one.
     `attach` runs the sender with no view, as a panel over an inactive
-    controller does."""
+    controller does. The panel is over no guild."""
 
-    def __init__(self, guild=None):
-        super().__init__(guild, lambda: None, lambda: None)
+    def __init__(self):
+        super().__init__(None, lambda: None, lambda: None)
         self.refreshes = 0
         self.directed = []
         self.attached = 0
@@ -53,11 +53,9 @@ def make_bot(controllers=None, is_owner=False, settings=None):
         return is_owner
 
     async def load(guilds):
-        # a vc_timeout means get_or_create() does not autojoin
-        return {
-            g: settings.get(g, types.SimpleNamespace(vc_timeout=True))
-            for g in guilds
-        }
+        # the default is admission's defaults; their vc_timeout means
+        # get_or_create() does not autojoin
+        return {g: settings.get(g, admission_settings()) for g in guilds}
 
     async def seed():
         await sessions.load_settings(settings)

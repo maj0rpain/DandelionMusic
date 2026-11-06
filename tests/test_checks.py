@@ -82,6 +82,17 @@ class TestGetSettings:
         bot = make_bot(settings={guild: "sett"})
         assert get_settings(make_ctx(bot, guild)) == "sett"
 
+    def test_controller_only_guild_gets_admission_settings(self):
+        guild = Guild()
+        bot = make_bot(controllers={guild: object()})
+        sett = get_settings(make_ctx(bot, guild))
+        assert (
+            sett.command_channel,
+            sett.user_must_be_in_vc,
+            sett.dj_role,
+            sett.vc_timeout,
+        ) == (None, True, None, True)
+
     def test_unregistered_guild_raises_check_error(self):
         bot = make_bot(settings={Guild(): "sett"})
         with pytest.raises(CheckError) as exc:

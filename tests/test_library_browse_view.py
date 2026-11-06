@@ -33,7 +33,7 @@ from musicbot.commands.library import (
 )
 from musicbot.outcome import EnqueueOutcome, OutcomeKind, render
 from musicbot.library import SearchResult
-from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
+from musicbot.library_metadata import ArtInfo, Enrichment
 from config import config
 from discord_fakes import (
     VoiceGuild,
@@ -42,7 +42,7 @@ from discord_fakes import (
     make_bot,
 )
 from helpers import run
-from library_fakes import library_song
+from library_fakes import external_stats, library_song
 
 INDEX = {
     "Radiohead": {
@@ -128,11 +128,14 @@ class EditingInteraction:
             self.log.append((self, kwargs))
 
 
-def make_view(index=INDEX):
-    ctx = SimpleNamespace(
+def make_ctx():
+    return SimpleNamespace(
         author=SimpleNamespace(id=AUTHOR_ID), interaction=None
     )
-    return LibraryBrowseView.open(ctx, index)[0]
+
+
+def make_view(index=INDEX):
+    return LibraryBrowseView.open(make_ctx(), index)[0]
 
 
 class Clicks:
@@ -457,14 +460,7 @@ async def settle():
 
 
 STALE = Enrichment(
-    stats=ExternalStats(
-        listeners=424242,
-        playcount=None,
-        tags=("stale-tag",),
-        popularity=77,
-        followers=None,
-        release_date=None,
-    ),
+    stats=external_stats(listeners=424242, tags=("stale-tag",), popularity=77),
     art=ArtInfo(url=None, data=b"\x89PNG", extension="png"),
 )
 
@@ -1036,7 +1032,7 @@ def test_search_select_cuts_labels_like_the_browse_select():
         SearchResult("artist", EMOJI60, None, None, EMOJI60, 1.0),
         SearchResult("artist", "Short", None, None, "Short", 0.5),
     ]
-    ctx = SimpleNamespace(author=SimpleNamespace(id=AUTHOR_ID))
+    ctx = make_ctx()
     view = LibrarySearchView(ctx, {}, "q", results)
 
     cut, short = select_labels(view, library_commands.SearchSelect)
@@ -1435,7 +1431,7 @@ def test_a_library_pick_that_loads_everything_reports_the_count(monkeypatch):
     ]
 
 
-def test_enrichment_is_resolved_on_the_cursors_index_not_the_librarys(
+def test_enrichment_is_resolved_on_the_views_snapshot_not_the_librarys(
     monkeypatch,
 ):
     other = {"Elsewhere": {"Album": [library_song("Song")]}}
@@ -1454,9 +1450,7 @@ def test_enrichment_is_resolved_on_the_cursors_index_not_the_librarys(
 
 
 def test_open_returns_the_frame_the_items_were_built_from():
-    ctx = SimpleNamespace(
-        author=SimpleNamespace(id=AUTHOR_ID), interaction=None
-    )
+    ctx = make_ctx()
 
     view, frame = LibraryBrowseView.open(ctx, INDEX)
 

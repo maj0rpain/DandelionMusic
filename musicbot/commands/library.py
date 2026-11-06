@@ -147,13 +147,19 @@ class PageButton(_BrowseItem, discord.ui.Button):
 
 
 class QueueLevelButton(_BrowseItem, discord.ui.Button):
-    def __init__(self, browse_view: "LibraryBrowseView", label: str):
+    def __init__(self, browse_view: "LibraryBrowseView", action):
+        self.action = action
         super().__init__(
-            browse_view, label=label, style=discord.ButtonStyle.green, row=1
+            browse_view,
+            label=action.label,
+            style=discord.ButtonStyle.green,
+            row=1,
         )
 
     async def on_click(self, interaction: discord.Interaction):
-        await self.browse_view.queue_current_level(interaction)
+        await self.browse_view.queue_current_level(
+            interaction, self.action.source
+        )
 
 
 async def queue_songs(ctx, interaction, triples, source: str) -> None:
@@ -370,8 +376,8 @@ class LibraryBrowseView(LibraryView):
             self.add_item(
                 LibrarySelect(frame.entries, frame.labels, frame.kind, self)
             )
-        if frame.queue_label is not None:
-            self.add_item(QueueLevelButton(self, frame.queue_label))
+        if frame.queue is not None:
+            self.add_item(QueueLevelButton(self, frame.queue))
             self.add_item(BackButton(self))
         if frame.show_prev:
             self.add_item(PageButton(self, -1, "◀ Prev"))
@@ -618,12 +624,9 @@ class LibraryBrowseView(LibraryView):
         # unguarded, staleness checked in _render_enrichment()
         await self._render_enrichment(interaction, token, enrichment)
 
-    async def queue_current_level(self, interaction: discord.Interaction):
-        artist, album = self.scope
-        if album is not None:
-            source = f"browse: entire album {artist} - {album}"
-        else:
-            source = f"browse: entire discography of {artist}"
+    async def queue_current_level(
+        self, interaction: discord.Interaction, source: str
+    ):
         await self.queue(interaction, self.session.tracks(), source)
 
 

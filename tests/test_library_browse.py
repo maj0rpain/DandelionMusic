@@ -59,14 +59,11 @@ class TestDescend:
         descent = c.descend("Radiohead")
         assert descent == library_browse.Descent(True, None)
         assert (c.artist, c.album) == ("Radiohead", None)
-        assert not c.at_root
-        assert not c.at_album_level
         assert c.screen().kind == "album"
 
     def test_descending_from_an_artist_selects_an_album(self):
         c = at_album()
         assert (c.artist, c.album) == ("Radiohead", "OK Computer")
-        assert c.at_album_level
         assert c.screen().kind == "song"
 
     def test_a_level_change_resets_the_page_and_bumps_the_revision(self):
@@ -298,7 +295,7 @@ class TestBack:
         c.descend("Radiohead")
         assert c.back() is True
         assert (c.artist, c.album) == (None, None)
-        assert c.at_root
+        assert c.screen().kind == "artist"
 
     def test_back_resets_the_page_and_bumps_the_revision(self):
         c = at_album()
