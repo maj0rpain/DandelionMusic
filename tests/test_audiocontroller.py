@@ -41,6 +41,7 @@ from controller_seam import (
     controller_seam,
 )
 from db_seam import in_memory_db
+from discord_fakes import EXPIRED
 from helpers import attribute_names, imported_names, run
 
 MIX = playlists.PlaylistRef("1234", "mix")
@@ -2409,23 +2410,27 @@ def test_a_start_overtaken_after_its_report_drops_and_starts_nothing(
 
 
 def test_a_failed_notice_send_still_drops_and_moves_on(
-    hooked_controller, monkeypatch
+    expired_panel_seam, monkeypatch
 ):
-    controller, stub_loader = hooked_controller
+    real, stub_loader = expired_panel_seam
     _fake_ffmpeg(monkeypatch)
-    _queue(controller, "broken", "next")
+    _queue(real, "broken", "next")
     _failing_preloads(stub_loader, "broken")
+    sends = []
 
-    async def failing_notice(song):
-        raise RuntimeError("send failed")
+    class RefusingChannel:
+        async def send(self, *args, **kwargs):
+            sends.append(args)
+            raise EXPIRED
 
-    controller.panel.on_notice = failing_notice
+    real.panel.direct_to(RefusingChannel())
 
-    _bounded(controller, lambda: _start_playing(controller))
+    _bounded(real, lambda: _start_playing(real))
 
-    assert _played(controller) == ["next"]
-    assert _titles(controller)[0] == "next"
-    assert "broken" not in _titles(controller)
+    assert sends
+    assert _played(real) == ["next"]
+    assert _titles(real)[0] == "next"
+    assert "broken" not in _titles(real)
 
 
 # --- a track that ends on its own having produced no audio ------------
