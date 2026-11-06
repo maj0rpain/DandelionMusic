@@ -18,7 +18,9 @@ import discord
 import pytest
 
 from config import config
-from musicbot.views import MusicButton
+from musicbot import admission
+from musicbot.utils import CheckError
+from musicbot.views import MusicButton, admit_click
 from musicbot.admission import RequestKind
 from musicbot.bot import Context
 from discord_fakes import (
@@ -212,3 +214,127 @@ def test_an_exception_from_after_reaches_on_failure():
 
     run(Button(lambda c: None, after=after).callback(inter))
     assert seen == [error]
+
+
+def test_a_failed_defer_is_reported_with_the_clicks_ctx_and_no_check(
+    monkeypatch,
+):
+    inter, ctx = click_interaction()
+    error = RuntimeError("defer failed")
+    checked = []
+    seen = []
+
+    async def defer(**kwargs):
+        raise error
+
+    async def check(ctx, kind):
+        checked.append(kind)
+
+    inter.response.defer = defer
+    monkeypatch.setattr(admission, "check", check)
+
+    class Button(MusicButton):
+        async def on_failure(self, ctx, err):
+            seen.append((ctx, err))
+
+    run(Button(lambda c: None).callback(inter))
+    assert (seen, checked) == ([(ctx, error)], [])
+
+
+# --- admit_click -------------------------------------------------------
+
+
+def _recording_check(monkeypatch, controller=None, refuse=None):
+    calls = []
+    events = []
+
+    async def check(ctx, kind):
+        calls.append((ctx, kind))
+        if refuse is not None:
+            raise refuse
+
+        async def enter():
+            events.append("enter")
+            return controller
+
+        return SimpleNamespace(enter=enter)
+
+    monkeypatch.setattr(admission, "check", check)
+    return calls, events
+
+
+def test_admit_click_checks_the_ctx_built_from_the_interaction(
+    monkeypatch,
+):
+    inter, ctx = click_interaction()
+    calls, _ = _recording_check(monkeypatch)
+
+    run(admit_click(inter, RequestKind.PICK))
+    assert [c for c, _ in calls] == [ctx]
+
+
+def test_admit_click_checks_the_kind_it_is_given(monkeypatch):
+    inter, ctx = click_interaction()
+    calls, _ = _recording_check(monkeypatch)
+
+    run(admit_click(inter, RequestKind.PICK))
+    assert [k for _, k in calls] == [RequestKind.PICK]
+
+
+def test_admit_click_enters_after_an_admit_and_returns_the_controller(
+    monkeypatch,
+):
+    inter, ctx = click_interaction()
+    controller = object()
+    _, events = _recording_check(monkeypatch, controller)
+
+    result = run(admit_click(inter, RequestKind.PICK))
+    assert (result, events, ctx.audiocontroller) == (
+        (ctx, controller),
+        ["enter"],
+        controller,
+    )
+
+
+def test_admit_click_raises_a_refusal_and_makes_no_join(monkeypatch):
+    inter, ctx = click_interaction()
+    _, events = _recording_check(monkeypatch, refuse=CheckError("no"))
+
+    with pytest.raises(CheckError):
+        run(admit_click(inter, RequestKind.PICK))
+    assert events == []
+
+
+def test_admit_click_neither_acknowledges_nor_replies(monkeypatch):
+    inter, ctx = click_interaction()
+    _recording_check(monkeypatch, refuse=CheckError("no"))
+
+    with pytest.raises(CheckError):
+        run(admit_click(inter, RequestKind.PICK))
+    assert (inter.deferred, inter.messages, inter.followups) == (
+        False,
+        [],
+        [],
+    )
+
+
+def test_admit_click_uses_a_passed_ctx_without_building_one(monkeypatch):
+    inter, built = click_interaction()
+    other = SimpleNamespace()
+    controller = object()
+    built_calls = []
+
+    async def get_context(i):
+        built_calls.append(i)
+        return built
+
+    inter.client.get_context = get_context
+    calls, _ = _recording_check(monkeypatch, controller)
+
+    result = run(admit_click(inter, RequestKind.PICK, ctx=other))
+    assert (result, [c for c, _ in calls], built_calls) == (
+        (other, controller),
+        [other],
+        [],
+    )
+    assert other.audiocontroller is controller

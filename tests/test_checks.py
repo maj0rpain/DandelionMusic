@@ -329,13 +329,17 @@ def test_a_failed_join_from_the_library_says_so():
     async def edit_original_response(content):
         replies.append(content)
 
+    async def get_context(inter):
+        return ctx
+
     interaction = types.SimpleNamespace(
+        client=types.SimpleNamespace(get_context=get_context),
         response=types.SimpleNamespace(
             is_done=lambda: False, send_message=send_message
         ),
         edit_original_response=edit_original_response,
     )
-    run(queue_songs(ctx, interaction, [("A", "B", "c.mp3")], "browse"))
+    run(queue_songs(interaction, [("A", "B", "c.mp3")], "browse"))
     assert replies == ["Queueing...", config.VOICE_CONNECT_FAILED]
     assert guild.events == [("connect", "a")]
 
