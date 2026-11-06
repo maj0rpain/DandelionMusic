@@ -2522,6 +2522,145 @@ def test_a_local_library_song_opens_only_file(controller, monkeypatch):
     )
 
 
+class _UnregisteringVoiceClient(PlaybackVoiceClient):
+    """As discord.py's: closing it unregisters whatever client the guild
+    has registered."""
+
+    def __init__(self, guild):
+        super().__init__()
+        self.guild = guild
+
+    async def disconnect(self, *, force=False):
+        await super().disconnect(force=force)
+        self.guild.voice_client = None
+
+
+def _announcing_disconnect(controller, monkeypatch, during):
+    """Switches ANNOUNCE_DISCONNECT on (monkeypatch restores it) and
+    makes the announcement end after one poll, running `during()` at
+    that poll; the poll's sleep does not wait."""
+    from config import config
+
+    _fake_ffmpeg(monkeypatch)
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", True)
+    real_sleep = asyncio.sleep
+
+    async def quick_sleep(delay, *args):
+        await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", quick_sleep)
+    client = controller.guild.voice_client
+    polls = []
+
+    def is_playing():
+        if not client.played:  # the sound has not started yet
+            return client.playing
+        polls.append(1)
+        if len(polls) == 1:
+            during()
+            return True
+        client.playing = False
+        return False
+
+    client.is_playing = is_playing
+    return client
+
+
+def test_a_disconnect_survives_the_voice_client_vanishing_mid_sound(
+    controller, monkeypatch
+):
+    guild = controller.guild
+    _announcing_disconnect(
+        controller, monkeypatch, lambda: setattr(guild, "voice_client", None)
+    )
+
+    assert _run(controller, lambda: controller.udisconnect("test")) is True
+
+
+def test_a_disconnect_leaves_a_replacement_voice_client_alone(
+    controller, monkeypatch
+):
+    guild = controller.guild
+    replacement = PlaybackVoiceClient()
+    old = _announcing_disconnect(
+        controller,
+        monkeypatch,
+        lambda: setattr(guild, "voice_client", replacement),
+    )
+
+    result = _run(controller, lambda: controller.udisconnect("test"))
+
+    assert result is True
+    assert not old.disconnected
+    assert not replacement.disconnected
+    assert guild.voice_client is replacement
+
+
+def test_a_disconnect_closes_the_voice_client_after_the_sound(
+    controller, monkeypatch
+):
+    client = _announcing_disconnect(controller, monkeypatch, lambda: None)
+
+    assert _run(controller, lambda: controller.udisconnect("test")) is True
+    assert client.disconnected
+
+
+def test_a_disconnect_with_no_connection_returns_false(controller):
+    controller.guild.voice_client = None
+
+    assert _run(controller, lambda: controller.udisconnect("test")) is False
+
+
+def test_two_concurrent_disconnects_both_succeed(controller, monkeypatch):
+    from config import config
+
+    _fake_ffmpeg(monkeypatch)
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", True)
+    real_sleep = asyncio.sleep
+
+    async def quick_sleep(delay, *args):
+        await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", quick_sleep)
+    guild = controller.guild
+    client = guild.voice_client = _UnregisteringVoiceClient(guild)
+
+    async def scenario():
+        both = asyncio.gather(
+            controller.udisconnect("one"), controller.udisconnect("two")
+        )
+        await _settle()  # both are inside the announcement
+        client.playing = False
+        return await both
+
+    assert _run(controller, scenario) == [True, True]
+    assert guild.voice_client is None
+
+
+def test_dispose_cancels_tasks_and_timer_when_the_disconnect_raises(
+    controller,
+):
+    async def failing_disconnect(*, force=False):
+        raise RuntimeError("disconnect failed")
+
+    controller.guild.voice_client.disconnect = failing_disconnect
+
+    async def scenario():
+        await controller.timer.start()
+        timer_task = controller.timer._task
+        pending = []
+        controller.add_task(sleep_forever(pending))
+        await _settle()
+        (pending_task,) = pending
+        with pytest.raises(RuntimeError):
+            await controller.dispose()
+        await _settle()
+        # read before the loop's own shutdown cancels what is left
+        return timer_task.cancelled(), pending_task.cancelled()
+
+    assert _run(controller, scenario) == (True, True)
+
+
 # -- a backup write that fails, and a backup that cannot be read -----------
 
 
