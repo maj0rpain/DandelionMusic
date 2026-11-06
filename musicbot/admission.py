@@ -31,6 +31,7 @@ from musicbot.utils import (
 if TYPE_CHECKING:
     from musicbot.audiocontroller import AudioController
     from musicbot.bot import Context
+    from musicbot.settings import GuildSettings
 
 
 class RequestKind(enum.Enum):
@@ -62,7 +63,7 @@ _PLAYER_KINDS = frozenset(
 COMMAND_KINDS = frozenset({RequestKind.COMMAND, RequestKind.JOINING_COMMAND})
 
 
-def _check_command_channel(ctx: Context, sett):
+def _check_command_channel(ctx: Context, sett: GuildSettings):
     """Refuses a request made outside the guild's command channel,
     when one is set."""
     cm_channel = sett.command_channel
@@ -70,12 +71,12 @@ def _check_command_channel(ctx: Context, sett):
         raise CheckError(config.WRONG_CHANNEL_MESSAGE)
 
 
-def _bot_alone(bot_vc) -> bool:
+def _bot_alone(bot_vc: discord.VoiceProtocol) -> bool:
     """Whether the bot's channel has only bots in it."""
     return all(m.bot for m in bot_vc.channel.members)
 
 
-async def _voice_check(ctx: Context, sett):
+async def _voice_check(ctx: Context, sett: GuildSettings):
     """Check if the user can use the bot now. Only refuses: a bot
     sitting in a channel with only bots admits the user, and the join
     moves it later."""
@@ -114,7 +115,7 @@ def _marked_joining(ctx: Context) -> bool:
     )
 
 
-def _join_needed(ctx: Context, sett) -> bool:
+def _join_needed(ctx: Context, sett: GuildSettings) -> bool:
     """Whether the bot has to join the user's voice channel: it has no
     voice client (a connect), or user_must_be_in_vc is on, its channel
     has only bots and the user is in another one (a move)."""
@@ -131,7 +132,9 @@ def _join_needed(ctx: Context, sett) -> bool:
     )
 
 
-def _join_target(ctx: Context, sett) -> Optional[discord.VoiceChannel]:
+def _join_target(
+    ctx: Context, sett: GuildSettings
+) -> Optional[discord.VoiceChannel]:
     """The channel the bot has to join or move to, or None when no
     join is needed. Raises CheckError (USER_NOT_IN_VC_MESSAGE) when a
     join is needed but the author is not in voice."""

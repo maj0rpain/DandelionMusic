@@ -14,7 +14,7 @@ from config import config
 from musicbot import admission
 from musicbot.admission import RequestKind as K
 from musicbot.panel_snapshot import PanelSnapshot
-from musicbot.player_panel import build_view
+from musicbot.player_panel import PanelHooks, build_view
 from musicbot.utils import CheckError
 from discord_fakes import (
     BOTS_ONLY,
@@ -56,7 +56,7 @@ def _panel_buttons():
         volume=70,
         current_song=object(),
     )
-    view = build_view(snapshot, None, None, None, None)
+    view = build_view(snapshot, PanelHooks(None, None, None, None))
     return [(b.custom_id, b._kind) for b in view.children]
 
 

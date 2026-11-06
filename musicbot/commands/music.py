@@ -8,6 +8,7 @@ from discord.ext import commands
 from config import config
 from musicbot import admission, utils, loader, playlists
 from musicbot.outcome import BatchReport, send_outcome
+from musicbot.player_panel import send_song_info
 from musicbot.song import Song
 from musicbot.bot import MusicBot, Context
 from musicbot.utils import dj_check, chunks, joining_command, SimplePaginator
@@ -407,11 +408,7 @@ class Music(commands.Cog):
     )
     @active_only
     async def _songinfo(self, ctx):
-        song = ctx.audiocontroller.current_song
-        if song is None:
-            await ctx.send(config.QUEUE_EMPTY)
-            return
-        await ctx.send(embed=song.format_output(config.SONGINFO_SONGINFO))
+        await send_song_info(ctx, ctx.audiocontroller.current_song)
 
     @commands.hybrid_command(
         name="history",
