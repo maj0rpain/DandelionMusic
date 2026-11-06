@@ -7,7 +7,7 @@ import types
 import pytest
 
 from config import config
-from musicbot import loader
+from musicbot import loader, playlists
 from musicbot.commands import music
 from musicbot.commands.music import Music
 from musicbot.plugins.button import Button
@@ -130,6 +130,50 @@ def test_a_play_message_with_its_own_attachment_loads(
     arm(controller, stub_loader, monkeypatch)
     invoke("_play", controller, message=message(LINK))
     assert loaded(stub_loader) == [(LINK,)]
+
+
+def add_song(controller, stub_loader, monkeypatch, link):
+    arm(controller, stub_loader, monkeypatch)
+    saved = []
+    loads = []
+
+    async def load_song(track):
+        loads.append(track)
+        return LoadResult.of_song(_song(controller, "a"))
+
+    monkeypatch.setattr(music.loader, "load_song", load_song)
+
+    async def add_songs(_factory, _ref, entries):
+        saved.extend(entries)
+
+    monkeypatch.setattr(playlists, "add_songs", add_songs)
+    ctx, sent = command_ctx(controller)
+    ctx.author = FakeMember(guild=controller.guild)
+    _run(
+        controller,
+        lambda: Music._playlist_add_song.callback(Music(None), ctx, "p", link),
+    )
+    return sent, saved, loads
+
+
+def test_playlist_add_song_refuses_a_forbidden_link_and_saves_nothing(
+    controller, stub_loader, monkeypatch
+):
+    sent, saved, loads = add_song(
+        controller, stub_loader, monkeypatch, FOREIGN_LINK
+    )
+    assert sent == [config.MESSAGE_LINK_FORBIDDEN]
+    assert loads == []
+    assert saved == []
+
+
+def test_playlist_add_song_saves_an_allowed_link(
+    controller, stub_loader, monkeypatch
+):
+    sent, saved, loads = add_song(controller, stub_loader, monkeypatch, LINK)
+    assert loads == [LINK]
+    assert len(saved) == 1
+    assert sent == [config.PLAYLIST_UPDATED]
 
 
 class PluginController:
