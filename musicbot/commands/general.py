@@ -123,11 +123,16 @@ class General(commands.Cog):
     @joining_command
     async def _connect(self, ctx):
         await ctx.defer()  # a connect or move can outlast the deadline
-        # connects, or moves the bot out of a channel with only bots
-        # in it; otherwise the bot stays where it is
         # CheckError while the bot is starting, or on a refusal
-        await (await admission.check(ctx)).enter()
-        await ctx.send("Connected.")
+        admitted = await admission.check(ctx)
+        if admitted.join is admission.Join.NONE:
+            # nothing to do: the bot stays where it is
+            raise CheckError(config.ALREADY_CONNECTED_MESSAGE)
+        await admitted.enter()
+        if admitted.join is admission.Join.MOVE:
+            await ctx.send("Moved to your voice channel.")
+        else:
+            await ctx.send("Connected.")
 
     @commands.hybrid_command(
         name="disconnect",

@@ -1,6 +1,8 @@
 """General's voice commands go through request admission: the command
 channel and user_must_be_in_vc rules apply, and d!reset admits twice."""
 
+import asyncio
+
 import pytest
 from discord.ext import commands
 
@@ -8,7 +10,13 @@ from config import config
 from musicbot.admission import RequestKind as K
 from musicbot.commands.general import General
 from musicbot.utils import CheckError
-from discord_fakes import HERE, PEOPLE, situation
+from discord_fakes import (
+    ADMISSION_DJ_ROLE,
+    BOTS_ONLY,
+    HERE,
+    PEOPLE,
+    situation,
+)
 from helpers import run
 
 
@@ -142,3 +150,94 @@ def test_a_refusal_after_the_reset_keeps_the_reset():
     assert sent == []
     assert guild.events == []
     assert disposed == ["reset command"]
+
+
+def connect(**kw):
+    """(refusal, sent, events, order) for d!connect in a situation:
+    `order` records the context's defer and sends in the order they
+    happened."""
+    guild, ctx, sent, _ = prepare("connect", K.JOINING_COMMAND, **kw)
+    order = []
+    send = ctx.send
+
+    async def defer(**kwargs):
+        order.append("defer")
+
+    async def recording_send(content, **kwargs):
+        order.append("send")
+        await send(content, **kwargs)
+
+    ctx.defer = defer
+    ctx.send = recording_send
+    refusal = invoke("connect", ctx)
+    return refusal, sent, guild.events, order
+
+
+@pytest.mark.parametrize("rule", [True, False])
+def test_connect_out_of_voice_says_connected(rule):
+    refusal, sent, events, order = connect(rule=rule)
+    assert refusal is None
+    assert sent == ["Connected."]
+    assert events == [("connect", "b")]
+    assert order == ["defer", "send"]
+
+
+@pytest.mark.parametrize("rule", [True, False])
+def test_connect_out_of_a_bots_only_channel_says_moved(rule):
+    refusal, sent, events, order = connect(bot=BOTS_ONLY, rule=rule)
+    assert refusal is None
+    assert sent == ["Moved to your voice channel."]
+    assert events == [("move", "b")]
+    assert order == ["defer", "send"]
+
+
+@pytest.mark.parametrize("rule", [True, False])
+@pytest.mark.parametrize(
+    "spec",
+    [
+        {"bot": HERE, "author": "a"},
+        {"bot": PEOPLE, "author": "b", "role": "admin"},
+        {"bot": PEOPLE, "author": "b", "role": "owner"},
+        {
+            "bot": PEOPLE,
+            "author": "b",
+            "role": "dj",
+            "dj_role": ADMISSION_DJ_ROLE,
+        },
+        {"bot": BOTS_ONLY, "author": None, "role": "admin"},
+    ],
+    ids=["with the bot", "admin", "owner", "dj", "not in voice"],
+)
+def test_connect_with_nothing_to_do_is_refused_as_already_connected(
+    rule, spec
+):
+    refusal, sent, events, order = connect(rule=rule, **spec)
+    assert refusal == config.ALREADY_CONNECTED_MESSAGE
+    assert sent == []
+    assert events == []
+    assert order == ["defer"]
+
+
+def test_connect_from_outside_a_channel_with_people_rule_off_is_refused():
+    refusal, sent, events, order = connect(bot=PEOPLE, rule=False)
+    assert refusal == config.ALREADY_CONNECTED_MESSAGE
+    assert (sent, events, order) == ([], [], ["defer"])
+
+
+def test_connect_bots_only_channel_author_not_in_voice_rule_off():
+    refusal, sent, events, order = connect(
+        bot=BOTS_ONLY, author=None, rule=False
+    )
+    assert refusal == config.ALREADY_CONNECTED_MESSAGE
+    assert (sent, events, order) == ([], [], ["defer"])
+
+
+@pytest.mark.parametrize("rule", [True, False])
+@pytest.mark.parametrize("bot", [None, BOTS_ONLY], ids=["connect", "move"])
+def test_a_failed_connect_or_move_keeps_todays_refusal(rule, bot, no_sleep):
+    guild, ctx, sent, _ = prepare(
+        "connect", K.JOINING_COMMAND, bot=bot, rule=rule
+    )
+    guild.fail = asyncio.TimeoutError()
+    assert invoke("connect", ctx) == config.VOICE_CONNECT_FAILED
+    assert sent == []

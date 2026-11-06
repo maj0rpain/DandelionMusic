@@ -115,30 +115,40 @@ def _marked_joining(ctx: Context) -> bool:
     )
 
 
-def _join_needed(ctx: Context, sett: GuildSettings) -> bool:
-    """Whether the bot has to join the user's voice channel: it has no
-    voice client (a connect), or user_must_be_in_vc is on, its channel
-    has only bots and the user is in another one (a move)."""
+class Join(enum.Enum):
+    """The join a request will make."""
+
+    # the bot has no voice client and a join is needed
+    CONNECT = enum.auto()
+    # the bot has a voice client and a join is needed
+    MOVE = enum.auto()
+    # no join is needed
+    NONE = enum.auto()
+
+
+def _join_kind(ctx: Context) -> Join:
+    """The join the bot has to make into the user's voice channel: a
+    connect when it has no voice client, a move when its channel has
+    only bots and the user is in another one, whatever
+    user_must_be_in_vc says."""
     bot_vc = ctx.guild.voice_client
     if not bot_vc:
-        return True
-    if not sett.user_must_be_in_vc:
-        return False
+        return Join.CONNECT
     author_voice = ctx.author.voice
-    return (
+    if (
         author_voice is not None
         and author_voice.channel != bot_vc.channel
         and _bot_alone(bot_vc)
-    )
+    ):
+        return Join.MOVE
+    return Join.NONE
 
 
-def _join_target(
-    ctx: Context, sett: GuildSettings
-) -> Optional[discord.VoiceChannel]:
+def _join_target(ctx: Context, join: Join) -> Optional[discord.VoiceChannel]:
     """The channel the bot has to join or move to, or None when no
     join is needed. Raises CheckError (USER_NOT_IN_VC_MESSAGE) when a
     join is needed but the author is not in voice."""
-    if not _join_needed(ctx, sett):
+    if join is Join.NONE:
         return None
     author_voice = ctx.author.voice
     if not author_voice:
@@ -164,15 +174,18 @@ class Admission:
         ctx: Context,
         audiocontroller: AudioController,
         target: Optional[discord.VoiceChannel],
+        join: Join,
     ):
         self._ctx = ctx
         # the guild's controller when the request was checked
         self.audiocontroller = audiocontroller
         self._target = target
+        # the join enter() will make
+        self.join = join
 
     @property
     def join_needed(self) -> bool:
-        return self._target is not None
+        return self.join is not Join.NONE
 
     async def enter(self) -> AudioController:
         """Joins when a join is needed, and returns the guild's
@@ -202,12 +215,14 @@ async def check(ctx: Context, kind: Optional[RequestKind] = None):
         raise CheckError(config.NOT_CONNECTED_MESSAGE)
     _check_command_channel(ctx, sett)
     target = None
+    join = Join.NONE
     if kind in _JOINING_KINDS:
-        target = _join_target(ctx, sett)
+        join = _join_kind(ctx)
+        target = _join_target(ctx, join)
         if target is not None:
             check_voice_permissions(ctx.guild, target)
     if ctx.guild.voice_client and sett.user_must_be_in_vc:
         await _voice_check(ctx, sett)
     if kind is RequestKind.DJ_PLAYER_BUTTON:
         await dj_check(ctx)
-    return Admission(ctx, controller, target)
+    return Admission(ctx, controller, target, join)
