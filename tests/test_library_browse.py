@@ -10,28 +10,12 @@ pins pytest with no asyncio_mode, so an async test here would be
 collected, skipped with a warning, and silently pass.
 """
 
-import ast
-from pathlib import Path
-
 import pytest
 
 from musicbot import library, library_browse
-from musicbot.library import LibrarySong
 
-
-def make_song(title, **kw):
-    return LibrarySong(
-        filename=kw.get("filename", title + ".flac"),
-        title=title,
-        duration=kw.get("duration"),
-        year=kw.get("year"),
-        genre=kw.get("genre"),
-        fmt=kw.get("fmt", "FLAC"),
-        bitrate=kw.get("bitrate"),
-        sample_rate=kw.get("sample_rate"),
-        bit_depth=kw.get("bit_depth"),
-    )
-
+from helpers import imported_names
+from library_fakes import library_song
 
 # Album contents are in the filename order build_index() produces, and
 # "Kid A" is deliberately one whose filename order and title order
@@ -39,17 +23,17 @@ def make_song(title, **kw):
 INDEX = {
     "Radiohead": {
         "OK Computer": [
-            make_song("Airbag", filename="01 - Airbag.flac"),
-            make_song("Karma Police", filename="02 - Karma.flac"),
-            make_song("Lucky", filename="03 - Lucky.flac"),
+            library_song("Airbag", filename="01 - Airbag.flac"),
+            library_song("Karma Police", filename="02 - Karma.flac"),
+            library_song("Lucky", filename="03 - Lucky.flac"),
         ],
         "Kid A": [
-            make_song("Zoo", filename="01 - Zoo.flac"),
-            make_song("Apple", filename="02 - Apple.flac"),
+            library_song("Zoo", filename="01 - Zoo.flac"),
+            library_song("Apple", filename="02 - Apple.flac"),
         ],
     },
-    "The Beatles": {"Abbey Road": [make_song("Come Together")]},
-    "Aphex Twin": {"Drukqs": [make_song("Avril 14th")]},
+    "The Beatles": {"Abbey Road": [library_song("Come Together")]},
+    "Aphex Twin": {"Drukqs": [library_song("Avril 14th")]},
 }
 
 # Small enough that three artists span two pages. The real one is a
@@ -295,7 +279,7 @@ class TestSampleTrack:
         assert library.sample_track({"E": {"A": []}}, "E", "A") is None
 
     def test_albums_are_ordered_case_insensitively(self):
-        index = {"X": {"b": [make_song("b1")], "A": [make_song("a1")]}}
+        index = {"X": {"b": [library_song("b1")], "A": [library_song("a1")]}}
         assert library.sample_track(index, "X", None) == (
             "X",
             "A",
@@ -375,25 +359,8 @@ class TestTheSeam:
     having already imported discord first.
     """
 
-    @staticmethod
-    def _imports(module) -> set:
-        source = Path(module.__file__).read_text(encoding="utf-8")
-        names = set()
-        for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.Import):
-                names.update(alias.name for alias in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                # `from musicbot import library` names a module and
-                # `from typing import List` names an object inside
-                # one; recording both shapes covers either
-                names.add(node.module)
-                names.update(
-                    f"{node.module}.{alias.name}" for alias in node.names
-                )
-        return names
-
     def test_the_cursor_imports_nothing_but_typing_and_the_index(self):
-        imports = self._imports(library_browse)
+        imports = imported_names(library_browse)
         assert {name.split(".")[0] for name in imports} == {
             "typing",
             "musicbot",
@@ -406,7 +373,7 @@ class TestTheSeam:
 
 def test_artists_and_albums_sort_case_insensitively():
     index = {
-        "beta": {"b": [make_song("1")], "A": [make_song("2")]},
+        "beta": {"b": [library_song("1")], "A": [library_song("2")]},
         "Alpha": {},
         "Zed": {},
     }
@@ -418,8 +385,8 @@ def test_artists_and_albums_sort_case_insensitively():
 
 def test_song_order_stays_filename_order():
     songs = [
-        make_song("Zoo", filename="01 - Zoo.flac"),
-        make_song("Apple", filename="02 - Apple.flac"),
+        library_song("Zoo", filename="01 - Zoo.flac"),
+        library_song("Apple", filename="02 - Apple.flac"),
     ]
     cursor = library_browse.BrowseCursor({"A": {"B": songs}}, 25)
     cursor.descend("A")

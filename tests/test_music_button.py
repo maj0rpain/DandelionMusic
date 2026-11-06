@@ -26,7 +26,6 @@ from discord_fakes import (
     ADMISSION_DJ_ROLE,
     FakeInteraction,
     VoiceGuild,
-    FakePanel,
     admission_settings,
     make_bot,
 )
@@ -165,45 +164,51 @@ def test_a_failed_join_is_an_ephemeral_followup_and_skips_the_action(
     assert ran == []
 
 
-def click_with_panel(custom_id):
-    """A click on the button `custom_id` in a guild with a player
-    panel: (the click's interaction, its context, the panel)."""
-    ctx = FakeContext()
-    panel = FakePanel()
-    inter = FakeInteraction(ctx, custom_id, panel=panel)
-    ctx.interaction = inter
-    ctx.bot.sessions.panel = lambda guild: panel
-    return inter, ctx, panel
+def test_after_is_awaited_with_the_clicks_ctx_after_the_action():
+    inter, ctx = click_interaction()
+    events = []
+
+    async def after(c):
+        events.append(("after", c))
+
+    run(
+        MusicButton(lambda c: events.append("action"), after=after).callback(
+            inter
+        )
+    )
+    assert events == ["action", ("after", ctx)]
 
 
-@pytest.mark.parametrize("custom_id", ["next", "prev"])
-def test_a_skip_click_posts_the_skip_notice_and_does_not_refresh(custom_id):
-    inter, ctx, panel = click_with_panel(custom_id)
-    ctx.settings.dj_role = None
+def test_a_refused_click_runs_no_after():
+    inter, ctx = click_interaction()
+    ctx.out_of_voice()
+    ran = []
 
-    run(MusicButton(lambda ctx: None, custom_id=custom_id).callback(inter))
+    async def after(c):
+        ran.append(c)
 
-    assert sent_texts_and_kwargs(inter.followups) == [
-        (f"{inter.user} Skipped a Song", {})
-    ]
-    assert panel.refreshes == 0
+    run(MusicButton(lambda c: None, after=after).callback(inter))
+    assert ran == []
 
 
-@pytest.mark.parametrize("custom_id", ["pause", "shuffle", "queue", "x"])
-def test_every_other_successful_click_refreshes_the_panel(custom_id):
-    inter, ctx, panel = click_with_panel(custom_id)
-    ctx.settings.dj_role = None
+def test_a_button_without_after_does_nothing_after_its_action():
+    inter, ctx = click_interaction()
 
-    run(MusicButton(lambda ctx: None, custom_id=custom_id).callback(inter))
-
-    assert panel.refreshes == 1
+    run(MusicButton(lambda c: None).callback(inter))
     assert inter.followups == []
 
 
-def test_a_refused_click_does_not_refresh_the_panel():
-    inter, ctx, panel = click_with_panel("pause")
-    ctx.out_of_voice()
+def test_an_exception_from_after_reaches_on_failure():
+    inter, ctx = click_interaction()
+    error = RuntimeError("after failed")
+    seen = []
 
-    run(MusicButton(lambda ctx: None, custom_id="pause").callback(inter))
+    async def after(c):
+        raise error
 
-    assert panel.refreshes == 0
+    class Button(MusicButton):
+        async def on_failure(self, ctx, err):
+            seen.append(err)
+
+    run(Button(lambda c: None, after=after).callback(inter))
+    assert seen == [error]

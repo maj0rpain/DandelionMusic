@@ -21,6 +21,7 @@ class FakeBot:
         return user.id == self.owner_id
 
     _leave = MusicBot._leave
+    leave_guilds = MusicBot.leave_guilds
 
 
 class FakeCtx:

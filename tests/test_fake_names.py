@@ -20,6 +20,7 @@ SHARED_MODULES = [
     "controller_seam",
     "controller_helpers",
     "db_seam",
+    "library_fakes",
 ]
 
 PARAGRAPH_OPENING = "A shared test-helper module is any of"

@@ -4,41 +4,21 @@ Synchronous throughout, like the cursor's tests.
 """
 
 import ast
-from collections import namedtuple
 from pathlib import Path
 
 from musicbot import library, library_browse, library_session
-from musicbot.library import LibrarySong
+from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 from musicbot.library_session import BrowseSession, stat_fields
-
-Art = namedtuple("Art", "url data extension")
-Ext = namedtuple(
-    "Ext", "listeners playcount tags popularity followers " "release_date"
-)
-Enr = namedtuple("Enr", "stats art")
-
-
-def song(title, **kw):
-    return LibrarySong(
-        filename=kw.get("filename", title + ".flac"),
-        title=title,
-        duration=kw.get("duration", 60),
-        year=kw.get("year"),
-        genre=kw.get("genre"),
-        fmt="FLAC",
-        bitrate=None,
-        sample_rate=None,
-        bit_depth=None,
-    )
-
+from helpers import imported_names
+from library_fakes import library_song
 
 INDEX = {
     "Radiohead": {
-        "OK Computer": [song("Airbag", year=1997, genre="Rock")],
-        "Kid A": [song("Zoo")],
+        "OK Computer": [library_song("Airbag", year=1997, genre="Rock")],
+        "Kid A": [library_song("Zoo")],
     },
-    "The Beatles": {"Abbey Road": [song("Come Together")]},
-    "Aphex Twin": {"Drukqs": [song("Avril")]},
+    "The Beatles": {"Abbey Road": [library_song("Come Together")]},
+    "Aphex Twin": {"Drukqs": [library_song("Avril")]},
 }
 
 
@@ -60,8 +40,13 @@ def at_album():
     return s
 
 
-EMBEDDED = Enr(None, Art(None, b"png", "png"))
-URL = Enr(None, Art("http://x/y.jpg", None, None))
+EMBEDDED = Enrichment(
+    stats=None, art=ArtInfo(url=None, data=b"png", extension="png")
+)
+URL = Enrichment(
+    stats=None,
+    art=ArtInfo(url="http://x/y.jpg", data=None, extension=None),
+)
 
 
 class TestUndo:
@@ -108,7 +93,17 @@ class TestStaleness:
         s = at_artist()
         s.offer_enrichment(
             s.enter_level(),
-            Enr(Ext(5000, None, (), None, None, None), EMBEDDED.art),
+            Enrichment(
+                stats=ExternalStats(
+                    listeners=5000,
+                    playcount=None,
+                    tags=(),
+                    popularity=None,
+                    followers=None,
+                    release_date=None,
+                ),
+                art=EMBEDDED.art,
+            ),
         )
         assert s.frame().attachment is not None
         s.back()
@@ -188,7 +183,7 @@ class TestFrameText:
             ("Albums", "4"),
             ("Songs", "4"),
         )
-        assert not f.show_back and not f.show_queue
+        assert f.queue_label is None
         assert f.entries == ["Aphex Twin", "Radiohead"]
         assert f.show_next and not f.show_prev
 
@@ -215,7 +210,17 @@ class TestFrameText:
         s = at_album()
         s.offer_enrichment(
             s.enter_level(),
-            Enr(Ext(1500, None, ("a", "b"), 80, None, None), None),
+            Enrichment(
+                stats=ExternalStats(
+                    listeners=1500,
+                    playcount=None,
+                    tags=("a", "b"),
+                    popularity=80,
+                    followers=None,
+                    release_date=None,
+                ),
+                art=None,
+            ),
         )
         f = s.frame()
         assert f.description == "*a · b*"
@@ -224,7 +229,7 @@ class TestFrameText:
 
     def test_long_names_are_trimmed(self):
         name = "x" * 300
-        s = session({name: {name: [song("s")]}})
+        s = session({name: {name: [library_song("s")]}})
         s.descend(name)
         f = s.frame()
         assert f.title == "\U0001f464 " + "x" * 252 + "…"
@@ -251,52 +256,43 @@ class TestStatFieldBuilder:
         base.update(kw)
         return library_browse.Screen(**base)
 
-    def test_counts_alone_select_the_root_branch(self):
-        # scope says "artist level"; only `counts` is set
-        screen = self._screen(scope=("A", None), counts=(1, 2, 3))
+    def test_root_kind_selects_the_counts_fields(self):
+        screen = self._screen(counts=(1, 2, 3))
         assert stat_fields(screen, None) == [
             ("Artists", "1"),
             ("Albums", "2"),
             ("Songs", "3"),
         ]
 
-    def test_stats_alone_select_the_lower_branch(self):
+    def test_album_kind_selects_the_artist_level_fields(self):
         stats = library.LevelStats(2, 5, None, None, None, (), None, ())
-        screen = self._screen(kind="album", scope=(None, None), stats=stats)
+        screen = self._screen(kind="album", scope=("A", None), stats=stats)
         assert stat_fields(screen, None) == [
             ("Albums", "2"),
             ("Tracks", "5"),
         ]
 
+    def test_song_kind_selects_the_album_level_fields(self):
+        stats = library.LevelStats(1, 5, None, None, None, (), None, ())
+        screen = self._screen(kind="song", scope=("A", "B"), stats=stats)
+        assert stat_fields(screen, None) == [("Tracks", "5")]
+
 
 class TestTheSeam:
     def test_imports_are_pinned(self):
-        source = Path(library_session.__file__).read_text(encoding="utf-8")
-        tree = ast.parse(source)
-        guarded = set()
-        for node in ast.walk(tree):
-            if isinstance(node, ast.If) and (
-                getattr(node.test, "id", None) == "TYPE_CHECKING"
-            ):
-                for inner in ast.walk(node):
-                    guarded.add(id(inner))
-        names = set()
-        for node in ast.walk(tree):
-            if id(node) in guarded:
-                continue
-            if isinstance(node, ast.Import):
-                names.update(a.name for a in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                names.add(node.module)
-                names.update(f"{node.module}.{a.name}" for a in node.names)
+        names = imported_names(library_session, skip_type_checking=True)
         assert {n for n in names if n.startswith("musicbot")} == {
             "musicbot",
             "musicbot.library",
             "musicbot.library_browse",
+            "musicbot.library_display",
         }
         assert {n.split(".")[0] for n in names} == {"typing", "musicbot"}
         # and the one allowed exception really is TYPE_CHECKING-only,
         # and is all that block holds
+        tree = ast.parse(
+            Path(library_session.__file__).read_text(encoding="utf-8")
+        )
         blocks = [
             n
             for n in tree.body
@@ -309,29 +305,9 @@ class TestTheSeam:
 
 
 class TestTrimAndFormat:
-    def test_trim_drops_whole_char_when_budget_ends_in_surrogate_pair(self):
-        text = "x" + "\U0001f600" * 10
-        assert library_session.trim(text, 4) == "x\U0001f600…"
-
-    def test_trim_cuts_bmp_text_at_the_limit(self):
-        assert library_session.trim("abcdef", 4) == "abcd…"
-
-    def test_trim_returns_text_within_budget_unchanged(self):
-        assert library_session.trim("abcd", 4) == "abcd"
-        assert library_session.trim("\U0001f600\U0001f600", 4) == (
-            "\U0001f600\U0001f600"
-        )
-
-    def test_trim_counts_a_lone_surrogate_as_one_unit(self):
-        lone = "\udc80"  # an undecodable filename byte
-        assert library_session.trim("ab" + lone, 3) == "ab" + lone
-        assert library_session.trim("ab" + lone + "cd", 3) == (
-            "ab" + lone + "…"
-        )
-
     def test_non_bmp_title_fits_the_embed_title_limit(self):
         name = "x" + "\U0001f600" * 255
-        s = session({name: {"Album": [song("S")]}})
+        s = session({name: {"Album": [library_song("S")]}})
         s.descend(name)
         title = s.frame().title
         assert len(title.encode("utf-16-le")) // 2 <= 256
@@ -339,7 +315,7 @@ class TestTrimAndFormat:
 
     def test_footer_breadcrumb_is_not_trimmed(self):
         name = "x" * 255
-        s = session({name: {"Album": [song("S")]}})
+        s = session({name: {"Album": [library_song("S")]}})
         s.descend(name)
         assert name in s.frame().footer
 
@@ -348,7 +324,17 @@ class TestTrimAndFormat:
             s = at_album()
             s.offer_enrichment(
                 s.enter_level(),
-                Enr(Ext(value, None, (), None, None, None), None),
+                Enrichment(
+                    stats=ExternalStats(
+                        listeners=value,
+                        playcount=None,
+                        tags=(),
+                        popularity=None,
+                        followers=None,
+                        release_date=None,
+                    ),
+                    art=None,
+                ),
             )
             return dict(s.frame().fields)["Listeners"]
 
@@ -356,3 +342,18 @@ class TestTrimAndFormat:
             listeners(v)
             for v in (999, 1_500, 999_949, 999_950, 1_204_338_291, 999_999_999)
         ] == ["999", "1.5K", "999.9K", "1M", "1.2B", "1B"]
+
+
+class TestNarrowReads:
+    def test_scope_at_each_level(self):
+        assert session().scope() == (None, None)
+        assert at_artist().scope() == ("Radiohead", None)
+        assert at_album().scope() == ("Radiohead", "OK Computer")
+
+    def test_tracks_at_each_level(self):
+        def files(s):
+            return sorted(f for _, _, f in s.tracks())
+
+        assert session().tracks() == []
+        assert files(at_artist()) == ["Airbag.flac", "Zoo.flac"]
+        assert files(at_album()) == ["Airbag.flac"]
