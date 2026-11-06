@@ -17,7 +17,7 @@ from aioconsole import aexec
 from musicbot.bot import MusicBot
 from musicbot import guild_whitelist
 from musicbot.guild_whitelist import Outcome
-from musicbot.utils import owner_check
+from musicbot.utils import is_bot_owner, owner_check
 
 
 class Splitter(TextWrapper):
@@ -216,6 +216,8 @@ class Developer(commands.Cog):
     async def _guild_whitelist_remove_autocomplete(
         self, interaction: discord.Interaction, current: str
     ) -> List[app_commands.Choice[str]]:
+        if not await is_bot_owner(self.bot, interaction.user):
+            return []
         all_guilds = [
             app_commands.Choice(name=f"{g.name} {g.id}", value=str(g.id))
             for g in self.bot.guilds

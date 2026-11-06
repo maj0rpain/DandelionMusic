@@ -8,6 +8,9 @@ removal that did not persist - so the whole write-back path is gone and
 these tests cover what replaced it.
 """
 
+import logging
+import types
+
 import pytest
 from discord.ext import commands
 
@@ -462,3 +465,46 @@ def test_leave_guilds_skips_an_id_the_bot_is_not_in_silently(capsys):
     assert present.left
     captured = capsys.readouterr()
     assert captured.out == "" and captured.err == ""
+
+
+class RaisingGuilds:
+    def __iter__(self):
+        raise AssertionError("guilds were read")
+
+
+class NoLookupBot(FakeBot):
+    async def is_owner(self, user):
+        raise AssertionError("is_owner was called")
+
+
+def suggest(bot, user_id, current):
+    cog = Developer(bot)
+    user = types.SimpleNamespace(id=user_id)
+    interaction = types.SimpleNamespace(user=user)
+    return run(cog._guild_whitelist_remove_autocomplete(interaction, current))
+
+
+class TestRemoveAutocomplete:
+    def test_non_owner_gets_nothing_and_no_guild_is_read(
+        self, monkeypatch, caplog
+    ):
+        monkeypatch.setattr(config, "EXTRA_OWNERS", [5])
+        guilds = [LeavingGuild(10, "Alpha"), LeavingGuild(11, "Beta")]
+        with caplog.at_level(logging.INFO):
+            assert suggest(FakeBot(guilds), 99, "") == []
+            assert suggest(FakeBot(RaisingGuilds()), 99, "a") == []
+        assert caplog.records == []
+
+    def test_extra_owner_gets_choices_without_an_owner_lookup(
+        self, monkeypatch
+    ):
+        monkeypatch.setattr(config, "EXTRA_OWNERS", [5])
+        guilds = [LeavingGuild(10, "Alpha"), LeavingGuild(11, "Beta")]
+        choices = suggest(NoLookupBot(guilds), 5, "ALPH")
+        assert [(c.name, c.value) for c in choices] == [("Alpha 10", "10")]
+
+    def test_application_owner_gets_first_25_matches_by_id(self, monkeypatch):
+        monkeypatch.setattr(config, "EXTRA_OWNERS", [])
+        guilds = [LeavingGuild(700 + i, f"g{i}") for i in range(30)]
+        choices = suggest(FakeBot(guilds, owner_id=1), 1, "7")
+        assert [c.value for c in choices] == [str(700 + i) for i in range(25)]
