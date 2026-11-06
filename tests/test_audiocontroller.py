@@ -2413,12 +2413,16 @@ def test_a_disconnect_goes_through_when_the_backup_write_fails(
     _queue(controller, "first", "second")
     _fail_replace(controller, monkeypatch)
 
+    reported = []
+
     async def scenario():
         await controller.ensure_playing()
-        await controller.udisconnect("d!disconnect")
+        reported.append(await controller.udisconnect("d!disconnect"))
 
     _run(controller, scenario)
 
+    assert reported == [True]
+    assert controller.guild.voice_client.disconnected is True
     assert controller.guild.voice_client.stopped == 1
     assert _titles(controller) == []
 
