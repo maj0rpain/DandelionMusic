@@ -697,11 +697,30 @@ class LibrarySearchView(LibraryView):
         )
 
 
+async def _send_private(ctx, **kwargs):
+    """Send a library reply, ephemeral when the context is a slash
+    interaction, and return what `ctx.send` returned.
+
+    Ephemeral only makes sense for an interaction response: a plain
+    text message from a prefix command can't be ephemeral. It matches
+    search's ephemeral deferral (a public reply behind an ephemeral
+    placeholder would leave a stray message) and keeps Context.send off
+    its public-message path, which moves the playback controls off the
+    player panel and onto this reply - which the ephemeral deferral
+    would then hide from everyone but the requester.
+    """
+    if ctx.interaction is not None:
+        kwargs["ephemeral"] = True
+    return await ctx.send(**kwargs)
+
+
 class Library(commands.Cog):
     def __init__(self, bot: MusicBot):
         self.bot = bot
 
     async def cog_check(self, ctx):
+        if not config.MUSIC_LIBRARY_PATH:
+            raise CheckError(config.LIBRARY_NOT_CONFIGURED)
         # kept for its not-ready refusal (CheckError), not for the value
         get_audiocontroller(ctx)
         return True
@@ -733,9 +752,6 @@ class Library(commands.Cog):
     # has a reason to rescan it
     @commands.check(owner_check)
     async def _library_refresh(self, ctx):
-        if not config.MUSIC_LIBRARY_PATH:
-            await ctx.send(config.LIBRARY_NOT_CONFIGURED)
-            return
         await ctx.defer()
         index = await library.build_index_async()
         artists, albums, songs = library.counts(index)
@@ -753,9 +769,6 @@ class Library(commands.Cog):
     @app_commands.describe(query="Artist, album or song to look for")
     @joining_command
     async def _library_search(self, ctx, *, query: str):
-        if not config.MUSIC_LIBRARY_PATH:
-            await ctx.send(config.LIBRARY_NOT_CONFIGURED)
-            return
         index = library.get_index()
         if not index:
             await ctx.send(config.LIBRARY_EMPTY)
@@ -771,34 +784,21 @@ class Library(commands.Cog):
             async with _search_lock:
                 results = await library.search_async(index, query)
         if not results:
-            kwargs = {
-                # the query is echoed back, so deny it any ability to
-                # ping on top of escaping its markdown
-                "allowed_mentions": discord.AllowedMentions.none(),
-            }
-            # matches the deferral above, and matches the hit-list send
-            # below. Without it Context.send takes its public-message
-            # path, which moves the playback controls off the
-            # player panel and onto this one - which the
-            # ephemeral deferral then hides from everyone but the
-            # searcher.
-            if ctx.interaction is not None:
-                kwargs["ephemeral"] = True
-            await ctx.send(
-                config.LIBRARY_SEARCH_NO_RESULTS.format(
+            await _send_private(
+                ctx,
+                content=config.LIBRARY_SEARCH_NO_RESULTS.format(
                     query=discord.utils.escape_markdown(
                         trim(query, QUERY_ECHO_LIMIT)
                     )
                 ),
-                **kwargs,
+                # the query is echoed back, so deny it any ability to
+                # ping on top of escaping its markdown
+                allowed_mentions=discord.AllowedMentions.none(),
             )
             return
 
         view = LibrarySearchView(ctx, index, query, results)
-        kwargs = {"embed": view.embed(), "view": view}
-        if ctx.interaction is not None:
-            kwargs["ephemeral"] = True
-        view.message = await ctx.send(**kwargs)
+        view.message = await _send_private(ctx, embed=view.embed(), view=view)
 
     @_library.command(
         name="browse",
@@ -807,9 +807,6 @@ class Library(commands.Cog):
     )
     @joining_command
     async def _library_browse(self, ctx):
-        if not config.MUSIC_LIBRARY_PATH:
-            await ctx.send(config.LIBRARY_NOT_CONFIGURED)
-            return
         # taken once and handed in: called twice, a `d!lib refresh`
         # landing between them (it replaces the module global) would
         # give the view a different - possibly empty - index than the
@@ -820,14 +817,11 @@ class Library(commands.Cog):
             return
 
         view, frame = LibraryBrowseView.open(ctx, index)
-        kwargs = {"embed": view.embed(frame), "view": view}
-        # ephemeral only makes sense for an interaction (slash) response -
-        # a plain text message from a prefix command can't be ephemeral
-        if ctx.interaction is not None:
-            kwargs["ephemeral"] = True
         # whatever this hands back, OwnedView.refresh_message() knows
         # what to do with it - see the note on OwnedView.message
-        view.message = await ctx.send(**kwargs)
+        view.message = await _send_private(
+            ctx, embed=view.embed(frame), view=view
+        )
         view.session.landed(frame)
 
 
