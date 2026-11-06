@@ -1141,6 +1141,9 @@ def voice_ctx_for(view, in_voice):
 
 
 class LibraryController:
+    def is_disconnecting(self):
+        return False
+
     def __init__(self, name):
         self.name = name
         self.queued = []

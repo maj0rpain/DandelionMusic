@@ -56,7 +56,9 @@ class FakeContext(Context):
         self.bot = make_bot(
             {
                 self.guild: SimpleNamespace(
-                    name="current", command_channel=None
+                    name="current",
+                    command_channel=None,
+                    is_disconnecting=lambda: False,
                 )
             },
             settings={self.guild: self.settings},

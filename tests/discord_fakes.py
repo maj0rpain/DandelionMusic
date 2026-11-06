@@ -260,7 +260,9 @@ def fake_controller():
     async def dispose(reason):
         pass
 
-    return types.SimpleNamespace(dispose=dispose)
+    return types.SimpleNamespace(
+        dispose=dispose, is_disconnecting=lambda: False
+    )
 
 
 def situation(

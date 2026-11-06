@@ -454,3 +454,50 @@ def test_command_level_checks_read_the_controller_off_the_context():
     ctx.controllers[guild].is_active = lambda: True
     run(cog.cog_check(ctx))
     assert run(active_only.predicate(ctx)) is True
+
+
+def disconnecting(ctx):
+    controller = ctx.controllers[ctx.guild]
+    controller.is_disconnecting = lambda: True
+
+
+@pytest.mark.parametrize("kind", JOINING, ids=lambda k: k.name)
+def test_a_joining_request_while_disconnecting_is_refused_and_never_joins(
+    kind,
+):
+    guild, ctx = situation(kind)
+    disconnecting(ctx)
+    with pytest.raises(CheckError) as exc:
+        run_request(ctx, kind)
+    assert str(exc.value) == config.DISCONNECTING_MESSAGE
+    assert guild.events == []
+
+
+@pytest.mark.parametrize(
+    "kind",
+    [K.COMMAND, K.PLAYER_BUTTON, K.DJ_PLAYER_BUTTON],
+    ids=lambda k: k.name,
+)
+def test_a_plain_request_or_button_while_disconnecting_is_admitted(kind):
+    guild, ctx = situation(kind, bot=HERE, author="a", role="admin")
+    disconnecting(ctx)
+    run_request(ctx, kind)
+    assert guild.events == []
+
+
+def test_a_wrong_channel_is_refused_before_the_disconnect_refusal():
+    _, ctx = situation(K.JOINING_COMMAND, wrong_channel=True)
+    disconnecting(ctx)
+    with pytest.raises(CheckError) as exc:
+        run_request(ctx, K.JOINING_COMMAND)
+    assert str(exc.value) == WRONG_CH
+
+
+def test_allow_disconnecting_admits_a_joining_command():
+    guild, ctx = situation(K.JOINING_COMMAND)
+    disconnecting(ctx)
+
+    async def go():
+        return await admission.check(ctx, allow_disconnecting=True)
+
+    run(go())

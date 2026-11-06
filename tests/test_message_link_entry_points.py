@@ -181,6 +181,9 @@ class PluginController:
     stand-in: nothing else of the controller is reached by a link that
     is refused or whose load fails."""
 
+    def is_disconnecting(self):
+        return False
+
     def __init__(self, guild):
         from musicbot.audiocontroller import AudioController
 
