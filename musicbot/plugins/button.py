@@ -115,7 +115,7 @@ class Button(commands.Cog):
                 except loader.SongError as e:
                     await ctx.send(str(e))
                     continue
-                await send_outcome(ctx, outcome, sett.announce_songs)
+                await send_outcome(ctx, outcome)
 
 
 async def setup(bot: MusicBot):

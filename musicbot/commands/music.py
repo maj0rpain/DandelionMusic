@@ -205,9 +205,7 @@ class Music(commands.Cog):
             await ctx.send(e)
             return
 
-        await send_outcome(
-            ctx, outcome, utils.get_settings(ctx).announce_songs
-        )
+        await send_outcome(ctx, outcome)
 
     @commands.hybrid_command(
         name="playnext",
@@ -527,9 +525,7 @@ class Music(commands.Cog):
             ),
             batch=True,
         )
-        await send_outcome(
-            ctx, outcome, utils.get_settings(ctx).announce_songs
-        )
+        await send_outcome(ctx, outcome)
 
     @_playlist.command(
         name="remove",
