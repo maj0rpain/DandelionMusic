@@ -18,7 +18,8 @@ from discord_fakes import RecordingCtx
 from helpers import run
 
 
-def make_music_bot():
+@pytest.fixture(scope="module")
+def music_bot():
     return MusicBot([], command_prefix="d!", intents=discord.Intents.default())
 
 
@@ -36,71 +37,177 @@ def _app(error):
     )
 
 
-WRAPS = [
-    pytest.param(lambda e: e, id="bare"),
-    pytest.param(commands.CommandInvokeError, id="prefix"),
-    pytest.param(_hybrid, id="hybrid"),
-    pytest.param(_app, id="app"),
-]
+def _bare(error):
+    return error
 
 
-async def _noop(ctx, name: str, count: int):
+WRAPS = {
+    "bare": _bare,
+    "prefix": commands.CommandInvokeError,
+    "hybrid": _hybrid,
+    "app": _app,
+}
+
+
+async def _seek(ctx, name: str, count: int):
     pass
 
 
-def _command(callback=_noop):
-    return commands.Command(callback, name="seek")
+async def _seek_no_args(ctx):
+    pass
 
 
-def _bare_command():
-    async def seek(ctx):
-        pass
+def _command():
+    return commands.Command(_seek, name="seek")
 
-    return commands.Command(seek, name="seek")
+
+def _no_args_command():
+    return commands.Command(_seek_no_args, name="seek")
 
 
 def _missing():
-    return commands.MissingRequiredArgument(
-        _command().clean_params["name"]
-    )
+    return commands.MissingRequiredArgument(_command().clean_params["name"])
 
 
 def _literal():
     return commands.BadLiteralArgument(
-        _command().clean_params["name"], ["a", "b"], ValueError("x"), None
+        _command().clean_params["name"],
+        ["a", "b"],
+        [commands.BadArgument("x")],
+        None,
     )
 
 
-def _usage(command, prefix="d!"):
-    return f"\nUsage: {prefix}seek {command.signature}"
+USAGE = "\nUsage: d!seek <name> <count>"
 
-
-# (error factory, sends the message, usage, prints)
-IGNORED = [lambda: commands.CommandNotFound('Command "x" is not found')]
-USER_ERRORS = [
-    _missing,
-    lambda: commands.BadArgument("bad value"),
-    _literal,
+# One row per error: (id, error factory, command factory or None, wrappable,
+# expected sends given the error as received, whether it is printed).
+# A row that is not wrappable runs bare only.
+ROWS = [
+    (
+        "unknown-command",
+        lambda: commands.CommandNotFound('Command "x" is not found'),
+        None,
+        True,
+        lambda e: [],
+        False,
+    ),
+    (
+        "missing-argument",
+        _missing,
+        _command,
+        True,
+        lambda e: [str(e) + USAGE],
+        False,
+    ),
+    (
+        "bad-argument",
+        lambda: commands.BadArgument("bad value"),
+        _command,
+        True,
+        lambda e: ["bad value" + USAGE],
+        False,
+    ),
+    (
+        "bad-literal",
+        _literal,
+        _command,
+        True,
+        lambda e: [str(e) + USAGE],
+        False,
+    ),
+    (
+        "missing-argument-no-command",
+        _missing,
+        None,
+        False,
+        lambda e: [str(e)],
+        False,
+    ),
+    (
+        "bad-argument-no-command",
+        lambda: commands.BadArgument("bad value"),
+        None,
+        False,
+        lambda e: ["bad value"],
+        False,
+    ),
+    (
+        "bad-literal-no-command",
+        _literal,
+        None,
+        False,
+        lambda e: [str(e)],
+        False,
+    ),
+    (
+        "empty-signature-no-trailing-space",
+        lambda: commands.BadArgument("bad value"),
+        _no_args_command,
+        False,
+        lambda e: ["bad value\nUsage: d!seek"],
+        False,
+    ),
+    (
+        "check-failure",
+        lambda: commands.CheckFailure("check failed"),
+        None,
+        True,
+        lambda e: ["check failed"],
+        False,
+    ),
+    (
+        "not-owner",
+        lambda: commands.NotOwner("not owner"),
+        None,
+        True,
+        lambda e: ["not owner"],
+        False,
+    ),
+    (
+        "check-error",
+        lambda: CheckError(config.USER_MISSING_PERMISSIONS),
+        None,
+        True,
+        lambda e: [config.USER_MISSING_PERMISSIONS],
+        False,
+    ),
+    (
+        "song-error",
+        lambda: SongError("unsupported link"),
+        None,
+        True,
+        lambda e: ["unsupported link"],
+        False,
+    ),
+    (
+        "failure",
+        lambda: RuntimeError("boom"),
+        None,
+        True,
+        lambda e: [str(e)],
+        True,
+    ),
 ]
-REFUSALS = [
-    lambda: commands.CheckFailure("check failed"),
-    lambda: commands.NotOwner("not owner"),
-    lambda: CheckError(config.USER_MISSING_PERMISSIONS),
+
+CASES = [
+    pytest.param(row, wrap, id=f"{row[0]}-{wrap}")
+    for row in ROWS
+    for wrap in (WRAPS if row[3] else ["bare"])
 ]
 
 
-def handle(error, command=None, prefix="d!"):
+def handle(bot, error, command=None):
     printed = []
     real = bot_module.print_exception
     bot_module.print_exception = lambda e: printed.append(e)
     try:
 
         async def scenario():
-            bot = make_music_bot()
             ctx = RecordingCtx(types.SimpleNamespace(DbSession=object()))
             if command is not None:
                 ctx.command = command
-                ctx.prefix = prefix
+                ctx.prefix = "d!"
             await bot.on_command_error(ctx, error)
             return ctx.sent
 
@@ -110,53 +217,15 @@ def handle(error, command=None, prefix="d!"):
     return [str(m) for m in sent], printed
 
 
-@pytest.mark.parametrize("wrap", WRAPS)
-@pytest.mark.parametrize("make", IGNORED)
-def test_unknown_command_gets_no_reply_and_no_log(wrap, make):
-    assert handle(wrap(make())) == ([], [])
-
-
-@pytest.mark.parametrize("wrap", WRAPS)
-@pytest.mark.parametrize("make", USER_ERRORS)
-def test_user_error_replies_with_message_and_usage(wrap, make):
+@pytest.mark.parametrize("row, wrap", CASES)
+def test_command_error_is_classified(music_bot, row, wrap):
+    _, make, make_command, _, expected_sends, is_printed = row
     error = make()
-    command = _command()
-    sent, printed = handle(wrap(error), command)
-    assert sent == [str(error) + _usage(command)]
-    assert printed == []
-
-
-@pytest.mark.parametrize("make", USER_ERRORS)
-def test_user_error_without_a_command_replies_with_message_alone(make):
-    error = make()
-    assert handle(error) == ([str(error)], [])
-
-
-def test_usage_has_no_trailing_space_for_an_empty_signature():
-    error = commands.BadArgument("bad value")
-    sent, printed = handle(error, _bare_command())
-    assert sent == ["bad value\nUsage: d!seek"]
-    assert printed == []
-
-
-@pytest.mark.parametrize("wrap", WRAPS)
-@pytest.mark.parametrize("make", REFUSALS)
-def test_failed_check_replies_with_its_message(wrap, make):
-    error = make()
-    assert handle(wrap(error)) == ([str(error)], [])
-
-
-@pytest.mark.parametrize("wrap", WRAPS)
-def test_song_error_replies_with_its_message(wrap):
-    assert handle(wrap(SongError("unsupported link"))) == (
-        ["unsupported link"],
-        [],
-    )
-
-
-@pytest.mark.parametrize("wrap", WRAPS)
-def test_failure_is_replied_to_and_printed_as_received(wrap):
-    wrapped = wrap(RuntimeError("boom"))
-    sent, printed = handle(wrapped)
-    assert sent == [str(wrapped)]
-    assert printed == [wrapped]
+    received = WRAPS[wrap](error)
+    command = make_command() if make_command else None
+    sent, printed = handle(music_bot, received, command)
+    # a failure is replied to and printed as received, so its text is the
+    # wrapped error's
+    reply_to = received if is_printed else error
+    assert sent == expected_sends(reply_to)
+    assert printed == ([received] if is_printed else [])
