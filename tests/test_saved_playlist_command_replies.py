@@ -99,3 +99,48 @@ def test_save_with_an_existing_name_replies_already_exists(monkeypatch):
     run(Music._playlist_save.callback(Music(None), ctx, "p"))
 
     assert sent == [config.PLAYLIST_ALREADY_EXISTS]
+
+
+@pytest.mark.parametrize(
+    "command, function, args",
+    [
+        (Music._playlist_load, "get", ("p",)),
+        (Music._playlist_show, "get", ("p",)),
+        (Music._playlist_remove_song, "remove_song", ("p", 1)),
+        (Music._playlist_move_song, "move_song", ("p", 1, 2)),
+        (Music._playlist_add_song, "add_songs", ("p", "t")),
+    ],
+    ids=["load", "show", "remove_song", "move_song", "add_song"],
+)
+def test_playlist_commands_on_an_unreadable_playlist_reply_corrupt(
+    monkeypatch, command, function, args
+):
+    sent = _run_playlist_command(
+        monkeypatch, command, function, playlists.CorruptPlaylist("p"), *args
+    )
+
+    assert sent == [config.PLAYLIST_CORRUPT]
+
+
+def test_show_lists_an_untitled_entry_by_its_url(monkeypatch):
+    async def get(session_factory, ref):
+        return playlists.PlaylistContents(
+            ref, [playlists.PlaylistEntry("u", None)]
+        )
+
+    shown = []
+
+    class Paginator:
+        def __init__(self, pages):
+            shown.extend(pages)
+
+        async def send(self, ctx):
+            pass
+
+    monkeypatch.setattr(playlists, "get", get)
+    monkeypatch.setattr(music, "SimplePaginator", Paginator)
+    ctx, sent = command_ctx()
+
+    run(Music._playlist_show.callback(Music(None), ctx, "p"))
+
+    assert "[u](u)" in shown[0].fields[0].value

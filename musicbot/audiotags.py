@@ -4,6 +4,7 @@ from pathlib import Path
 from typing import Callable, Dict, NamedTuple, Optional, Tuple
 
 from mutagen import File as MutagenFile
+from mutagen import MutagenError
 from mutagen.aiff import AIFF
 from mutagen.asf import ASF
 from mutagen.flac import FLAC
@@ -97,13 +98,38 @@ def _first_str(audio, key: str) -> Optional[str]:
     return text or None
 
 
-def read_tags(path: Path) -> AudioTags:
+def _io_error(e: BaseException) -> Optional[OSError]:
+    """The OSError behind `e`, or None. mutagen wraps the OSError of a
+    failed open in a MutagenError (as __context__, or __cause__, or its
+    first argument), so a bare isinstance check would miss it."""
+    if isinstance(e, OSError):
+        return e
+    if isinstance(e, MutagenError):
+        for inner in (e.__cause__, e.__context__, *e.args[:1]):
+            if isinstance(inner, OSError):
+                return inner
+    return None
+
+
+def _raise_if_io(e: BaseException, strict: bool) -> None:
+    """In strict mode, raise the OSError behind `e`, if any."""
+    if strict:
+        io = _io_error(e)
+        if io is not None:
+            raise io from None
+
+
+def read_tags(path: Path, *, strict: bool = False) -> AudioTags:
     """Best-effort tag read for a local library file. Never raises -
     an unreadable/corrupt file or a format mutagen can't parse just
-    yields all-None, so callers fall back to filename-derived data."""
+    yields all-None, so callers fall back to filename-derived data.
+    With strict=True an I/O failure (an OSError, bare or wrapped by
+    mutagen) is raised, unprinted, instead; a corrupt file or one with
+    no tags still yields all-None."""
     try:
         audio = MutagenFile(path, easy=True)
     except Exception as e:
+        _raise_if_io(e, strict)
         print(f"audiotags: failed to read {path}: {e}", file=sys.stderr)
         return _EMPTY_TAGS
 
@@ -129,6 +155,7 @@ def read_tags(path: Path) -> AudioTags:
         sample_rate = getattr(info, "sample_rate", None) or None
         bit_depth = getattr(info, "bits_per_sample", None) or None
     except Exception as e:
+        _raise_if_io(e, strict)
         print(
             f"audiotags: failed to parse tags of {path}: {e}", file=sys.stderr
         )
@@ -233,16 +260,19 @@ def _format_of(audio) -> _Format:
 
 
 def read_artwork(
-    path: Path, max_bytes: int = 5 * 1024 * 1024
+    path: Path, max_bytes: int = 5 * 1024 * 1024, *, strict: bool = False
 ) -> Optional[Tuple[bytes, str]]:
     """Best-effort embedded cover art extraction. Never raises - any
     failure, absence, or oversized result (larger than max_bytes, e.g.
     a multi-MB liner-note scan) just yields None. Needs its own
     non-easy-mode parse - easy mode (used by read_tags()) doesn't
-    expose embedded pictures for MP3 (EasyID3 has no APIC access)."""
+    expose embedded pictures for MP3 (EasyID3 has no APIC access).
+    With strict=True an I/O failure (an OSError, bare or wrapped by
+    mutagen) is raised, unprinted, instead."""
     try:
         audio = MutagenFile(path)
     except Exception as e:
+        _raise_if_io(e, strict)
         print(
             f"audiotags: failed to read artwork from {path}: {e}",
             file=sys.stderr,
@@ -252,6 +282,7 @@ def read_artwork(
     try:
         found = _format_of(audio).cover(audio)
     except Exception as e:
+        _raise_if_io(e, strict)
         print(
             f"audiotags: failed to extract artwork from {path}: {e}",
             file=sys.stderr,
