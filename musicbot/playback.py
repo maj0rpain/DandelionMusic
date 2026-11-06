@@ -161,8 +161,10 @@ class Playback:
         return self._generation
 
     def _invalidate_start(self):
-        """Drops a pending start, if any, so that it plays nothing once
-        its preload returns."""
+        """Drops a pending start or hand-over, so that a pending start
+        plays nothing once its preload returns and no advance takes a
+        hand-over picked before the intent that cancelled it."""
+        self._next_song = None
         if self._start_pending:
             self._generation += 1
             self._start_pending = False
