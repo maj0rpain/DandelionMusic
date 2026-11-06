@@ -32,33 +32,19 @@ from musicbot.commands.library import (
     QueueLevelButton,
 )
 from musicbot.outcome import EnqueueOutcome, OutcomeKind
-from musicbot.library import LibrarySong, SearchResult
+from musicbot.library import SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 from config import config
 from discord_fakes import VoiceGuild, http_error, make_bot
 from helpers import run
-
-
-def make_song(title):
-    return LibrarySong(
-        filename=title + ".flac",
-        title=title,
-        duration=None,
-        year=None,
-        genre=None,
-        fmt="FLAC",
-        bitrate=None,
-        sample_rate=None,
-        bit_depth=None,
-    )
-
+from library_fakes import library_song
 
 INDEX = {
     "Radiohead": {
-        "OK Computer": [make_song("Airbag"), make_song("Lucky")],
-        "Kid A": [make_song("Zoo")],
+        "OK Computer": [library_song("Airbag"), library_song("Lucky")],
+        "Kid A": [library_song("Zoo")],
     },
-    "The Beatles": {"Abbey Road": [make_song("Come Together")]},
+    "The Beatles": {"Abbey Road": [library_song("Come Together")]},
 }
 
 COVER = Enrichment(
@@ -396,7 +382,9 @@ def test_queue_and_back_are_present_exactly_below_the_root():
 
 
 # thirty artists: two pages of the root's Select
-PAGED = {f"Artist {n:02}": {"Album": [make_song("Song")]} for n in range(30)}
+PAGED = {
+    f"Artist {n:02}": {"Album": [library_song("Song")]} for n in range(30)
+}
 
 
 def test_failed_descend_is_undone(monkeypatch):
@@ -620,7 +608,7 @@ def test_queue_click_during_enrichment_edit_queues_the_level(monkeypatch):
 
 # one artist, thirty albums: two pages of the artist level's Select
 PAGED_ALBUMS = {
-    "Artist": {f"Album {n:02}": [make_song("Song")] for n in range(30)}
+    "Artist": {f"Album {n:02}": [library_song("Song")] for n in range(30)}
 }
 
 
@@ -986,7 +974,7 @@ def select_labels(view, kind=LibrarySelect):
 
 
 def test_browse_select_cuts_a_non_bmp_artist_label_to_the_limit():
-    view = make_view({EMOJI60: {"Album": [make_song("S")]}})
+    view = make_view({EMOJI60: {"Album": [library_song("S")]}})
 
     (label,) = select_labels(view)
 
@@ -996,8 +984,8 @@ def test_browse_select_cuts_a_non_bmp_artist_label_to_the_limit():
 def test_browse_select_keeps_99_units_and_cuts_100_with_an_ellipsis():
     view = make_view(
         {
-            "a" * 99: {"Album": [make_song("S")]},
-            "b" * 100: {"Album": [make_song("S")]},
+            "a" * 99: {"Album": [library_song("S")]},
+            "b" * 100: {"Album": [library_song("S")]},
         }
     )
 
@@ -1012,7 +1000,9 @@ def test_clicking_a_cut_song_option_queues_that_track(monkeypatch):
         queued.extend(triples)
 
     monkeypatch.setattr(library_commands, "queue_songs", queue_songs)
-    index = {"Artist": {"Album": [make_song("Other"), make_song(EMOJI60)]}}
+    index = {
+        "Artist": {"Album": [library_song("Other"), library_song(EMOJI60)]}
+    }
 
     async def scenario():
         view = make_view(index)
@@ -1439,7 +1429,7 @@ def test_a_library_pick_that_loads_everything_reports_the_count(monkeypatch):
 def test_enrichment_is_resolved_on_the_cursors_index_not_the_librarys(
     monkeypatch,
 ):
-    other = {"Elsewhere": {"Album": [make_song("Song")]}}
+    other = {"Elsewhere": {"Album": [library_song("Song")]}}
     monkeypatch.setattr(library_commands.library, "get_index", lambda: other)
 
     async def scenario():
