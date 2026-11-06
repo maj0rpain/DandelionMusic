@@ -98,14 +98,6 @@ class BrowseCursor:
 
     # -- where we are ---------------------------------------------
 
-    @property
-    def at_root(self) -> bool:
-        return self.artist is None
-
-    @property
-    def at_album_level(self) -> bool:
-        return self.album is not None
-
     def _songs(self) -> List[library.LibrarySong]:
         return self.index.get(self.artist, {}).get(self.album, [])
 

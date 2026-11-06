@@ -4,10 +4,10 @@ Synchronous throughout, like the cursor's tests.
 """
 
 from musicbot import library, library_browse, library_session
-from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
+from musicbot.library_metadata import ArtInfo, Enrichment
 from musicbot.library_session import BrowseSession, stat_fields
 from helpers import imported_names, imported_roots, type_checking_imports
-from library_fakes import library_song
+from library_fakes import external_stats, library_song
 
 INDEX = {
     "Radiohead": {
@@ -91,14 +91,7 @@ class TestStaleness:
         s.offer_enrichment(
             s.enter_level(),
             Enrichment(
-                stats=ExternalStats(
-                    listeners=5000,
-                    playcount=None,
-                    tags=(),
-                    popularity=None,
-                    followers=None,
-                    release_date=None,
-                ),
+                stats=external_stats(listeners=5000),
                 art=EMBEDDED.art,
             ),
         )
@@ -180,7 +173,7 @@ class TestFrameText:
             ("Albums", "4"),
             ("Songs", "4"),
         )
-        assert f.queue_label is None
+        assert f.queue is None
         assert f.entries == ["Aphex Twin", "Radiohead"]
         assert f.show_next and not f.show_prev
 
@@ -188,7 +181,10 @@ class TestFrameText:
         f = at_artist().frame()
         assert f.title == "\U0001f464 Radiohead"
         assert f.footer == "Artists › \U0001f464 Radiohead"
-        assert f.queue_label == "Queue this Artist"
+        assert f.queue == (
+            "Queue this Artist",
+            "browse: entire discography of Radiohead",
+        )
         assert f.kind == "album"
         assert dict(f.fields)["Albums"] == "2"
         assert f.description == "*Rock*"
@@ -197,7 +193,10 @@ class TestFrameText:
         f = at_album().frame()
         assert f.title == "\U0001f4bf OK Computer"
         assert f.footer == ("\U0001f464 Radiohead › \U0001f4bf OK Computer")
-        assert f.queue_label == "Queue this Album"
+        assert f.queue == (
+            "Queue this Album",
+            "browse: entire album Radiohead - OK Computer",
+        )
         assert f.kind == "song"
         assert f.labels == ["Airbag"]
         assert dict(f.fields)["Year"] == "1997"
@@ -208,13 +207,8 @@ class TestFrameText:
         s.offer_enrichment(
             s.enter_level(),
             Enrichment(
-                stats=ExternalStats(
-                    listeners=1500,
-                    playcount=None,
-                    tags=("a", "b"),
-                    popularity=80,
-                    followers=None,
-                    release_date=None,
+                stats=external_stats(
+                    listeners=1500, tags=("a", "b"), popularity=80
                 ),
                 art=None,
             ),
@@ -316,14 +310,7 @@ class TestTrimAndFormat:
             s.offer_enrichment(
                 s.enter_level(),
                 Enrichment(
-                    stats=ExternalStats(
-                        listeners=value,
-                        playcount=None,
-                        tags=(),
-                        popularity=None,
-                        followers=None,
-                        release_date=None,
-                    ),
+                    stats=external_stats(listeners=value),
                     art=None,
                 ),
             )
@@ -341,10 +328,7 @@ class TestNarrowReads:
         assert at_artist().scope() == ("Radiohead", None)
         assert at_album().scope() == ("Radiohead", "OK Computer")
 
-    def test_tracks_at_each_level(self):
-        def files(s):
-            return sorted(f for _, _, f in s.tracks())
+    def test_tracks_delegates_to_the_cursor(self):
+        files = [f for _, _, f in at_album().tracks()]
 
-        assert session().tracks() == []
-        assert files(at_artist()) == ["Airbag.flac", "Zoo.flac"]
-        assert files(at_album()) == ["Airbag.flac"]
+        assert files == ["Airbag.flac"]
