@@ -8,6 +8,7 @@ failed), and that is a legal state. `controller()`, `settings()` and
 part that is not registered.
 """
 
+import asyncio
 import sys
 from typing import (
     Awaitable,
@@ -49,6 +50,8 @@ class GuildSessions(Generic[Guild, Panel, Controller, Settings]):
         self._load_settings = settings_loader
         self._controllers: Dict[Guild, Controller] = {}
         self._settings: Dict[Guild, Settings] = {}
+        # guilds whose settings are being loaded, to the shared load
+        self._loading: Dict[Guild, asyncio.Future] = {}
 
     def controller(self, guild: Guild) -> Optional[Controller]:
         return self._controllers.get(guild)
@@ -85,8 +88,40 @@ class GuildSessions(Generic[Guild, Panel, Controller, Settings]):
         return iter(list(self._controllers.values()))
 
     async def load_settings(self, guilds: Iterable[Guild]) -> None:
-        """Bulk-fill the settings half only."""
-        self._settings.update(await self._load_settings(list(guilds)))
+        """Bulk-fill the settings half only, for guilds with no settings
+        yet: registered settings are never replaced, and a guild
+        already being loaded shares that load."""
+        waiting = []
+        fresh = []
+        for guild in dict.fromkeys(guilds):
+            if guild in self._settings:
+                continue
+            load = self._loading.get(guild)
+            if load is not None:
+                waiting.append(load)
+            else:
+                fresh.append(guild)
+        if fresh:
+            load = asyncio.ensure_future(self._load_fresh(fresh))
+            for guild in fresh:
+                self._loading[guild] = load
+            waiting.append(load)
+        # shielded: a cancelled waiter must not cancel the shared load
+        results = await asyncio.gather(
+            *(asyncio.shield(w) for w in waiting), return_exceptions=True
+        )
+        for result in results:
+            if isinstance(result, BaseException):
+                raise result
+
+    async def _load_fresh(self, guilds: list) -> None:
+        try:
+            loaded = await self._load_settings(guilds)
+            for guild, sett in loaded.items():
+                self._settings.setdefault(guild, sett)
+        finally:
+            for guild in guilds:
+                self._loading.pop(guild, None)
 
     async def _ensure_settings(self, guild: Guild) -> Settings:
         if guild not in self._settings:

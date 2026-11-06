@@ -512,3 +512,93 @@ def test_a_failing_controller_factory_registers_no_panel(sessions, factory):
         run(sessions.get_or_create(guild))
 
     assert sessions.panel(guild) is None
+
+
+class CountingLoader:
+    """A settings loader that waits for `release`, counts its calls and
+    raises on the first `failures` calls."""
+
+    def __init__(self, failures=0):
+        self.calls = 0
+        self.failures = failures
+        self.release = None
+
+    async def __call__(self, guilds):
+        self.calls += 1
+        if self.release is not None:
+            await self.release.wait()
+        if self.calls <= self.failures:
+            raise RuntimeError("load failed")
+        return {guild: FakeSettings(guild) for guild in guilds}
+
+
+def _counting_sessions(loader):
+    return GuildSessions(
+        lambda guild: FakePanel(), lambda g, panel: FakeController(g), loader
+    )
+
+
+def test_concurrent_ensures_share_one_load():
+    loader = CountingLoader()
+    sessions = _counting_sessions(loader)
+    guild = FakeGuild(1)
+
+    async def scenario():
+        loader.release = asyncio.Event()
+        calls = [
+            asyncio.ensure_future(sessions._ensure_settings(guild)),
+            asyncio.ensure_future(sessions.get_or_create(guild)),
+            asyncio.ensure_future(sessions._ensure_settings(guild)),
+        ]
+        await asyncio.sleep(0)
+        loader.release.set()
+        await asyncio.gather(*calls)
+        return calls[0].result(), calls[2].result()
+
+    first, third = run(scenario())
+
+    assert loader.calls == 1
+    assert first is third is sessions.settings(guild)
+
+
+def test_load_settings_keeps_registered_settings():
+    loader = CountingLoader()
+    sessions = _counting_sessions(loader)
+    guild, other = FakeGuild(1), FakeGuild(2)
+
+    async def scenario():
+        await sessions.load_settings([guild])
+        registered = sessions.settings(guild)
+        await sessions.load_settings([guild, other])
+        return registered
+
+    registered = run(scenario())
+
+    assert sessions.settings(guild) is registered
+    assert sessions.settings(other) is not None
+
+
+def test_a_failed_shared_load_reaches_every_waiter_and_is_retried():
+    loader = CountingLoader(failures=1)
+    sessions = _counting_sessions(loader)
+    guild = FakeGuild(1)
+
+    async def scenario():
+        loader.release = asyncio.Event()
+        calls = [
+            asyncio.ensure_future(sessions._ensure_settings(guild))
+            for _ in range(2)
+        ]
+        await asyncio.sleep(0)
+        loader.release.set()
+        results = await asyncio.gather(*calls, return_exceptions=True)
+        unregistered = sessions.settings(guild) is None
+        retried = await sessions._ensure_settings(guild)
+        return results, unregistered, retried
+
+    results, unregistered, retried = run(scenario())
+
+    assert all(isinstance(r, RuntimeError) for r in results)
+    assert unregistered
+    assert retried is sessions.settings(guild)
+    assert loader.calls == 2
