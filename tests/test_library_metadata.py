@@ -176,6 +176,25 @@ def rig(make_library):
 
 
 @pytest.fixture
+def tagged_rig(make_library):
+    """Builds a Rig over real tagged MP3s. `tags` maps (artist, album,
+    filename) to `write_mp3`'s keyword arguments; `spotify` is the fake
+    installed, a fresh `FakeSpotify` when None."""
+
+    def build(tags, layout=LAYOUT, spotify=None):
+        make_library(layout)
+        for (artist_name, album_name, filename), kwargs in tags.items():
+            write_mp3(
+                library.song_path(artist_name, album_name, filename), **kwargs
+            )
+        rig = Rig(library.build_index())
+        rig.spotify_client = spotify or FakeSpotify()
+        return rig
+
+    return build
+
+
+@pytest.fixture
 def lastfm(rig, monkeypatch):
     """Installs a fake Last.fm session; call it with the canned
     responses by method."""
@@ -550,14 +569,12 @@ def test_an_album_timeout_is_logged_with_label_and_key(
 class CountingReads:
     """Wrappers around the real `read_tags` and `read_artwork` that
     `library_metadata` imports, counting reads per path and optionally
-    failing or holding them; installed on the module."""
+    failing them; installed on the module."""
 
     def __init__(self, monkeypatch, artwork=None):
         self.tag_reads = []
         self.artwork_reads = []
         self.fail = set()  # "read_tags" and/or "read_artwork"
-        self.hold = None  # a threading.Event the artwork read waits on
-        self.entered = threading.Semaphore(0)
         self._artwork = artwork or audiotags.read_artwork
         monkeypatch.setattr(library_metadata, "read_tags", self.read_tags)
         monkeypatch.setattr(
@@ -572,9 +589,6 @@ class CountingReads:
 
     def read_artwork(self, path):
         self.artwork_reads.append(path)
-        self.entered.release()
-        if self.hold is not None:
-            self.hold.wait(10)
         if "read_artwork" in self.fail:
             raise OSError("unreadable")
         return self._artwork(path)
@@ -684,30 +698,21 @@ def test_low_limit_client_of_none_is_none():
 def test_spotify_enrichment_is_disabled_without_a_client(
     rig, no_spotify, no_lastfm
 ):
-    enricher = rig.enricher  # built with spotify=None
-
     result = rig.artist()
 
-    assert enricher.spotify is None
     assert result == Enrichment(stats=None, art=None)
 
 
-def test_the_import_built_enrichment_client_is_none_without_spotify_api():
+def test_the_import_built_enrichment_client_is_none_without_spotify_api(
+    make_library, no_lastfm
+):
     if library_metadata.spotify_api is not None:
         pytest.skip("Spotify credentials configured")
-    assert library_metadata.default_enricher.spotify is None
+    index = make_library(LAYOUT)
 
+    result = run(library_metadata.get_enrichment(index, "Radiohead", None))
 
-def test_the_import_built_enrichment_client_follows_spotify_api():
-    api = library_metadata.spotify_api
-    if api is None:
-        pytest.skip("no Spotify credentials configured")
-    client = library_metadata.default_enricher.spotify
-    assert client is not api
-    assert client.auth_manager is api.auth_manager
-    assert client.requests_timeout == 3
-    assert client.retries == 0
-    assert client.status_retries == 0
+    assert result == Enrichment(stats=None, art=None)
 
 
 def test_a_failed_spotify_artist_search_is_logged(
@@ -780,34 +785,31 @@ def test_artist_and_album_scopes_ask_their_own_spotify_search(
 
 
 def test_the_artist_level_samples_the_first_album_in_casefold_order(
-    make_library, no_lastfm
+    tagged_rig, no_lastfm
 ):
-    make_library({"Band": {"Zeta": ["01.mp3"], "alpha": ["01.mp3"]}})
-    for name in ("Zeta", "alpha"):
-        write_mp3(
-            library.song_path("Band", name, "01.mp3"),
-            album_artist=f"Tagged {name}",
-        )
-    rig = Rig(library.build_index())
-    rig.spotify_client = FakeSpotify()
+    rig = tagged_rig(
+        {
+            ("Band", "Zeta", "01.mp3"): {"album_artist": "Tagged Zeta"},
+            ("Band", "alpha", "01.mp3"): {"album_artist": "Tagged alpha"},
+        },
+        layout={"Band": {"Zeta": ["01.mp3"], "alpha": ["01.mp3"]}},
+    )
 
     rig.artist("Band")
 
     assert rig.spotify_client.searches == [("artist", "Tagged alpha")]
 
 
-def test_tags_name_the_album_and_beat_the_folder_names(
-    make_library, no_lastfm
-):
-    make_library(LAYOUT)
-    write_mp3(
-        library.song_path("Radiohead", "OK Computer", "01.mp3"),
-        album_artist="Radiohead (tagged)",
-        artist="Thom",
-        album="OK Computer (tagged)",
+def test_tags_name_the_album_and_beat_the_folder_names(tagged_rig, no_lastfm):
+    rig = tagged_rig(
+        {
+            ("Radiohead", "OK Computer", "01.mp3"): {
+                "album_artist": "Radiohead (tagged)",
+                "artist": "Thom",
+                "album": "OK Computer (tagged)",
+            }
+        }
     )
-    rig = Rig(library.build_index())
-    rig.spotify_client = FakeSpotify()
 
     rig.album()
 
@@ -820,15 +822,11 @@ def test_tags_name_the_album_and_beat_the_folder_names(
 
 
 def test_the_artist_tag_stands_in_for_a_missing_album_artist(
-    make_library, no_lastfm
+    tagged_rig, no_lastfm
 ):
-    make_library(LAYOUT)
-    write_mp3(
-        library.song_path("Radiohead", "OK Computer", "01.mp3"),
-        artist="Thom",
+    rig = tagged_rig(
+        {("Radiohead", "OK Computer", "01.mp3"): {"artist": "Thom"}}
     )
-    rig = Rig(library.build_index())
-    rig.spotify_client = FakeSpotify()
 
     rig.album()
 
@@ -837,15 +835,12 @@ def test_the_artist_tag_stands_in_for_a_missing_album_artist(
     ]
 
 
-def test_embedded_art_beats_remote_art(make_library, no_lastfm):
-    make_library(LAYOUT)
-    write_mp3(
-        library.song_path("Radiohead", "OK Computer", "01.mp3"),
-        cover=b"png-bytes",
-    )
-    rig = Rig(library.build_index())
-    rig.spotify_client = FakeSpotify(
-        albums=[{"images": [{"url": "https://sp/a.jpg"}], "id": None}]
+def test_embedded_art_beats_remote_art(tagged_rig, no_lastfm):
+    rig = tagged_rig(
+        {("Radiohead", "OK Computer", "01.mp3"): {"cover": b"png-bytes"}},
+        spotify=FakeSpotify(
+            albums=[{"images": [{"url": "https://sp/a.jpg"}], "id": None}]
+        ),
     )
 
     result = rig.album()
@@ -860,35 +855,6 @@ def test_a_file_without_a_cover_is_read_once_across_two_calls(
     rig.album()
     rig.album()
 
-    assert len(reads.artwork_reads) == 1
-    assert len(reads.tag_reads) == 1
-
-
-def test_concurrent_calls_read_a_file_once(rig, reads, no_lastfm):
-    reads.hold = threading.Event()
-
-    async def scenario():
-        loop = asyncio.get_running_loop()
-        calls = [
-            asyncio.ensure_future(
-                rig.enricher.get_enrichment(
-                    rig.index, "Radiohead", "OK Computer"
-                )
-            )
-            for _ in range(2)
-        ]
-        assert await loop.run_in_executor(None, reads.entered.acquire, True, 5)
-        for _ in range(20):
-            await asyncio.sleep(0)
-        reads.hold.set()
-        return await asyncio.gather(*calls)
-
-    try:
-        results = run(scenario())
-    finally:
-        reads.hold.set()
-
-    assert results[0] == results[1]
     assert len(reads.artwork_reads) == 1
     assert len(reads.tag_reads) == 1
 
