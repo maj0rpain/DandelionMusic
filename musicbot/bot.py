@@ -20,7 +20,6 @@ from musicbot.settings import (
     GuildSettings,
     run_migrations,
     extract_legacy_settings,
-    migrate_old_playlists,
 )
 from musicbot import guild_whitelist
 from musicbot.player_panel import PlayerPanel
@@ -113,7 +112,6 @@ class MusicBot(commands.Bot):
         async with self.db_engine.connect() as connection:
             await connection.run_sync(run_migrations)
         await extract_legacy_settings(self)
-        await migrate_old_playlists(self)
         await guild_whitelist.import_env_whitelist(self.DbSession)
 
         loader.init()

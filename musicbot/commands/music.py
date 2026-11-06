@@ -126,6 +126,8 @@ def _saved_playlist_error_reply(e: playlists.SavedPlaylistError) -> str:
     """The reply text for a saved-playlist failure."""
     if isinstance(e, playlists.PlaylistNotFound):
         return config.PLAYLIST_NOT_FOUND
+    if isinstance(e, playlists.CorruptPlaylist):
+        return config.PLAYLIST_CORRUPT
     if isinstance(e, playlists.InvalidPosition):
         return f"Invalid position. Playlist has {e.size} songs."
     if isinstance(e, playlists.PlaylistExists):
@@ -133,6 +135,12 @@ def _saved_playlist_error_reply(e: playlists.SavedPlaylistError) -> str:
     if isinstance(e, playlists.OnlySongInPlaylist):
         return "Can't remove the only song from playlist."
     raise e
+
+
+def _bare_url(url: str) -> str:
+    """A url's bare form when ``url_regex`` matches it, else the url."""
+    match = url_regex.fullmatch(url)
+    return match.group("bare") if match else url
 
 
 def _playlist_ref(ctx, name: str) -> playlists.PlaylistRef:
@@ -507,9 +515,13 @@ class Music(commands.Cog):
         name: str,
     ):
         await ctx.defer()
-        contents = await playlists.get(
-            ctx.bot.DbSession, _playlist_ref(ctx, name)
-        )
+        try:
+            contents = await playlists.get(
+                ctx.bot.DbSession, _playlist_ref(ctx, name)
+            )
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
+            return
         if contents is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
@@ -583,10 +595,14 @@ class Music(commands.Cog):
     ):
         await ctx.defer()
 
-        contents = await playlists.get(
-            ctx.bot.DbSession,
-            _playlist_ref(ctx, playlist),
-        )
+        try:
+            contents = await playlists.get(
+                ctx.bot.DbSession,
+                _playlist_ref(ctx, playlist),
+            )
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
+            return
         if contents is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
@@ -596,7 +612,7 @@ class Music(commands.Cog):
             embed = Embed(title=contents.ref.name)
             for song in part:
                 url = song.url
-                title = song.title or url_regex.fullmatch(url).group("bare")
+                title = song.title or _bare_url(url)
                 embed.add_field(
                     name=str(i), value=f"[{title}]({url})", inline=False
                 )
