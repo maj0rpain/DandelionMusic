@@ -2360,13 +2360,19 @@ def _tmp_files(tmp_path):
     return sorted(p.name for p in (tmp_path / "backup").glob("*.tmp"))
 
 
-def _fail_replace(controller, monkeypatch, error=None):
+def _fail_write(controller, monkeypatch, target, name, error):
     ac = sys.modules[type(controller).__module__]
 
     def failing(*args, **kwargs):
-        raise error or OSError("disk full")
+        raise error
 
-    monkeypatch.setattr(ac.os, "replace", failing)
+    monkeypatch.setattr(getattr(ac, target), name, failing)
+
+
+def _fail_replace(controller, monkeypatch, error=None):
+    _fail_write(
+        controller, monkeypatch, "os", "replace", error or OSError("disk full")
+    )
 
 
 def test_a_track_end_starts_the_next_song_when_the_backup_write_fails(
@@ -2544,7 +2550,9 @@ def test_restore_of_an_unreadable_backup_changes_nothing(
     assert _titles(controller) == ["keep"]
     assert controller.guild.voice_client.played == []
     assert _backup_path(controller, tmp_path).read_bytes() == content
-    assert f"({controller.guild.id})" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert f"({controller.guild.id})" in err
+    assert "Error(" in err
 
 
 def _failing_preloads(stub_loader, *titles):
