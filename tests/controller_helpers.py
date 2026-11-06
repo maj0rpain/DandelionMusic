@@ -10,6 +10,7 @@ import pickle
 import sys
 import types
 
+from discord_fakes import admission_without_join
 from helpers import run
 
 
@@ -183,13 +184,10 @@ def command_ctx(
     if controller is not None:
         guild = getattr(controller, "guild", None) or guild
 
-    async def enter():
-        return controller
-
     ctx = types.SimpleNamespace(
         audiocontroller=controller,
         # no join is needed; enter() returns the same controller
-        admitted=types.SimpleNamespace(join_needed=False, enter=enter),
+        admitted=admission_without_join(lambda: controller),
         send=send,
         defer=defer,
         author=None,

@@ -19,8 +19,14 @@ from musicbot.commands import music
 from musicbot.commands.music import Music
 from musicbot.loader import SongError
 from musicbot.outcome import EnqueueOutcome, OutcomeKind
+from musicbot.playlist import LoopMode, Playlist
 from musicbot.utils import CheckError
-from discord_fakes import BOTS_ONLY, invoke_music_hooks, situation
+from discord_fakes import (
+    BOTS_ONLY,
+    FakeInteraction,
+    invoke_music_hooks,
+    situation,
+)
 from helpers import run
 
 
@@ -28,24 +34,26 @@ class RecordingController:
     """The controller as the commands see it: it records what they ask
     of it. `backup` is what load_backup() loads into the queue."""
 
-    def __init__(self, backup=(), history=(), active=False, readable=True):
+    def __init__(
+        self, backup=(), history=(), active=False, readable=True, loop=None
+    ):
         self.name = "controller"
-        self.backup = list(backup)
+        self.backup = None if backup is None else list(backup)
         self.queue = []
-        self.history = list(history)
         self.active = active
         self.readable = readable
         self.calls = []
-        self.playlist = types.SimpleNamespace(
-            has_prev=lambda: bool(self.history)
-        )
+        self.playlist = Playlist()
+        self.playlist.playhistory.extend(history)
+        if loop is not None:
+            self.playlist.loop = loop
 
     def load_backup(self):
         if self.active:
             return RestoreResult.REFUSED_WHILE_ACTIVE
         if not self.readable:
             return RestoreResult.BACKUP_UNREADABLE
-        self.queue = list(self.backup)
+        self.queue = list(self.backup or [])
         if not self.queue:
             return RestoreResult.NOTHING_TO_RESTORE
         return RestoreResult.READY
@@ -110,6 +118,15 @@ def invoke(cog, ctx, callback, **kwargs):
     run(callback(cog, ctx, **kwargs))
 
 
+def invoke_on_replacement(cog, ctx, guild, callback, replacement, **kwargs):
+    """The guild's controller is replaced between the hooks and the
+    callback: the command must act on the one enter() returns."""
+    run(invoke_music_hooks(cog, ctx))
+    ctx.controllers[guild] = replacement
+    run(ctx.bot.sessions.reset(guild))
+    run(callback(cog, ctx, **kwargs))
+
+
 # --- refusals never join ----------------------------------------------
 
 
@@ -132,10 +149,11 @@ def test_a_slash_play_with_no_track_and_no_file_does_not_join():
 @pytest.mark.parametrize(
     "controller, reply",
     [
+        (RecordingController(backup=None), config.QUEUE_EMPTY),
         (RecordingController(), config.QUEUE_EMPTY),
         (RecordingController(readable=False), config.RESTORE_BACKUP_UNREADABLE),
     ],
-    ids=["empty backup", "unreadable backup"],
+    ids=["no backup", "empty backup", "unreadable backup"],
 )
 def test_restore_with_nothing_to_restore_does_not_join(controller, reply):
     guild, ctx, cog, sent = body_ctx("restore", controller, role="dj")
@@ -157,7 +175,15 @@ def test_restore_while_active_does_not_move_the_bot():
 def test_prev_with_no_previous_track_does_not_join():
     guild, ctx, cog, sent = body_ctx("prev", RecordingController())
     invoke(cog, ctx, Music._prev.callback)
-    assert sent == ["No previous track."]
+    assert sent == [config.NO_PREVIOUS_TRACK]
+    assert joins(guild) == []
+
+
+def test_prev_with_loop_all_and_an_empty_queue_does_not_join():
+    controller = RecordingController(history=["x"], loop=LoopMode.ALL)
+    guild, ctx, cog, sent = body_ctx("prev", controller)
+    invoke(cog, ctx, Music._prev.callback)
+    assert sent == [config.NO_PREVIOUS_TRACK]
     assert joins(guild) == []
 
 
@@ -231,8 +257,6 @@ def test_a_pick_from_the_search_results_joins_and_plays(monkeypatch):
 
     ctx.channel.typing = typing
     ctx.command = None
-    from discord_fakes import FakeInteraction
-
     inter = FakeInteraction(ctx, "pick")
     run(view.children[0].callback(inter))
     assert joins(guild) == [("connect", "b")]
@@ -251,39 +275,50 @@ def test_a_pick_from_the_search_results_joins_and_plays(monkeypatch):
 def test_play_with_a_track_defers_then_connects_then_plays(
     callback, playnext
 ):
-    controller = RecordingController()
-    guild, ctx, cog, sent = body_ctx(callback.name, controller)
-    invoke(cog, ctx, callback.callback, track="song")
+    before = RecordingController()
+    after = RecordingController()
+    guild, ctx, cog, sent = body_ctx(callback.name, before)
+    invoke_on_replacement(
+        cog, ctx, guild, callback.callback, after, track="song"
+    )
     assert guild.events == [("defer",), ("connect", "b")]
-    assert controller.calls == [("process_song", "song", playnext)]
+    assert after.calls == [("process_song", "song", playnext)]
+    assert before.calls == []
 
 
 def test_play_with_an_attached_file_connects_and_plays_it():
-    controller = RecordingController()
-    guild, ctx, cog, sent = body_ctx("play", controller)
+    before = RecordingController()
+    after = RecordingController()
+    guild, ctx, cog, sent = body_ctx("play", before)
     ctx.message = types.SimpleNamespace(
         attachments=[object()], jump_url="https://discord/m", reference=None
     )
-    invoke(cog, ctx, Music._play.callback)
-    assert joins(guild) == [("connect", "b")]
-    assert controller.calls == [("process_song", "https://discord/m", False)]
+    invoke_on_replacement(cog, ctx, guild, Music._play.callback, after)
+    assert guild.events == [("defer",), ("connect", "b")]
+    assert after.calls == [("process_song", "https://discord/m", False)]
+    assert before.calls == []
 
 
 def test_restore_with_a_backup_defers_then_connects_then_starts():
-    controller = RecordingController(backup=["x"])
-    guild, ctx, cog, sent = body_ctx("restore", controller, role="dj")
-    invoke(cog, ctx, Music._restore.callback)
+    before = RecordingController(backup=["x"])
+    after = RecordingController()
+    after.queue = ["x"]
+    guild, ctx, cog, sent = body_ctx("restore", before, role="dj")
+    invoke_on_replacement(cog, ctx, guild, Music._restore.callback, after)
     assert guild.events == [("defer",), ("connect", "b")]
-    assert controller.calls == ["start_restored"]
+    assert after.calls == ["start_restored"]
+    assert before.calls == []
     assert sent == ["Restored playlist"]
 
 
 def test_prev_with_history_connects_then_plays_it():
-    controller = RecordingController(history=["x"])
-    guild, ctx, cog, sent = body_ctx("prev", controller)
-    invoke(cog, ctx, Music._prev.callback)
+    before = RecordingController(history=["x"])
+    after = RecordingController()
+    guild, ctx, cog, sent = body_ctx("prev", before)
+    invoke_on_replacement(cog, ctx, guild, Music._prev.callback, after)
     assert guild.events == [("defer",), ("connect", "b")]
-    assert controller.calls == ["prev_song"]
+    assert after.calls == ["prev_song"]
+    assert before.calls == []
 
 
 def existing_playlist(monkeypatch):
@@ -302,11 +337,15 @@ def test_playlist_load_of_an_existing_playlist_connects_then_enqueues(
     monkeypatch,
 ):
     existing_playlist(monkeypatch)
-    controller = RecordingController()
-    guild, ctx, cog, sent = body_ctx("playlist load", controller)
-    invoke(cog, ctx, Music._playlist_load.callback, name="mix")
+    before = RecordingController()
+    after = RecordingController()
+    guild, ctx, cog, sent = body_ctx("playlist load", before)
+    invoke_on_replacement(
+        cog, ctx, guild, Music._playlist_load.callback, after, name="mix"
+    )
     assert guild.events == [("defer",), ("connect", "b")]
-    assert controller.calls == [("enqueue", ["https://example.com/a"])]
+    assert after.calls == [("enqueue", ["https://example.com/a"])]
+    assert before.calls == []
 
 
 # --- a failed join ---------------------------------------------------

@@ -408,13 +408,13 @@ class Music(commands.Cog):
     @joining_command
     async def _prev(self, ctx):
         if not ctx.audiocontroller.playlist.has_prev():
-            await ctx.send("No previous track.")
+            await ctx.send(config.NO_PREVIOUS_TRACK)
             return
         await self._enter(ctx)
         if ctx.audiocontroller.prev_song():
             await ctx.send("Playing previous song :track_previous:")
         else:
-            await ctx.send("No previous track.")
+            await ctx.send(config.NO_PREVIOUS_TRACK)
 
     @commands.hybrid_command(
         name="songinfo",

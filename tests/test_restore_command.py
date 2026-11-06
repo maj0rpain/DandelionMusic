@@ -11,6 +11,7 @@ import pytest
 from config import config
 from musicbot.audiocontroller import RestoreResult
 from musicbot.commands.music import Music
+from discord_fakes import admission_without_join
 from helpers import run
 
 
@@ -54,13 +55,11 @@ def test_restore_command_replies_with_the_outcome(outcome, reply):
 
     controller = OutcomeController(outcome, events)
 
-    async def enter():
-        events.append("enter")
-        return controller
-
     ctx = types.SimpleNamespace(
         audiocontroller=controller,
-        admitted=types.SimpleNamespace(join_needed=False, enter=enter),
+        admitted=admission_without_join(
+            lambda: controller, lambda: events.append("enter")
+        ),
         send=send,
         defer=defer,
     )
