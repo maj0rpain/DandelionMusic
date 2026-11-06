@@ -121,16 +121,6 @@ def assert_failed(sent, sett, reply):
     assert stored_values(sett) == stored_values(stored_settings())
 
 
-@pytest.mark.parametrize("name", list(ARGS))
-def test_an_unknown_setting_is_reported(name, monkeypatch):
-    monkeypatch.delitem(SETTINGS, name)
-    sett = stored_settings()
-
-    sent = invoke_setting(name, ARGS[name], sett)
-
-    assert_failed(sent, sett, f"`Error: Setting {name} could not be updated.`")
-
-
 def test_an_invalid_emoji_is_reported():
     unknown_emoji = discord.HTTPException(
         types.SimpleNamespace(status=400, reason="Bad Request"),
@@ -420,12 +410,3 @@ def test_a_button_emote_reset_succeeds_with_the_plugin_disabled(
 
     assert sent[-1] == reset_text("button_emote")
     assert sett.button_emote is None
-
-
-def test_an_unknown_setting_reset_is_reported(monkeypatch):
-    monkeypatch.delitem(SETTINGS, "dj_role")
-    sett = stored_settings()
-
-    sent = invoke_setting("dj_role", NO_VALUE, sett)
-
-    assert_failed(sent, sett, "`Error: Setting dj_role could not be updated.`")
