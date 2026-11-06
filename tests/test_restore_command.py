@@ -30,6 +30,10 @@ class OutcomeController:
         (RestoreResult.RESTORED, "Restored playlist"),
         (RestoreResult.NOTHING_TO_RESTORE, config.QUEUE_EMPTY),
         (RestoreResult.REFUSED_WHILE_ACTIVE, config.RESTORE_WHILE_ACTIVE),
+        (
+            RestoreResult.BACKUP_UNREADABLE,
+            config.RESTORE_BACKUP_UNREADABLE,
+        ),
     ],
 )
 def test_restore_command_replies_with_the_outcome(outcome, reply):

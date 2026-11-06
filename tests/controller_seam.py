@@ -167,6 +167,11 @@ class PlaybackVoiceClient:
             self.playing = False
             self.paused = True
 
+    def resume(self):
+        if self.paused:
+            self.paused = False
+            self.playing = True
+
     def play(self, source, *, after=None):
         import discord
 
