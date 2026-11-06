@@ -571,3 +571,18 @@ def test_the_library_hook_directs_the_panel_to_the_channel():
     run(Library(None).cog_before_invoke(ctx))
 
     assert ctx.bot.sessions.panel(guild).directed == [(ctx.channel, True)]
+
+
+def test_a_library_command_in_an_unregistered_guild_is_not_ready():
+    ctx = make_ctx(make_bot(), Guild())
+    with pytest.raises(CheckError) as exc:
+        run(Library(None).cog_check(ctx))
+    assert str(exc.value) == config.BOT_NOT_READY
+    assert not hasattr(ctx, "audiocontroller")
+
+
+def test_a_library_command_in_a_registered_guild_is_admitted():
+    guild = Guild()
+    ctx = make_ctx(make_bot({guild: "controller"}), guild)
+    assert run(Library(None).cog_check(ctx)) is True
+    assert not hasattr(ctx, "audiocontroller")

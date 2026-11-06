@@ -699,7 +699,8 @@ class Library(commands.Cog):
         self.bot = bot
 
     async def cog_check(self, ctx):
-        ctx.audiocontroller = get_audiocontroller(ctx)
+        # kept for its not-ready refusal (CheckError), not for the value
+        get_audiocontroller(ctx)
         return True
 
     async def cog_before_invoke(self, ctx):

@@ -201,15 +201,27 @@ def test_the_loop_button_names_the_loop_mode():
     assert buttons(view)["loop"].label == "Loop: all"
 
 
-def test_the_dj_buttons_are_the_ones_admission_gates():
+def test_the_playback_buttons_need_a_dj_and_the_rest_do_not():
     view = layout_of(snap())
-    playback_buttons = {
-        b.custom_id
-        for b in view.children
-        if b.custom_id not in ("current_song", "queue")
-    }
+    kinds = {b.custom_id: b._kind for b in view.children}
 
-    assert playback_buttons == set(admission._DJ_BUTTONS)
+    assert kinds == {
+        **dict.fromkeys(
+            [
+                "prev",
+                "pause",
+                "next",
+                "loop",
+                "shuffle",
+                "stop",
+                "volume_down",
+                "volume_up",
+            ],
+            admission.RequestKind.DJ_PLAYER_BUTTON,
+        ),
+        "current_song": admission.RequestKind.PLAYER_BUTTON,
+        "queue": admission.RequestKind.PLAYER_BUTTON,
+    }
 
 
 def test_an_unchanged_snapshot_is_not_edited_again(attached):

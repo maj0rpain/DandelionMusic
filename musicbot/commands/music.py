@@ -154,8 +154,8 @@ class Music(commands.Cog):
         cmd = ctx.command
         if cmd is not None and (cmd.root_parent or cmd) is self._playlist:
             playlists_enabled(ctx)
-        ctx.admission = await admission.check(ctx)
-        ctx.audiocontroller = ctx.admission.audiocontroller
+        ctx.admitted = await admission.check(ctx)
+        ctx.audiocontroller = ctx.admitted.audiocontroller
         return True
 
     async def cog_before_invoke(self, ctx):
@@ -165,10 +165,10 @@ class Music(commands.Cog):
         # slash command past Discord's 3-second deadline, so it is
         # deferred first - publicly, as the reply that follows is.
         # Only a joining command (@joining_command) ever needs a join.
-        if ctx.admission.join_needed:
+        if ctx.admitted.join_needed:
             await ctx.defer()
         # the guild's current controller, not the one cog_check saw
-        ctx.audiocontroller = await ctx.admission.enter()
+        ctx.audiocontroller = await ctx.admitted.enter()
         ctx.bot.sessions.direct_panel(ctx.guild, ctx.channel)
 
     @commands.hybrid_command(

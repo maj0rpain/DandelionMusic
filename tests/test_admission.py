@@ -13,12 +13,13 @@ import pytest
 from config import config
 from musicbot import admission
 from musicbot.admission import RequestKind as K
+from musicbot.panel_snapshot import PanelSnapshot
+from musicbot.player_panel import build_view
 from musicbot.utils import CheckError
 from discord_fakes import (
     BOTS_ONLY,
     ADMISSION_DJ_ROLE,
     HERE,
-    PLAYER_BUTTONS,
     PEOPLE,
     fake_controller,
     invoke_music_hooks,
@@ -35,18 +36,42 @@ NOT_DJ = config.NOT_A_DJ
 
 def run_request(ctx, kind):
     async def go():
-        entry = await admission.check(
+        admitted = await admission.check(
             ctx, None if kind in admission.COMMAND_KINDS else kind
         )
-        return await entry.enter()
+        return await admitted.enter()
 
     return run(go())
 
 
-OPEN_BUTTONS = ["current_song", "queue"]
-DJ_BUTTONS = [b for b in PLAYER_BUTTONS if b not in OPEN_BUTTONS]
+def _panel_buttons():
+    """(custom_id, kind) of each button the player panel builds."""
+    snapshot = PanelSnapshot(
+        active=True,
+        paused=False,
+        has_previous=True,
+        has_next=True,
+        queue_empty=False,
+        loop_mode="off",
+        volume=70,
+        current_song=object(),
+    )
+    view = build_view(snapshot, None, None, None, None)
+    return [(b.custom_id, b._kind) for b in view.children]
+
+
+PANEL_BUTTONS = _panel_buttons()
+OPEN_BUTTONS = [c for c, k in PANEL_BUTTONS if k is K.PLAYER_BUTTON]
+DJ_BUTTONS = [c for c, k in PANEL_BUTTONS if k is K.DJ_PLAYER_BUTTON]
 JOINING = [K.JOINING_COMMAND, K.PICK, K.REACTION]
-EVERY = [K.COMMAND, K.JOINING_COMMAND, K.PLAYER_BUTTON, K.PICK, K.REACTION]
+EVERY = [
+    K.COMMAND,
+    K.JOINING_COMMAND,
+    K.PLAYER_BUTTON,
+    K.DJ_PLAYER_BUTTON,
+    K.PICK,
+    K.REACTION,
+]
 
 
 def rows():
@@ -124,7 +149,7 @@ def rows():
         ]
     for kind in EVERY:
         n = kind.name.lower()
-        if kind is K.PLAYER_BUTTON:
+        if kind in (K.PLAYER_BUTTON, K.DJ_PLAYER_BUTTON):
             continue
         out += [
             (
@@ -236,11 +261,11 @@ def rows():
             WRONG_CH,
         ),
     ]
-    for cid in PLAYER_BUTTONS:
+    for cid, kind in PANEL_BUTTONS:
         out.append(
             (
-                f"player_button {cid}: bot out of voice, admin",
-                K.PLAYER_BUTTON,
+                f"{kind.name.lower()} {cid}: bot out of voice, admin",
+                kind,
                 {"custom_id": cid, "role": "admin"},
                 NOT_CONNECTED,
             )
@@ -248,8 +273,8 @@ def rows():
     for cid in DJ_BUTTONS:
         out += [
             (
-                f"player_button {cid}: plain member under a DJ role",
-                K.PLAYER_BUTTON,
+                f"dj_player_button {cid}: plain member under a DJ role",
+                K.DJ_PLAYER_BUTTON,
                 {
                     "bot": HERE,
                     "author": "a",
@@ -259,8 +284,8 @@ def rows():
                 NOT_DJ,
             ),
             (
-                f"player_button {cid}: DJ-role holder",
-                K.PLAYER_BUTTON,
+                f"dj_player_button {cid}: DJ-role holder",
+                K.DJ_PLAYER_BUTTON,
                 {
                     "bot": HERE,
                     "author": "a",
@@ -285,6 +310,73 @@ def rows():
                 "admitted",
             )
         )
+    # the kind decides, whatever the custom_id says
+    out += [
+        (
+            "dj_player_button queue: plain member under a DJ role",
+            K.DJ_PLAYER_BUTTON,
+            {
+                "bot": HERE,
+                "author": "a",
+                "custom_id": "queue",
+                "dj_role": ADMISSION_DJ_ROLE,
+            },
+            NOT_DJ,
+        ),
+        (
+            "player_button next: plain member under a DJ role",
+            K.PLAYER_BUTTON,
+            {
+                "bot": HERE,
+                "author": "a",
+                "custom_id": "next",
+                "dj_role": ADMISSION_DJ_ROLE,
+            },
+            "admitted",
+        ),
+    ]
+    # a non-DJ under a set DJ role who also fails an earlier check gets
+    # the earlier refusal
+    dj = {"dj_role": ADMISSION_DJ_ROLE}
+    out += [
+        (
+            "dj_player_button: bot out of voice",
+            K.DJ_PLAYER_BUTTON,
+            {},
+            NOT_CONNECTED,
+        ),
+        (
+            "dj_player_button: wrong channel",
+            K.DJ_PLAYER_BUTTON,
+            {"bot": HERE, "author": "a", "wrong_channel": True},
+            WRONG_CH,
+        ),
+        (
+            "dj_player_button: rule on, author outside",
+            K.DJ_PLAYER_BUTTON,
+            {"bot": PEOPLE},
+            NOT_IN_VC,
+        ),
+        (
+            "dj_player_button: out of voice, non-DJ under a DJ role",
+            K.DJ_PLAYER_BUTTON,
+            dj,
+            NOT_CONNECTED,
+        ),
+        (
+            "dj_player_button: wrong channel, non-DJ under a DJ role",
+            K.DJ_PLAYER_BUTTON,
+            {"bot": HERE, "author": "a", "wrong_channel": True, **dj},
+            WRONG_CH,
+        ),
+        (
+            "dj_player_button: rule on, author outside, non-DJ under a "
+            "DJ role",
+            K.DJ_PLAYER_BUTTON,
+            {"bot": PEOPLE, **dj},
+            NOT_IN_VC,
+        ),
+    ]
     return out
 
 
@@ -355,12 +447,12 @@ def test_a_passed_command_kind_is_a_programming_error(kind):
 
 def test_enter_returns_the_controller_current_when_it_acts():
     guild, ctx = situation(K.JOINING_COMMAND)
-    entry = run(admission.check(ctx))
-    assert entry.audiocontroller is ctx.bot.sessions.controller(guild)
+    admitted = run(admission.check(ctx))
+    assert admitted.audiocontroller is ctx.bot.sessions.controller(guild)
     ctx.controllers[guild] = fake_controller()
     run(ctx.bot.sessions.reset(guild))
-    assert run(entry.enter()) is ctx.bot.sessions.controller(guild)
-    assert run(entry.enter()) is not entry.audiocontroller
+    assert run(admitted.enter()) is ctx.bot.sessions.controller(guild)
+    assert run(admitted.enter()) is not admitted.audiocontroller
 
 
 # --- the Music cog's hooks ------------------------------------------

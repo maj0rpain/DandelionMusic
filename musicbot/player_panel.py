@@ -17,6 +17,7 @@ from typing import Callable, Optional
 import discord
 from config import config
 
+from musicbot import admission
 from musicbot.panel_snapshot import PanelSnapshot
 from musicbot.views import MusicButton
 
@@ -44,6 +45,7 @@ def build_view(
     for button in (
         MusicButton(
             lambda ctx: ctx.audiocontroller.prev_song(),
+            admission.RequestKind.DJ_PLAYER_BUTTON,
             after=after_skip,
             custom_id="prev",
             disabled=not snapshot.has_previous,
@@ -51,12 +53,14 @@ def build_view(
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.pause(),
+            admission.RequestKind.DJ_PLAYER_BUTTON,
             after=after_other,
             custom_id="pause",
             emoji="▶️" if snapshot.paused else "⏸️",
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.skip(),
+            admission.RequestKind.DJ_PLAYER_BUTTON,
             after=after_skip,
             custom_id="next",
             disabled=not snapshot.has_next,
@@ -64,6 +68,7 @@ def build_view(
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.loop(),
+            admission.RequestKind.DJ_PLAYER_BUTTON,
             after=after_other,
             custom_id="loop",
             disabled=snapshot.queue_empty,
@@ -80,6 +85,7 @@ def build_view(
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.shuffle(),
+            admission.RequestKind.DJ_PLAYER_BUTTON,
             after=after_other,
             custom_id="shuffle",
             row=1,
@@ -96,6 +102,7 @@ def build_view(
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.stop(),
+            admission.RequestKind.DJ_PLAYER_BUTTON,
             after=after_other,
             custom_id="stop",
             row=1,
@@ -104,6 +111,7 @@ def build_view(
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.volume_down(),
+            admission.RequestKind.DJ_PLAYER_BUTTON,
             after=after_other,
             custom_id="volume_down",
             row=2,
@@ -112,6 +120,7 @@ def build_view(
         ),
         MusicButton(
             lambda ctx: ctx.audiocontroller.volume_up(),
+            admission.RequestKind.DJ_PLAYER_BUTTON,
             after=after_other,
             custom_id="volume_up",
             row=2,
