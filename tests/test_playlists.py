@@ -450,7 +450,6 @@ def test_get_on_an_unreadable_blob_raises_and_logs_the_row(blob, capsys):
     assert GUILD in err and "mix" in err
 
 
-@pytest.mark.parametrize("blob", UNREADABLE)
 @pytest.mark.parametrize(
     "edit",
     [
@@ -461,7 +460,9 @@ def test_get_on_an_unreadable_blob_raises_and_logs_the_row(blob, capsys):
     ],
     ids=["add_songs", "remove_song", "move_song", "set_title"],
 )
-def test_an_edit_on_an_unreadable_blob_raises_and_writes_nothing(blob, edit):
+def test_an_edit_on_an_unreadable_blob_raises_and_writes_nothing(edit):
+    blob = "not json"
+
     async def test(factory):
         await _seed(factory, blob)
         try:

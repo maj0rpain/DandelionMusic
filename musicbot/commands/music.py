@@ -18,7 +18,7 @@ from musicbot.audiocontroller import (
 )
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
-from musicbot.linkutils import get_site_type, url_regex
+from musicbot.linkutils import get_site_type
 from musicbot.views import MusicButton, OwnedView
 
 
@@ -135,12 +135,6 @@ def _saved_playlist_error_reply(e: playlists.SavedPlaylistError) -> str:
     if isinstance(e, playlists.OnlySongInPlaylist):
         return "Can't remove the only song from playlist."
     raise e
-
-
-def _bare_url(url: str) -> str:
-    """A url's bare form when ``url_regex`` matches it, else the url."""
-    match = url_regex.fullmatch(url)
-    return match.group("bare") if match else url
 
 
 def _playlist_ref(ctx, name: str) -> playlists.PlaylistRef:
@@ -612,7 +606,7 @@ class Music(commands.Cog):
             embed = Embed(title=contents.ref.name)
             for song in part:
                 url = song.url
-                title = song.title or _bare_url(url)
+                title = song.title or utils.bare_url(url)
                 embed.add_field(
                     name=str(i), value=f"[{title}]({url})", inline=False
                 )

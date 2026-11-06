@@ -72,10 +72,6 @@ class PlaylistNotFound(SavedPlaylistError):
 class CorruptPlaylist(SavedPlaylistError):
     """The playlist's stored data cannot be read."""
 
-    def __init__(self, name: str):
-        super().__init__(name)
-        self.name = name
-
 
 class PlaylistExists(SavedPlaylistError):
     pass
