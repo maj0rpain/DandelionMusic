@@ -79,10 +79,12 @@ def _run_while_playing(controller, intent):
 
 
 class _FakeFFmpeg:
-    """Stands in for ffmpeg: records the stream it was asked to open."""
+    """Stands in for ffmpeg: records the stream it was asked to open
+    and the keyword arguments it was built with."""
 
     def __init__(self, url, **kwargs):
         self.url = url
+        self.kwargs = kwargs
 
     def read(self):
         return b""
