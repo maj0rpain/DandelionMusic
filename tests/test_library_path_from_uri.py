@@ -65,6 +65,8 @@ def test_windows_drive_root_refusals(uri):
         "file://nas/share/Music/A/B/t.mp3/..%5C",
         "file:////nas/share/Music/A/B/t.mp3",
         "file://localhost//nas/share/Music/A/B/t.mp3",
+        "file:///%2Fnas/share/Music/A/B/t.mp3",
+        "file://localhost/%2Fnas/share/Music/A/B/t.mp3",
         "file://localhost/nas/share/Music/A/B/t.mp3",
         "file://nas/C:/Music/A/B/t.mp3",
         "file:///%5C%5Cnas%5Cshare%5CMusic/A/B/t.mp3",

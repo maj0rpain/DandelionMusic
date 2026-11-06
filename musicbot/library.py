@@ -488,7 +488,7 @@ def library_path_from_uri(uri: str, root: PurePath) -> Optional[PurePath]:
     decoded = os.fsdecode(unquote_to_bytes(tail))
     segments = decoded.split("/")
     if windows:
-        if decoded[1:2] == "\\" or decoded[2:3] == "|":
+        if decoded[1:2] in ("\\", "/") or decoded[2:3] == "|":
             return None
         if host and decoded[2:3] == ":":
             return None
