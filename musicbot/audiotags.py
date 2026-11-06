@@ -24,7 +24,7 @@ class AudioTags(NamedTuple):
     year: Optional[int]
     bitrate: Optional[int]  # bits per second, lossy formats
     sample_rate: Optional[int]  # Hz
-    bit_depth: Optional[int]  # bits per sample, lossless formats
+    bit_depth: Optional[int]  # bits per sample, recorded only for lossless
 
 
 _EMPTY_TAGS = AudioTags(
@@ -137,7 +137,8 @@ def read_tags(path: Path, *, strict: bool = False) -> AudioTags:
         return _EMPTY_TAGS
 
     try:
-        keys = _format_of(audio).keys
+        fmt = _format_of(audio)
+        keys = fmt.keys
         title = _first_str(audio, keys["title"])
         artist = _first_str(audio, keys["artist"])
         album = _first_str(audio, keys["album"])
@@ -150,10 +151,11 @@ def read_tags(path: Path, *, strict: bool = False) -> AudioTags:
         )
         # stream details are format-specific attributes on mutagen's
         # StreamInfo - lossy formats carry a bitrate, lossless ones
-        # carry bit depth, and none of them carry every field
+        # carry bit depth (read per format: mutagen reports a
+        # placeholder one for AAC), and none of them carry every field
         bitrate = getattr(info, "bitrate", None) or None
         sample_rate = getattr(info, "sample_rate", None) or None
-        bit_depth = getattr(info, "bits_per_sample", None) or None
+        bit_depth = fmt.bit_depth(info)
     except Exception as e:
         _raise_if_io(e, strict)
         print(
@@ -236,22 +238,34 @@ def _no_cover(audio):
     return None
 
 
+def _reported_bit_depth(info) -> Optional[int]:
+    return getattr(info, "bits_per_sample", None) or None
+
+
+def _mp4_bit_depth(info) -> Optional[int]:
+    """mutagen sets a placeholder 16 for AAC; only ALAC has a depth."""
+    if getattr(info, "codec", None) != "alac":
+        return None
+    return _reported_bit_depth(info)
+
+
 class _Format(NamedTuple):
     types: tuple  # matched with isinstance
     keys: Dict[str, str]  # tag field -> key in the parsed file
     cover: Callable  # audio -> (data, mime) or None
+    bit_depth: Callable  # stream info -> bits per sample or None
 
 
 # The one place a format is described, walked in order with isinstance
 # by both readers (the order matters where one class subclasses
 # another). The last row matches anything and is the fallback.
 _FORMATS = (
-    _Format((WAVE, AIFF), _ID3_KEYS, _id3_cover),
-    _Format((MP3,), _EASY_KEYS, _id3_cover),
-    _Format((FLAC,), _EASY_KEYS, _flac_cover),
-    _Format((MP4,), _EASY_KEYS, _mp4_cover),
-    _Format((ASF,), _ASF_KEYS, _no_cover),
-    _Format((object,), _EASY_KEYS, _no_cover),
+    _Format((WAVE, AIFF), _ID3_KEYS, _id3_cover, _reported_bit_depth),
+    _Format((MP3,), _EASY_KEYS, _id3_cover, _reported_bit_depth),
+    _Format((FLAC,), _EASY_KEYS, _flac_cover, _reported_bit_depth),
+    _Format((MP4,), _EASY_KEYS, _mp4_cover, _mp4_bit_depth),
+    _Format((ASF,), _ASF_KEYS, _no_cover, _reported_bit_depth),
+    _Format((object,), _EASY_KEYS, _no_cover, _reported_bit_depth),
 )
 
 
