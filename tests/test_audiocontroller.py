@@ -1313,6 +1313,7 @@ def test_teardown_ends_a_sweep_awaiting_a_preload(
         futures = _gated_preload(stub_loader, "b")
         await _start_playing(controller)
         await controller.udisconnect("test")
+        await _settle()
         controller.playlist.add(songs[2])
         futures[0].set_result(stub_loader.Preload.EXTRACTED)
 
