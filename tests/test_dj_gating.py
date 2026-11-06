@@ -1,7 +1,7 @@
 """Which Music and General commands need a DJ.
 
 With a DJ role set, a command that changes shared playback, removes or
-reorders what is queued, or changes saved playlists or settings needs a
+reorders what is queued, or changes saved playlists needs a
 DJ; a read-only command, or one that only adds songs or brings the bot
 in, does not. The table test pins the set; the behaviour tests show a
 refused non-DJ leaves everything untouched.
@@ -16,7 +16,6 @@ from config import config
 from musicbot.admission import RequestKind as K
 from musicbot.commands.general import General
 from musicbot.commands.music import Music
-from musicbot.settings import SETTINGS
 from musicbot.utils import CheckError
 from discord_fakes import ADMISSION_DJ_ROLE, HERE, situation
 from helpers import run
@@ -64,7 +63,6 @@ def refusal_of(cmd, ctx):
 
 def test_the_commands_needing_a_dj_are_exactly_the_listed_ones(monkeypatch):
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", True)
-    expected = NEEDS_A_DJ | {f"setting {name}" for name in SETTINGS}
     refused = set()
     for cog in (Music, General):
         for cmd in cog(None).walk_commands():
@@ -72,7 +70,7 @@ def test_the_commands_needing_a_dj_are_exactly_the_listed_ones(monkeypatch):
             ctx.audiocontroller = types.SimpleNamespace(is_active=lambda: True)
             if refusal_of(cmd, ctx) == config.NOT_A_DJ:
                 refused.add(cmd.qualified_name)
-    assert refused == expected
+    assert refused == NEEDS_A_DJ
 
 
 def gated(name, role=None, dj_role=ADMISSION_DJ_ROLE):
