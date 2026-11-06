@@ -191,7 +191,7 @@ class PluginController:
         return await self._process(self, url, user=user)
 
 
-def react(link, monkeypatch, readable=True):
+def react(link, monkeypatch):
     loads = []
 
     async def load_song(track):
@@ -201,7 +201,7 @@ def react(link, monkeypatch, readable=True):
     monkeypatch.setattr(loader, "load_song", load_song)
     sent = []
     msg = types.SimpleNamespace(content=link)
-    channel = LinkChannel(2, perms(view_channel=readable))
+    channel = LinkChannel(2, perms())
 
     class Channel(LinkChannel):
         async def fetch_message(self, _id):

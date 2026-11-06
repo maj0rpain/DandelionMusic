@@ -1,6 +1,9 @@
 """The message-link gate: whether a track that is a message link may be
 loaded for the requesting member."""
 
+import ast
+import inspect
+
 import discord
 import pytest
 
@@ -119,8 +122,29 @@ def test_the_extractor_matches_with_the_gates_pattern():
     assert DiscordAttachmentsIE._VALID_URL is message_link.MESSAGE_LINK_PATTERN
 
 
+def _module_level_imports(statements):
+    for node in statements:
+        if isinstance(node, ast.Import):
+            yield from (a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            base = "." * node.level + (node.module or "")
+            yield base
+            yield from (f"{base}.{a.name}" for a in node.names)
+        elif isinstance(node, (ast.If, ast.Try)):
+            for body in (node.body, node.orelse):
+                yield from _module_level_imports(body)
+            for handler in getattr(node, "handlers", []):
+                yield from _module_level_imports(handler.body)
+            yield from _module_level_imports(getattr(node, "finalbody", []))
+
+
 def test_the_gate_imports_neither_the_loader_nor_linkutils_at_module_level():
-    # module-level imports bind names in the module namespace; the check's
-    # own imports are function-local and so bind none
-    bound = set(vars(message_link))
-    assert not {"SongError", "normalize_track", "loader", "linkutils"} & bound
+    # function bodies are not walked: the check's own imports are local
+    tree = ast.parse(inspect.getsource(message_link))
+    for name in _module_level_imports(tree.body):
+        parts = name.lstrip(".").split(".")
+        assert parts[:2] not in (
+            ["musicbot", "loader"],
+            ["musicbot", "linkutils"],
+        ), name
+        assert parts[0] not in ("loader", "linkutils"), name
