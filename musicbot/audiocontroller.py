@@ -543,6 +543,8 @@ class AudioController(object):
                     return refused
 
         loaded_tail = await loader.load_local_songs(tail)
+        if self._refusal() is not None:
+            return refused
         songs += loaded_tail
 
         added = [song for song in loaded_tail if song is not None]
