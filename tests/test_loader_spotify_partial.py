@@ -23,8 +23,6 @@ def _fetch(monkeypatch, result):
 
     monkeypatch.setattr(loader, "fetch_spotify", fetch_spotify)
     monkeypatch.setattr(loader, "extract_info", lambda *a, **k: None)
-    # tracks are plain, already resolved links
-    monkeypatch.setattr(loader.YT_IE, "suitable", lambda u: False)
 
 
 def _links(n):

@@ -21,6 +21,7 @@ SHARED_MODULES = [
     "controller_helpers",
     "db_seam",
     "library_fakes",
+    "message_link_fakes",
 ]
 
 PARAGRAPH_OPENING = "A shared test-helper module is any of"

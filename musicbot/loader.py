@@ -19,7 +19,6 @@ from musicbot.audiotags import nice_title, read_tags
 from musicbot.song import LoadResult, Song
 from musicbot.utils import wrap_stdio
 from musicbot.linkutils import (
-    YT_IE,
     ExtractorT,
     SiteTypes,
     get_ie,
@@ -72,7 +71,7 @@ def _new_downloader() -> YoutubeDL:
     return YoutubeDL(
         {
             "format": "bestaudio/best",
-            "extract_flat": True,
+            "extract_flat": "in_playlist",
             "noplaylist": True,
             # default_search shouldn't be needed as long as
             # we don't pass plain text to the downloader.
@@ -81,7 +80,7 @@ def _new_downloader() -> YoutubeDL:
             "cookiefile": config.COOKIE_PATH,
             "quiet": True,
             "extractor_args": {
-                "youtube": {"player-client": ["default", "tv"]},
+                "youtube": {"player_client": ["default", "tv"]},
                 "youtubepot-bgutilhttp": {
                     "base_url": ["http://bgutil-provider:4416"]
                 },
@@ -343,11 +342,6 @@ def _load_song(track: str) -> LoadResult:
         if "entries" in data:
             # assuming a playlist
             data = data["entries"]
-        elif YT_IE.suitable(data["url"]):
-            # the URL wasn't extracted, do it now
-            data = extract_info(data["url"], YT_IE)
-            if not data:
-                raise SongError(config.SONGINFO_ERROR)
 
     if isinstance(data, list):
         if not data:

@@ -18,6 +18,7 @@ from musicbot.audiocontroller import (
 )
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
+from musicbot.message_link import check_message_link
 from musicbot.linkutils import get_site_type, url_regex
 from musicbot.views import MusicButton, OwnedView
 
@@ -371,6 +372,8 @@ class Music(commands.Cog):
         result = await ctx.audiocontroller.restore()
         if result is RestoreResult.REFUSED_WHILE_ACTIVE:
             await ctx.send(config.RESTORE_WHILE_ACTIVE)
+        elif result is RestoreResult.BACKUP_UNREADABLE:
+            await ctx.send(config.RESTORE_BACKUP_UNREADABLE)
         elif result is RestoreResult.NOTHING_TO_RESTORE:
             await ctx.send(config.QUEUE_EMPTY)
         else:
@@ -620,6 +623,7 @@ class Music(commands.Cog):
     ):
         await ctx.defer()
         try:
+            await check_message_link(track, ctx.guild, ctx.author)
             result = await loader.load_song(track)
         except SongError as e:
             await ctx.send(e)
