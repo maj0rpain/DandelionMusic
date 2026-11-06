@@ -142,10 +142,20 @@ class ProcessController:
         return self.result
 
 
-def command_ctx(controller=None, on_send=None, announce_songs=False):
+def _no_idle_timer(controller, monkeypatch):
+    async def start_idle_timer(restart=False):
+        pass
+
+    monkeypatch.setattr(controller, "start_idle_timer", start_idle_timer)
+
+
+def command_ctx(
+    controller=None, on_send=None, announce_songs=False, db_session=None
+):
     """The fake command context for `Music` callbacks, and the list of
     its replies (what `send` was given, as strings; an embed reply is
-    its title). `announce_songs` is the guild's setting of that name.
+    its title). `announce_songs` is the guild's setting of that name;
+    `db_session` is the bot's database-session factory.
 
     `controller` is what the callback reads from `ctx.audiocontroller`;
     `controller=None` for a command that reads no controller.
@@ -174,7 +184,7 @@ def command_ctx(controller=None, on_send=None, announce_songs=False):
         author=None,
         guild=guild,
         bot=types.SimpleNamespace(
-            DbSession=None,
+            DbSession=db_session,
             sessions=types.SimpleNamespace(
                 settings=lambda _guild: types.SimpleNamespace(
                     announce_songs=announce_songs

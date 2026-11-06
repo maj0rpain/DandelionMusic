@@ -367,7 +367,7 @@ def _load_song(track: str) -> LoadResult:
     song = Song(host, webpage_url=track)
     song.update(data)
 
-    return LoadResult([song], True)
+    return LoadResult.of_song(song)
 
 
 def _parse_expire(url: str) -> Optional[int]:

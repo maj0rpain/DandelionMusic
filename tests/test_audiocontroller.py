@@ -15,6 +15,7 @@ import types
 import pytest
 
 from musicbot import playlists
+from musicbot.library import LocalTrack
 from musicbot.commands.music import Music
 from controller_helpers import (
     _backup,
@@ -34,7 +35,7 @@ from controller_helpers import (
 )
 from controller_seam import PlaybackVoiceClient, StubLoader, controller_seam
 from db_seam import in_memory_db
-from helpers import run
+from helpers import imported_names, run
 
 MIX = playlists.PlaylistRef("1234", "mix")
 
@@ -1356,6 +1357,13 @@ def test_the_snapshot_has_previous_only_with_history(controller):
     assert controller.panel_snapshot().has_previous
 
 
+def test_current_song_is_nothing_when_active_with_an_empty_queue(controller):
+    controller.guild.voice_client.playing = True
+
+    assert controller.current_song is None
+    assert controller.panel_snapshot().current_song is None
+
+
 def test_the_snapshot_reports_an_empty_queue(controller):
     controller.guild.voice_client.playing = True
 
@@ -1431,22 +1439,8 @@ def test_a_song_loaded_from_a_saved_playlist_keeps_its_title_refresh(
     _rewriting_preload(stub_loader, "https://example.invalid/normalised")
 
     async def load_and_preload(ac, factory):
-        async def noop(*args, **kwargs):
-            pass
-
-        ctx = types.SimpleNamespace(
-            bot=types.SimpleNamespace(
-                DbSession=factory,
-                sessions=types.SimpleNamespace(
-                    settings=lambda _guild: types.SimpleNamespace(
-                        announce_songs=True
-                    )
-                ),
-            ),
-            guild=controller.guild,
-            audiocontroller=controller,
-            defer=noop,
-            send=noop,
+        ctx, _ = command_ctx(
+            controller, db_session=factory, announce_songs=True
         )
         await Music._playlist_load.callback(Music(None), ctx, "mix")
         await _settle(controller)
@@ -1566,10 +1560,10 @@ def test_the_inactivity_timeout_of_a_paused_bot_disconnects(
 def test_a_local_batch_during_a_pending_start_starts_nothing_new(
     controller, stub_loader, monkeypatch
 ):
-    by_title = {s.title: s for s in _songs(controller, "a", "b")}
+    by_uri = {f"/music/{s.title}.mp3": s for s in _songs(controller, "a", "b")}
 
-    async def load_local_songs(tracks):
-        return [by_title[t] for t in tracks]
+    async def load_local_songs(uris):
+        return [by_uri[u] for u in uris]
 
     monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
 
@@ -1578,7 +1572,10 @@ def test_a_local_batch_during_a_pending_start_starts_nothing_new(
             controller, stub_loader, monkeypatch, "slow"
         )
         await _settle()
-        await controller.process_local_tracks(["a", "b"], "test")
+        await controller.process_local_tracks(
+            [LocalTrack(f"/music/{t}.mp3", f"Name {t}") for t in ["a", "b"]],
+            "test",
+        )
         release.set()
         await _finish(task)
 
@@ -2066,22 +2063,25 @@ def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
 def test_a_local_batch_reports_what_it_loaded_and_skipped(
     controller, stub_loader, monkeypatch, loaded, requested, count, skipped
 ):
-    by_title = {s.title: s for s in _songs(controller, *loaded)}
+    by_uri = {f"/music/{s.title}.mp3": s for s in _songs(controller, *loaded)}
 
-    async def load_local_songs(tracks):
-        return [by_title.get(t) for t in tracks]
+    async def load_local_songs(uris):
+        return [by_uri.get(u) for u in uris]
 
     monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
 
     async def scenario():
-        return await controller.process_local_tracks(requested, "test")
+        return await controller.process_local_tracks(
+            [LocalTrack(f"/music/{t}.mp3", f"Name {t}") for t in requested],
+            "test",
+        )
 
     outcome = _run(controller, scenario)
 
     assert (outcome.kind.value, outcome.count, outcome.skipped) == (
-        "playlist",
+        "library_pick",
         count,
-        skipped,
+        tuple(f"Name {t}" for t in skipped),
     )
 
 
@@ -2098,15 +2098,7 @@ def test_the_controller_imports_nothing_from_discord_ui():
     import musicbot.audiocontroller as module
 
     tree = ast.parse(Path(module.__file__).read_text())
-    imported = []
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            imported += [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom):
-            base = node.module or ""
-            imported.append(base)
-            if base == "discord":
-                imported += [f"discord.{a.name}" for a in node.names]
+    imported = imported_names(module)
 
     assert [m for m in imported if m.startswith("discord.ui")] == []
     assert "musicbot.player_panel" not in imported
