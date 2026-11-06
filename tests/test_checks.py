@@ -7,6 +7,7 @@ finished registering its guilds.
 
 import asyncio
 import contextlib
+import inspect
 import types
 
 import discord
@@ -29,7 +30,10 @@ from musicbot.utils import (
     owner_check,
 )
 from discord_fakes import (
+    ADMISSION_DJ_ROLE,
+    HERE,
     admission_settings,
+    situation,
     FakeInteraction,
     VoiceGuild,
     invoke_music_hooks,
@@ -591,3 +595,156 @@ def test_a_library_command_in_a_registered_guild_is_admitted():
     ctx = make_ctx(make_bot({guild: "controller"}), guild)
     assert run(Library(None).cog_check(ctx)) is True
     assert not hasattr(ctx, "audiocontroller")
+
+
+# --- which commands need a DJ ------------------------------------------
+#
+# With a DJ role set, a command that changes shared playback, removes or
+# reorders what is queued, or changes saved playlists needs a DJ; a
+# read-only command, or one that only adds songs or brings the bot in,
+# does not. The table test pins the set; the behaviour tests show a
+# refused non-DJ leaves everything untouched.
+
+NEEDS_A_DJ = {
+    # Music
+    "loop",
+    "shuffle",
+    "pause",
+    "stop",
+    "move",
+    "remove",
+    "skip",
+    "restore",
+    "clear",
+    "prev",
+    "volume",
+    "playlist save",
+    "playlist remove",
+    "playlist add_song",
+    "playlist remove_song",
+    "playlist move_song",
+    # General
+    "disconnect",
+    "reset",
+}
+
+# name -> (cog, request kind, bot channel, author) for the gated tests
+GATED_COMMANDS = {
+    "stop": (Music, admission.RequestKind.COMMAND, HERE, "a"),
+    "disconnect": (General, admission.RequestKind.COMMAND, HERE, "a"),
+    "reset": (General, admission.RequestKind.JOINING_COMMAND, None, "b"),
+}
+
+
+async def run_checks(cmd, ctx):
+    """The command's own checks, in discord.py's order."""
+    for check in cmd.checks:
+        result = check(ctx)
+        if inspect.isawaitable(result):
+            await result
+
+
+def refusal_of(cmd, ctx):
+    """The CheckError message a command's own checks raise, or None."""
+    try:
+        run(run_checks(cmd, ctx))
+    except CheckError as e:
+        return str(e)
+    return None
+
+
+def test_the_commands_needing_a_dj_are_exactly_the_listed_ones(monkeypatch):
+    monkeypatch.setattr(config, "ENABLE_PLAYLISTS", True)
+    refused = set()
+    for cog in (Music, General):
+        for cmd in cog(None).walk_commands():
+            _, ctx = situation(
+                admission.RequestKind.COMMAND, dj_role=ADMISSION_DJ_ROLE
+            )
+            ctx.audiocontroller = types.SimpleNamespace(is_active=lambda: True)
+            if refusal_of(cmd, ctx) == config.NOT_A_DJ:
+                refused.add(cmd.qualified_name)
+    assert refused == NEEDS_A_DJ
+
+
+def gated_command_context(name, role=None, dj_role=ADMISSION_DJ_ROLE):
+    """(guild, ctx, calls, deferred) for the gated command `name`."""
+    cog, kind, bot_channel, author = GATED_COMMANDS[name]
+    guild, ctx = situation(
+        kind, bot=bot_channel, author=author, role=role, dj_role=dj_role
+    )
+    ctx.command = command_of(cog, name)
+    calls = []
+    deferred = []
+    sent = []
+
+    async def send(content=None, **kwargs):
+        sent.append(content)
+
+    async def defer(**kwargs):
+        deferred.append(True)
+
+    async def udisconnect(reason):
+        calls.append(("udisconnect", reason))
+        return True
+
+    async def dispose(reason):
+        calls.append(("dispose", reason))
+
+    controller = ctx.controllers[guild]
+    controller.udisconnect = udisconnect
+    controller.dispose = dispose
+    controller.stop = lambda: calls.append(("stop",))
+    ctx.audiocontroller = controller
+    ctx.send = send
+    ctx.defer = defer
+    ctx.sent = sent
+    return guild, ctx, calls, deferred
+
+
+def invoke_gated(name, ctx):
+    """Check-then-invoke; the refusal message, or None."""
+    cog = GATED_COMMANDS[name][0]
+    cb = getattr(cog, f"_{name}").callback
+
+    async def scenario():
+        await run_checks(ctx.command, ctx)
+        await cb(cog(None), ctx)
+
+    try:
+        run(scenario())
+    except CheckError as e:
+        return str(e)
+    return None
+
+
+@pytest.mark.parametrize("name", list(GATED_COMMANDS))
+def test_a_non_dj_is_refused_and_nothing_happens(name):
+    guild, ctx, calls, deferred = gated_command_context(name)
+    controller = ctx.controllers[guild]
+    assert invoke_gated(name, ctx) == config.NOT_A_DJ
+    assert calls == []
+    assert deferred == []
+    assert ctx.sent == []
+    assert ctx.bot.sessions.controller(guild) is controller
+    assert guild.events == []
+
+
+@pytest.mark.parametrize("name", list(GATED_COMMANDS))
+@pytest.mark.parametrize(
+    "role, dj_role",
+    [
+        ("dj", ADMISSION_DJ_ROLE),
+        ("admin", ADMISSION_DJ_ROLE),
+        ("owner", ADMISSION_DJ_ROLE),
+        (None, None),
+    ],
+    ids=["dj", "admin", "owner", "no-dj-role-set"],
+)
+def test_a_dj_admin_owner_or_anyone_without_a_dj_role_is_admitted(
+    name, role, dj_role, no_sleep
+):
+    _, ctx, calls, _ = gated_command_context(name, role=role, dj_role=dj_role)
+    ctx.guild.events.clear()
+    assert invoke_gated(name, ctx) is None
+    assert calls
