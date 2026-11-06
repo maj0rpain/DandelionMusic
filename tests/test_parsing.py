@@ -92,6 +92,39 @@ class TestIdentifyUrl:
             identify_url("https://example.invalid/a.mp3") is SiteTypes.CUSTOM
         )
 
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "http://example.invalid/a.mp3",
+            "HTTPS://example.invalid/a.mp3",
+        ],
+    )
+    def test_http_and_https_links_in_any_case_are_custom(self, url):
+        assert identify_url(url) is SiteTypes.CUSTOM
+
+    @pytest.mark.parametrize(
+        "url",
+        [
+            "file:/srv/private/x.mp3",
+            "concat:/a|/b.mp3",
+            "ftp://host/a.mp3",
+            "subfile:/a.mp3",
+            "http://127.0.0.1:8080/a.mp3",
+            "http://localhost/a.mp3",
+            "http://LOCALHOST./a.mp3",
+            "http://[::1]/a.mp3",
+            "http://10.0.0.1/a.mp3",
+            "http://192.168.1.1/a.mp3",
+            "http://169.254.169.254/a.mp3",
+            "http://[fe80::1]/a.mp3",
+            "http://0.0.0.0/a.mp3",
+            "http://[::]/a.mp3",
+            "http://[::ffff:127.0.0.1]/a.mp3",
+        ],
+    )
+    def test_a_refused_direct_media_link_is_unknown(self, url):
+        assert identify_url(url) is SiteTypes.UNKNOWN
+
     def test_unknown_site(self):
         assert (
             identify_url("https://example.invalid/page.html")

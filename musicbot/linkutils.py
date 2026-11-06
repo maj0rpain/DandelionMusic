@@ -1,5 +1,6 @@
 import re
 import sys
+import ipaddress
 import asyncio
 from enum import Enum, auto
 from dataclasses import dataclass
@@ -154,6 +155,28 @@ def get_session() -> ClientSession:
             headers=headers, timeout=ClientTimeout(total=HTTP_TIMEOUT)
         )
     return session
+
+
+def _is_disallowed_host(host: Optional[str]) -> bool:
+    """True for localhost and literal loopback, private, link-local or
+    unspecified addresses. Reads the text only; no DNS lookup."""
+    if not host:
+        return True
+    host = host.rstrip(".").lower()
+    if host == "localhost":
+        return True
+    try:
+        address = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
+        address = address.ipv4_mapped
+    return (
+        address.is_loopback
+        or address.is_private
+        or address.is_link_local
+        or address.is_unspecified
+    )
 
 
 class SiteTypes(Enum):
@@ -388,7 +411,12 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     if ie := get_ie(url):
         return ie
 
-    if urlparse(url).path.lower().endswith(config.SUPPORTED_EXTENSIONS):
+    parsed = urlparse(url)
+    if (
+        parsed.scheme.lower() in ("http", "https")
+        and not _is_disallowed_host(parsed.hostname)
+        and parsed.path.lower().endswith(config.SUPPORTED_EXTENSIONS)
+    ):
         return SiteTypes.CUSTOM
 
     # If no match
