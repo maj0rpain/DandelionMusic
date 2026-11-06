@@ -40,15 +40,12 @@ def perms(
     view_channel=True,
     read_message_history=True,
     manage_threads=False,
-    **extra,
 ):
     return types.SimpleNamespace(
         view_channel=view_channel,
         read_message_history=read_message_history,
         manage_threads=manage_threads,
         manage_messages=False,
-        administrator=False,
-        **extra,
     )
 
 
