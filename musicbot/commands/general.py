@@ -12,6 +12,7 @@ from musicbot.bot import MusicBot
 from musicbot.settings import SETTINGS, ConversionError, SettingDescriptor
 from musicbot.utils import (
     CheckError,
+    dj_check,
     get_settings,
     joining_command,
     settings_admin_check,

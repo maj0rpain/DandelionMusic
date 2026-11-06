@@ -69,9 +69,7 @@ def test_the_commands_needing_a_dj_are_exactly_the_listed_ones(monkeypatch):
     for cog in (Music, General):
         for cmd in cog(None).walk_commands():
             _, ctx = situation(K.COMMAND, dj_role=ADMISSION_DJ_ROLE)
-            ctx.audiocontroller = types.SimpleNamespace(
-                is_active=lambda: True
-            )
+            ctx.audiocontroller = types.SimpleNamespace(is_active=lambda: True)
             if refusal_of(cmd, ctx) == config.NOT_A_DJ:
                 refused.add(cmd.qualified_name)
     assert refused == expected
