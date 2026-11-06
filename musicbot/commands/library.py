@@ -725,6 +725,7 @@ class Library(commands.Cog):
 
     @_library.command(
         name="refresh",
+        hidden=True,
         description=config.HELP_LIBRARY_REFRESH_SHORT,
         help=config.HELP_LIBRARY_REFRESH_LONG,
     )
