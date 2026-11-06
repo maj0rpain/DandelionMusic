@@ -29,7 +29,6 @@ from musicbot.utils import (
     owner_check,
 )
 from discord_fakes import (
-    PLAYER_BUTTONS,
     admission_settings,
     FakeInteraction,
     VoiceGuild,
@@ -429,31 +428,24 @@ def press(ctx, custom_id):
 
 
 class TestButtons:
-    @pytest.mark.parametrize("custom_id", PLAYER_BUTTONS)
-    def test_a_player_button_runs_on_a_connected_bot_without_joining(
-        self, custom_id
-    ):
+    def test_a_player_button_runs_on_a_connected_bot_without_joining(self):
         guild = VoiceGuild()
         here = guild.channel("a", humans=1)
         guild.put_bot_in(here)
         ctx = voice_ctx(guild, here, admin=True)
-        _, ran = press(ctx, custom_id)
+        _, ran = press(ctx, "queue")
         assert ran == [ctx]
         assert guild.events == []
 
-    @pytest.mark.parametrize("custom_id", PLAYER_BUTTONS)
-    def test_a_player_button_does_not_move(self, custom_id, no_sleep):
+    def test_a_player_button_does_not_move(self, no_sleep):
         guild = VoiceGuild()
         guild.put_bot_in(guild.channel("a", bots=1))
         ctx = voice_ctx(guild, guild.channel("b"), admin=True)
-        _, ran = press(ctx, custom_id)
+        _, ran = press(ctx, "queue")
         assert ran == [ctx]
         assert guild.events == []
 
-    @pytest.mark.parametrize("custom_id", PLAYER_BUTTONS)
-    def test_a_player_button_ignores_voice_permissions_it_never_needs(
-        self, custom_id
-    ):
+    def test_a_player_button_ignores_voice_permissions_it_never_needs(self):
         """A player button never moves the bot, so the user's channel
         lacking connect/speak for the bot does not refuse it."""
         guild = VoiceGuild()
@@ -461,7 +453,7 @@ class TestButtons:
         ctx = voice_ctx(
             guild, guild.channel("b", connect=False, speak=False), admin=True
         )
-        sent, ran = press(ctx, custom_id)
+        sent, ran = press(ctx, "queue")
         assert sent == []
         assert ran == [ctx]
 

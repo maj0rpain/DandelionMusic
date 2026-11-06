@@ -207,9 +207,9 @@ def coded_error(cls, status, code):
 EXPIRED = coded_error(discord.HTTPException, 401, 50027)
 
 
-# The player panel's button ids, in its order. Hand-written because
-# parametrize reads it at collection; test_player_panel checks it
-# against the real view.
+# The player panel's expected layout, its button ids in order. Written
+# out by hand so test_player_panel can check the real view against it;
+# deriving it from the view would compare the view with itself.
 PLAYER_BUTTONS = [
     "prev",
     "pause",
