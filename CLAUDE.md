@@ -49,7 +49,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 ## Rules
 
 - `Config` is read-only; runtime state goes in the DB - see ADR-0001 (`docs/adr/0001-config-is-read-only.md`).
-- A new setting is a `Config` class attribute with a comment directly above it (parsed by `get_comments()`).
+- A new setting is a `Config` class attribute with a comment directly above it describing it.
 - Don't move `_help`/`_help_autocomplete` into `MusicBot`; they stay module-level (`musicbot/bot.py`).
 - discord.py's `after=` callback runs on its audio thread; it only hops to the loop (`call_soon_threadsafe`). `Playback`'s track-ended handling and everything it calls are loop-only (`musicbot/playback.py`).
 - `musicbot/audiocontroller.py` imports nothing from `discord.ui`, and sends no user-facing message; the player panel does (a test asserts the import).
