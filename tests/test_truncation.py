@@ -1,13 +1,11 @@
 """Truncation and TruncationReason: pure values."""
 
-import ast
-from pathlib import Path
-
 import pytest
 
 from config import config
 from musicbot import truncation as truncation_module
 from musicbot.truncation import Truncation, TruncationReason
+from helpers import imported_names
 
 
 @pytest.mark.parametrize(
@@ -50,12 +48,13 @@ def test_text_and_notice_follow_messages_changed_after_import(monkeypatch):
 
 
 def test_module_imports_only_config_enum_and_dataclasses():
-    tree = ast.parse(Path(truncation_module.__file__).read_text())
-    names = set()
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names.update(a.name for a in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            names.add(node.module)
+    names = imported_names(truncation_module)
 
-    assert names == {"config", "enum", "dataclasses"}
+    assert names == {
+        "config",
+        "config.config",
+        "enum",
+        "enum.Enum",
+        "dataclasses",
+        "dataclasses.dataclass",
+    }

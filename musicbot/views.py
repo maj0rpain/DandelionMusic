@@ -100,14 +100,22 @@ class MusicButton(discord.ui.Button):
     its request `kind`. A player button (the default kind) never
     touches voice and is refused while the bot is out of voice; a
     pick (`RequestKind.PICK`) acts in a joining command's name, so
-    `enter()` joins voice before its action."""
+    `enter()` joins voice before its action. An optional async
+    `after(ctx)` runs once the action has succeeded; a refused click
+    runs none."""
 
     def __init__(
-        self, callback, kind=admission.RequestKind.PLAYER_BUTTON, **kwargs
+        self,
+        callback,
+        kind=admission.RequestKind.PLAYER_BUTTON,
+        *,
+        after=None,
+        **kwargs,
     ):
         super().__init__(**kwargs)
         self._callback = callback
         self._kind = kind
+        self._after = after
 
     async def callback(self, inter: discord.Interaction):
         # Build ctx first, then acknowledge: get_context makes no HTTP
@@ -133,19 +141,15 @@ class MusicButton(discord.ui.Button):
             if isawaitable(res):
                 await res
 
-            panel = inter.client.sessions.panel(inter.guild)
-            if panel:
-                if inter.data.get("custom_id") in ["next", "prev"]:
-                    await ctx.send(f"{inter.user} Skipped a Song")
-                else:
-                    await panel.refresh()
+            if self._after is not None:
+                await self._after(ctx)
         except Exception as e:
             await self.on_failure(ctx, e)
 
     async def on_failure(self, ctx, error):
         """Called for any failure that is not a refusal: a failed
         defer, or an exception (a CheckError included) from the
-        action or the panel refresh. Re-raises by default."""
+        action or the `after` step. Re-raises by default."""
         raise error
 
     def on_refused(self):

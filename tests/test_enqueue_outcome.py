@@ -6,7 +6,9 @@ import asyncio
 from musicbot.commands.music import Music
 from musicbot.outcome import OutcomeKind
 from musicbot.song import LoadResult
+from musicbot.truncation import Truncation, TruncationReason
 from controller_helpers import (
+    _no_idle_timer,
     _fake_ffmpeg,
     _queue,
     _run,
@@ -19,21 +21,14 @@ from controller_helpers import (
 )
 
 
-def _no_idle_timer(controller, monkeypatch):
-    async def start_idle_timer(restart=False):
-        pass
-
-    monkeypatch.setattr(controller, "start_idle_timer", start_idle_timer)
-
-
 def test_a_first_track_whose_preload_fails_is_start_failed(
     controller, stub_loader, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
     _no_idle_timer(controller, monkeypatch)
     stub_loader.results["preload"] = stub_loader.Preload.FAILED
-    stub_loader.results["load_song"] = LoadResult(
-        [_song(controller, "a")], True
+    stub_loader.results["load_song"] = LoadResult.of_song(
+        _song(controller, "a")
     )
     ctx, sent = command_ctx(controller)
 
@@ -114,8 +109,8 @@ def test_process_song_of_a_single_result_gives_a_single_song_outcome(
     controller, stub_loader, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
-    stub_loader.results["load_song"] = LoadResult(
-        [_song(controller, "a")], True
+    stub_loader.results["load_song"] = LoadResult.of_song(
+        _song(controller, "a")
     )
 
     outcome = _process(controller)
@@ -133,3 +128,37 @@ def test_enqueue_of_one_song_with_batch_is_a_playlist(controller, monkeypatch):
     assert outcome.kind is OutcomeKind.PLAYLIST
     assert outcome.count == 1
     assert _titles(controller) == ["a"]
+
+
+def test_enqueue_next_with_batch_is_a_playlist(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    (added,) = _songs(controller, "a")
+
+    outcome = _run(
+        controller, lambda: controller.enqueue_next(added, batch=True)
+    )
+
+    assert outcome.kind is OutcomeKind.PLAYLIST
+    assert outcome.count == 1
+
+
+def test_process_song_playnext_of_a_one_item_playlist_keeps_truncation(
+    controller, stub_loader, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    cut = Truncation(5, next(iter(TruncationReason)))
+    stub_loader.results["load_song"] = LoadResult(
+        [_song(controller, "a")], False, cut
+    )
+
+    outcome = _process(controller, playnext=True)
+
+    assert outcome.kind is OutcomeKind.PLAYLIST
+    assert (outcome.count, outcome.truncation) == (1, cut)
+
+
+def test_ensure_playing_returns_nothing(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _songs(controller, "a")
+
+    assert _run(controller, controller.ensure_playing) is None

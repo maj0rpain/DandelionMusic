@@ -18,21 +18,23 @@ class OutcomeKind(Enum):
     QUEUED = "queued"
     # a batch of songs was added as one request
     PLAYLIST = "playlist"
+    # files picked in the library browser were added as one request
+    LIBRARY_PICK = "library_pick"
 
 
 @dataclass(frozen=True)
 class EnqueueOutcome:
     """What adding a request's songs to the queue did. `position`
     (QUEUED only) numbers the queue as `d!queue` does: the current
-    track is #1. `skipped` is `None` except for a library pick's, where
-    it lists the inputs that could not be loaded (possibly empty)."""
+    track is #1. `skipped` lists, for a LIBRARY_PICK, the inputs that
+    could not be loaded (possibly empty)."""
 
     kind: OutcomeKind
     song: Optional[Song] = None
     count: int = 1
     position: Optional[int] = None
     truncation: Optional[Truncation] = None
-    skipped: Optional[list[str]] = None
+    skipped: tuple[str, ...] = ()
 
 
 @dataclass(frozen=True)
@@ -44,7 +46,7 @@ class Reply:
 
 
 def _library_report(outcome: EnqueueOutcome) -> str:
-    skipped = outcome.skipped or []
+    skipped = outcome.skipped
     message = f"Queued {outcome.count} song(s)."
     if skipped:
         shown = ", ".join(skipped[:5])
@@ -75,15 +77,19 @@ def render(outcome: EnqueueOutcome, announce_songs: bool) -> Optional[Reply]:
             position=outcome.position
         )
         return Reply(embed=outcome.song.format_output(title))
-    if outcome.skipped is not None:
+    if kind is OutcomeKind.LIBRARY_PICK:
         return Reply(text=_library_report(outcome))
     if outcome.truncation is not None:
         return Reply(text=outcome.truncation.notice(outcome.count))
     return Reply(text=config.SONGINFO_PLAYLIST_QUEUED)
 
 
-async def send_outcome(ctx, outcome: EnqueueOutcome, announce_songs: bool):
-    """Sends through `ctx.send` only what `render` returns."""
+async def send_outcome(ctx, outcome: EnqueueOutcome):
+    """Sends through `ctx.send` only what `render` returns, announcing
+    songs as the context guild's `announce_songs` setting says (off when
+    the guild has no settings)."""
+    settings = ctx.bot.sessions.settings(ctx.guild)
+    announce_songs = settings is not None and settings.announce_songs
     reply = render(outcome, announce_songs)
     if reply is None:
         return

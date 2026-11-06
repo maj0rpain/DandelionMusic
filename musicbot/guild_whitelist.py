@@ -162,12 +162,13 @@ async def import_env_whitelist(session_factory: SessionFactory):
     async with session_factory() as session:
         if await session.get(BotState, ENV_WHITELIST_IMPORTED) is not None:
             return
-        # Skip ids the table already holds rather than assuming a
-        # missing marker means an empty table. Two processes sharing
-        # one database can both pass the check above, and a restored
-        # backup can have rows without the marker; inserting blindly
-        # then raises IntegrityError out of MusicBot.start() and the
-        # bot never logs in.
+        # Two things are tolerated here. Rows that already exist (a
+        # restored backup can have rows without the marker) are skipped
+        # below. A concurrent import in another process sharing the
+        # database, which commits between the marker check above and
+        # our commit, is handled at the commit: we lose the race and
+        # roll back. Either would otherwise raise IntegrityError out of
+        # MusicBot.start() and the bot would never log in.
         existing = await _listed(session)
         for guild_id in config.GUILD_WHITELIST:
             if int(guild_id) not in existing:
@@ -178,7 +179,11 @@ async def import_env_whitelist(session_factory: SessionFactory):
                 value=str(len(config.GUILD_WHITELIST)),
             )
         )
-        await session.commit()
+        try:
+            await session.commit()
+        except IntegrityError:
+            await session.rollback()
+            return
     if config.GUILD_WHITELIST:
         print(
             f"Imported {len(config.GUILD_WHITELIST)} guild(s) from the"
