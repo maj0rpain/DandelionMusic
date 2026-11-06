@@ -12,7 +12,7 @@ LINK = f"https://discord.com/channels/{GUILD_ID}/{CHANNEL_ID}/5"
 FOREIGN_LINK = f"https://discord.com/channels/{OTHER_GUILD_ID}/{CHANNEL_ID}/5"
 
 
-class FakeMember(discord.Member):
+class LinkMember(discord.Member):
     """A real `discord.Member` by type, built without a connection."""
 
     # class attributes shadow Member's slots and properties
@@ -52,7 +52,7 @@ def perms(
     )
 
 
-class FakeChannel:
+class LinkChannel:
     def __init__(self, channel_id=CHANNEL_ID, permissions=None):
         self.id = channel_id
         self.permissions = permissions or perms()
@@ -61,7 +61,7 @@ class FakeChannel:
         return self.permissions
 
 
-class FakeThread(FakeChannel):
+class LinkThread(LinkChannel):
     """A thread: `private`, and `fetch_member` raising `joined_error`
     (None: the member is in it)."""
 
@@ -79,7 +79,7 @@ class FakeThread(FakeChannel):
         return object()
 
 
-class FakeGuild:
+class LinkGuild:
     def __init__(self, channels=(), guild_id=GUILD_ID):
         self.id = guild_id
         self.name = f"guild {guild_id}"

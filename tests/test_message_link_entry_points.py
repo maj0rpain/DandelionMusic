@@ -25,8 +25,8 @@ from message_link_fakes import (
     FOREIGN_LINK,
     GUILD_ID,
     LINK,
-    FakeChannel,
-    FakeMember,
+    LinkChannel,
+    LinkMember,
     perms,
 )
 
@@ -44,14 +44,14 @@ def arm(controller, stub_loader, monkeypatch, readable=True):
     stub_loader.results["load_song"] = LoadResult.of_song(
         _song(controller, "a")
     )
-    controller.guild.get_channel_or_thread = lambda _id: FakeChannel(
+    controller.guild.get_channel_or_thread = lambda _id: LinkChannel(
         permissions=perms(view_channel=readable)
     )
 
 
 def invoke(name, controller, track=None, message=None):
     ctx, sent = command_ctx(controller)
-    ctx.author = FakeMember(guild=controller.guild)
+    ctx.author = LinkMember(guild=controller.guild)
     ctx.interaction = None
     ctx.message = message or types.SimpleNamespace(
         attachments=[], reference=None
@@ -148,7 +148,7 @@ def add_song(controller, stub_loader, monkeypatch, link):
 
     monkeypatch.setattr(playlists, "add_songs", add_songs)
     ctx, sent = command_ctx(controller)
-    ctx.author = FakeMember(guild=controller.guild)
+    ctx.author = LinkMember(guild=controller.guild)
     _run(
         controller,
         lambda: Music._playlist_add_song.callback(Music(None), ctx, "p", link),
@@ -201,9 +201,9 @@ def react(link, monkeypatch, readable=True):
     monkeypatch.setattr(loader, "load_song", load_song)
     sent = []
     msg = types.SimpleNamespace(content=link)
-    channel = FakeChannel(2, perms(view_channel=readable))
+    channel = LinkChannel(2, perms(view_channel=readable))
 
-    class Channel(FakeChannel):
+    class Channel(LinkChannel):
         async def fetch_message(self, _id):
             return msg
 
@@ -242,7 +242,7 @@ def react(link, monkeypatch, readable=True):
         )
 
     bot.get_context = get_context
-    member = FakeMember(
+    member = LinkMember(
         roles=[], voice=types.SimpleNamespace(channel=mine), guild=guild
     )
     event = types.SimpleNamespace(
