@@ -53,15 +53,26 @@ async def _start_playing(controller):
     await _settle()
 
 
-def _run_playing(controller, scenario):
-    """Runs `scenario(controller)` on a loop, with the queue head
+def _bounded(controller, scenario):
+    """Runs `scenario` under a wall-clock bound, so a regression to
+    cycling fails the test instead of hanging the suite."""
+
+    async def bounded():
+        await asyncio.wait_for(scenario(), timeout=2)
+
+    _run(controller, bounded)
+
+
+def _run_playing(controller, scenario, runner=_run):
+    """Runs `scenario(controller)` through `runner(controller, main)`
+    (`_run`, or `_bounded` for a wall-clock bound), with the queue head
     started first and the loop given time to settle afterwards."""
 
     async def main():
         await _start_playing(controller)
         await scenario(controller)
 
-    _run(controller, main)
+    runner(controller, main)
 
 
 def _played(controller):
@@ -2246,16 +2257,6 @@ def _loop_all(controller):
     controller.playlist.loop = LoopMode.ALL
 
 
-def _bounded(controller, scenario):
-    """Runs `scenario` under a wall-clock bound, so a regression to
-    cycling fails the test instead of hanging the suite."""
-
-    async def bounded():
-        await asyncio.wait_for(scenario(), timeout=2)
-
-    _run(controller, bounded)
-
-
 def test_loop_all_one_song_whose_preload_fails_is_reported_once_and_idles(
     controller, stub_loader, monkeypatch, tmp_path
 ):
@@ -2264,10 +2265,7 @@ def test_loop_all_one_song_whose_preload_fails_is_reported_once_and_idles(
     _loop_all(controller)
     _failing_preloads(stub_loader, "broken")
 
-    async def scenario():
-        await _start_playing(controller)
-
-    _bounded(controller, scenario)
+    _bounded(controller, lambda: _start_playing(controller))
 
     assert [s.title for s in controller.panel.skipped] == ["broken"]
     assert _titles(controller) == []
@@ -2290,10 +2288,7 @@ def test_loop_all_every_preload_failing_drains_to_idle(
     _loop_all(controller)
     _failing_preloads(stub_loader, "a", "b", "c")
 
-    async def scenario():
-        await _start_playing(controller)
-
-    _bounded(controller, scenario)
+    _bounded(controller, lambda: _start_playing(controller))
 
     assert [s.title for s in controller.panel.skipped] == ["a", "b", "c"]
     assert _titles(controller) == []
@@ -2311,10 +2306,7 @@ def test_loop_all_song_without_a_url_is_reported_once_and_removed(
     controller.playlist.add(_without_url(controller, "no url"))
     _loop_all(controller)
 
-    async def scenario():
-        await _start_playing(controller)
-
-    _bounded(controller, scenario)
+    _bounded(controller, lambda: _start_playing(controller))
 
     assert [s.title for s in controller.panel.skipped] == ["no url"]
     assert _titles(controller) == []
@@ -2325,21 +2317,29 @@ def test_loop_all_song_without_a_url_is_reported_once_and_removed(
     assert _history_songs(controller) == []
 
 
+def _failing_at_the_head(controller, stub_loader, *titles):
+    """Makes the preload of a song titled in `titles` fail only while
+    it is the queue head, so the preload sweep behind the head leaves
+    it for the failed-track path."""
+    original = stub_loader.preload
+
+    async def preload(song):
+        result = await original(song)
+        queue = controller.playlist.playque
+        if song.title in titles and queue and queue[0] is song:
+            return stub_loader.Preload.FAILED
+        return result
+
+    stub_loader.preload = preload
+
+
 def test_loop_all_mixed_queue_drops_failing_songs_and_keeps_the_rest(
     controller, stub_loader, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
-    _queue(controller, "bad", "good", "worse")
+    _queue(controller, "bad", "good", "worse", "fine")
     _loop_all(controller)
-    _failing_preloads(stub_loader, "bad", "worse")
-
-    async def scenario():
-        await _start_playing(controller)
-
-    _bounded(controller, scenario)
-
-    assert [s.title for s in controller.panel.skipped] == ["bad"]
-    assert _played(controller) == ["good"]
+    _failing_at_the_head(controller, stub_loader, "bad", "worse")
 
     async def next_round():
         controller.playback.skip()
@@ -2347,12 +2347,18 @@ def test_loop_all_mixed_queue_drops_failing_songs_and_keeps_the_rest(
         controller.guild.voice_client.playing = False
         await _settle()
 
-    _bounded(controller, next_round)
+    async def scenario():
+        await _start_playing(controller)
+        assert _played(controller) == ["good"]
+        # "worse" rotates to the head and fails there; "fine" follows
+        await next_round()
+        assert _played(controller) == ["good", "fine"]
+        await next_round()
 
-    # "worse" was removed by the preload sweep behind "good"; "good"
-    # keeps rotating alone
-    assert [s.title for s in controller.panel.skipped].count("bad") == 1
-    assert _titles(controller) == ["good"]
+    _bounded(controller, scenario)
+
+    assert [s.title for s in controller.panel.skipped] == ["bad", "worse"]
+    assert sorted(_titles(controller)) == ["fine", "good"]
     assert _history_songs(controller) == []
 
 
@@ -2388,19 +2394,18 @@ def test_a_start_overtaken_after_its_report_drops_and_starts_nothing(
     _queue(controller, "broken", "next")
     _failing_preloads(stub_loader, "broken")
 
-    async def stop_during_notice(song):
-        controller.stop()
+    voice = controller.guild.voice_client
 
-    controller.panel.on_notice = stop_during_notice
+    async def disconnect_during_notice(song):
+        controller.guild.voice_client = None
 
-    async def scenario():
-        await _start_playing(controller)
+    controller.panel.on_notice = disconnect_during_notice
 
-    _bounded(controller, scenario)
+    _bounded(controller, lambda: _start_playing(controller))
 
     assert [s.title for s in controller.panel.skipped] == ["broken"]
-    assert _titles(controller) == []
-    assert _played(controller) == []
+    assert _titles(controller) == ["broken", "next"]
+    assert voice.played == []
 
 
 def test_a_failed_notice_send_still_drops_and_moves_on(
@@ -2416,10 +2421,7 @@ def test_a_failed_notice_send_still_drops_and_moves_on(
 
     controller.panel.on_notice = failing_notice
 
-    async def scenario():
-        await _start_playing(controller)
-
-    _bounded(controller, scenario)
+    _bounded(controller, lambda: _start_playing(controller))
 
     assert _played(controller) == ["next"]
     assert _titles(controller)[0] == "next"
@@ -2574,7 +2576,7 @@ def test_a_user_command_on_a_track_with_no_audio_is_not_a_failure(
         await command(c)
         await _settle()
 
-    _bounded(controller, lambda: _scenario_playing(controller, scenario))
+    _run_playing(controller, scenario, runner=_bounded)
 
     assert controller.panel.skipped == []
     assert _played(controller)[1:] == played
@@ -2592,11 +2594,6 @@ def test_a_user_command_on_a_track_with_no_audio_is_not_a_failure(
     else:
         # loose on purpose (deviation, #1012)
         assert "first" in _titles(controller)
-
-
-async def _scenario_playing(controller, scenario):
-    await _start_playing(controller)
-    await scenario(controller)
 
 
 @pytest.mark.parametrize(
@@ -2625,8 +2622,18 @@ def test_a_track_with_audio_then_an_error_advances_as_finished(
 
 
 def test_a_volume_change_reaches_the_wrapped_source(controller, monkeypatch):
+    import discord
+
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first")
+    built = []
+
+    class RecordingTransformer(discord.PCMVolumeTransformer):
+        def __init__(self, *args, **kwargs):
+            super().__init__(*args, **kwargs)
+            built.append(self)
+
+    monkeypatch.setattr(discord, "PCMVolumeTransformer", RecordingTransformer)
 
     async def scenario(c):
         c.set_volume(25)
@@ -2635,4 +2642,5 @@ def test_a_volume_change_reaches_the_wrapped_source(controller, monkeypatch):
 
     given = controller.guild.voice_client.source
     assert given.volume == 0.25
-    assert given.original is not None
+    assert len(built) == 1
+    assert built[0].volume == 0.25
