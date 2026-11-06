@@ -299,9 +299,7 @@ def test_a_prefix_subcommand_converts_its_argument(
 ):
     """d!setting <name> <arg>: discord.py converts the text by the
     subcommand's parameter type before the setting is updated"""
-    cog = General(None)
-    command = subcommand(cog, name)
-    command.cog = cog  # as bot.add_cog() binds it
+    command = bound_subcommand(name)
     sett = stored_settings()
     sent = []
 
@@ -320,6 +318,13 @@ def test_every_generated_subcommand_takes_only_its_value_parameter():
         ]
 
 
+def bound_subcommand(name):
+    cog = General(None)
+    command = subcommand(cog, name)
+    command.cog = cog  # as bot.add_cog() binds it
+    return command
+
+
 def reset_text(name):
     shown = SETTINGS[name].show(None, SETTINGS[name].default)
     return f"Setting `{name}` reset to {shown}!"
@@ -335,7 +340,9 @@ def invoke_reset(name, sett):
 @pytest.mark.parametrize("name", list(ARGS))
 def test_a_subcommand_without_a_value_resets_the_setting(name):
     sett = stored_settings()
-    setattr(sett, name, ARGS[name] if name != "dj_role" else "22")
+    if getattr(sett, name) == SETTINGS[name].default:
+        setattr(sett, name, True)  # announce_songs defaults to False
+    assert getattr(sett, name) != SETTINGS[name].default
 
     sent = invoke_reset(name, sett)
 
@@ -350,9 +357,7 @@ def test_a_reset_is_confirmed_with_the_value_the_embed_shows():
 
 
 def test_a_prefix_subcommand_without_a_value_resets_the_setting():
-    cog = General(None)
-    command = subcommand(cog, "dj_role")
-    command.cog = cog
+    command = bound_subcommand("dj_role")
     sett = stored_settings()
     sent = []
 
@@ -363,9 +368,7 @@ def test_a_prefix_subcommand_without_a_value_resets_the_setting():
 
 
 def test_a_prefix_value_that_does_not_convert_is_not_a_reset():
-    cog = General(None)
-    command = subcommand(cog, "dj_role")
-    command.cog = cog
+    command = bound_subcommand("dj_role")
     sett = stored_settings()
     sent = []
 
@@ -399,12 +402,13 @@ def test_a_vc_timeout_reset_is_refused_while_its_edit_is_disabled(
 ):
     monkeypatch.setattr(config, "ALLOW_VC_TIMEOUT_EDIT", False)
     sett = stored_settings()
-    sett.vc_timeout = True
+    sett.vc_timeout = False
+    assert SETTINGS["vc_timeout"].default is not False
 
     sent = invoke_reset("vc_timeout", sett)
 
     assert sent == [config.VC_TIMEOUT_EDIT_DISABLED]
-    assert sett.vc_timeout is True
+    assert sett.vc_timeout is False
 
 
 def test_a_button_emote_reset_succeeds_with_the_plugin_disabled(

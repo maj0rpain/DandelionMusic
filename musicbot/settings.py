@@ -367,14 +367,18 @@ class GuildSettings(Base):
 
         return embed
 
-    async def update_setting(
-        self, setting: str, value: Any, ctx: "Context"
+    async def _store_setting(
+        self,
+        setting: str,
+        ctx: "Context",
+        choose: Callable[[SettingDescriptor], Any],
     ) -> bool:
+        "Stores choose(descriptor); False for an unknown setting"
         descriptor = SETTINGS.get(setting)
         if descriptor is None:
             return False
 
-        value = descriptor.converter(ctx, value)
+        value = choose(descriptor)
         if isawaitable(value):
             value = await value
         setattr(self, setting, value)
@@ -383,17 +387,16 @@ class GuildSettings(Base):
             await session.commit()
         return True
 
+    async def update_setting(
+        self, setting: str, value: Any, ctx: "Context"
+    ) -> bool:
+        return await self._store_setting(
+            setting, ctx, lambda d: d.converter(ctx, value)
+        )
+
     async def reset_setting(self, setting: str, ctx: "Context") -> bool:
         "Stores the setting's descriptor default, bypassing its converter"
-        descriptor = SETTINGS.get(setting)
-        if descriptor is None:
-            return False
-
-        setattr(self, setting, descriptor.default)
-        async with ctx.bot.DbSession() as session:
-            session.add(self)
-            await session.commit()
-        return True
+        return await self._store_setting(setting, ctx, lambda d: d.default)
 
 
 class SavedPlaylist(Base):
