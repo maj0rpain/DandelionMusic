@@ -1,4 +1,4 @@
-"""d!restore: the reply for each outcome of AudioController.restore().
+"""d!restore: the reply for each outcome of AudioController.load_backup().
 
 Drives the command callback on a fake context whose controller reports
 a fixed outcome, so nothing here needs Discord or playback.
@@ -19,8 +19,14 @@ class OutcomeController:
         self.outcome = outcome
         self.events = events
 
-    async def restore(self):
-        self.events.append("restore")
+    def load_backup(self):
+        self.events.append("load_backup")
+        if self.outcome is RestoreResult.RESTORED:
+            return RestoreResult.READY
+        return self.outcome
+
+    async def start_restored(self):
+        self.events.append("start_restored")
         return self.outcome
 
 
@@ -54,5 +60,8 @@ def test_restore_command_replies_with_the_outcome(outcome, reply):
 
     run(Music._restore.callback(Music(None), ctx))
 
-    assert events == [("defer", False), "restore"]
+    expected = [("defer", False), "load_backup"]
+    if outcome is RestoreResult.RESTORED:
+        expected.append("start_restored")
+    assert events == expected
     assert sent == [reply]

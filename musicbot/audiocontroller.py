@@ -39,8 +39,9 @@ if TYPE_CHECKING:
 
 
 class RestoreResult(Enum):
-    """What AudioController.restore() did."""
+    """What load_backup() and start_restored() did."""
 
+    READY = auto()
     RESTORED = auto()
     NOTHING_TO_RESTORE = auto()
     REFUSED_WHILE_ACTIVE = auto()
@@ -394,15 +395,15 @@ class AudioController(object):
         first_index, start = await self._place_and_start(place)
         return self._outcome(placed, first_index, start, batch)
 
-    async def restore(self) -> RestoreResult:
-        """Reloads the playlist backup and starts its head.
+    def load_backup(self) -> RestoreResult:
+        """Reloads the playlist backup, starting nothing.
 
         Refuses while something is playing or paused, before touching
         the backup or the queue: starting the head then would make
         discord.py refuse play() and the controller disconnect (#24).
-        Reports NOTHING_TO_RESTORE, playing nothing, when there is no
-        queue to restore, and BACKUP_UNREADABLE, changing nothing, when
-        the backup exists but cannot be loaded."""
+        Reports BACKUP_UNREADABLE, changing nothing, when the backup
+        exists but cannot be loaded, NOTHING_TO_RESTORE when the queue
+        is still empty, and READY when start_restored() has a head."""
         if not self.is_idle():
             return RestoreResult.REFUSED_WHILE_ACTIVE
         try:
@@ -414,6 +415,14 @@ class AudioController(object):
                 file=sys.stderr,
             )
             return RestoreResult.BACKUP_UNREADABLE
+        if not self.playlist:
+            return RestoreResult.NOTHING_TO_RESTORE
+        return RestoreResult.READY
+
+    async def start_restored(self) -> RestoreResult:
+        """Starts the head of the queue load_backup() brought back.
+        With an empty queue it starts nothing and reports
+        NOTHING_TO_RESTORE."""
         if not self.playlist:
             return RestoreResult.NOTHING_TO_RESTORE
         await self.play_song(self.playlist[0])

@@ -371,7 +371,9 @@ class Music(commands.Cog):
     @joining_command
     async def _restore(self, ctx):
         await ctx.defer()  # restoring extracts the head of the backup
-        result = await ctx.audiocontroller.restore()
+        result = ctx.audiocontroller.load_backup()
+        if result is RestoreResult.READY:
+            result = await ctx.audiocontroller.start_restored()
         if result is RestoreResult.REFUSED_WHILE_ACTIVE:
             await ctx.send(config.RESTORE_WHILE_ACTIVE)
         elif result is RestoreResult.BACKUP_UNREADABLE:

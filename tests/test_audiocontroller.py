@@ -295,17 +295,21 @@ def test_restore_brings_back_the_queue_a_stop_cleared(
     async def scenario():
         await controller.ensure_playing()
         controller.stop()
-        restored = await controller.restore()
+        loaded = controller.load_backup()
+        restored = await controller.start_restored()
         await _settle()
-        return restored
+        return loaded, restored
 
     ac = sys.modules[type(controller).__module__]
-    assert _run(controller, scenario) is ac.RestoreResult.RESTORED
+    assert _run(controller, scenario) == (
+        ac.RestoreResult.READY,
+        ac.RestoreResult.RESTORED,
+    )
     assert _played(controller) == ["first", "first"]
     assert _titles(controller) == ["first", "second"]
     assert _backup(controller, tmp_path) == ["first", "second"]
     # "first" each time it starts; "second" by the one sweep that
-    # survives: stop() ended the first, and restore() started the next
+    # survives: stop() ended the first, and start_restored() started the next
     assert _preloaded(stub_loader) == ["first", "first", "second"]
 
 
@@ -313,11 +317,37 @@ def test_restore_with_no_backup_and_an_empty_queue_plays_nothing(
     controller,
 ):
     async def scenario():
-        return await controller.restore()
+        return (
+            controller.load_backup(),
+            await controller.start_restored(),
+        )
 
     ac = sys.modules[type(controller).__module__]
-    assert _run(controller, scenario) is ac.RestoreResult.NOTHING_TO_RESTORE
+    nothing = ac.RestoreResult.NOTHING_TO_RESTORE
+    assert _run(controller, scenario) == (nothing, nothing)
     assert controller.guild.voice_client.played == []
+
+
+def test_load_backup_reports_ready_for_a_backup_with_tracks(
+    controller, tmp_path
+):
+    _queue(controller, "first", "second")
+    _save_backup(controller)
+    controller.playlist.clear()
+
+    ac = sys.modules[type(controller).__module__]
+    assert controller.load_backup() is ac.RestoreResult.READY
+    assert _titles(controller) == ["first", "second"]
+    assert controller.guild.voice_client.played == []
+
+
+def test_load_backup_of_an_empty_backup_has_nothing_to_restore(
+    controller, tmp_path
+):
+    _save_backup(controller)
+
+    ac = sys.modules[type(controller).__module__]
+    assert controller.load_backup() is ac.RestoreResult.NOTHING_TO_RESTORE
 
 
 def _restore_while_active(controller, monkeypatch, tmp_path, pause):
@@ -331,7 +361,7 @@ def _restore_while_active(controller, monkeypatch, tmp_path, pause):
         if pause:
             controller.guild.voice_client.pause()
         before = (controller.playlist, backup.read_bytes())
-        result = await controller.restore()
+        result = controller.load_backup()
         await _settle()
         return before, result
 
@@ -1237,7 +1267,8 @@ def test_restore_after_an_external_disconnect_starts_the_cut_off_song(
         assert _backup(controller, tmp_path) == ["first"]
         await controller.udisconnect("test")
         _fresh_voice_client(controller)
-        restored = await controller.restore()
+        controller.load_backup()
+        restored = await controller.start_restored()
         await _settle()
         return restored
 
@@ -1944,7 +1975,7 @@ def test_restore_during_a_pending_start_is_refused(
             controller, stub_loader, monkeypatch, "slow", "next"
         )
         await _settle()
-        result = await controller.restore()
+        result = controller.load_backup()
         release.set()
         await _finish(task)
         return result
@@ -2856,7 +2887,7 @@ def test_restore_of_an_unreadable_backup_changes_nothing(
     _backup_path(controller, tmp_path).write_bytes(content)
 
     async def scenario():
-        return await controller.restore()
+        return controller.load_backup()
 
     ac = sys.modules[type(controller).__module__]
     assert _run(controller, scenario) is ac.RestoreResult.BACKUP_UNREADABLE
