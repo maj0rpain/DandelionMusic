@@ -215,6 +215,10 @@ class SpotifyPlaylistTypes(Enum):
     ALBUM = "album"
 
 
+class SpotifyApiReturnedNothing(Exception):
+    """The Spotify API answered a playlist or album request with nothing."""
+
+
 @dataclass
 class SpotifyTracks:
     """Links of a Spotify playlist or album. `truncation` is set when
@@ -256,6 +260,30 @@ async def resolve_short_link(url: str) -> str:
         return str(response.url)
 
 
+async def _scrape_track(url: str) -> tuple[str, str]:
+    """A track's title and artist, read from its public page."""
+    soup = await get_soup(url)
+
+    title_str = soup.find("title").string
+    # Match "Title - song and lyrics by Artist | Spotify"
+    match = re.match(
+        r"(.*) - song(?: and lyrics)? by (.*) \| Spotify", title_str
+    )
+    if match:
+        return match.group(1), match.group(2)
+    # Fallback if regex doesn't match
+    return title_str, ""
+
+
+def _log_api_error(kind, code) -> None:
+    """Logs the exception being handled as a Spotify API error."""
+    print(
+        f"ERROR: Spotify API returned error for {kind} {code}:",
+        file=sys.stderr,
+    )
+    print_exc(file=sys.stderr)
+
+
 async def fetch_spotify(
     url: str,
 ) -> Union[SpotifyTrack, SpotifyTracks]:
@@ -268,23 +296,18 @@ async def fetch_spotify(
     if url_type != "track":
         return await fetch_spotify_playlist(url, url_type, match.group("code"))
 
+    code = match.group("code")
     if spotify_api:
-        track_data = spotify_api.track(match.group("code"))
-        title = track_data["name"]
-        artist = track_data["artists"][0]["name"]
+        try:
+            track_data = spotify_api.track(code)
+            title = track_data["name"]
+            artist = track_data["artists"][0]["name"]
+        except Exception:
+            _log_api_error("track", code)
+            # raised inside the except, so the API error is its context
+            title, artist = await _scrape_track(url)
     else:
-        soup = await get_soup(url)
-
-        title_str = soup.find("title").string
-        # Match "Title - song and lyrics by Artist | Spotify"
-        match = re.match(
-            r"(.*) - song(?: and lyrics)? by (.*) \| Spotify", title_str
-        )
-        if match:
-            title, artist = match.group(1), match.group(2)
-        else:
-            # Fallback if regex doesn't match
-            title, artist = title_str, ""
+        title, artist = await _scrape_track(url)
 
     if artist:
         query = f'{title} - {artist} "Topic"'
@@ -300,8 +323,25 @@ async def fetch_spotify_playlist(
     """Returns the Spotify links, and how many tracks are missing"""
 
     if spotify_api:
-        return fetch_playlist_with_api(SpotifyPlaylistTypes(list_type), code)
+        try:
+            return fetch_playlist_with_api(
+                SpotifyPlaylistTypes(list_type), code
+            )
+        except Exception:
+            _log_api_error(list_type, code)
+            # raised inside the except, so the API error is its context
+            return await _scrape_playlist(
+                url, TruncationReason.API_UNAVAILABLE
+            )
 
+    return await _scrape_playlist(url, TruncationReason.NO_API)
+
+
+async def _scrape_playlist(
+    url: str, reason: TruncationReason
+) -> SpotifyTracks:
+    """The links the playlist's public page lists, truncated with
+    `reason` when it reports more tracks than it lists."""
     soup = await get_soup(url)
     results = soup.find_all(attrs={"name": "music:song", "content": True})
     count_tag = soup.find(attrs={"name": "music:song_count", "content": True})
@@ -311,8 +351,7 @@ async def fetch_spotify_playlist(
         total = None
 
     links = [item["content"] for item in results]
-    truncation = Truncation.of(total, len(links), TruncationReason.NO_API)
-    return SpotifyTracks(links, truncation)
+    return SpotifyTracks(links, Truncation.of(total, len(links), reason))
 
 
 def fetch_playlist_with_api(
@@ -336,19 +375,13 @@ def fetch_playlist_with_api(
                 pages += 1
                 results = spotify_api.next(results)
         else:
-            print(
-                f"Warning: Spotify API returned nothing"
-                f" for {list_type} {code}",
-                file=sys.stderr,
+            raise SpotifyApiReturnedNothing(
+                f"Spotify API returned nothing for {list_type} {code}"
             )
     except Exception:
         if not pages:
             raise
-        print(
-            f"ERROR: Spotify API returned error for {list_type} {code}:",
-            file=sys.stderr,
-        )
-        print_exc(file=sys.stderr)
+        _log_api_error(list_type, code)
         api_failed = True
 
     links = []

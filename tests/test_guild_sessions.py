@@ -7,6 +7,7 @@ needs Discord or a database.
 """
 
 import asyncio
+from types import SimpleNamespace
 
 import discord
 import pytest
@@ -40,6 +41,9 @@ class FakeSettings:
 
 
 class FakeController:
+    def is_disconnecting(self):
+        return False
+
     def __init__(self, guild, panel=None):
         self.guild = guild
         self.panel = panel
@@ -431,8 +435,9 @@ def test_reset_refuses_when_the_bot_is_still_in_voice(monkeypatch):
 
     monkeypatch.setattr(asyncio, "sleep", no_sleep)
     guild = FakeGuild(1)
-    guild.voice_client = object()
     channel = CountingVoiceChannel(guild)
+    # the bot sits in the user's own channel
+    guild.voice_client = SimpleNamespace(channel=channel)
 
     _, _, _, sent, refusal = run_reset(guild, channel)
 

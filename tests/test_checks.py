@@ -33,6 +33,7 @@ from discord_fakes import (
     ADMISSION_DJ_ROLE,
     HERE,
     admission_settings,
+    fake_controller,
     situation,
     FakeInteraction,
     VoiceGuild,
@@ -161,7 +162,7 @@ def voice_ctx(
 ):
     sett = admission_settings(dj_role=dj_role)
     bot = make_bot(
-        {guild: types.SimpleNamespace(command_channel=None)},
+        {guild: fake_controller()},
         settings={guild: sett},
     )
     author = types.SimpleNamespace(
@@ -310,7 +311,7 @@ def test_connect_moves_the_bot_out_of_a_bots_only_channel(no_sleep):
 
     run(scenario())
     assert guild.events == [("defer", False), ("move", "b")]
-    assert sent == ["Connected."]
+    assert sent == ["Moved to your voice channel."]
 
 
 def test_a_failed_join_from_the_library_says_so():
@@ -329,13 +330,17 @@ def test_a_failed_join_from_the_library_says_so():
     async def edit_original_response(content):
         replies.append(content)
 
+    async def get_context(inter):
+        return ctx
+
     interaction = types.SimpleNamespace(
+        client=types.SimpleNamespace(get_context=get_context),
         response=types.SimpleNamespace(
             is_done=lambda: False, send_message=send_message
         ),
         edit_original_response=edit_original_response,
     )
-    run(queue_songs(ctx, interaction, [("A", "B", "c.mp3")], "browse"))
+    run(queue_songs(interaction, [("A", "B", "c.mp3")], "browse"))
     assert replies == ["Queueing...", config.VOICE_CONNECT_FAILED]
     assert guild.events == [("connect", "a")]
 
@@ -582,7 +587,14 @@ def test_the_library_hook_directs_the_panel_to_the_channel():
     assert ctx.bot.sessions.panel(guild).directed == [(ctx.channel, True)]
 
 
-def test_a_library_command_in_an_unregistered_guild_is_not_ready():
+@pytest.fixture
+def library_path(monkeypatch):
+    monkeypatch.setattr(config, "MUSIC_LIBRARY_PATH", "/x")
+
+
+def test_a_library_command_in_an_unregistered_guild_is_not_ready(
+    library_path,
+):
     ctx = make_ctx(make_bot(), Guild())
     with pytest.raises(CheckError) as exc:
         run(Library(None).cog_check(ctx))
@@ -590,11 +602,24 @@ def test_a_library_command_in_an_unregistered_guild_is_not_ready():
     assert not hasattr(ctx, "audiocontroller")
 
 
-def test_a_library_command_in_a_registered_guild_is_admitted():
+def test_a_library_command_in_a_registered_guild_is_admitted(library_path):
     guild = Guild()
     ctx = make_ctx(make_bot({guild: "controller"}), guild)
     assert run(Library(None).cog_check(ctx)) is True
     assert not hasattr(ctx, "audiocontroller")
+
+
+@pytest.mark.parametrize("registered", [True, False])
+def test_a_library_command_without_a_library_path_is_not_configured(
+    monkeypatch, registered
+):
+    monkeypatch.setattr(config, "MUSIC_LIBRARY_PATH", "")
+    guild = Guild()
+    bot = make_bot({guild: "controller"} if registered else {})
+    ctx = make_ctx(bot, guild)
+    with pytest.raises(CheckError) as exc:
+        run(Library(None).cog_check(ctx))
+    assert str(exc.value) == config.LIBRARY_NOT_CONFIGURED
 
 
 # --- which commands need a DJ ------------------------------------------

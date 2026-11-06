@@ -8,11 +8,11 @@
 
 **Joining command**: a command that may bring the bot into the invoker's voice channel, or move it there: when it runs, or later, when a pick in a view it opened acts in its name. Every other command never brings the bot into voice or moves it there.
 
-**Truncated playlist**: a Spotify playlist or album that loaded fewer tracks than Spotify reports it has, because the bot has no Spotify API credentials or the API failed partway through. The user is told how many of how many were queued, and why.
+**Truncated playlist**: a Spotify playlist or album that loaded fewer tracks than Spotify reports it has, because the bot has no Spotify API credentials, the API refused it and only its public page could be read, or the API failed partway through. The user is told how many of how many were queued, and why.
 
 **Guild whitelist** - The guilds the bot may stay in. When it is empty the whitelist is *disabled* and every guild is *admitted*; otherwise a guild is admitted only if it is listed. A change that leaves a present guild unadmitted makes the bot leave it.
 
-**Enqueue outcome**: what adding a request's songs to the queue did: started playing it, placed it at a numbered queue position, failed to start it, or added a batch of songs as one request (a playlist, possibly truncated, a saved playlist, or a library pick with files skipped). Every reply to a play request is drawn from it.
+**Enqueue outcome**: what adding a request's songs to the queue did: started playing it, placed it at a numbered queue position, failed to start it, added a batch of songs as one request (a playlist, possibly truncated, a saved playlist, or a library pick with files skipped), or refused it because the bot had left voice before the songs arrived. Every reply to a play request is drawn from it.
 
 **Playback** - one guild's start/advance/stop state machine over its voice connection: which track is starting or playing, which comes next, and when the playlist backup is written. Distinct from a guild session (the guild's settings, controller and player panel, `GuildSessions`). Its states are idle, starting (a track is claimed but its preload has not finished) and active (playing or paused).
 
