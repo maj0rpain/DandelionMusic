@@ -183,7 +183,7 @@ class TestFrameText:
             ("Albums", "4"),
             ("Songs", "4"),
         )
-        assert f.queue_label is None
+        assert f.queue is None
         assert f.entries == ["Aphex Twin", "Radiohead"]
         assert f.show_next and not f.show_prev
 
@@ -191,7 +191,10 @@ class TestFrameText:
         f = at_artist().frame()
         assert f.title == "\U0001f464 Radiohead"
         assert f.footer == "Artists › \U0001f464 Radiohead"
-        assert f.queue_label == "Queue this Artist"
+        assert f.queue == (
+            "Queue this Artist",
+            "browse: entire discography of Radiohead",
+        )
         assert f.kind == "album"
         assert dict(f.fields)["Albums"] == "2"
         assert f.description == "*Rock*"
@@ -200,7 +203,10 @@ class TestFrameText:
         f = at_album().frame()
         assert f.title == "\U0001f4bf OK Computer"
         assert f.footer == ("\U0001f464 Radiohead › \U0001f4bf OK Computer")
-        assert f.queue_label == "Queue this Album"
+        assert f.queue == (
+            "Queue this Album",
+            "browse: entire album Radiohead - OK Computer",
+        )
         assert f.kind == "song"
         assert f.labels == ["Airbag"]
         assert dict(f.fields)["Year"] == "1997"
