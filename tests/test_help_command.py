@@ -69,7 +69,7 @@ def refusing_context(bot):
 
 def help_for(bot, ctx):
     "The bot's help command as it runs: a copy with the context set"
-    help_command = bot._default_help._original.copy()
+    help_command = bot.help_command.copy()
     help_command.context = ctx
     return help_command
 
