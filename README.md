@@ -27,7 +27,9 @@ A Discord music bot written in Python with support for Youtube, SoundCloud, Spot
 
 Obtained keys must be entered into the ```.env``` file as environment variables
 
-#### Requirements (skip this if you've decided to use pre-built exe)
+#### Requirements
+
+Skip Python and uv if you've decided to use the pre-built exe. You still need ffmpeg installed and on PATH.
 
 * Installation of Python 3.13+
 * Installation of [uv](https://docs.astral.sh/uv/getting-started/installation/)
@@ -38,9 +40,7 @@ uv sync
 ```
 
 ##### Windows
-Download `ffmpeg` and put it into a folder in PATH.
-
-If ffmpeg is not found, the script will try to download it automatically.
+Download `ffmpeg` from the [official download page](https://ffmpeg.org/download.html) and put it into a folder in PATH. The bot does not download ffmpeg itself; if it is not found on PATH, startup fails with "ffmpeg was not found".
 ##### Other platforms
 Install `ffmpeg` and `libopus` packages.
 
