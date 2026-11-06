@@ -83,9 +83,7 @@ def test_failed_whitelist_load_fails_closed(monkeypatch, capsys):
     assert out.ready and out.started
 
 
-def test_failed_settings_load_still_registers_every_guild(
-    monkeypatch, capsys
-):
+def test_failed_settings_load_still_registers_every_guild(monkeypatch, capsys):
     out = drive(monkeypatch, three(), fail_settings=True)
     err = capsys.readouterr().err
     assert out.registered == [1, 2, 3]
