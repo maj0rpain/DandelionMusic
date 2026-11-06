@@ -106,8 +106,11 @@ def test_save_with_an_existing_name_replies_already_exists(monkeypatch):
     [
         (Music._playlist_load, "get", ("p",)),
         (Music._playlist_show, "get", ("p",)),
+        (Music._playlist_remove_song, "remove_song", ("p", 1)),
+        (Music._playlist_move_song, "move_song", ("p", 1, 2)),
+        (Music._playlist_add_song, "add_songs", ("p", "t")),
     ],
-    ids=["load", "show"],
+    ids=["load", "show", "remove_song", "move_song", "add_song"],
 )
 def test_playlist_commands_on_an_unreadable_playlist_reply_corrupt(
     monkeypatch, command, function, args
