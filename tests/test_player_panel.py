@@ -53,11 +53,27 @@ class PanelMessage:
         self.channel = channel or PanelChannel()
         self.edits = []
         self.errors = list(errors)
+        self.store = None
+        self.shown = None
+        self.strips_saw_finished = []
+
+    def show(self, view):
+        """A send carrying `view`, registering it as discord.py does."""
+        self.shown = view
+        if view is not None and self.store is not None:
+            self.store.add_view(view, self.id)
 
     async def edit(self, *, view):
         if self.errors:
             raise self.errors.pop(0)
         self.edits.append(view)
+        if self.store is not None:
+            self.store._synced_message_views.pop(self.id, None)
+        if view is None:
+            self.strips_saw_finished.append(
+                self.shown is not None and self.shown.is_finished()
+            )
+        self.show(view)
 
 
 class PanelController:
@@ -82,6 +98,7 @@ class Rig:
 
     def attach(self, message):
         async def send(view):
+            message.show(view)
             return message
 
         return run(self.panel.attach(send))
@@ -455,6 +472,7 @@ def attach_during(rig, message, target, attr, new_snapshot=None):
 
     async def replaced(*args, **kwargs):
         async def send(view):
+            message.show(view)
             return message
 
         if not once:
@@ -734,3 +752,224 @@ def test_every_other_clicks_step_edits_the_message_once(custom_id):
     assert ctx.sent == []
     assert len(message.edits) == 1
     assert buttons(message.edits[0])["volume_down"].disabled
+
+
+# -- the drawn view's life ---------------------------------------------
+
+
+def test_playback_ended_stops_the_view_before_the_strip(attached):
+    rig, message = attached
+    view = message.shown
+
+    run(rig.panel.playback_ended())
+
+    assert view.is_finished()
+    assert message.strips_saw_finished == [True]
+
+
+def test_attach_stops_the_replaced_view_before_the_strip(attached):
+    rig, old = attached
+    view = old.shown
+
+    rig.attach(PanelMessage())
+
+    assert view.is_finished()
+    assert old.strips_saw_finished == [True]
+
+
+def test_attach_stops_the_replaced_view_when_its_strip_fails(attached):
+    rig, old = attached
+    view = old.shown
+    old.errors = [EXPIRED]
+
+    rig.attach(PanelMessage())
+
+    assert view.is_finished()
+
+
+def test_an_inactive_refresh_stops_the_view_before_the_strip(attached):
+    rig, message = attached
+    view = message.shown
+    rig.controller.snapshot = PanelSnapshot.inactive()
+
+    rig.refresh()
+
+    assert view.is_finished()
+    assert message.strips_saw_finished == [True]
+
+
+def test_a_refresh_keeps_the_new_view_live_and_leaves_the_old_one(attached):
+    rig, message = attached
+    old = message.shown
+    rig.controller.snapshot = snap(volume=0)
+
+    rig.refresh()
+    new = message.edits[0]
+
+    assert not new.is_finished() and not old.is_finished()
+    run(rig.panel.playback_ended())
+    assert new.is_finished()
+
+
+def test_a_failed_refresh_edit_leaves_the_old_view_live(attached, capsys):
+    rig, message = attached
+    old = message.shown
+    message.errors = [http_error()]
+    rig.controller.snapshot = snap(volume=0)
+
+    rig.refresh()
+
+    assert not old.is_finished()
+    run(rig.panel.playback_ended())
+    assert old.is_finished()
+
+
+def test_a_refresh_edit_finishing_after_a_take_down_stops_the_new_view(
+    attached,
+):
+    rig, message = attached
+    rig.controller.snapshot = snap(volume=0)
+
+    redrawn = []
+
+    async def edit_after_take_down(*, view):
+        await rig.panel.playback_ended()
+        if view is not None:
+            redrawn.append(view)
+
+    message.edit = edit_after_take_down
+
+    rig.refresh()
+
+    assert redrawn[0].is_finished()
+
+
+def test_recovery_forgetting_the_message_stops_the_view_on_not_found(expired):
+    rig, channel, stale = expired
+    view = stale.shown
+    channel.fetch_error = coded_error(discord.NotFound, 404, 10008)
+
+    rig.refresh()
+
+    assert view.is_finished()
+
+
+def test_recovery_stops_the_view_on_another_refetch_error(expired, capsys):
+    rig, channel, stale = expired
+    view = stale.shown
+    channel.fetch_error = RuntimeError("boom")
+
+    rig.refresh()
+
+    assert view.is_finished()
+
+
+def test_recovery_stops_the_view_when_the_refetched_edit_fails(
+    expired, capsys
+):
+    rig, channel, stale = expired
+    view = stale.shown
+    channel.fetch_result = PanelMessage(channel, errors=[RuntimeError("x")])
+
+    rig.refresh()
+
+    assert view.is_finished()
+
+
+def test_a_recovered_message_takes_down_with_the_new_view(expired):
+    rig, channel, stale = expired
+    fresh = PanelMessage(channel)
+    channel.fetch_result = fresh
+
+    rig.refresh()
+    new = fresh.edits[0]
+    assert not new.is_finished()
+    run(rig.panel.playback_ended())
+
+    assert new.is_finished()
+
+
+def test_a_recovery_on_a_message_no_longer_current_keeps_the_view_live(
+    expired,
+):
+    rig, channel, stale = expired
+    channel.fetch_error = coded_error(discord.NotFound, 404, 10008)
+    newer = PanelMessage()
+    attach_during(rig, newer, channel, "fetch_message")
+
+    rig.refresh()
+
+    assert not newer.shown.is_finished()
+
+
+def test_a_recovery_edit_finishing_after_a_take_down_stops_the_new_view(
+    expired,
+):
+    rig, channel, stale = expired
+    fresh = PanelMessage(channel)
+    channel.fetch_result = fresh
+
+    redrawn = []
+
+    async def edit_after_take_down(*, view):
+        await rig.panel.playback_ended()
+        if view is not None:
+            redrawn.append(view)
+
+    fresh.edit = edit_after_take_down
+
+    rig.refresh()
+
+    assert redrawn[0].is_finished()
+
+
+def test_a_take_down_after_a_raising_send_stops_nothing(attached):
+    rig, old = attached
+
+    async def send(view):
+        raise RuntimeError("no permission")
+
+    with pytest.raises(RuntimeError):
+        run(rig.panel.attach(send))
+
+    run(rig.panel.playback_ended())
+
+
+def test_a_take_down_after_an_attach_without_buttons_stops_nothing():
+    rig = Rig(PanelSnapshot.inactive())
+    message = PanelMessage()
+    rig.attach(message)
+
+    run(rig.panel.playback_ended())
+
+    assert message.edits == []
+
+
+@pytest.fixture
+def store():
+    return discord.ui.view.ViewStore(types.SimpleNamespace())
+
+
+def test_the_view_store_holds_at_most_the_current_view_across_attaches(store):
+    rig = Rig()
+    for _ in range(4):
+        message = PanelMessage()
+        message.store = store
+        rig.attach(message)
+        assert len(store.persistent_views) == 1
+
+    run(rig.panel.playback_ended())
+
+    assert store.persistent_views == []
+
+
+def test_the_view_store_holds_the_newest_view_across_refreshes(store):
+    rig = Rig()
+    message = PanelMessage()
+    message.store = store
+    rig.attach(message)
+
+    for volume in (0, 10, 20):
+        rig.controller.snapshot = snap(volume=volume)
+        rig.refresh()
+        assert store.persistent_views == [message.edits[-1]]
