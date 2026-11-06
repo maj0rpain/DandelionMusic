@@ -370,6 +370,8 @@ class Music(commands.Cog):
         result = await ctx.audiocontroller.restore()
         if result is RestoreResult.REFUSED_WHILE_ACTIVE:
             await ctx.send(config.RESTORE_WHILE_ACTIVE)
+        elif result is RestoreResult.BACKUP_UNREADABLE:
+            await ctx.send(config.RESTORE_BACKUP_UNREADABLE)
         elif result is RestoreResult.NOTHING_TO_RESTORE:
             await ctx.send(config.QUEUE_EMPTY)
         else:
