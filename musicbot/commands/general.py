@@ -50,7 +50,7 @@ async def _apply_setting(ctx, descriptor: SettingDescriptor, value):
     sett = get_settings(ctx)
     failure = f"`Error: Setting {descriptor.name} could not be updated.`"
     if value is None:
-        if not await sett.reset_setting(descriptor.name, ctx):
+        if not await sett.reset_setting(descriptor, ctx):
             await ctx.send(failure)
             return
         await ctx.send(
@@ -60,7 +60,7 @@ async def _apply_setting(ctx, descriptor: SettingDescriptor, value):
         )
         return
     try:
-        updated = await sett.update_setting(descriptor.name, value, ctx)
+        updated = await sett.update_setting(descriptor, value, ctx)
     except ConversionError as e:
         await ctx.send(f"`Error: {e}`")
         return

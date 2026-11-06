@@ -6,7 +6,6 @@ __pycache__
 /dist
 
 /config.json
-/config/config_comments.json
 /settings.db
 /data/*
 !/data/.gitkeep

@@ -18,6 +18,18 @@ from musicbot.utils import joining_command
 from helpers import run
 
 
+def admission_without_join(controller, on_enter=None):
+    """A fake admission needing no join: `enter()` returns `controller()`
+    (called each time), after calling `on_enter()` when given."""
+
+    async def enter():
+        if on_enter is not None:
+            on_enter()
+        return controller()
+
+    return types.SimpleNamespace(join_needed=False, enter=enter)
+
+
 class FakePanel(PlayerPanel):
     """A real player panel over no controller, recording `refresh`,
     `direct_to` and `attach`; `carries_buttons` is the real one.
@@ -181,6 +193,13 @@ class RecordingCtx:
         self.interaction = None
         self.bot = bot
         self.message = types.SimpleNamespace(attachments=[], reference=None)
+        self.audiocontroller = None
+        self.joined = []
+
+        self.admitted = admission_without_join(
+            lambda: self.audiocontroller,
+            lambda: self.joined.append("enter"),
+        )
 
     async def defer(self):
         self.deferred = True

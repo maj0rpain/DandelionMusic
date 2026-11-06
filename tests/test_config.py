@@ -294,7 +294,8 @@ def test_default_library_dir_is_tracked_and_kept_out_of_git_and_image():
 def test_env_sample_documents_compose_only_library_host_path():
     from config.config import parse_env_file
 
-    text, keys = parse_env_file(str(REPO_ROOT / ".env.sample"))
+    keys = parse_env_file(str(REPO_ROOT / ".env.sample"))
+    text = (REPO_ROOT / ".env.sample").read_text("utf-8")
     assert "MUSIC_LIBRARY_HOST_PATH" in text
     assert "MUSIC_LIBRARY_HOST_PATH" not in keys
 

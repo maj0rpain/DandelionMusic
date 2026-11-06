@@ -19,7 +19,6 @@ from musicbot import library, linkutils, loader
 from musicbot.settings import (
     GuildSettings,
     run_migrations,
-    extract_legacy_settings,
 )
 from musicbot import guild_whitelist
 from musicbot.player_panel import PlayerPanel
@@ -118,7 +117,6 @@ class MusicBot(commands.Bot):
 
         async with self.db_engine.connect() as connection:
             await connection.run_sync(run_migrations)
-        await extract_legacy_settings(self)
         await guild_whitelist.import_env_whitelist(self.DbSession)
 
         loader.init()
@@ -293,9 +291,6 @@ class MusicBot(commands.Bot):
         await ctx.send(error)
         print_exception(error)
 
-    async def on_hybrid_command_error(self, ctx, error):
-        await self.on_command_error(ctx, error)
-
     async def on_voice_state_update(self, member, before, after):
         guild = member.guild
         # A raw gateway event, unlike a prefix command, is not gated
@@ -400,8 +395,8 @@ class Context(commands.Context):
 
     async def defer(self, *, ephemeral: bool = False) -> None:
         """Context.defer, but a second call does nothing: a command
-        body may defer an interaction that Music.cog_before_invoke
-        already deferred before joining voice."""
+        body may defer an interaction that Music._enter already
+        deferred before joining voice."""
         if self.interaction and not self.interaction.response.is_done():
             await self.interaction.response.defer(ephemeral=ephemeral)
 
@@ -431,9 +426,6 @@ class Context(commands.Context):
                 *args, original_response=original_response, **kwargs
             )
         return await fallback(*args, **kwargs)
-
-    async def response_send_message(self, *args, **kwargs):
-        return await self._send_routed(self.send, *args, **kwargs)
 
     async def send(self, *args, **kwargs):
         kwargs.pop("reference", None)  # not supported

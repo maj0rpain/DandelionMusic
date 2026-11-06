@@ -1,11 +1,8 @@
-import ast
 import inspect
 import os
 import sys
 import warnings
-from typing import Optional
 
-import jsonc
 from packaging.requirements import Requirement
 from dotenv import find_dotenv, load_dotenv
 
@@ -30,15 +27,15 @@ ENV_ALIASES = {
 }
 
 
-def parse_env_file(path: str) -> tuple:
-    """Reads an env-style file into (raw text, {key: raw value}).
+def parse_env_file(path: str) -> dict:
+    """Reads an env-style file into {key: raw value}.
 
     One parser for .env and .env.sample alike - they have the same
     shape, and the three hand-rolled copies of this that used to exist
     had already drifted apart in how they treated blank and comment
     lines."""
     if not os.path.isfile(path):
-        return "", {}
+        return {}
     with open(path, "r", encoding="utf-8") as f:
         content = f.read()
     values = {}
@@ -49,7 +46,7 @@ def parse_env_file(path: str) -> tuple:
         if "=" in line:
             key, value = line.split("=", 1)
             values[key] = value
-    return content, values
+    return values
 
 
 class Config:
@@ -236,13 +233,8 @@ class Config:
         # that aren't in Config class
         self.unknown_vars = {}
 
-        # Ensure SUPPORTED_EXTENSIONS is a tuple
-        current_cfg["SUPPORTED_EXTENSIONS"] = tuple(
-            current_cfg["SUPPORTED_EXTENSIONS"]
-        )
-
         # Read .env directly to check for unknown variables
-        for key, value in parse_env_file(self._env_path)[1].items():
+        for key, value in parse_env_file(self._env_path).items():
             if (
                 key not in current_cfg
                 and key not in ENV_ALIASES
@@ -305,37 +297,3 @@ class Config:
             for k, v in inspect.getmembers(cls)
             if not k.startswith("__") and not inspect.isroutine(v)
         }
-
-    @classmethod
-    def get_comments(cls) -> Optional[dict]:
-        try:
-            src = inspect.getsource(cls)
-        except OSError:
-            fallback = os.path.join(
-                getattr(sys, "_MEIPASS", ""), "config_comments.json"
-            )
-            if os.path.isfile(fallback):
-                with open(fallback) as f:
-                    return jsonc.load(f)
-            return None
-        result = {}
-        body = ast.parse(src).body[0].body
-        src = src.splitlines()
-        for node in body:
-            if isinstance(node, ast.Assign):
-                target = node.targets[0]
-            elif isinstance(node, ast.AnnAssign):
-                target = node.target
-            else:
-                target = None
-            if target is not None:
-                comment = ""
-                for i in range(node.lineno - 2, -1, -1):
-                    line = src[i].strip()
-                    if line and not line.startswith("#"):
-                        break
-                    comment = line[1:].strip() + "\n" + comment
-                # Skip internal variables
-                if not target.id.startswith("_"):
-                    result[target.id] = comment
-        return result
