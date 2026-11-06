@@ -9,6 +9,7 @@ class TruncationReason(Enum):
     value is the key of the reason's message in the language file."""
 
     NO_API = "SPOTIFY_TRUNCATED_NO_API"
+    API_UNAVAILABLE = "SPOTIFY_TRUNCATED_API_UNAVAILABLE"
     API_ERROR = "SPOTIFY_TRUNCATED_API_ERROR"
 
     @property
