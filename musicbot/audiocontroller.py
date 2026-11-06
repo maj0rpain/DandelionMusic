@@ -1,3 +1,4 @@
+import os
 import sys
 import asyncio
 from itertools import islice
@@ -43,6 +44,7 @@ class RestoreResult(Enum):
     RESTORED = auto()
     NOTHING_TO_RESTORE = auto()
     REFUSED_WHILE_ACTIVE = auto()
+    BACKUP_UNREADABLE = auto()
 
 
 class AudioController(object):
@@ -65,6 +67,7 @@ class AudioController(object):
         self.pickle_file = Path("backup") / f"playlist_{guild.id}.pickle"
         self.pickle_file.parent.mkdir(parents=True, exist_ok=True)
         self.guild = guild
+        self._log_label = f"{guild.name!r} ({guild.id})"
 
         sett = bot.sessions.settings(guild)
         self._volume: int = sett.default_volume
@@ -89,7 +92,7 @@ class AudioController(object):
             humans_present=self._humans_present,
             on_play_failed=lambda: self.udisconnect("playback error"),
             get_loop=lambda: self.bot.loop,
-            log_label=f"{guild.name!r} ({guild.id})",
+            log_label=self._log_label,
         )
 
         # according to Python documentation, we need
@@ -118,8 +121,27 @@ class AudioController(object):
             print_exc(file=sys.stderr)
 
     def _write_backup(self):
-        with open(self.pickle_file, "wb") as f:
-            pickle.dump(self.playlist, f)
+        """Best-effort, atomic backup write; never raises. The previous
+        backup survives any failure."""
+        tmp = self.pickle_file.with_name(self.pickle_file.name + ".tmp")
+        try:
+            with open(tmp, "wb") as f:
+                pickle.dump(self.playlist, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.pickle_file)
+        except Exception as e:
+            print(
+                f"Playlist backup write failed in guild "
+                f"{self._log_label}: {e!r}",
+                file=sys.stderr,
+            )
+            if not isinstance(e, OSError):
+                print_exc(file=sys.stderr)
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def _humans_present(self) -> bool:
         return not all(m.bot for m in self.guild.voice_client.channel.members)
@@ -377,10 +399,19 @@ class AudioController(object):
         the backup or the queue: starting the head then would make
         discord.py refuse play() and the controller disconnect (#24).
         Reports NOTHING_TO_RESTORE, playing nothing, when there is no
-        queue to restore."""
+        queue to restore, and BACKUP_UNREADABLE, changing nothing, when
+        the backup exists but cannot be loaded."""
         if not self.is_idle():
             return RestoreResult.REFUSED_WHILE_ACTIVE
-        self.load_pickle_playlist()
+        try:
+            self.load_pickle_playlist()
+        except Exception as e:
+            print(
+                f"Playlist backup unreadable in guild "
+                f"{self._log_label}: {e!r}",
+                file=sys.stderr,
+            )
+            return RestoreResult.BACKUP_UNREADABLE
         if not self.playlist:
             return RestoreResult.NOTHING_TO_RESTORE
         await self.play_song(self.playlist[0])

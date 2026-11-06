@@ -39,6 +39,7 @@
   "SONGINFO_PLAYLIST_QUEUED": "Queued playlist :page_with_curl:",
   "SONGINFO_UNKNOWN": "Unknown",
   "QUEUE_EMPTY": "Playlist is empty :x:",
+  "RESTORE_BACKUP_UNREADABLE": "The playlist backup could not be read - nothing was restored :x:",
   "RESTORE_WHILE_ACTIVE": "Something is already playing - stop it before restoring :x:",
   "QUEUE_TITLE": ":scroll: Queue [{tracks_number}]",
 

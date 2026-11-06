@@ -16,7 +16,7 @@ import pytest
 
 from musicbot import playlists
 from musicbot.library import LocalTrack
-from musicbot.playlist import LoopMode
+from musicbot.playlist import LoopMode, PauseState
 from musicbot.commands.music import Music
 from controller_helpers import (
     _backup,
@@ -2350,6 +2350,213 @@ def test_a_local_library_song_opens_only_file(controller, monkeypatch):
     assert source.original.kwargs["before_options"] == (
         "-protocol_whitelist file"
     )
+
+
+# -- a backup write that fails, and a backup that cannot be read -----------
+
+
+def _tmp_files(tmp_path):
+    return sorted(p.name for p in (tmp_path / "backup").glob("*.tmp"))
+
+
+def _fail_write(controller, monkeypatch, target, name, error):
+    ac = sys.modules[type(controller).__module__]
+
+    def failing(*args, **kwargs):
+        raise error
+
+    monkeypatch.setattr(getattr(ac, target), name, failing)
+
+
+def _fail_replace(controller, monkeypatch, error=None):
+    _fail_write(
+        controller, monkeypatch, "os", "replace", error or OSError("disk full")
+    )
+
+
+def test_a_track_end_starts_the_next_song_when_the_backup_write_fails(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second", "third")
+    _fail_replace(controller, monkeypatch)
+
+    _run(controller, lambda: _end_first_track_on_audio_thread(controller))
+
+    assert _played(controller) == ["first", "second"]
+    assert _titles(controller) == ["second", "third"]
+    assert not controller.is_idle()
+
+
+def test_stop_empties_the_queue_when_the_backup_write_fails(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    _fail_replace(controller, monkeypatch)
+
+    async def scenario():
+        await controller.ensure_playing()
+        controller.stop()
+
+    _run(controller, scenario)
+
+    assert controller.guild.voice_client.stopped == 1
+    assert _titles(controller) == []
+
+
+def test_a_disconnect_goes_through_when_the_backup_write_fails(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    _fail_replace(controller, monkeypatch)
+
+    reported = []
+
+    async def scenario():
+        await controller.ensure_playing()
+        reported.append(await controller.udisconnect("d!disconnect"))
+
+    _run(controller, scenario)
+
+    assert reported == [True]
+    assert controller.guild.voice_client.disconnected is True
+    assert controller.guild.voice_client.stopped == 1
+    assert _titles(controller) == []
+
+
+def test_pause_and_resume_work_when_the_backup_write_fails(
+    controller, monkeypatch
+):
+    _queue(controller, "current")
+    _fail_replace(controller, monkeypatch)
+    results = []
+
+    async def scenario():
+        client = controller.guild.voice_client
+        client.playing = True
+        results.append(controller.pause())
+        results.append((client.is_paused(), client.is_playing()))
+        results.append(controller.pause())
+        results.append((client.is_paused(), client.is_playing()))
+
+    _run(controller, scenario)
+
+    assert results == [
+        PauseState.PAUSED,
+        (True, False),
+        PauseState.RESUMED,
+        (False, True),
+    ]
+
+
+def test_an_enqueue_works_when_the_backup_write_fails(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "current")
+    songs = _songs(controller, "a")
+    _fail_replace(controller, monkeypatch)
+
+    async def scenario():
+        await controller.enqueue(songs)
+
+    _run(controller, scenario)
+
+    assert _titles(controller) == ["current", "a"]
+
+
+def test_back_starts_the_previous_song_when_the_backup_write_fails(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    _fail_replace(controller, monkeypatch)
+    results = []
+
+    async def scenario(c):
+        c.skip()
+        await _settle()
+        results.append(c.prev_song())
+
+    _run_playing(controller, scenario)
+
+    assert results == [True]
+    assert _titles(controller)[0] == "first"
+    assert not controller.is_idle()
+
+
+def _fail_pickle(controller, monkeypatch, error=None):
+    ac = sys.modules[type(controller).__module__]
+
+    def failing(*args, **kwargs):
+        raise error or RuntimeError("cannot pickle")
+
+    monkeypatch.setattr(ac.pickle, "dump", failing)
+
+
+@pytest.mark.parametrize("fail", [_fail_replace, _fail_pickle])
+def test_a_failed_write_keeps_the_previous_backup_and_leaves_no_temp_file(
+    controller, monkeypatch, tmp_path, fail
+):
+    _queue(controller, "good")
+    _save_backup(controller)
+    before = _backup_path(controller, tmp_path).read_bytes()
+    _queue(controller, "newer")
+    fail(controller, monkeypatch)
+
+    _save_backup(controller)
+
+    assert _backup_path(controller, tmp_path).read_bytes() == before
+    assert _tmp_files(tmp_path) == []
+
+
+def test_an_os_error_write_failure_logs_the_guild_and_no_traceback(
+    controller, monkeypatch, capsys
+):
+    _queue(controller, "first")
+    _fail_replace(controller, monkeypatch)
+
+    _save_backup(controller)
+
+    err = capsys.readouterr().err
+    assert f"({controller.guild.id})" in err
+    assert "disk full" in err
+    assert "Traceback" not in err
+    assert len(err.strip().splitlines()) == 1
+
+
+def test_a_non_os_error_write_failure_logs_the_traceback(
+    controller, monkeypatch, capsys
+):
+    _queue(controller, "first")
+    _fail_replace(controller, monkeypatch, RuntimeError("cannot pickle"))
+
+    _save_backup(controller)
+
+    err = capsys.readouterr().err
+    assert f"({controller.guild.id})" in err
+    assert "Traceback" in err
+    assert "cannot pickle" in err
+
+
+@pytest.mark.parametrize("content", [b"", b"\x80\x04garbage", b"not pickle"])
+def test_restore_of_an_unreadable_backup_changes_nothing(
+    controller, tmp_path, capsys, content
+):
+    _queue(controller, "keep")
+    _backup_path(controller, tmp_path).write_bytes(content)
+
+    async def scenario():
+        return await controller.restore()
+
+    ac = sys.modules[type(controller).__module__]
+    assert _run(controller, scenario) is ac.RestoreResult.BACKUP_UNREADABLE
+    assert _titles(controller) == ["keep"]
+    assert controller.guild.voice_client.played == []
+    assert _backup_path(controller, tmp_path).read_bytes() == content
+    err = capsys.readouterr().err
+    assert f"({controller.guild.id})" in err
+    assert "Error(" in err
 
 
 def _failing_preloads(stub_loader, *titles):
