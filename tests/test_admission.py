@@ -32,10 +32,12 @@ NOT_CONNECTED = config.NOT_CONNECTED_MESSAGE
 NOT_DJ = config.NOT_A_DJ
 
 
-def run_request(ctx, kind):
+def run_request(ctx, kind, allow_disconnecting=False):
     async def go():
         admitted = await admission.check(
-            ctx, None if kind in admission.COMMAND_KINDS else kind
+            ctx,
+            None if kind in admission.COMMAND_KINDS else kind,
+            allow_disconnecting=allow_disconnecting,
         )
         return await admitted.enter()
 
@@ -324,6 +326,46 @@ def rows():
             NOT_IN_VC,
         ),
     ]
+    # a controller that is disconnecting refuses a joining request
+    gone = {"disconnecting": True}
+    for kind in JOINING:
+        out.append(
+            (
+                f"{kind.name.lower()}: disconnecting, refused, no join",
+                kind,
+                gone,
+                config.DISCONNECTING_MESSAGE,
+            )
+        )
+    for kind in (K.COMMAND, K.PLAYER_BUTTON, K.DJ_PLAYER_BUTTON):
+        out.append(
+            (
+                f"{kind.name.lower()}: disconnecting, admitted",
+                kind,
+                {**gone, "bot": HERE, "author": "a", "role": "admin"},
+                "admitted",
+            )
+        )
+    out += [
+        (
+            "joining_command: disconnecting, wrong channel first",
+            K.JOINING_COMMAND,
+            {**gone, "wrong_channel": True},
+            WRONG_CH,
+        ),
+        (
+            "joining_command: disconnecting, allowed, connects as today",
+            K.JOINING_COMMAND,
+            {**gone, "allow_disconnecting": True},
+            "connect",
+        ),
+        (
+            "joining_command: disconnecting, allowed, bots-only moves",
+            K.JOINING_COMMAND,
+            {**gone, "allow_disconnecting": True, "bot": BOTS_ONLY},
+            "move",
+        ),
+    ]
     return out
 
 
@@ -336,9 +378,11 @@ ROWS = rows()
     ids=[r[0] for r in ROWS],
 )
 def test_admission_table(kind, spec, outcome, no_sleep):
+    spec = dict(spec)
+    allow = spec.pop("allow_disconnecting", False)
     guild, ctx = situation(kind, **spec)
     if outcome in ("connect", "move", "admitted"):
-        controller = run_request(ctx, kind)
+        controller = run_request(ctx, kind, allow)
         assert controller is ctx.bot.sessions.controller(guild)
         expected = {
             "connect": [("connect", "b")],
@@ -348,7 +392,7 @@ def test_admission_table(kind, spec, outcome, no_sleep):
         assert guild.events == expected
     else:
         with pytest.raises(CheckError) as exc:
-            run_request(ctx, kind)
+            run_request(ctx, kind, allow)
         assert str(exc.value) == outcome
         assert guild.events == []
 
@@ -454,50 +498,3 @@ def test_command_level_checks_read_the_controller_off_the_context():
     ctx.controllers[guild].is_active = lambda: True
     run(cog.cog_check(ctx))
     assert run(active_only.predicate(ctx)) is True
-
-
-def disconnecting(ctx):
-    controller = ctx.controllers[ctx.guild]
-    controller.is_disconnecting = lambda: True
-
-
-@pytest.mark.parametrize("kind", JOINING, ids=lambda k: k.name)
-def test_a_joining_request_while_disconnecting_is_refused_and_never_joins(
-    kind,
-):
-    guild, ctx = situation(kind)
-    disconnecting(ctx)
-    with pytest.raises(CheckError) as exc:
-        run_request(ctx, kind)
-    assert str(exc.value) == config.DISCONNECTING_MESSAGE
-    assert guild.events == []
-
-
-@pytest.mark.parametrize(
-    "kind",
-    [K.COMMAND, K.PLAYER_BUTTON, K.DJ_PLAYER_BUTTON],
-    ids=lambda k: k.name,
-)
-def test_a_plain_request_or_button_while_disconnecting_is_admitted(kind):
-    guild, ctx = situation(kind, bot=HERE, author="a", role="admin")
-    disconnecting(ctx)
-    run_request(ctx, kind)
-    assert guild.events == []
-
-
-def test_a_wrong_channel_is_refused_before_the_disconnect_refusal():
-    _, ctx = situation(K.JOINING_COMMAND, wrong_channel=True)
-    disconnecting(ctx)
-    with pytest.raises(CheckError) as exc:
-        run_request(ctx, K.JOINING_COMMAND)
-    assert str(exc.value) == WRONG_CH
-
-
-def test_allow_disconnecting_admits_a_joining_command():
-    guild, ctx = situation(K.JOINING_COMMAND)
-    disconnecting(ctx)
-
-    async def go():
-        return await admission.check(ctx, allow_disconnecting=True)
-
-    run(go())

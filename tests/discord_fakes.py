@@ -276,6 +276,7 @@ def situation(
     dj_role=None,
     custom_id="queue",
     registered=True,
+    disconnecting=False,
 ):
     """Builds (guild, ctx) for one row.
 
@@ -298,7 +299,9 @@ def situation(
         user_must_be_in_vc=rule,
         dj_role=dj_role,
     )
-    controllers = {guild: fake_controller()} if registered else {}
+    controller = fake_controller()
+    controller.is_disconnecting = lambda: disconnecting
+    controllers = {guild: controller} if registered else {}
     bot_obj = make_bot(
         controllers,
         is_owner=role == "owner",
