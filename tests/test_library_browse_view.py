@@ -41,7 +41,7 @@ from discord_fakes import (
     http_error,
     make_bot,
 )
-from helpers import run
+from helpers import attribute_names, imported_names, run
 from library_fakes import external_stats, library_song
 
 INDEX = {
@@ -591,7 +591,7 @@ def test_select_click_during_enrichment_edit_is_accepted(monkeypatch):
 def test_queue_click_during_enrichment_edit_queues_the_level(monkeypatch):
     queued = []
 
-    async def queue_songs(ctx, interaction, triples, source):
+    async def queue_songs(interaction, triples, source):
         await interaction.response.defer()
         queued.extend(triples)
 
@@ -776,7 +776,7 @@ def test_component_from_an_earlier_scope_is_acknowledged_and_ignored(
 ):
     queued = []
 
-    async def queue_songs(ctx, interaction, triples, source):
+    async def queue_songs(interaction, triples, source):
         queued.append(triples)
 
     monkeypatch.setattr(library_commands, "queue_songs", queue_songs)
@@ -999,7 +999,7 @@ def test_browse_select_keeps_99_units_and_cuts_100_with_an_ellipsis():
 def test_clicking_a_cut_song_option_queues_that_track(monkeypatch):
     queued = []
 
-    async def queue_songs(ctx, interaction, triples, source):
+    async def queue_songs(interaction, triples, source):
         await interaction.response.defer()
         queued.extend(triples)
 
@@ -1141,6 +1141,9 @@ def voice_ctx_for(view, in_voice):
 
 
 class LibraryController:
+    def is_disconnecting(self):
+        return False
+
     def __init__(self, name):
         self.name = name
         self.queued = []
@@ -1161,6 +1164,7 @@ def test_a_library_pick_made_after_a_reset_queues_on_the_new_controller():
         new = view.ctx.controllers[view.ctx.guild] = LibraryController("new")
         await view.ctx.bot.sessions.reset(view.ctx.guild)
         click = ClickInteraction()
+        _click_context(click, view.ctx)
         assert await view.interaction_check(click)
         await view.queue(click, [("A", "B", "c.mp3")], "test")
         return old, new
@@ -1175,6 +1179,7 @@ def test_a_refused_library_pick_replies_in_its_placeholder():
         view = timeout_view(SimpleNamespace())
         guild = voice_ctx_for(view, in_voice=False)
         click = ClickInteraction()
+        _click_context(click, view.ctx)
         assert await view.interaction_check(click)
         await view.queue(click, [("A", "B", "c.mp3")], "test")
         return guild, click
@@ -1190,6 +1195,7 @@ def test_timeout_after_a_bulk_queue_click_edits_the_view_not_the_placeholder():
         view = timeout_view(SimpleNamespace())
         voice_ctx_for(view, in_voice=False)
         click = ClickInteraction()
+        _click_context(click, view.ctx)
         assert await view.interaction_check(click)
         await view.queue(click, [("A", "B", "c.mp3")], "test")
         # the click's original response is now the "Queueing..." message
@@ -1306,7 +1312,6 @@ def test_timeout_swallows_a_failed_followup_edit():
 
 
 def test_first_message_is_drawn_from_one_frame(monkeypatch):
-    monkeypatch.setattr(library_commands.config, "MUSIC_LIBRARY_PATH", "/x")
     monkeypatch.setattr(library_commands.library, "get_index", lambda: INDEX)
     sent = []
 
@@ -1349,6 +1354,18 @@ class _PickController:
         )
 
 
+def _click_context(interaction, ctx=None):
+    """Gives the interaction a client whose get_context answers the
+    click's own context."""
+    ctx = ctx or SimpleNamespace(author=None)
+
+    async def get_context(inter):
+        return ctx
+
+    interaction.client = SimpleNamespace(get_context=get_context)
+    return ctx
+
+
 def _pick_replies(monkeypatch, missing):
     from musicbot import admission, library
 
@@ -1368,9 +1385,9 @@ def _pick_replies(monkeypatch, missing):
             send=lambda content, ephemeral: _collect(replies, content)
         ),
     )
-    ctx = SimpleNamespace(author=None)
+    _click_context(interaction)
     triples = [("A", "B", "x.mp3"), ("A", "B", "y.mp3")]
-    run(library_commands.queue_songs(ctx, interaction, triples, "browse"))
+    run(library_commands.queue_songs(interaction, triples, "browse"))
     return replies
 
 
@@ -1399,12 +1416,38 @@ def _silent_pick(monkeypatch, interaction):
 
     monkeypatch.setattr(admission, "check", check)
     monkeypatch.setattr(library_commands, "render", lambda *a, **k: None)
-    ctx = SimpleNamespace(author=None)
+    _click_context(interaction)
     run(
         library_commands.queue_songs(
-            ctx, interaction, [("A", "B", "x.mp3")], "browse"
+            interaction, [("A", "B", "x.mp3")], "browse"
         )
     )
+
+
+def test_a_library_pick_is_admitted_on_the_clicks_own_context(monkeypatch):
+    from musicbot import admission
+
+    seen = []
+
+    async def check(ctx, kind):
+        seen.append(ctx)
+
+        async def enter():
+            return LibraryController("c")
+
+        return SimpleNamespace(enter=enter)
+
+    monkeypatch.setattr(admission, "check", check)
+    monkeypatch.setattr(library_commands, "render", lambda *a, **k: None)
+    click = ClickInteraction()
+    clicks_ctx = _click_context(click)
+    run(library_commands.queue_songs(click, [("A", "B", "x.mp3")], "browse"))
+    assert seen == [clicks_ctx]
+
+
+def test_the_library_command_module_does_not_know_song_uri():
+    assert "library.song_uri" not in attribute_names(library_commands)
+    assert "musicbot.library.song_uri" not in imported_names(library_commands)
 
 
 def test_a_library_pick_with_no_reply_deletes_its_placeholder(monkeypatch):
@@ -1463,7 +1506,7 @@ def test_open_returns_the_frame_the_items_were_built_from():
 def test_queue_level_click_queues_the_level_with_its_source(monkeypatch):
     queued = []
 
-    async def queue_songs(ctx, interaction, triples, source):
+    async def queue_songs(interaction, triples, source):
         await interaction.response.defer()
         queued.append((source, sorted(f for _, _, f in triples)))
 

@@ -142,6 +142,21 @@ class SimplePaginator(OwnedView):
         await self._turn(interaction, 1)
 
 
+async def admit_click(inter, kind, *, ctx=None):
+    """Admits a click as its request `kind`: builds the click's
+    context (unless the caller passes its own `ctx`), checks the
+    request, then `enter()`s it - joining voice for a pick - and
+    stores the controller on `ctx.audiocontroller`. Returns
+    `(ctx, controller)`. A refusal or a failed join is the CheckError
+    that `check`/`enter()` raise. It neither acknowledges the
+    interaction nor replies: both stay with the caller."""
+    if ctx is None:
+        ctx = await inter.client.get_context(inter)
+    admitted = await admission.check(ctx, kind)
+    ctx.audiocontroller = await admitted.enter()
+    return ctx, ctx.audiocontroller
+
+
 class MusicButton(discord.ui.Button):
     """A button running `callback` once admission admits the click as
     its request `kind`. A player button (the default kind) never
@@ -178,8 +193,7 @@ class MusicButton(discord.ui.Button):
         try:
             await inter.response.defer()
             try:
-                admitted = await admission.check(ctx, self._kind)
-                ctx.audiocontroller = await admitted.enter()
+                await admit_click(inter, self._kind, ctx=ctx)
             except CheckError as e:
                 self.on_refused()
                 await ctx.send(e, ephemeral=True)
