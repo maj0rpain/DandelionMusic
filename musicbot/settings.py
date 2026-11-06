@@ -26,6 +26,7 @@ from discord import (
 )
 import sqlalchemy
 from sqlalchemy import String, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from alembic.migration import MigrationContext
 from alembic.autogenerate import produce_migrations, render_python_code
@@ -279,34 +280,6 @@ class GuildSettings(Base):
     )
 
     @classmethod
-    async def load(
-        cls, bot: "MusicBot", guild: discord.Guild
-    ) -> "GuildSettings":
-        "Load object from database or create a new one and commit it"
-        guild_id = str(guild.id)
-        async with bot.DbSession() as session:
-            sett = (
-                await session.execute(
-                    select(GuildSettings).where(
-                        GuildSettings.guild_id == guild_id
-                    )
-                )
-            ).scalar_one_or_none()
-            if sett:
-                return sett
-            session.add(GuildSettings(guild_id=guild_id, **default_settings()))
-            # avoiding incomplete detached object
-            sett = (
-                await session.execute(
-                    select(GuildSettings).where(
-                        GuildSettings.guild_id == guild_id
-                    )
-                )
-            ).scalar_one()
-            await session.commit()
-            return sett
-
-    @classmethod
     async def load_many(
         cls, bot: "MusicBot", guilds: List[discord.Guild]
     ) -> Dict[discord.Guild, "GuildSettings"]:
@@ -314,8 +287,9 @@ class GuildSettings(Base):
         Creates new ones when not found
         Returns dict with guilds as keys and their settings as values"""
         ids = [str(g.id) for g in guilds]
-        async with bot.DbSession() as session:
-            settings = (
+
+        async def select_all(session):
+            return (
                 (
                     await session.execute(
                         select(GuildSettings).where(
@@ -326,26 +300,30 @@ class GuildSettings(Base):
                 .scalars()
                 .fetchall()
             )
-            missing = set(ids) - {sett.guild_id for sett in settings}
-            for new_id in missing:
-                session.add(
-                    GuildSettings(guild_id=new_id, **default_settings())
-                )
-            settings.extend(
-                (
-                    await session.execute(
-                        select(GuildSettings).where(
-                            GuildSettings.guild_id.in_(missing)
-                        )
+
+        async with bot.DbSession() as session:
+            found = {s.guild_id for s in await select_all(session)}
+            missing = [i for i in dict.fromkeys(ids) if i not in found]
+            for attempt in (1, 2):
+                if not missing:
+                    break
+                for new_id in missing:
+                    session.add(
+                        GuildSettings(guild_id=new_id, **default_settings())
                     )
-                )
-                .scalars()
-                .fetchall()
-            )
-            await session.commit()
-        # ensure the correct order
-        settings.sort(key=lambda x: ids.index(x.guild_id))
-        return {g: sett for g, sett in zip(guilds, settings)}
+                try:
+                    await session.commit()
+                    break
+                except IntegrityError:
+                    # Another loader created some of these rows between
+                    # our select and insert.
+                    await session.rollback()
+                    if attempt == 2:
+                        raise
+                    found = {s.guild_id for s in await select_all(session)}
+                    missing = [i for i in missing if i not in found]
+            by_id = {s.guild_id: s for s in await select_all(session)}
+        return {g: by_id[str(g.id)] for g in guilds}
 
     def format(self, ctx: "Context"):
         embed = discord.Embed(
