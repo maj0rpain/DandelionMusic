@@ -22,6 +22,7 @@ from musicbot.bot import MusicBot
 from musicbot.commands.music import SearchView, SongButton
 from discord_fakes import (
     ADMISSION_CHANNEL,
+    FakePanel,
     FakeInteraction,
     VoiceGuild,
     http_error,
@@ -430,3 +431,17 @@ def test_a_failing_followup_edit_still_queues_and_reports_no_error():
     cog, inter = run(go())
     assert cog.played == [URLS[0]]
     assert inter.ctx.sent == []
+
+
+def test_a_successful_pick_does_not_refresh_the_player_panel():
+    async def go():
+        view, cog = make_view(message=None)
+        inter = SearchInteraction(OWNER)
+        panel = FakePanel()
+        inter.ctx.bot.sessions.panel = lambda guild: panel
+        await click(view, 0, inter=inter)
+        return cog, panel
+
+    cog, panel = run(go())
+    assert cog.played == [URLS[0]]
+    assert panel.refreshes == 0

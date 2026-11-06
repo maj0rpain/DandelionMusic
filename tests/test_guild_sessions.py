@@ -456,6 +456,23 @@ def test_panels_iterates_every_registered_panel(sessions):
     assert list(sessions.panels()) == [sessions.panel(g) for g in guilds]
 
 
+def test_direct_panel_directs_the_registered_panel(sessions):
+    guild = FakeGuild(1)
+    run(sessions.get_or_create(guild))
+
+    sessions.direct_panel(guild, "chan")
+    sessions.direct_panel(guild, "other", replace=False)
+
+    assert sessions.panel(guild).directed == [
+        ("chan", True),
+        ("other", False),
+    ]
+
+
+def test_direct_panel_without_a_registered_panel_does_nothing(sessions):
+    sessions.direct_panel(FakeGuild(1), "chan")
+
+
 def test_discard_drops_the_panel(sessions):
     guild = FakeGuild(1)
 

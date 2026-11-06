@@ -32,33 +32,19 @@ from musicbot.commands.library import (
     QueueLevelButton,
 )
 from musicbot.outcome import EnqueueOutcome, OutcomeKind, render
-from musicbot.library import LibrarySong, SearchResult
+from musicbot.library import SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
 from config import config
 from discord_fakes import VoiceGuild, http_error, make_bot
 from helpers import run
-
-
-def make_song(title):
-    return LibrarySong(
-        filename=title + ".flac",
-        title=title,
-        duration=None,
-        year=None,
-        genre=None,
-        fmt="FLAC",
-        bitrate=None,
-        sample_rate=None,
-        bit_depth=None,
-    )
-
+from library_fakes import library_song
 
 INDEX = {
     "Radiohead": {
-        "OK Computer": [make_song("Airbag"), make_song("Lucky")],
-        "Kid A": [make_song("Zoo")],
+        "OK Computer": [library_song("Airbag"), library_song("Lucky")],
+        "Kid A": [library_song("Zoo")],
     },
-    "The Beatles": {"Abbey Road": [make_song("Come Together")]},
+    "The Beatles": {"Abbey Road": [library_song("Come Together")]},
 }
 
 COVER = Enrichment(
@@ -141,7 +127,7 @@ def make_view(index=INDEX):
     ctx = SimpleNamespace(
         author=SimpleNamespace(id=AUTHOR_ID), interaction=None
     )
-    return LibraryBrowseView(ctx, index)
+    return LibraryBrowseView.open(ctx, index)[0]
 
 
 class Clicks:
@@ -192,7 +178,7 @@ def pick(select, interaction, label):
 
 
 def level_of(view):
-    return (view.session.cursor.artist, view.session.cursor.album)
+    return view.session.scope()
 
 
 async def finish(*tasks):
@@ -204,7 +190,7 @@ def test_failed_render_keeps_previous_components_live(capsys):
         view = make_view()
         before = list(view.children)
         interaction = EditingInteraction(fail=True)
-        view.session.cursor.descend("Radiohead")
+        view.session.descend("Radiohead")
         result = await view.render(interaction)
         return view, before, result
 
@@ -265,7 +251,7 @@ def test_click_after_failed_page_turn_acts_on_the_shown_page(monkeypatch):
         clicks = Clicks(view)
         failing = clicks.interaction(fail=True)
         await finish(clicks.click(PageButton, failing))
-        undone_page = view.session.cursor.page
+        undone_page = view.session.position().page
         again = clicks.interaction()
         await finish(clicks.click(LibrarySelect, again, label="Artist 03"))
         return undone_page, view
@@ -379,8 +365,26 @@ def test_stat_fields_become_inline_embed_fields():
     assert all(f.inline for f in edit["embed"].fields)
 
 
+def test_queue_and_back_are_present_exactly_below_the_root():
+    def has(view):
+        kinds = {type(c) for c in view.children}
+        return QueueLevelButton in kinds, BackButton in kinds
+
+    view = make_view()
+    view.build_items(view.session.frame())
+    assert has(view) == (False, False)
+    view.session.descend("Radiohead")
+    view.build_items(view.session.frame())
+    assert has(view) == (True, True)
+    view.session.descend("OK Computer")
+    view.build_items(view.session.frame())
+    assert has(view) == (True, True)
+
+
 # thirty artists: two pages of the root's Select
-PAGED = {f"Artist {n:02}": {"Album": [make_song("Song")]} for n in range(30)}
+PAGED = {
+    f"Artist {n:02}": {"Album": [library_song("Song")]} for n in range(30)
+}
 
 
 def test_failed_descend_is_undone(monkeypatch):
@@ -395,7 +399,7 @@ def test_failed_descend_is_undone(monkeypatch):
     view, resolved = run(scenario())
 
     assert level_of(view) == (None, None)
-    assert view.session.cursor.page == 1
+    assert view.session.position().page == 1
     assert resolved == []
 
 
@@ -539,7 +543,7 @@ def _click_during_enrichment_edit(
         handler = click(clicks, clicking)
         await settle()
         moved_to = level_of(view)
-        page = view.session.cursor.page
+        page = view.session.position().page
         entering.release()
         await finish(entry, handler)
         return EditClick(
@@ -607,7 +611,7 @@ def test_queue_click_during_enrichment_edit_queues_the_level(monkeypatch):
 
 # one artist, thirty albums: two pages of the artist level's Select
 PAGED_ALBUMS = {
-    "Artist": {f"Album {n:02}": [make_song("Song")] for n in range(30)}
+    "Artist": {f"Album {n:02}": [library_song("Song")] for n in range(30)}
 }
 
 
@@ -621,7 +625,7 @@ def test_page_click_during_enrichment_edit_turns_the_page_once(monkeypatch):
 
     assert result.handler is not None
     assert result.page == 1
-    assert result.view.session.cursor.page == 1
+    assert result.view.session.position().page == 1
 
 
 def test_enrichment_resolving_after_moving_on_is_not_drawn(monkeypatch):
@@ -714,7 +718,7 @@ def test_second_click_during_page_turn_is_turned_away():
 
     assert handler is not None
     assert second.deferred == 1
-    assert view.session.cursor.page == 1
+    assert view.session.position().page == 1
 
 
 def test_select_from_previous_page_during_page_turn_opens_its_entry(
@@ -739,7 +743,7 @@ def test_select_from_previous_page_during_page_turn_opens_its_entry(
         await turning.in_flight.wait()
         turning.release()
         await finish(turn)
-        assert view.session.cursor.page == 1
+        assert view.session.position().page == 1
         picking = clicks.interaction()
         pick(previous, picking, "Artist 03")
         await previous.callback(picking)
@@ -782,11 +786,7 @@ def test_component_from_an_earlier_scope_is_acknowledged_and_ignored(
         await finish(
             clicks.click(LibrarySelect, clicks.interaction(), label="Album 00")
         )
-        where = (
-            view.session.cursor.artist,
-            view.session.cursor.album,
-            view.session.cursor.page,
-        )
+        where = view.session.position()
         picking = clicks.interaction()
         if kind is LibrarySelect:
             pick(kept, picking, "Album 01")
@@ -796,11 +796,7 @@ def test_component_from_an_earlier_scope_is_acknowledged_and_ignored(
     view, where, picking = run(scenario())
 
     assert picking.deferred == 1
-    assert (
-        view.session.cursor.artist,
-        view.session.cursor.album,
-        view.session.cursor.page,
-    ) == where
+    assert view.session.position() == where
     assert where[:2] == ("Artist", "Album 00")
     assert queued == []
 
@@ -810,14 +806,14 @@ def test_every_browse_component_is_built_on_the_stale_guard_base():
         views = []
         view = make_view()
         views.append(list(view.children))
-        view.session.cursor.descend("Radiohead")
+        view.session.descend("Radiohead")
         view.build_items(view.session.frame())
         views.append(list(view.children))
-        view.session.cursor.descend("Kid A")
+        view.session.descend("Kid A")
         view.build_items(view.session.frame())
         views.append(list(view.children))
         paged = make_view(PAGED_ALBUMS)
-        paged.session.cursor.descend("Artist")
+        paged.session.descend("Artist")
         paged.build_items(paged.session.frame())
         views.append(list(paged.children))
         return views
@@ -909,10 +905,10 @@ def test_failed_clamped_page_turn_is_undone():
     async def scenario():
         view = make_view(PAGED)
         await view.turn_page(EditingInteraction(), 1)
-        last = view.session.cursor.page
+        last = view.session.position().page
         failing = EditingInteraction(fail=True)
         await view.turn_page(failing, 5)
-        return last, view.session.cursor.page
+        return last, view.session.position().page
 
     last, page = run(scenario())
 
@@ -935,7 +931,7 @@ def test_failed_defer_leaves_cursor_unchanged(click, error, monkeypatch):
         if click == "back":
             await view.descend(EditingInteraction(), "Radiohead")
             resolved.clear()
-        before = (*level_of(view), view.session.cursor.page)
+        before = (*level_of(view), view.session.position().page)
         interaction = EditingInteraction(defer_error=error())
         if click == "descend":
             coro = view.descend(interaction, "Radiohead")
@@ -944,7 +940,7 @@ def test_failed_defer_leaves_cursor_unchanged(click, error, monkeypatch):
         else:
             coro = view.turn_page(interaction, 1)
         raised = await attempt(coro)
-        after = (*level_of(view), view.session.cursor.page)
+        after = (*level_of(view), view.session.position().page)
         return before, after, raised, resolved
 
     before, after, raised, resolved = run(scenario())
@@ -981,7 +977,7 @@ def select_labels(view, kind=LibrarySelect):
 
 
 def test_browse_select_cuts_a_non_bmp_artist_label_to_the_limit():
-    view = make_view({EMOJI60: {"Album": [make_song("S")]}})
+    view = make_view({EMOJI60: {"Album": [library_song("S")]}})
 
     (label,) = select_labels(view)
 
@@ -991,8 +987,8 @@ def test_browse_select_cuts_a_non_bmp_artist_label_to_the_limit():
 def test_browse_select_keeps_99_units_and_cuts_100_with_an_ellipsis():
     view = make_view(
         {
-            "a" * 99: {"Album": [make_song("S")]},
-            "b" * 100: {"Album": [make_song("S")]},
+            "a" * 99: {"Album": [library_song("S")]},
+            "b" * 100: {"Album": [library_song("S")]},
         }
     )
 
@@ -1007,7 +1003,9 @@ def test_clicking_a_cut_song_option_queues_that_track(monkeypatch):
         queued.extend(triples)
 
     monkeypatch.setattr(library_commands, "queue_songs", queue_songs)
-    index = {"Artist": {"Album": [make_song("Other"), make_song(EMOJI60)]}}
+    index = {
+        "Artist": {"Album": [library_song("Other"), library_song(EMOJI60)]}
+    }
 
     async def scenario():
         view = make_view(index)
@@ -1064,6 +1062,7 @@ class ClickInteraction:
         self.message = SimpleNamespace(id=message_id)
         self.followup = Followup(fail=fail)
         self.original_edits = []
+        self.deleted = 0
         self.sent = []
         self.deferred = 0
 
@@ -1081,6 +1080,9 @@ class ClickInteraction:
 
     async def edit_original_response(self, **kwargs):
         self.original_edits.append(kwargs)
+
+    async def delete_original_response(self):
+        self.deleted += 1
 
 
 def timeout_message(cls, fail=False):
@@ -1153,9 +1155,7 @@ class LibraryController:
 
     async def process_local_tracks(self, tracks, source, user=None):
         self.queued.append(tracks)
-        return EnqueueOutcome(
-            OutcomeKind.PLAYLIST, count=len(tracks), skipped=[]
-        )
+        return EnqueueOutcome(OutcomeKind.LIBRARY_PICK, count=len(tracks))
 
 
 def test_a_library_pick_made_after_a_reset_queues_on_the_new_controller():
@@ -1346,9 +1346,9 @@ class _PickController:
         self.missing = missing
 
     async def process_local_tracks(self, tracks, source, user=None):
-        skipped = [t for t in tracks if t in self.missing]
+        skipped = tuple(t.name for t in tracks if t.uri in self.missing)
         return EnqueueOutcome(
-            OutcomeKind.PLAYLIST,
+            OutcomeKind.LIBRARY_PICK,
             count=len(tracks) - len(skipped),
             skipped=skipped,
         )
@@ -1384,9 +1384,54 @@ async def _collect(replies, content):
 
 
 def test_a_library_pick_names_the_skipped_files_by_filename(monkeypatch):
-    expected = EnqueueOutcome(OutcomeKind.PLAYLIST, count=1, skipped=["y.mp3"])
+    expected = EnqueueOutcome(
+        OutcomeKind.LIBRARY_PICK, count=1, skipped=("y.mp3",)
+    )
 
     assert _pick_replies(monkeypatch, [("A", "B", "y.mp3")]) == [
+        render(expected, announce_songs=False).text
+    ]
+
+
+def _silent_pick(monkeypatch, interaction):
+    from musicbot import admission
+
+    async def check(ctx, kind):
+        async def enter():
+            return LibraryController("c")
+
+        return SimpleNamespace(enter=enter)
+
+    monkeypatch.setattr(admission, "check", check)
+    monkeypatch.setattr(library_commands, "render", lambda *a, **k: None)
+    ctx = SimpleNamespace(author=None)
+    run(
+        library_commands.queue_songs(
+            ctx, interaction, [("A", "B", "x.mp3")], "browse"
+        )
+    )
+
+
+def test_a_library_pick_with_no_reply_deletes_its_placeholder(monkeypatch):
+    click = ClickInteraction()
+    _silent_pick(monkeypatch, click)
+    assert (click.deleted, click.original_edits) == (1, [])
+
+
+def test_a_library_pick_with_no_reply_and_no_placeholder_sends_nothing(
+    monkeypatch,
+):
+    click = ClickInteraction()
+    run(click.response.defer())
+    _silent_pick(monkeypatch, click)
+    # the fake followup has no `send`, so any reply would raise
+    assert (click.deleted, click.original_edits) == (0, [])
+
+
+def test_a_library_pick_that_loads_everything_reports_the_count(monkeypatch):
+    expected = EnqueueOutcome(OutcomeKind.LIBRARY_PICK, count=2)
+
+    assert _pick_replies(monkeypatch, []) == [
         render(expected, announce_songs=False).text
     ]
 
@@ -1394,7 +1439,7 @@ def test_a_library_pick_names_the_skipped_files_by_filename(monkeypatch):
 def test_enrichment_is_resolved_on_the_cursors_index_not_the_librarys(
     monkeypatch,
 ):
-    other = {"Elsewhere": {"Album": [make_song("Song")]}}
+    other = {"Elsewhere": {"Album": [library_song("Song")]}}
     monkeypatch.setattr(library_commands.library, "get_index", lambda: other)
 
     async def scenario():
@@ -1407,3 +1452,56 @@ def test_enrichment_is_resolved_on_the_cursors_index_not_the_librarys(
     seen = run(scenario())
 
     assert len(seen) == 1 and seen[0] is INDEX
+
+
+def test_open_returns_the_frame_the_items_were_built_from():
+    ctx = SimpleNamespace(
+        author=SimpleNamespace(id=AUTHOR_ID), interaction=None
+    )
+
+    view, frame = LibraryBrowseView.open(ctx, INDEX)
+
+    assert frame == view.session.frame()
+    select = next(c for c in view.children if isinstance(c, LibrarySelect))
+    assert [o.label for o in select.options] == frame.labels
+    assert not hasattr(view, "first_frame")
+
+
+def test_queue_level_click_queues_the_level_with_its_source(monkeypatch):
+    queued = []
+
+    async def queue_songs(ctx, interaction, triples, source):
+        await interaction.response.defer()
+        queued.append((source, sorted(f for _, _, f in triples)))
+
+    monkeypatch.setattr(library_commands, "queue_songs", queue_songs)
+
+    async def scenario():
+        view = make_view()
+        stub_enrichment(monkeypatch)
+        clicks = Clicks(view)
+        await finish(
+            clicks.click(
+                LibrarySelect, clicks.interaction(), label="Radiohead"
+            )
+        )
+        await finish(clicks.click(QueueLevelButton, clicks.interaction()))
+        await finish(
+            clicks.click(
+                LibrarySelect, clicks.interaction(), label="OK Computer"
+            )
+        )
+        await finish(clicks.click(QueueLevelButton, clicks.interaction()))
+
+    run(scenario())
+
+    assert queued == [
+        (
+            "browse: entire discography of Radiohead",
+            ["Airbag.flac", "Lucky.flac", "Zoo.flac"],
+        ),
+        (
+            "browse: entire album Radiohead - OK Computer",
+            ["Airbag.flac", "Lucky.flac"],
+        ),
+    ]
