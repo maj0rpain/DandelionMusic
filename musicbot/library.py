@@ -435,6 +435,11 @@ class LocalTrack(NamedTuple):
     uri: str
     name: str
 
+    @classmethod
+    def of(cls, artist: str, album: str, filename: str) -> "LocalTrack":
+        """The track for an (artist, album, filename) triple."""
+        return cls(song_uri(artist, album, filename), filename)
+
 
 def library_path_from_uri(uri: str, root: PurePath) -> Optional[PurePath]:
     r"""`root / artist / album / filename` for a local-library URI, or
