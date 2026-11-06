@@ -288,9 +288,6 @@ class MusicBot(commands.Bot):
         await ctx.send(error)
         print_exception(error)
 
-    async def on_hybrid_command_error(self, ctx, error):
-        await self.on_command_error(ctx, error)
-
     async def on_voice_state_update(self, member, before, after):
         guild = member.guild
         # A raw gateway event, unlike a prefix command, is not gated
@@ -426,9 +423,6 @@ class Context(commands.Context):
                 *args, original_response=original_response, **kwargs
             )
         return await fallback(*args, **kwargs)
-
-    async def response_send_message(self, *args, **kwargs):
-        return await self._send_routed(self.send, *args, **kwargs)
 
     async def send(self, *args, **kwargs):
         kwargs.pop("reference", None)  # not supported
