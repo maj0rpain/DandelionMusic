@@ -26,3 +26,7 @@ backup
 # contents are not.
 /handoffs/*
 !/handoffs/.gitkeep
+
+# Real cookies files: only the placeholder is tracked.
+/config/cookies/*
+!/config/cookies/cookies.txt

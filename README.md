@@ -5,7 +5,7 @@
 A Discord music bot written in Python with support for Youtube, SoundCloud, Spotify, Bandcamp, Twitter, and custom files.
 
 ### Keep in mind:
-* The Wiki may have the answer you are looking for https://github.com/solaluset/DandelionMusic/wiki
+* Every configuration option is described by the comments in `.env.sample`.
 * Known problems are listed in Issues. If you are interested in this project feel free to submit an Issue.
 
 
@@ -49,25 +49,33 @@ Install `ffmpeg` and `libopus` packages.
 1. Download release if available, alternatively download repository zip
 2. Complete Prerequisites
 3. Start ```run.py``` in project root (or the exe)
-4. See configuration options in the .env file (more info at https://github.com/solaluset/DandelionMusic/wiki/Configuration)
+4. See configuration options in the .env file (each one is described by the comments in `.env.sample`)
 
 Button play plugin:
 * Set emoji with the setting command to enable this feature
 * Emote must be available for bot
 * Needs Manage Message permissions
 
+<a id="custom-cookies"></a>
 Custom Cookies:
-* Extract cookies.txt from you browser using your preferred method
-* Overwrite the existing cookies.txt in /config/cookies/
-* (Optional) Set a custom cookies.txt location by modifying COOKIE_PATH in config.py
+* Extract cookies.txt from your browser using your preferred method
+* Save it as a new file inside `config/cookies/`, for example `config/cookies/my-cookies.txt`. Do not overwrite the tracked placeholder `config/cookies/cookies.txt`; git ignores every other file in that directory, so your cookies can't be committed by accident
+* Set `COOKIE_PATH` in your `.env` file to that file, for example `COOKIE_PATH=config/cookies/my-cookies.txt` (`Config` is read-only, so it is not set in `config.py`)
 
-### Docker image
+### Docker
 
-You can find pre-built Docker image at https://hub.docker.com/repository/docker/solaluset/dandelion-music/
+Compose builds the image locally; there is no pre-built image to pull.
+
+1. Copy the sample environment file: `cp .env.sample .env`
+2. Set `BOT_TOKEN` in `.env`
+3. Set `MUSIC_LIBRARY_HOST_PATH` in `.env` to the folder with your music on the host. It defaults to `F:/Music`
+4. Build and start the bot: `docker compose up -d --build`
+
+For cookies, follow the custom cookies steps above; compose mounts `config/cookies/` read-only.
 
 The container runs as UID 1000 (user `app`). When upgrading an existing deployment, run `sudo chown -R 1000:1000 data/` once; without it the bot cannot write its database. Also either remove the `backup` volume or chown it the same way. If your host user is not UID 1000, you can instead set `user:` on the bot (`doybot`) service in the compose file and chown `data/` and the `backup` volume to that UID, accepting that the fallback `log.txt` and the yt-dlp/deno caches may then not be writable.
 
-See https://github.com/solaluset/DandelionMusic/wiki/Configuration for description of environment variables.
+Environment variables are described by the comments in `.env.sample`.
 
 ## Commands:
 
@@ -77,7 +85,7 @@ After the bot has joined your server, use ```d!help``` to display help and comma
 
 
 ```
-d!p [link/video title/key words/playlist-link/soundcloud link/spotify link/bandcamp link/twitter link]
+d!p / d!yt [link/video title/key words/playlist-link/soundcloud link/spotify link/bandcamp link/twitter link]
 ```
 
 * Plays the audio of supported website
@@ -86,16 +94,34 @@ d!p [link/video title/key words/playlist-link/soundcloud link/spotify link/bandc
     - A link to a YouTube playlist
 * If a song is playing, it will be added to queue
 
+```
+d!play / d!p / d!yt
+```
+
+* Same as above: `d!p` and `d!yt` are aliases of `d!play`.
+
+```
+d!playnext / d!pn [link/video title/key words]
+```
+
+* Like `d!play`, but puts the song at the front of the queue so it plays next.
+
+```
+d!search / d!sc [key words]
+```
+
+* Searches YouTube and lists the results to pick from.
+
 #### Playlist Commands
 
 ```
-d!skip / d!s
+d!skip / d!s / d!next
 ```
 
 * Skips the current song and plays next in queue.
 
 ```
-d!q
+d!queue / d!q
 ```
 
 * Show the list of songs in queue
@@ -118,28 +144,50 @@ d!mv / d!move
 
 * Move song position in queue
 
+```
+d!clear / d!cl
+```
+
+* Clears the queue.
+
+```
+d!restore
+```
+
+* Restores the last playlist after an unexpected disconnect.
+
+#### Saved Playlists
+
+```
+d!playlist / d!pl
+```
+
+* Saves, loads and edits named playlists. Subcommands:
+    - `d!playlist save (name)` / `d!pl s (name)`: saves the current queue
+    - `d!playlist load (name)` / `d!pl l (name)`: loads and plays a playlist
+    - `d!playlist remove (name)` / `d!pl r (name)`: deletes a playlist
+    - `d!playlist list` / `d!pl li`: lists the saved playlists
+    - `d!playlist show (name)` / `d!pl sw (name)`: shows the songs of a playlist
+    - `d!playlist add_song (playlist) (song)` / `d!pl as (name) (song)`: adds a song to a playlist
+    - `d!playlist remove_song (name) (position)` / `d!pl rs (name) (position)`: removes a song from a playlist
+    - `d!playlist move_song (name) (from) (to)` / `d!pl ms (name) (from) (to)`: moves a song within a playlist
+
 #### Audio Commands
 
 ```
-d!pause
+d!pause / d!resume
 ```
 
-* Pauses the current song.
+* Toggles pause: pauses the current song, or resumes it when paused. `d!resume` is an alias of `d!pause`, so it also pauses a playing song.
 
 ```
-d!resume
-```
-
-* Resumes the paused song.
-
-```
-d!prev
+d!prev / d!back
 ```
 
 * Goes back one song and plays the last song again.
 
 ```
-d!np
+d!songinfo / d!np
 ```
 
 * Shows more details about the current song.
@@ -148,7 +196,7 @@ d!np
 d!volume / d!vol
 ```
 
-* Adjust the volume 1-100%
+* Adjust the volume 0-100%
 * Pass no arguments for current volume
 
 ```
@@ -202,18 +250,26 @@ d!settings / d!setting / d!set
 ```
 * No Arguments: Lists server settings
 * Arguments: (setting) (value)
-* Omit the value to reset a setting to its default (Not Set for channels, the DJ role and the button emote)
 * Example: d!setting start_voice_channel ChannelName
+* One subcommand per setting:
+    - `d!setting command_channel (value)`
+    - `d!setting start_voice_channel (value)`
+    - `d!setting dj_role (value)`
+    - `d!setting user_must_be_in_vc (value)`
+    - `d!setting button_emote (value)`
+    - `d!setting default_volume (value)`
+    - `d!setting vc_timeout (value)`
+    - `d!setting announce_songs (value)`
 * Administrators only
 
 ```
-d!c
+d!connect / d!c / d!cc
 ```
 
 * Connects the bot to the user's voice channel
 
 ```
-d!dc
+d!disconnect / d!dc
 ```
 
 * Disconnects the bot from the current voice channel
@@ -227,7 +283,7 @@ d!history
 ### Utility
 
 ```
-d!reset / d!rs
+d!reset / d!rs / d!restart
 ```
 
 * Resets the player. May recover the bot after unexpected problems.
@@ -248,8 +304,35 @@ d!addbot
 d!shutdown
 ```
 
-* Stops the bot completely. May be useful after you move the bot to background. Works only for bot owner.
+* Owner only. Stops the bot completely. May be useful after you move the bot to background.
 * Note that unlike other commands, this one doesn't have a slash variant. This allows it to be hidden.
+
+```
+d!update
+```
+
+* Owner only. Runs `git pull` in the bot's folder and reports its output.
+
+```
+d!execute / d!exec (code)
+```
+
+* Owner only. **Warning:** runs arbitrary Python in the bot process, with full access to the host. Only bot owners can use it; keep `EXTRA_OWNERS` (see `.env.sample`) short.
+
+```
+d!guild_whitelist / d!gw
+```
+
+* Owner only. Manages the guilds the bot may stay in; use it instead of the `GUILD_WHITELIST` environment variable.
+    - `d!guild_whitelist show` / `d!gw show`: lists the whitelisted guilds
+    - `d!guild_whitelist add (guild id)` / `d!gw add (guild id)`: adds a guild
+    - `d!guild_whitelist remove (guild id)` / `d!gw remove (guild id)`: removes a guild (the bot leaves it)
+
+```
+d!help [command]
+```
+
+* Displays help and command information.
 
 ## Development
 
