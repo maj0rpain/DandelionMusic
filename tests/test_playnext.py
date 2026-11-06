@@ -201,3 +201,13 @@ def test_songinfo_replies_queue_empty_when_active_with_an_empty_queue(
     run(Music._songinfo.callback(Music(None), ctx))
 
     assert sent == [config.QUEUE_EMPTY]
+
+
+def test_songinfo_replies_with_the_current_songs_info_embed(controller):
+    controller.guild.voice_client.playing = True
+    _queue(controller, "current")
+    ctx, sent = command_ctx(controller)
+
+    run(Music._songinfo.callback(Music(None), ctx))
+
+    assert sent == [config.SONGINFO_SONGINFO]
