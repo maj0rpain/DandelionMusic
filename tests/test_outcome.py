@@ -1,6 +1,4 @@
-import ast
 import types
-from pathlib import Path
 
 import pytest
 
@@ -11,7 +9,7 @@ from musicbot.outcome import EnqueueOutcome, OutcomeKind, render, send_outcome
 from musicbot.song import Song
 from musicbot.truncation import Truncation, TruncationReason
 
-from helpers import plain_song, run
+from helpers import imported_names, plain_song, run
 
 
 def test_started_with_announcements_on_says_nothing():
@@ -114,13 +112,6 @@ def test_send_outcome_with_missing_settings_is_treated_as_announcements_off():
 
 
 def test_outcome_module_imports_neither_utils_nor_the_controller():
-    names = set()
-    tree = ast.parse(Path(outcome_module.__file__).read_text())
-    for node in ast.walk(tree):
-        if isinstance(node, ast.Import):
-            names.update(a.name for a in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            names.add(node.module)
-            names.update(f"{node.module}.{a.name}" for a in node.names)
+    names = imported_names(outcome_module)
     assert "musicbot.utils" not in names
     assert "musicbot.audiocontroller" not in names

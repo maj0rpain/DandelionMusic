@@ -3,13 +3,10 @@
 Synchronous throughout, like the cursor's tests.
 """
 
-import ast
-from pathlib import Path
-
 from musicbot import library, library_browse, library_session
 from musicbot.library_metadata import ArtInfo, Enrichment
 from musicbot.library_session import BrowseSession, stat_fields
-from helpers import imported_names
+from helpers import imported_names, imported_roots, type_checking_imports
 from library_fakes import external_stats, library_song
 
 INDEX = {
@@ -281,19 +278,13 @@ class TestTheSeam:
             "musicbot.library_browse",
             "musicbot.library_display",
         }
-        assert {n.split(".")[0] for n in names} == {"typing", "musicbot"}
+        assert imported_roots(library_session, skip_type_checking=True) == {
+            "typing",
+            "musicbot",
+        }
         # and the one allowed exception really is TYPE_CHECKING-only,
         # and is all that block holds
-        tree = ast.parse(
-            Path(library_session.__file__).read_text(encoding="utf-8")
-        )
-        blocks = [
-            n
-            for n in tree.body
-            if isinstance(n, ast.If)
-            and getattr(n.test, "id", None) == "TYPE_CHECKING"
-        ]
-        assert [ast.unparse(s) for b in blocks for s in b.body] == [
+        assert type_checking_imports(library_session) == [
             "from musicbot import library_metadata"
         ]
 

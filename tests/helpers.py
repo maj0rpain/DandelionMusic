@@ -1,5 +1,6 @@
 """The suite's generic shared helpers: the bounded `run(coro)`,
-`FakeClock` and `imported_names(module)`."""
+`FakeClock` and the import-reading helpers `imported_names`,
+`imported_roots`, `type_checking_imports` and `attribute_names`."""
 
 import ast
 import asyncio
@@ -38,6 +39,20 @@ class FakeClock:
         return self.now
 
 
+def _parse_module_source(module):
+    """The AST of a module's source file (UTF-8)."""
+    return ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+
+
+def _is_type_checking_block(node) -> bool:
+    """Whether `node` is an `if TYPE_CHECKING:` (the bare name only)."""
+    return (
+        isinstance(node, ast.If)
+        and isinstance(node.test, ast.Name)
+        and node.test.id == "TYPE_CHECKING"
+    )
+
+
 def imported_names(module, *, skip_type_checking=False) -> set[str]:
     """The names a module's source imports, from its AST.
 
@@ -46,14 +61,11 @@ def imported_names(module, *, skip_type_checking=False) -> set[str]:
     With `skip_type_checking=True`, every node inside an
     `if TYPE_CHECKING:` block is skipped.
     """
-    tree = ast.parse(Path(module.__file__).read_text(encoding="utf-8"))
+    tree = _parse_module_source(module)
     skipped = set()
     if skip_type_checking:
         for node in ast.walk(tree):
-            if (
-                isinstance(node, ast.If)
-                and getattr(node.test, "id", None) == "TYPE_CHECKING"
-            ):
+            if _is_type_checking_block(node):
                 skipped.update(id(inner) for inner in ast.walk(node))
     names = set()
     for node in ast.walk(tree):
@@ -66,3 +78,38 @@ def imported_names(module, *, skip_type_checking=False) -> set[str]:
             names.add(base)
             names.update(f"{base}.{a.name}" for a in node.names)
     return names
+
+
+def imported_roots(module, *, skip_type_checking=False) -> set[str]:
+    """The first dotted part of each name `imported_names` returns, with
+    the same `skip_type_checking` meaning (a relative import's root is
+    `""`)."""
+    return {
+        name.split(".")[0]
+        for name in imported_names(
+            module, skip_type_checking=skip_type_checking
+        )
+    }
+
+
+def type_checking_imports(module) -> list[str]:
+    """The unparsed statements inside every `if TYPE_CHECKING:` block of
+    the module, at any depth, in source order - the blocks
+    `imported_names(..., skip_type_checking=True)` skips."""
+    blocks = [
+        node
+        for node in ast.walk(_parse_module_source(module))
+        if _is_type_checking_block(node)
+    ]
+    blocks.sort(key=lambda block: block.lineno)
+    return [ast.unparse(s) for block in blocks for s in block.body]
+
+
+def attribute_names(module) -> set[str]:
+    """Every `name.attr` attribute access in the module's source whose
+    value is a plain name, as the dotted string `"name.attr"`."""
+    return {
+        f"{node.value.id}.{node.attr}"
+        for node in ast.walk(_parse_module_source(module))
+        if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
+    }
