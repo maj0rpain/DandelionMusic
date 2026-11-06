@@ -22,6 +22,7 @@ from controller_helpers import (
     _backup,
     _backup_path,
     _fake_ffmpeg,
+    _local_batch,
     _preloaded,
     command_ctx,
     _queue,
@@ -1812,20 +1813,6 @@ def _pending_start(controller, stub_loader, monkeypatch, *titles, result=None):
     release = stub_loader.hold(slow, result)
     task = asyncio.ensure_future(controller.ensure_playing())
     return release, task, slow
-
-
-def _local_batch(controller, stub_loader, monkeypatch, loadable, picked):
-    """Stubs the loader to load the `loadable` titles (None for any other
-    uri) and returns the local batch of the `picked` titles."""
-    by_uri = {
-        f"/music/{s.title}.mp3": s for s in _songs(controller, *loadable)
-    }
-
-    async def load_local_songs(uris):
-        return [by_uri.get(u) for u in uris]
-
-    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
-    return [LocalTrack(f"/music/{t}.mp3", f"Name {t}") for t in picked]
 
 
 def _without_url(controller, title):

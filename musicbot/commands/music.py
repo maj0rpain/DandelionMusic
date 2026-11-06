@@ -12,7 +12,7 @@ from musicbot.player_panel import send_song_info
 from musicbot.settings import PLAYLIST_NAME_MAX_LENGTH
 from musicbot.song import Song
 from musicbot.bot import MusicBot, Context
-from musicbot.utils import dj_check, chunks, joining_command, SimplePaginator
+from musicbot.utils import dj_check, chunks, joining_command
 from musicbot.audiocontroller import (
     AudioController,
     RestoreResult,
@@ -21,7 +21,7 @@ from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
 from musicbot.linkutils import get_site_type
 from musicbot.message_link import check_message_link
-from musicbot.views import MusicButton, OwnedView
+from musicbot.views import MusicButton, OwnedView, SimplePaginator
 
 
 def _attachment_track(ctx, file) -> Optional[str]:
@@ -622,7 +622,7 @@ class Music(commands.Cog):
                 )
                 i += 1
             pages.append(embed)
-        await SimplePaginator(pages).send(ctx)
+        await SimplePaginator(ctx, pages).send()
 
     @_playlist.command(
         name="add_song",
