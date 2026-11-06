@@ -236,6 +236,51 @@ def test_a_reset_whose_factory_fails_leaves_the_guild_settings_only(
     assert sessions.settings(guild) is not None
 
 
+def test_a_reset_whose_dispose_fails_still_builds_a_fresh_controller(
+    sessions, capsys
+):
+    guild = FakeGuild(1)
+
+    async def failing_dispose(reason="left guild"):
+        raise RuntimeError("dispose failed")
+
+    async def scenario():
+        old = await sessions.get_or_create(guild)
+        old.dispose = failing_dispose
+        settings = sessions.settings(guild)
+        new = await sessions.reset(guild)
+        return old, settings, new
+
+    old, settings, new = run(scenario())
+
+    assert new is not old
+    assert sessions.controller(guild) is new
+    assert sessions.settings(guild) is settings
+    assert "dispose failed" in capsys.readouterr().err
+
+
+def test_a_reset_whose_dispose_and_build_fail_leaves_settings_only(
+    sessions, factory, capsys
+):
+    guild = FakeGuild(1)
+
+    async def failing_dispose(reason="left guild"):
+        raise RuntimeError("dispose failed")
+
+    async def scenario():
+        old = await sessions.get_or_create(guild)
+        old.dispose = failing_dispose
+        factory.fail = True
+        with pytest.raises(RuntimeError, match="factory failed"):
+            await sessions.reset(guild)
+
+    run(scenario())
+
+    assert "dispose failed" in capsys.readouterr().err
+    assert sessions.controller(guild) is None
+    assert sessions.settings(guild) is not None
+
+
 def test_on_guild_remove_discards_the_guilds_session(sessions):
     """Leaving a guild (kicked, banned, or a guild.leave() of our own)
     must not leak its session: MusicBot.on_guild_remove discards it."""

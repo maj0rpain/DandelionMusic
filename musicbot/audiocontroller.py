@@ -509,11 +509,13 @@ class AudioController(object):
     async def dispose(self, reason: str = "left guild"):
         """Tear this controller down for good: disconnect, then cancel
         every task add_task() still has pending."""
-        await self.udisconnect(reason)
-        for task in list(self._tasks):
-            task.cancel()
-        # after the tasks: one of them may have started it
-        self.timer.cancel()
+        try:
+            await self.udisconnect(reason)
+        finally:
+            for task in list(self._tasks):
+                task.cancel()
+            # after the tasks: one of them may have started it
+            self.timer.cancel()
 
     async def _preload(self, song: Song) -> bool:
         """Preloads `song`; when that ran a fresh extraction, refreshes
@@ -629,14 +631,21 @@ class AudioController(object):
                 )
             return False
         print(f"Disconnecting from guild {self.guild.name!r} ({reason})")
+        # guild.voice_client is guild-global and the sound below awaits,
+        # so it can vanish or be replaced meanwhile: hold the one being
+        # closed, and close it only if it is still the guild's. Closing
+        # a stale client would make discord.py unregister whatever
+        # client has taken its place.
+        voice_client = self.guild.voice_client
         if config.ANNOUNCE_DISCONNECT:
             try:
-                self.guild.voice_client.play(
+                voice_client.play(
                     discord.FFmpegPCMAudio(asset("disconnect.mp3"))
                 )
-                while self.guild.voice_client.is_playing():
+                while voice_client.is_playing():
                     await asyncio.sleep(1)
             except Exception:
                 print_exc(file=sys.stderr)
-        await self.guild.voice_client.disconnect(force=True)
+        if self.guild.voice_client is voice_client:
+            await voice_client.disconnect(force=True)
         return True

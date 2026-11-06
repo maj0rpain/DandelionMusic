@@ -9,6 +9,7 @@ part that is not registered.
 """
 
 import sys
+from traceback import print_exc
 from typing import (
     Awaitable,
     Callable,
@@ -134,11 +135,15 @@ class GuildSessions(Generic[Guild, Panel, Controller, Settings]):
 
     async def reset(self, guild: Guild, reason: str = "reset") -> Controller:
         """Replace the guild's controller with a fresh one, keeping
-        its settings. Leaves the guild settings-only if disposing of
-        the old controller or building the new one fails."""
+        its settings. A failure disposing of the old controller is
+        logged to stderr and the new one is built regardless; the guild
+        is left settings-only only if building the new one fails."""
         await self._ensure_settings(guild)
         old = self._controllers.pop(guild, None)
         self._panels.pop(guild, None)
         if old is not None:
-            await old.dispose(reason)
+            try:
+                await old.dispose(reason)
+            except Exception:
+                print_exc(file=sys.stderr)
         return self._build(guild)
