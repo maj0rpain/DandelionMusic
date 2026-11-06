@@ -113,3 +113,14 @@ def attribute_names(module) -> set[str]:
         for node in ast.walk(_parse_module_source(module))
         if isinstance(node, ast.Attribute) and isinstance(node.value, ast.Name)
     }
+
+
+def dockerfile_commands():
+    """The repo Dockerfile's instructions, one string each: continuation
+    lines joined, blank lines and `#` comment lines dropped."""
+    text = (Path(__file__).parent.parent / "Dockerfile").read_text()
+    return [
+        c.strip()
+        for c in text.replace("\\\n", " ").splitlines()
+        if c.strip() and not c.strip().startswith("#")
+    ]

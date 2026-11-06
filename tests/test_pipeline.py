@@ -5,6 +5,8 @@ from pathlib import Path
 
 import yaml
 
+from helpers import dockerfile_commands
+
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
@@ -33,10 +35,9 @@ def _uv_commands():
             for step in job.get("steps", []):
                 for c in _split_commands(step.get("run", "")):
                     found.append((path.name, c))
-    text = (REPO_ROOT / "Dockerfile").read_text()
-    for line in text.replace("\\\n", " ").splitlines():
-        if line.strip().startswith("RUN"):
-            for c in _split_commands(line.strip()[3:]):
+    for line in dockerfile_commands():
+        if line.startswith("RUN"):
+            for c in _split_commands(line[3:]):
                 found.append(("Dockerfile", c))
     return [
         (f, c)
@@ -60,10 +61,6 @@ def test_checks_workflow_is_callable_and_runs_on_branches_and_prs():
     assert "pull_request" in triggers
 
 
-def _release():
-    return _load("release.yml")
-
-
 def _checks_jobs(release):
     return [
         name
@@ -73,7 +70,7 @@ def _checks_jobs(release):
 
 
 def test_release_calls_the_checks_and_the_exe_build_needs_them():
-    release = _release()
+    release = _load("release.yml")
     checks = _checks_jobs(release)
     assert checks
     needs = release["jobs"]["build"]["needs"]
@@ -82,7 +79,7 @@ def test_release_calls_the_checks_and_the_exe_build_needs_them():
 
 
 def test_release_permissions_are_narrow():
-    release = _release()
+    release = _load("release.yml")
     assert release["permissions"] == {"contents": "read"}
     assert release["jobs"]["build"]["permissions"] == {"contents": "write"}
     for name, job in release["jobs"].items():

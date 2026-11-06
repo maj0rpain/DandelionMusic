@@ -13,6 +13,8 @@ import pytest
 
 from config.utils import alchemize_url, ensure_sqlite_parent, get_env_var
 
+from helpers import dockerfile_commands
+
 REPO_ROOT = Path(__file__).parent.parent
 
 SECRETS_ENV = (
@@ -139,15 +141,6 @@ def test_config_rejects_a_non_bare_driver_naming_only_the_driver(
     assert "secret" not in msg
 
 
-def _dockerfile_commands():
-    text = (REPO_ROOT / "Dockerfile").read_text()
-    return [
-        c.strip()
-        for c in text.replace("\\\n", " ").splitlines()
-        if c.strip() and not c.strip().startswith("#")
-    ]
-
-
 def _uv_sync_index(commands):
     (index,) = _indices_where(
         commands, lambda c: c.startswith("RUN") and "uv sync" in c
@@ -156,7 +149,7 @@ def _uv_sync_index(commands):
 
 
 def test_dockerfile_installs_db_drivers_without_dev():
-    commands = _dockerfile_commands()
+    commands = dockerfile_commands()
     run = commands[_uv_sync_index(commands)]
     assert "--frozen" not in run
     for flag in (
@@ -175,13 +168,13 @@ def _indices_where(commands, predicate):
 
 def test_dockerfile_runs_as_a_non_root_user():
     users = [
-        c.split()[1] for c in _dockerfile_commands() if c.split()[0] == "USER"
+        c.split()[1] for c in dockerfile_commands() if c.split()[0] == "USER"
     ]
     assert users and users[-1].split(":")[0] not in ("root", "0")
 
 
 def test_dockerfile_copies_source_only_after_dependencies():
-    commands = _dockerfile_commands()
+    commands = dockerfile_commands()
     sync = _uv_sync_index(commands)
     (copy_all,) = _indices_where(commands, lambda c: c.startswith("COPY . ."))
     assert copy_all > sync
@@ -204,7 +197,7 @@ def _image_tag(image):
 def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
     import re
 
-    commands = _dockerfile_commands()
+    commands = dockerfile_commands()
     images = [c.split()[1] for c in commands if c.startswith("FROM")]
     copied = []
     for c in commands:
@@ -220,7 +213,7 @@ def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
 
 
 def test_dockerfile_apt_installs_are_minimal_and_clean():
-    commands = _dockerfile_commands()
+    commands = dockerfile_commands()
     sync = _uv_sync_index(commands)
     for i in _indices_where(commands, lambda c: "apt-get" in c):
         assert commands[i].startswith("RUN") and i < sync
