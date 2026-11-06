@@ -117,20 +117,48 @@ def test_settings_embed_shows_a_unicode_button_emote_as_itself():
     )
 
 
-def test_settings_embed_shows_unset_values_as_not_set():
+def test_settings_embed_shows_none_ids_as_not_set():
     sett = GuildSettings(
         guild_id="1",
         command_channel=None,
         start_voice_channel=None,
         dj_role=None,
-        user_must_be_in_vc=False,
         button_emote=None,
+    )
+
+    fields = shown(sett, fake_ctx(FakeGuild()))
+
+    assert [
+        fields[name]
+        for name in (
+            "command_channel",
+            "start_voice_channel",
+            "dj_role",
+            "button_emote",
+        )
+    ] == ["Not Set"] * 4
+
+
+def test_settings_embed_shows_false_and_zero_as_themselves():
+    sett = GuildSettings(
+        guild_id="1",
+        user_must_be_in_vc=False,
         default_volume=0,
         vc_timeout=False,
         announce_songs=False,
     )
 
-    assert set(shown(sett, fake_ctx(FakeGuild())).values()) == {"Not Set"}
+    fields = shown(sett, fake_ctx(FakeGuild()))
+
+    assert [
+        fields[name]
+        for name in (
+            "user_must_be_in_vc",
+            "vc_timeout",
+            "announce_songs",
+            "default_volume",
+        )
+    ] == ["False", "False", "False", "0"]
 
 
 def test_settings_embed_flags_ids_that_no_longer_resolve():

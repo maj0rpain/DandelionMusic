@@ -142,6 +142,11 @@ class Config:
     # whether to tell users the bot is disconnecting
     ANNOUNCE_DISCONNECT = True
 
+    # what a request is told while the bot is leaving the voice channel
+    DISCONNECTING_MESSAGE = (
+        "I'm leaving the voice channel - try again in a moment."
+    )
+
     ENABLE_PLAYLISTS = True
 
     # DEPRECATED seed for the guild whitelist, which the database

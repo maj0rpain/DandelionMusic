@@ -2539,16 +2539,7 @@ def _announcing_disconnect(controller, monkeypatch, during):
     """Switches ANNOUNCE_DISCONNECT on (monkeypatch restores it) and
     makes the announcement end after one poll, running `during()` at
     that poll; the poll's sleep does not wait."""
-    from config import config
-
-    _fake_ffmpeg(monkeypatch)
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", True)
-    real_sleep = asyncio.sleep
-
-    async def quick_sleep(delay, *args):
-        await real_sleep(0)
-
-    monkeypatch.setattr(asyncio, "sleep", quick_sleep)
+    _quick_goodbye(monkeypatch)
     client = controller.guild.voice_client
     polls = []
 
@@ -2612,16 +2603,7 @@ def test_a_disconnect_with_no_connection_returns_false(controller):
 
 
 def test_two_concurrent_disconnects_both_succeed(controller, monkeypatch):
-    from config import config
-
-    _fake_ffmpeg(monkeypatch)
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", True)
-    real_sleep = asyncio.sleep
-
-    async def quick_sleep(delay, *args):
-        await real_sleep(0)
-
-    monkeypatch.setattr(asyncio, "sleep", quick_sleep)
+    _quick_goodbye(monkeypatch)
     guild = controller.guild
     client = guild.voice_client = _UnregisteringVoiceClient(guild)
 
@@ -3288,3 +3270,181 @@ def test_a_volume_change_reaches_the_wrapped_source(controller, monkeypatch):
     assert given.volume == 0.25
     assert len(built) == 1
     assert built[0].volume == 0.25
+
+
+# -- requests while the bot is disconnecting --------------------------------
+
+
+def _quick_goodbye(monkeypatch, announce=True):
+    """Sets ANNOUNCE_DISCONNECT, and makes the goodbye's polling sleep
+    yield only once, so the sound stays "playing" until a test ends it."""
+    from config import config
+
+    _fake_ffmpeg(monkeypatch)
+    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", announce)
+    real_sleep = asyncio.sleep
+
+    async def quick_sleep(delay, *args):
+        await real_sleep(0)
+
+    monkeypatch.setattr(asyncio, "sleep", quick_sleep)
+
+
+async def _hold_goodbye(controller):
+    """Plays "first" and "second", then starts a disconnect that stops
+    inside the goodbye sound. Returns the disconnect task."""
+    await _start_playing(controller)
+    _save_backup(controller)
+    task = asyncio.ensure_future(controller.udisconnect("test"))
+    await _settle()
+    return task
+
+
+async def _end_goodbye(controller, task):
+    controller.guild.voice_client.playing = False
+    await task
+    await _settle()
+
+
+def test_requests_during_the_goodbye_are_refused_and_place_nothing(
+    controller, stub_loader, monkeypatch, tmp_path
+):
+    ac = sys.modules[type(controller).__module__]
+    _quick_goodbye(monkeypatch)
+    _queue(controller, "first", "second")
+    batch = _local_batch(controller, stub_loader, monkeypatch, "a", "a")
+    extra = _songs(controller, "x", "y", "z")
+
+    async def scenario():
+        task = await _hold_goodbye(controller)
+        client = controller.guild.voice_client
+        backup = _backup_path(controller, tmp_path).read_bytes()
+        handed = len(client.played)
+        results = [
+            (await controller.enqueue(extra[:1])).kind,
+            (await controller.enqueue_next(extra[1])).kind,
+            (await controller.process_local_tracks(batch, "test")).kind,
+            await controller.restore(),
+        ]
+        state = (
+            _titles(controller),
+            len(client.played),
+            _backup_path(controller, tmp_path).read_bytes(),
+        )
+        await _end_goodbye(controller, task)
+        return results, state, (([], handed, backup))
+
+    results, state, expected = _run(controller, scenario)
+
+    refused = ac.OutcomeKind.REFUSED_DISCONNECTING
+    assert results == [
+        refused,
+        refused,
+        refused,
+        ac.RestoreResult.REFUSED_WHILE_DISCONNECTING,
+    ]
+    assert state == expected
+
+
+def test_a_request_after_the_goodbye_starts_on_a_reconnected_client(
+    controller, monkeypatch
+):
+    _quick_goodbye(monkeypatch)
+    _queue(controller, "first", "second")
+
+    async def scenario():
+        task = await _hold_goodbye(controller)
+        await _end_goodbye(controller, task)
+        client = controller.guild.voice_client = PlaybackVoiceClient()
+        outcome = await controller.enqueue(_songs(controller, "fresh"))
+        await _settle()
+        return outcome, client
+
+    outcome, client = _run(controller, scenario)
+
+    assert outcome.kind.value == "started"
+    assert len(client.played) == 1
+
+
+def test_a_request_after_a_disconnect_that_raised_is_not_refused(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+
+    async def failing_disconnect(*, force=False):
+        raise RuntimeError("disconnect failed")
+
+    controller.guild.voice_client.disconnect = failing_disconnect
+
+    async def scenario():
+        with pytest.raises(RuntimeError):
+            await controller.udisconnect("test")
+        return await controller.enqueue(_songs(controller, "fresh"))
+
+    assert _run(controller, scenario).kind.value != "refused_disconnecting"
+
+
+def test_a_request_inside_the_voice_disconnect_is_refused_without_the_sound(
+    controller, monkeypatch
+):
+    _quick_goodbye(monkeypatch, announce=False)
+    seen = []
+
+    async def scenario():
+        async def during():
+            seen.append(await controller.enqueue(_songs(controller, "x")))
+
+        original = controller.guild.voice_client.disconnect
+
+        async def disconnect(*, force=False):
+            await during()
+            await original(force=force)
+
+        controller.guild.voice_client.disconnect = disconnect
+        await controller.udisconnect("test")
+
+    _run(controller, scenario)
+
+    assert [o.kind.value for o in seen] == ["refused_disconnecting"]
+    assert _titles(controller) == []
+
+
+def test_a_library_pick_whose_load_lands_in_the_goodbye_places_no_tail(
+    controller, stub_loader, monkeypatch, tmp_path
+):
+    _quick_goodbye(monkeypatch)
+    songs = {f"/music/{s.title}.mp3": s for s in _songs(controller, *"abc")}
+    tail_gate = asyncio.Event()
+    calls = []
+
+    async def load_local_songs(uris):
+        calls.append(uris)
+        if len(calls) == 2:
+            await tail_gate.wait()
+        return [songs.get(u) for u in uris]
+
+    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
+    batch = [LocalTrack(f"/music/{t}.mp3", f"Name {t}") for t in "abc"]
+
+    async def scenario():
+        controller.bot.loop = asyncio.get_running_loop()
+        pick = asyncio.ensure_future(
+            controller.process_local_tracks(batch, "test")
+        )
+        await _settle()
+        client = controller.guild.voice_client
+        teardown = asyncio.ensure_future(controller.udisconnect("test"))
+        await _settle()
+        handed = len(client.played)
+        tail_gate.set()
+        outcome = await pick
+        await _end_goodbye(controller, teardown)
+        return outcome, handed, len(client.played)
+
+    outcome, handed, after = _run(controller, scenario)
+
+    assert outcome.kind.value == "refused_disconnecting"
+    assert _titles(controller) == []
+    # "a" and the goodbye sound only
+    assert (handed, after) == (2, 2)
+    assert _backup(controller, tmp_path) == ["a"]
