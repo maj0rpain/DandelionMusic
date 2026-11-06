@@ -2539,16 +2539,7 @@ def _announcing_disconnect(controller, monkeypatch, during):
     """Switches ANNOUNCE_DISCONNECT on (monkeypatch restores it) and
     makes the announcement end after one poll, running `during()` at
     that poll; the poll's sleep does not wait."""
-    from config import config
-
-    _fake_ffmpeg(monkeypatch)
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", True)
-    real_sleep = asyncio.sleep
-
-    async def quick_sleep(delay, *args):
-        await real_sleep(0)
-
-    monkeypatch.setattr(asyncio, "sleep", quick_sleep)
+    _quick_goodbye(monkeypatch)
     client = controller.guild.voice_client
     polls = []
 
@@ -2612,16 +2603,7 @@ def test_a_disconnect_with_no_connection_returns_false(controller):
 
 
 def test_two_concurrent_disconnects_both_succeed(controller, monkeypatch):
-    from config import config
-
-    _fake_ffmpeg(monkeypatch)
-    monkeypatch.setattr(config, "ANNOUNCE_DISCONNECT", True)
-    real_sleep = asyncio.sleep
-
-    async def quick_sleep(delay, *args):
-        await real_sleep(0)
-
-    monkeypatch.setattr(asyncio, "sleep", quick_sleep)
+    _quick_goodbye(monkeypatch)
     guild = controller.guild
     client = guild.voice_client = _UnregisteringVoiceClient(guild)
 
