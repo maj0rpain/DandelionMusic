@@ -977,7 +977,7 @@ def test_a_stop_right_after_a_skip_plays_nothing_more(
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second", "third")
-    backup = tmp_path / controller.pickle_file
+    backup = _backup_path(controller, tmp_path)
     snapshots = []
 
     async def scenario(c):
