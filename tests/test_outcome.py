@@ -65,7 +65,8 @@ def test_library_pick_with_nothing_skipped():
 def test_library_pick_names_a_few_skipped_files():
     assert _library(1, ["a.mp3", "b.mp3"]) == (
         "Queued 1 song(s). 2 skipped (file not found): a.mp3, b.mp3. "
-        "The index may be stale - ask the bot owner to run `d!lib refresh`."
+        "The index may be stale - ask the bot owner to run "
+        "`d!library refresh`."
     )
 
 
@@ -74,8 +75,80 @@ def test_library_pick_elides_skipped_files_past_five():
     assert _library(0, names) == (
         "Queued 0 song(s). 7 skipped (file not found): "
         "0.mp3, 1.mp3, 2.mp3, 3.mp3, 4.mp3, and 2 more. "
-        "The index may be stale - ask the bot owner to run `d!lib refresh`."
+        "The index may be stale - ask the bot owner to run "
+        "`d!library refresh`."
     )
+
+
+def _library_under(config_obj, monkeypatch, names):
+    monkeypatch.setattr(outcome_module, "config", config_obj)
+    return _library(1, names)
+
+
+def test_library_pick_wording_comes_from_the_language_file(monkeypatch):
+    cfg = types.SimpleNamespace(
+        LIBRARY_PICK_QUEUED="Got {count}.",
+        LIBRARY_PICK_SKIPPED=" Lost {skipped}: {names}",
+        LIBRARY_PICK_SKIPPED_MORE=" +{more}",
+        LIBRARY_PICK_STALE_INDEX=" Refresh!",
+    )
+    names = [f"{i}.mp3" for i in range(7)]
+    assert _library_under(cfg, monkeypatch, names) == (
+        "Got 1. Lost 7: 0.mp3, 1.mp3, 2.mp3, 3.mp3, 4.mp3 +2 Refresh!"
+    )
+
+
+def test_library_hints_name_a_bang_prefix(config_factory, monkeypatch):
+    cfg = config_factory("BOT_TOKEN=x\nBOT_PREFIX=!\n")
+    for key in (
+        "LIBRARY_EMPTY",
+        "LIBRARY_FILE_MISSING",
+        "LIBRARY_PICK_STALE_INDEX",
+    ):
+        text = getattr(cfg, key)
+        assert "`!library refresh`" in text
+        assert "d!" not in text
+    assert _library_under(cfg, monkeypatch, ["a.mp3"]).endswith(
+        "run `!library refresh`."
+    )
+
+
+@pytest.mark.parametrize("slash, shown", [("True", "/"), ("False", "@bot ")])
+def test_library_hint_without_a_prefix(config_factory, slash, shown):
+    cfg = config_factory(
+        f"BOT_TOKEN=x\nBOT_PREFIX=\nENABLE_SLASH_COMMANDS={slash}\n"
+    )
+    assert f"`{shown}library refresh`" in cfg.LIBRARY_PICK_STALE_INDEX
+
+
+def test_library_report_survives_braces_in_the_prefix(
+    config_factory, monkeypatch
+):
+    cfg = config_factory("BOT_TOKEN=x\nBOT_PREFIX={!\n")
+    assert _library_under(cfg, monkeypatch, ["a.mp3"]).endswith(
+        "run `{!library refresh`."
+    )
+
+
+def test_no_language_file_string_holds_a_literal_d_bang():
+    from pathlib import Path
+
+    import jsonc
+
+    def strings(node):
+        if isinstance(node, str):
+            yield node
+        elif isinstance(node, dict):
+            for v in node.values():
+                yield from strings(v)
+        elif isinstance(node, list):
+            for v in node:
+                yield from strings(v)
+
+    path = Path(__file__).parent.parent / "config" / "en.json"
+    with open(path, encoding="utf-8") as f:
+        found = [s for s in strings(jsonc.load(f)) if "d!" in s]
+    assert found == []
 
 
 def _send(settings):
