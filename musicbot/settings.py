@@ -1,6 +1,8 @@
+import asyncio
 import json
 import os
 import re
+import weakref
 from dataclasses import dataclass
 from enum import StrEnum
 from inspect import isawaitable
@@ -26,7 +28,7 @@ from discord import (
 )
 import sqlalchemy
 from sqlalchemy import String, select
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column
 from alembic.migration import MigrationContext
 from alembic.autogenerate import produce_migrations, render_python_code
@@ -264,6 +266,19 @@ def default_settings() -> Dict[str, Any]:
     return {name: d.default for name, d in SETTINGS.items()}
 
 
+_setting_locks: "weakref.WeakValueDictionary[str, asyncio.Lock]" = (
+    weakref.WeakValueDictionary()
+)
+
+
+def _setting_lock(guild_id: str) -> asyncio.Lock:
+    "The guild's setting-write lock; gone once nothing holds or awaits it"
+    lock = _setting_locks.get(guild_id)
+    if lock is None:
+        lock = _setting_locks[guild_id] = asyncio.Lock()
+    return lock
+
+
 class GuildSettings(Base):
     __tablename__ = "settings"
 
@@ -359,10 +374,20 @@ class GuildSettings(Base):
         value = choose(descriptor)
         if isawaitable(value):
             value = await value
-        setattr(self, setting, value)
-        async with ctx.bot.DbSession() as session:
-            session.add(self)
-            await session.commit()
+        async with _setting_lock(self.guild_id):
+            try:
+                async with ctx.bot.DbSession() as session:
+                    result = await session.execute(
+                        sqlalchemy.update(GuildSettings)
+                        .where(GuildSettings.guild_id == self.guild_id)
+                        .values({setting: value})
+                    )
+                    if result.rowcount != 1:
+                        return False
+                    await session.commit()
+            except SQLAlchemyError:
+                return False
+            setattr(self, setting, value)
         return True
 
     async def update_setting(
