@@ -1,3 +1,4 @@
 # Netscape HTTP Cookie File
 # https://curl.haxx.se/rfc/cookie_spec.html
-# More info at https://github.com/solaluset/DandelionMusic/wiki/Configuration#custom-cookies
+# Put real cookies in a new file here and point COOKIE_PATH at it; see the
+# "Custom Cookies" section of README.md. Do not overwrite this file.
