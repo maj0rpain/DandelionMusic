@@ -247,6 +247,17 @@ def rows():
             {"role": "admin"},
             NOT_CONNECTED,
         ),
+        (
+            "dj_player_button: DJ-role holder",
+            K.DJ_PLAYER_BUTTON,
+            {
+                "bot": HERE,
+                "author": "a",
+                "dj_role": ADMISSION_DJ_ROLE,
+                "role": "dj",
+            },
+            "admitted",
+        ),
         # the kind decides, whatever the custom_id says
         (
             "dj_player_button queue: plain member under a DJ role",
@@ -258,17 +269,6 @@ def rows():
                 "dj_role": ADMISSION_DJ_ROLE,
             },
             NOT_DJ,
-        ),
-        (
-            "dj_player_button: DJ-role holder",
-            K.DJ_PLAYER_BUTTON,
-            {
-                "bot": HERE,
-                "author": "a",
-                "dj_role": ADMISSION_DJ_ROLE,
-                "role": "dj",
-            },
-            "admitted",
         ),
         (
             "player_button next: plain member under a DJ role",
