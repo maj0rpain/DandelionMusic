@@ -680,10 +680,10 @@ def test_a_track_ended_without_an_error_logs_no_playback_error(
     assert _played(controller) == ["first", "second"]
 
 
-def test_next_song_off_the_loop_raises(controller):
+def test_skip_off_the_loop_raises(controller):
     _queue(controller, "first", "second")
 
-    _, error = _in_thread(controller.next_song)
+    _, error = _in_thread(controller.skip)
 
     assert isinstance(error, RuntimeError)
     assert _titles(controller) == ["first", "second"]
@@ -1976,7 +1976,7 @@ def test_next_during_a_pending_start_skips_it_and_plays_the_one_after(
             controller, stub_loader, monkeypatch, "slow", "next", "third"
         )
         await _settle()
-        controller.next_song()
+        controller.skip()
         await _settle()
         before = len(stub_loader.calls)
         release.set()

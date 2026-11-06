@@ -148,8 +148,12 @@ def test_process_song_playnext_of_a_one_item_playlist_keeps_truncation(
     assert (outcome.count, outcome.truncation) == (1, cut)
 
 
-def test_ensure_playing_returns_nothing(controller, monkeypatch):
-    _fake_ffmpeg(monkeypatch)
-    _songs(controller, "a")
-
+def test_ensure_playing_returns_none_when_nothing_starts(controller):
     assert _run(controller, controller.ensure_playing) is None
+
+
+def test_ensure_playing_returns_the_start_result(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "a")
+
+    assert _run(controller, controller.ensure_playing) is True

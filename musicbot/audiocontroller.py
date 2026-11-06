@@ -285,27 +285,19 @@ class AudioController(object):
 
     def skip(self):
         """Ends the current track and moves on to the next one,
-        ignoring a single-track loop"""
-        self.next_song(forced=True)
-
-    def next_song(self, *, forced=False):
-        """Ends the current track and moves on to the next one. Runs
-        on the event loop only - raises RuntimeError anywhere else."""
-        self.playback.skip(forced)
+        ignoring a single-track loop. Runs on the event loop only -
+        raises RuntimeError anywhere else."""
+        self.playback.skip(True)
 
     async def play_song(self, song: Song) -> bool:
         """Plays a song object."""
         return await self.playback.start(song)
 
-    async def ensure_playing(self) -> None:
+    async def ensure_playing(self) -> Optional[bool]:
         """Starts the head of the queue if nothing is playing and the
-        queue is non-empty; otherwise preloads the queue. The one
-        "start if idle" rule for everything that adds to the queue."""
-        await self._start_if_idle()
-
-    async def _start_if_idle(self) -> Optional[bool]:
-        """ensure_playing()'s body: the start's result, or `None` when
-        it started nothing."""
+        queue is non-empty, returning the start's result; otherwise
+        preloads the queue and returns `None`. The one "start if idle"
+        rule for everything that adds to the queue."""
         if self.is_idle() and len(self.playlist) > 0:
             return await self.play_song(self.playlist[0])
         self._schedule_preload()
@@ -346,7 +338,7 @@ class AudioController(object):
         would_start = self._would_start()
         placed = place()
         self.playback.save_backup()
-        started = await self._start_if_idle()
+        started = await self.ensure_playing()
         if not would_start or started is None:
             return placed, None
         kind = OutcomeKind.STARTED if started else OutcomeKind.START_FAILED
