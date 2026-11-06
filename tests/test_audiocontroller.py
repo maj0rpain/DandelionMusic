@@ -1069,6 +1069,28 @@ def test_a_play_the_voice_client_refuses_is_not_recorded(
     assert _titles(controller) == []
 
 
+def test_a_source_that_cannot_be_built_goes_the_play_failed_path(
+    controller, monkeypatch, tmp_path
+):
+    import discord
+
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "no ffmpeg")
+
+    def refuse(song):
+        raise discord.ClientException("ffmpeg was not found.")
+
+    monkeypatch.setattr(controller.playback, "_make_source", refuse)
+
+    async def scenario():
+        await controller.play_song(controller.playlist[0])
+
+    _run(controller, scenario)
+    assert _history(controller) == []
+    assert _backup(controller, tmp_path) == ["no ffmpeg"]
+    assert _titles(controller) == []
+
+
 def test_a_song_that_finishes_on_its_own_is_recorded_once(
     controller, monkeypatch
 ):

@@ -493,9 +493,9 @@ class Playback:
         # no longer pending once it reaches play(); the generation
         # token that guards the start is _claim_start()'s
         self._start_pending = False
-        probe = _AudioProbe(self._make_source(song))
-        self._track = _PlayingTrack(song, probe)
         try:
+            probe = _AudioProbe(self._make_source(song))
+            self._track = _PlayingTrack(song, probe)
             self._voice_client().play(
                 probe,
                 after=self._track_end_callback(generation),
