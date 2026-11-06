@@ -159,6 +159,7 @@ class Developer(commands.Cog):
         aliases=("gw",),
         usage="[action [guild id]]",
         invoke_without_command=True,
+        hidden=True,
     )
     @commands.check(owner_check)
     async def _guild_whitelist(self, ctx, *, inexistent_subcommand=None):
@@ -175,11 +176,11 @@ class Developer(commands.Cog):
         lines = [_guild_line(ctx.bot, id_) for id_ in whitelist]
         await ctx.send("```\n" + "\n".join(lines) + "```")
 
-    _show_guild_whitelist = _guild_whitelist.command(name="show")(
+    _show_guild_whitelist = _guild_whitelist.command(name="show", hidden=True)(
         commands.check(owner_check)(_show_guild_whitelist_callback)
     )
 
-    @_guild_whitelist.command(name="add")
+    @_guild_whitelist.command(name="add", hidden=True)
     @commands.check(owner_check)
     async def _guild_whitelist_add(self, ctx, *, id: str):
         id = int(id)
@@ -221,7 +222,7 @@ class Developer(commands.Cog):
         ]
         return all_guilds[:25]
 
-    @_guild_whitelist.command(name="remove")
+    @_guild_whitelist.command(name="remove", hidden=True)
     @commands.check(owner_check)
     @app_commands.autocomplete(id=_guild_whitelist_remove_autocomplete)
     async def _guild_whitelist_remove(

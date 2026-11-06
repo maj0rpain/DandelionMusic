@@ -61,7 +61,10 @@ async def _help_autocomplete(
 
 class MusicBot(commands.Bot):
     def __init__(self, initial_extensions: List[str], *args, **kwargs):
-        kwargs.setdefault("help_command", UniversalHelpCommand())
+        # help lists what is not hidden; it never runs command checks
+        kwargs.setdefault(
+            "help_command", UniversalHelpCommand(verify_checks=False)
+        )
         # slash commands are offered in guilds only, never DMs
         kwargs.setdefault(
             "allowed_contexts",
