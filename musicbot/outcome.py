@@ -55,16 +55,19 @@ class Reply:
 
 def _library_report(outcome: EnqueueOutcome) -> str:
     skipped = outcome.skipped
-    message = f"Queued {outcome.count} song(s)."
+    message = config.LIBRARY_PICK_QUEUED.format(count=outcome.count)
     if skipped:
-        shown = ", ".join(skipped[:5])
-        message += f" {len(skipped)} skipped (file not found): {shown}"
+        message += config.LIBRARY_PICK_SKIPPED.format(
+            skipped=len(skipped), names=", ".join(skipped[:5])
+        )
         if len(skipped) > 5:
-            message += f", and {len(skipped) - 5} more"
+            message += config.LIBRARY_PICK_SKIPPED_MORE.format(
+                more=len(skipped) - 5
+            )
         # refresh is owner-only, so this can't tell whoever hit it to
-        # just run it themselves
-        message += ". The index may be stale - ask the bot owner to run"
-        message += " `d!lib refresh`."
+        # just run it themselves. Appended as-is: its prefix is already
+        # filled in, and may hold braces that format would choke on
+        message += config.LIBRARY_PICK_STALE_INDEX
     return message
 
 

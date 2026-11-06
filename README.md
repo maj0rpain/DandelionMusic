@@ -204,7 +204,7 @@ d!settings / d!setting / d!set
 * Arguments: (setting) (value)
 * Omit the value to reset a setting
 * Example: d!setting start_voice_channel ChannelName
-* Administrators and DJs only
+* Administrators only
 
 ```
 d!c

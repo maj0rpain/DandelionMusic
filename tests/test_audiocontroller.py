@@ -2187,3 +2187,30 @@ def test_a_failed_skipped_notice_still_lets_the_queue_advance(
 
 def test_the_controller_keeps_no_command_channel(controller):
     assert not hasattr(controller, "command_channel")
+
+
+def test_a_remote_song_opens_only_the_http_protocol_stack(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    source = controller._make_source(_song(controller, "remote"))
+
+    before = source.original.kwargs["before_options"]
+    assert "-protocol_whitelist http,https,tcp,tls,crypto" in before
+    assert "-reconnect 1" in before
+
+
+def test_a_local_library_song_opens_only_file(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
+    ac = sys.modules[type(controller).__module__]
+    song = ac.Song(
+        ac.SiteTypes.LOCAL_LIBRARY,
+        "file:///music/a.mp3",
+        url="/music/a.mp3",
+        title="local",
+    )
+    source = controller._make_source(song)
+
+    assert source.original.kwargs["before_options"] == (
+        "-protocol_whitelist file"
+    )
