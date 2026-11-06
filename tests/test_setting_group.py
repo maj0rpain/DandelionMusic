@@ -17,8 +17,12 @@ from discord.ext import commands
 from discord.ext.commands.view import StringView
 
 from config import config
+from musicbot import bot as bot_module
+from musicbot.bot import MusicBot
 from musicbot.commands.general import General, _unmatched_word
+from musicbot.settings import SETTINGS
 from musicbot.utils import CheckError
+from discord_fakes import RecordingCtx
 from setting_fakes import (
     FakeDbSession,
     FakeMessage,
@@ -38,23 +42,71 @@ class RecordingContext(commands.Context):
         return FakeMessage()
 
 
-def build_ctx(text, sett, is_dj=True):
-    bot = fake_bot(sett)
-    guild = types.SimpleNamespace(
+TEXT_ID, VOICE_ID, ROLE_ID = (
+    100000000000000021,
+    100000000000000031,
+    100000000000000022,
+)
+DJ_ROLE_ID = 13
+
+
+def guild_channel(cls, channel_id, name):
+    "A real discord.py channel object, so the converters' type checks hold"
+    channel = cls.__new__(cls)
+    channel.id = channel_id
+    channel.name = name
+    return channel
+
+
+def fake_group_guild():
+    "A guild resolving the channel and role ids the settings take"
+    channels = {
+        TEXT_ID: guild_channel(discord.TextChannel, TEXT_ID, "music"),
+        VOICE_ID: guild_channel(discord.VoiceChannel, VOICE_ID, "Lounge"),
+    }
+    roles = {ROLE_ID: types.SimpleNamespace(id=ROLE_ID, name="DJ")}
+    return types.SimpleNamespace(
         emojis=[],
         name="Guild",
         icon=None,
         id=1,
-        get_channel=lambda i: None,
-        get_channel_or_thread=lambda i: None,
-        get_role=lambda i: None,
+        get_channel=channels.get,
+        get_channel_or_thread=channels.get,
+        get_thread=lambda i: None,
+        get_role=roles.get,
+        voice_channels=[channels[VOICE_ID]],
     )
+
+
+# a value valid for each generated subcommand
+VALID_VALUES = {
+    "command_channel": f"<#{TEXT_ID}>",
+    "start_voice_channel": f"<#{VOICE_ID}>",
+    "dj_role": f"<@&{ROLE_ID}>",
+    "user_must_be_in_vc": "on",
+    "button_emote": "\N{SPARKLES}",
+    "default_volume": "50",
+    "vc_timeout": "on",
+    "announce_songs": "on",
+}
+
+
+def build_ctx(text, sett, is_admin=True, is_owner=False, roles=()):
+    bot = fake_bot(sett)
+
+    async def is_owner_answer(user):
+        return is_owner
+
+    bot.is_owner = is_owner_answer
+    author = fake_author()
+    author.roles = list(roles)
+    guild = fake_group_guild()
     message = types.SimpleNamespace(
         _state=None,
         attachments=[],
         guild=guild,
-        channel=fake_channel(is_dj),
-        author=fake_author(),
+        channel=fake_channel(is_admin),
+        author=author,
     )
     ctx = RecordingContext(
         message=message, bot=bot, view=StringView(text), prefix="d!"
@@ -63,7 +115,7 @@ def build_ctx(text, sett, is_dj=True):
     return ctx
 
 
-def invoke(text, is_dj=True, sett=None):
+def invoke(text, is_admin=True, sett=None, is_owner=False, roles=()):
     """Runs `d!setting <text>`; returns (sent, error, sett)"""
     cog = General(None)
     group = setting_group(cog)
@@ -72,7 +124,7 @@ def invoke(text, is_dj=True, sett=None):
         sub.cog = cog
     sett = sett or stored_settings()
     sett.guild_id = "1"
-    ctx = build_ctx(text, sett, is_dj)
+    ctx = build_ctx(text, sett, is_admin, is_owner, roles)
     ctx.invoked_with = "setting"
     ctx.command = group
     ctx.invoked_parents = []
@@ -89,24 +141,114 @@ def reset_commit_count():
     FakeDbSession.commits = 0
 
 
-def test_a_dj_setting_a_value_gets_only_the_confirmation():
+def test_an_admin_setting_a_value_gets_only_the_confirmation():
     sent, error, sett = invoke("announce_songs on")
 
     assert error is None
     assert sent == [("Setting `announce_songs` updated to True!", None)]
 
 
-def test_a_non_dj_is_refused_without_the_embed_or_a_change():
+def refused(sett_dj_role, **who):
     sett = stored_settings()
-    before = stored_values(sett)
+    sett.dj_role = sett_dj_role
+    return sett, stored_values(sett)
 
-    sent, error, sett = invoke("announce_songs on", is_dj=False, sett=sett)
+
+@pytest.mark.parametrize("dj_role", [None, str(DJ_ROLE_ID)])
+@pytest.mark.parametrize("name", list(SETTINGS))
+def test_a_plain_member_is_refused_without_a_reply_or_a_change(name, dj_role):
+    sett, before = refused(dj_role)
+
+    sent, error, sett = invoke(
+        f"{name} {VALID_VALUES[name]}", is_admin=False, sett=sett
+    )
 
     assert isinstance(error, CheckError)
-    assert str(error) == config.NOT_A_DJ
+    assert str(error) == config.USER_MISSING_PERMISSIONS
     assert sent == []
     assert stored_values(sett) == before
     assert FakeDbSession.commits == 0
+
+
+@pytest.mark.parametrize("name", list(SETTINGS))
+def test_a_dj_who_is_not_an_admin_is_refused(name):
+    sett, before = refused(str(DJ_ROLE_ID))
+    dj = types.SimpleNamespace(id=DJ_ROLE_ID)
+
+    sent, error, sett = invoke(
+        f"{name} {VALID_VALUES[name]}",
+        is_admin=False,
+        sett=sett,
+        roles=[dj],
+    )
+
+    assert isinstance(error, CheckError)
+    assert str(error) == config.USER_MISSING_PERMISSIONS
+    assert sent == []
+    assert stored_values(sett) == before
+
+
+@pytest.mark.parametrize("name", list(SETTINGS))
+def test_an_extra_owner_who_is_not_an_admin_is_refused(monkeypatch, name):
+    monkeypatch.setattr(config, "EXTRA_OWNERS", [1])
+    sett, before = refused(None)
+
+    sent, error, sett = invoke(
+        f"{name} {VALID_VALUES[name]}", is_admin=False, sett=sett
+    )
+
+    assert isinstance(error, CheckError)
+    assert str(error) == config.USER_MISSING_PERMISSIONS
+    assert sent == []
+    assert stored_values(sett) == before
+
+
+@pytest.mark.parametrize("is_owner", [False, True], ids=["admin", "owner"])
+@pytest.mark.parametrize("name", list(SETTINGS))
+def test_an_admin_or_the_owner_gets_the_subcommands_own_reply(name, is_owner):
+    sent, error, sett = invoke(
+        f"{name} {VALID_VALUES[name]}",
+        is_admin=not is_owner,
+        is_owner=is_owner,
+    )
+
+    assert error is None
+    # button_emote first sends its reaction check; the last reply is the
+    # subcommand's own
+    content, embed = sent[-1]
+    assert embed is None
+    assert content == config.VC_TIMEOUT_EDIT_DISABLED or content.startswith(
+        f"Setting `{name}` updated to"
+    )
+
+
+@pytest.mark.parametrize("text", ["", "show"])
+def test_a_plain_member_still_gets_the_settings_embed(text):
+    sent, error, sett = invoke(text, is_admin=False)
+
+    assert error is None
+    [(content, embed)] = sent
+    assert isinstance(embed, discord.Embed)
+
+
+def test_the_slash_setting_group_has_no_default_permissions():
+    app_group = setting_group(General(None)).app_command
+
+    assert app_group.default_permissions is None
+
+
+def test_the_command_error_handler_replies_with_the_refusal(monkeypatch):
+    printed = []
+    monkeypatch.setattr(
+        bot_module, "print_exception", lambda e: printed.append(e)
+    )
+    ctx = RecordingCtx(types.SimpleNamespace(DbSession=object()))
+    bot = MusicBot([], command_prefix="d!", intents=discord.Intents.default())
+
+    run(bot.on_command_error(ctx, CheckError(config.USER_MISSING_PERMISSIONS)))
+
+    assert [str(m) for m in ctx.sent] == [config.USER_MISSING_PERMISSIONS]
+    assert printed == []
 
 
 def test_a_bad_value_gives_only_the_conversion_error():
