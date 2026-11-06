@@ -703,7 +703,7 @@ def test_spotify_enrichment_is_disabled_without_a_client(
     assert result == Enrichment(stats=None, art=None)
 
 
-def test_the_import_built_enrichment_client_is_none_without_spotify_api(
+def test_the_default_enricher_adds_no_spotify_enrichment_without_spotify_api(
     make_library, no_lastfm
 ):
     if library_metadata.spotify_api is not None:
