@@ -234,11 +234,24 @@ def test_dockerfile_apt_installs_are_minimal_and_clean():
 def _declared_variable_names(command):
     keyword, _, rest = command.partition(" ")
     rest = rest.strip()
+    keyword = keyword.upper()
     if keyword == "ARG":
-        return [rest.split("=")[0]]
+        return [token.split("=")[0] for token in shlex.split(rest)]
     if "=" in rest.split()[0]:
         return [pair.split("=")[0] for pair in shlex.split(rest)]
     return [rest.split()[0]]
+
+
+def test_declared_variable_names_reads_every_name_in_any_case():
+    assert _declared_variable_names("ARG FOO BOT_TOKEN") == [
+        "FOO",
+        "BOT_TOKEN",
+    ]
+    assert _declared_variable_names("arg A=1 BOT_TOKEN=x") == [
+        "A",
+        "BOT_TOKEN",
+    ]
+    assert _declared_variable_names("env A=1 B=2") == ["A", "B"]
 
 
 def test_dockerfile_declares_no_bot_setting_as_arg_or_env():
@@ -246,7 +259,7 @@ def test_dockerfile_declares_no_bot_setting_as_arg_or_env():
 
     settings = {*Config.as_dict(), *ENV_ALIASES}
     for command in _dockerfile_commands():
-        if command.split()[0] not in ("ARG", "ENV"):
+        if command.split()[0].upper() not in ("ARG", "ENV"):
             continue
         for name in _declared_variable_names(command):
             assert name not in settings, (
