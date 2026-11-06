@@ -153,47 +153,80 @@ class QueueAction(NamedTuple):
     source: str
 
 
+def _icon(kind: str) -> str:
+    return library_display.KIND_EMOJI[kind]
+
+
+def _named(kind: str, name: str) -> str:
+    trimmed = library_display.trim(name, library_display.NAME_TITLE_LIMIT)
+    return f"{_icon(kind)} {trimmed}"
+
+
+# Titles show only the current scope, prefixed with the icon for what
+# that scope is - the path to it lives in the footer. In the footer's
+# breadcrumb the icons mark entities only - the leading "Artists" names
+# the root screen rather than an artist.
+
+
+def _root_title(screen: library_browse.Screen) -> str:
+    return f"{_icon('artist')} Artists"
+
+
+def _artist_title(screen: library_browse.Screen) -> str:
+    return _named("artist", screen.scope[0])
+
+
+def _album_title(screen: library_browse.Screen) -> str:
+    return _named("album", screen.scope[1])
+
+
+def _no_footer(screen: library_browse.Screen) -> Optional[str]:
+    return None
+
+
+def _artist_footer(screen: library_browse.Screen) -> Optional[str]:
+    return f"Artists › {_icon('artist')} {screen.scope[0]}"
+
+
+def _album_footer(screen: library_browse.Screen) -> Optional[str]:
+    artist, album = screen.scope
+    return f"{_icon('artist')} {artist} › {_icon('album')} {album}"
+
+
 class _Level(NamedTuple):
-    # the title's icon kind and which scope element it names; None
-    # for `title_scope` means the fixed `title_fixed` text
-    title_icon: str
-    title_scope: Optional[int]
-    title_fixed: str
-    # the breadcrumb: the scope elements shown, in order, after the
-    # leading text (None: no footer)
-    footer_lead: Optional[str]
-    footer_album: bool
-    # None at the root, where neither Queue nor Back is drawn
-    queue_label: Optional[str]
-    queue_source: str
-    stat_builder: Callable[[library_browse.Screen, object], List[Field]]
+    title: Callable[[library_browse.Screen], str]
+    footer: Callable[[library_browse.Screen], Optional[str]]
+    # None at the root, where neither Queue nor Back is drawn; below
+    # it, the source is a template formatted with the (artist, album)
+    # scope
+    queue: Optional[QueueAction]
+    stats: Callable[[library_browse.Screen, object], List[Field]]
 
 
 # Keyed by `Screen.kind`, which names what the *entries* are, so
 # "artist" = root, "album" = artist level, "song" = album level.
 _LEVELS = {
     "artist": _Level(
-        "artist", None, "Artists", None, False, None, "", _root_fields
+        title=_root_title,
+        footer=_no_footer,
+        queue=None,
+        stats=_root_fields,
     ),
     "album": _Level(
-        "artist",
-        0,
-        "",
-        "Artists › ",
-        False,
-        "Queue this Artist",
-        "browse: entire discography of {0}",
-        _artist_fields,
+        title=_artist_title,
+        footer=_artist_footer,
+        queue=QueueAction(
+            "Queue this Artist", "browse: entire discography of {0}"
+        ),
+        stats=_artist_fields,
     ),
     "song": _Level(
-        "album",
-        1,
-        "",
-        "",
-        True,
-        "Queue this Album",
-        "browse: entire album {0} - {1}",
-        _album_fields,
+        title=_album_title,
+        footer=_album_footer,
+        queue=QueueAction(
+            "Queue this Album", "browse: entire album {0} - {1}"
+        ),
+        stats=_album_fields,
     ),
 }
 
@@ -203,7 +236,7 @@ def stat_fields(screen: library_browse.Screen, external) -> List[Field]:
     out - a grid of dashes reads worse than a short grid.
 
     `external` is the drawn enrichment's stats, or None."""
-    return _LEVELS[screen.kind].stat_builder(screen, external)
+    return _LEVELS[screen.kind].stats(screen, external)
 
 
 def _description(screen: library_browse.Screen, external) -> Optional[str]:
@@ -331,40 +364,11 @@ class BrowseSession:
         return self._enrichment.art if self._enrichment else None
 
     @staticmethod
-    def _title(screen: library_browse.Screen) -> str:
-        """Only the current scope, prefixed with the icon for what that
-        scope is - the path to it lives in the footer."""
-        level = _LEVELS[screen.kind]
-        icon = library_display.KIND_EMOJI[level.title_icon]
-        if level.title_scope is None:
-            return f"{icon} {level.title_fixed}"
-        name = screen.scope[level.title_scope]
-        trimmed = library_display.trim(name, library_display.NAME_TITLE_LIMIT)
-        return f"{icon} {trimmed}"
-
-    @staticmethod
-    def _footer(screen: library_browse.Screen) -> Optional[str]:
-        """In the breadcrumb the icons mark entities only - the leading
-        "Artists" names the root screen rather than an artist."""
-        level = _LEVELS[screen.kind]
-        if level.footer_lead is None:
-            return None
-        artist_name, album_name = screen.scope
-        text = f"{level.footer_lead}{library_display.KIND_EMOJI['artist']} "
-        text += artist_name
-        if level.footer_album:
-            icon = library_display.KIND_EMOJI["album"]
-            text += f" › {icon} {album_name}"
-        return text
-
-    @staticmethod
     def _queue(screen: library_browse.Screen) -> Optional[QueueAction]:
-        level = _LEVELS[screen.kind]
-        if level.queue_label is None:
+        queue = _LEVELS[screen.kind].queue
+        if queue is None:
             return None
-        return QueueAction(
-            level.queue_label, level.queue_source.format(*screen.scope)
-        )
+        return queue._replace(source=queue.source.format(*screen.scope))
 
     def frame(self) -> Frame:
         cursor = self._cursor
@@ -390,8 +394,8 @@ class BrowseSession:
             queue=self._queue(screen),
             show_prev=cursor.has_prev(),
             show_next=cursor.has_next(),
-            title=self._title(screen),
-            footer=self._footer(screen),
+            title=_LEVELS[screen.kind].title(screen),
+            footer=_LEVELS[screen.kind].footer(screen),
             description=(None if empty else _description(screen, external)),
             fields=() if empty else tuple(stat_fields(screen, external)),
             empty=empty,
