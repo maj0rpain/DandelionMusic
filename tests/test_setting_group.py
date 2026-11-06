@@ -148,19 +148,38 @@ def test_an_admin_setting_a_value_gets_only_the_confirmation():
     assert sent == [("Setting `announce_songs` updated to True!", None)]
 
 
-def refused(sett_dj_role, **who):
+def settings_with_dj_role(dj_role):
     sett = stored_settings()
-    sett.dj_role = sett_dj_role
+    sett.dj_role = dj_role
     return sett, stored_values(sett)
 
 
-@pytest.mark.parametrize("dj_role", [None, str(DJ_ROLE_ID)])
+NOT_ADMIN_INVOKERS = {
+    "plain member": (None, [], []),
+    "plain member, DJ role set": (str(DJ_ROLE_ID), [], []),
+    "DJ-role holder": (
+        str(DJ_ROLE_ID),
+        [types.SimpleNamespace(id=DJ_ROLE_ID)],
+        [],
+    ),
+    "extra owner": (None, [], [1]),
+}
+
+
+@pytest.mark.parametrize("who", list(NOT_ADMIN_INVOKERS))
 @pytest.mark.parametrize("name", list(SETTINGS))
-def test_a_plain_member_is_refused_without_a_reply_or_a_change(name, dj_role):
-    sett, before = refused(dj_role)
+def test_a_non_admin_is_refused_without_a_reply_or_a_change(
+    monkeypatch, name, who
+):
+    dj_role, roles, extra_owners = NOT_ADMIN_INVOKERS[who]
+    monkeypatch.setattr(config, "EXTRA_OWNERS", extra_owners)
+    sett, before = settings_with_dj_role(dj_role)
 
     sent, error, sett = invoke(
-        f"{name} {VALID_VALUES[name]}", is_admin=False, sett=sett
+        f"{name} {VALID_VALUES[name]}",
+        is_admin=False,
+        sett=sett,
+        roles=roles,
     )
 
     assert isinstance(error, CheckError)
@@ -168,39 +187,6 @@ def test_a_plain_member_is_refused_without_a_reply_or_a_change(name, dj_role):
     assert sent == []
     assert stored_values(sett) == before
     assert FakeDbSession.commits == 0
-
-
-@pytest.mark.parametrize("name", list(SETTINGS))
-def test_a_dj_who_is_not_an_admin_is_refused(name):
-    sett, before = refused(str(DJ_ROLE_ID))
-    dj = types.SimpleNamespace(id=DJ_ROLE_ID)
-
-    sent, error, sett = invoke(
-        f"{name} {VALID_VALUES[name]}",
-        is_admin=False,
-        sett=sett,
-        roles=[dj],
-    )
-
-    assert isinstance(error, CheckError)
-    assert str(error) == config.USER_MISSING_PERMISSIONS
-    assert sent == []
-    assert stored_values(sett) == before
-
-
-@pytest.mark.parametrize("name", list(SETTINGS))
-def test_an_extra_owner_who_is_not_an_admin_is_refused(monkeypatch, name):
-    monkeypatch.setattr(config, "EXTRA_OWNERS", [1])
-    sett, before = refused(None)
-
-    sent, error, sett = invoke(
-        f"{name} {VALID_VALUES[name]}", is_admin=False, sett=sett
-    )
-
-    assert isinstance(error, CheckError)
-    assert str(error) == config.USER_MISSING_PERMISSIONS
-    assert sent == []
-    assert stored_values(sett) == before
 
 
 @pytest.mark.parametrize("is_owner", [False, True], ids=["admin", "owner"])

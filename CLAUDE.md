@@ -22,7 +22,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/__main__.py` / `run.py` - entrypoint; `run.py` is a thin forwarder (PyInstaller entry).
 - `musicbot/bot.py` - `MusicBot`, custom `Context`; user-facing replies go through `ctx.send(...)`, not raw channel sends.
 - `musicbot/admission.py` - request admission: per request kind, the checks, the join and the current controller; every Music command, General's voice commands, player button, pick and reaction goes through it.
-- `musicbot/utils.py` - the joining-command marker (`joining_command`), the DJ and owner checks, `CheckError`, and the voice connect port (`connect_to`, `check_voice_permissions`).
+- `musicbot/utils.py` - the joining-command marker (`joining_command`), the DJ and owner checks, `settings_admin_check` (administrator or application owner only, for `d!setting`), `CheckError`, and the voice connect port (`connect_to`, `check_voice_permissions`).
 - `musicbot/sessions.py` - `GuildSessions` (`bot.sessions`): each guild's settings, controller and player panel, their creation, lookup (`None` when not registered) and disposal.
 - `musicbot/audiocontroller.py` - per-guild controller over the queue: volume, loop, inactivity timer, preload sweep; its public methods delegate the start/advance/stop state machine to `Playback`.
 - `musicbot/player_panel.py` - `PlayerPanel` (one per guild, built by `GuildSessions`): the destination channel, announcements, the player message, its refresh and its stale-message/expired-token recovery; implements the controller's panel port. `PanelSnapshot` (defined in `musicbot/panel_snapshot.py` so the controller can build one without importing the panel) is the controller's read-only state it draws from.
