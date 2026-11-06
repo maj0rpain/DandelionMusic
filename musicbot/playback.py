@@ -90,6 +90,17 @@ class _AudioProbe(discord.AudioSource):
             setattr(self._wrapped, name, value)
 
 
+class _PlayingTrack:
+    """The playing track: its song, its audio probe, and whether
+    Playback itself ended it (a handover or stop(), never a failure).
+    One record per play(), so the three cannot go out of step."""
+
+    def __init__(self, song: "Song", probe: _AudioProbe):
+        self.song = song
+        self.probe = probe
+        self.ended_by_us = False
+
+
 class PlaybackState(Enum):
     """IDLE: nothing playing, paused or pending. STARTING: a track is
     claimed but its preload has not finished. ACTIVE: the voice client
@@ -166,13 +177,10 @@ class Playback:
         # True for the whole of teardown(): a track-end hop that lands
         # meanwhile must not start the idle timer.
         self._disconnecting = False
-        # the playing track's song and audio probe, set when it is
-        # handed to the voice client
-        self._current_song: Optional["Song"] = None
-        self._probe: Optional[_AudioProbe] = None
-        # True once Playback itself ends the playing track (a handover
-        # or stop()): that end is never a failure
-        self._ended_by_us = False
+        # the playing track's song, audio probe and ended-by-us flag,
+        # replaced as one record when a track is handed to the voice
+        # client
+        self._track: Optional[_PlayingTrack] = None
 
     # -- state -------------------------------------------------------
 
@@ -278,7 +286,7 @@ class Playback:
         # stopping an active voice client runs an `after` callback;
         # its _advance() finds the queue empty and idle, so
         # save_backup() keeps this snapshot
-        self._ended_by_us = True
+        self._mark_ended_by_us()
         self._voice_client().stop()
 
     def toggle_pause(self) -> PauseState:
@@ -375,18 +383,15 @@ class Playback:
             # move or reconnect, when a real track end must advance.
             return
 
-        probe = self._probe
+        track = self._track
         if (
-            not self._ended_by_us
-            and probe is not None
-            and not probe.produced_audio
-            and self._current_song is not None
+            track is not None
+            and not track.ended_by_us
+            and not track.probe.produced_audio
         ):
             # ended on its own having played nothing: a failed track,
             # guarded like a start by a token of its own
-            self._spawn(
-                self._fail_track(self._current_song, self._claim_start())
-            )
+            self._spawn(self._fail_track(track.song, self._claim_start()))
             return
 
         self._advance()
@@ -403,21 +408,30 @@ class Playback:
         self.save_backup()
 
         if next_song is None:
-            # nothing left to advance to - the next song to start is a
-            # fresh one
-            self._playing = False
-            if not self._timer.triggered and self._voice_client():
-                self._spawn(self.start_idle_timer(self._humans_present()))
+            self._go_idle()
             return
 
         self._spawn_start(next_song)
+
+    def _go_idle(self):
+        """Nothing is left to play: the next song to start is a fresh
+        one, and the idle timer starts."""
+        self._playing = False
+        if not self._timer.triggered and self._voice_client():
+            self._spawn(self.start_idle_timer(self._humans_present()))
+
+    def _mark_ended_by_us(self):
+        """Playback itself is ending the playing track (a handover or
+        stop()): that end is never a failure."""
+        if self._track is not None:
+            self._track.ended_by_us = True
 
     def _hand_over_to(self, song: "Song"):
         """With a track active, picks `song` as the next one and stops
         the voice client: the after= hop of the track does the advance.
         """
         self._next_song = song
-        self._ended_by_us = True
+        self._mark_ended_by_us()
         self._voice_client().stop()
 
     def _spawn_start(self, song: "Song"):
@@ -438,9 +452,7 @@ class Playback:
 
         if next_song is None:
             self._start_pending = False
-            self._playing = False
-            if not self._timer.triggered and self._voice_client():
-                self._spawn(self.start_idle_timer(self._humans_present()))
+            self._go_idle()
             return
 
         self._spawn_start(next_song)
@@ -469,8 +481,9 @@ class Playback:
         # Claimed before play() rather than after it, because play()
         # starts the audio thread there and then: a source that yields
         # nothing (a truncated file, a stream URL that died) ends
-        # immediately, and its after= hop advances an empty queue,
-        # which clears this flag. Reading it afterwards would see the
+        # immediately, and its after= hop takes the failed-track path,
+        # which clears this flag when the queue runs dry. Reading it
+        # afterwards would see the
         # value that callback left, announce a track that has already
         # finished, and leave the flag set with nothing playing -
         # silencing the next genuine start. A play() that raises below
@@ -481,9 +494,7 @@ class Playback:
         # token that guards the start is _claim_start()'s
         self._start_pending = False
         probe = _AudioProbe(self._make_source(song))
-        self._current_song = song
-        self._probe = probe
-        self._ended_by_us = False
+        self._track = _PlayingTrack(song, probe)
         try:
             self._voice_client().play(
                 probe,

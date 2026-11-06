@@ -543,10 +543,10 @@ class AudioController(object):
         ):
             if not await self._preload(song):
                 # Not the head: while this preload ran, the song may
-                # have become the current one, and play_song()'s own
-                # failed-preload skip is the only owner of the head.
-                # Removing it here too would make that skip drop the
-                # song behind it.
+                # have become the current one, and the failed-track
+                # path (Playback's drop_head) is the only owner of the
+                # head. Removing it here too would make that path drop
+                # the song behind it.
                 queue = self.playlist.playque
                 if queue and queue[0] is song:
                     continue
