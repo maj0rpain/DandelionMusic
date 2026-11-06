@@ -294,7 +294,7 @@ def _load_song(track: str) -> LoadResult:
         data = _search_youtube(track)[0]
         host = SiteTypes.YT_DLP
 
-    elif host == SiteTypes.UNKNOWN:
+    elif host in (SiteTypes.UNKNOWN, SiteTypes.SHORT_LINK):
         raise SongError(config.SONGINFO_UNSUPPORTED)
 
     elif host == SiteTypes.SPOTIFY:

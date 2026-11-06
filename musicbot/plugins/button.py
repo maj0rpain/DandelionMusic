@@ -7,6 +7,7 @@ from musicbot.outcome import send_outcome
 SUPPORTED_SITES = (
     linkutils.SiteTypes.SPOTIFY,
     linkutils.SiteTypes.YT_DLP,
+    linkutils.SiteTypes.SHORT_LINK,
 )
 
 

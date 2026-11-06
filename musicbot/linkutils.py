@@ -194,11 +194,18 @@ def _is_disallowed_host(host: Optional[str]) -> bool:
     )
 
 
+# Hosts of link shorteners; matched exactly (case-insensitive).
+SHORT_LINK_HOSTS = frozenset(
+    {"on.soundcloud.com", "spotify.link", "spotify.app.link"}
+)
+
+
 class SiteTypes(Enum):
     SPOTIFY = auto()
     YT_DLP = auto()
     CUSTOM = auto()
     LOCAL_LIBRARY = auto()
+    SHORT_LINK = auto()
     UNKNOWN = auto()
     NOT_URL = auto()
 
@@ -422,6 +429,9 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
         if not config.ENABLE_LOCAL_LIBRARY:
             return SiteTypes.UNKNOWN
         return SiteTypes.LOCAL_LIBRARY
+
+    if (urlparse(url).hostname or "").lower() in SHORT_LINK_HOSTS:
+        return SiteTypes.SHORT_LINK
 
     if ie := get_ie(url):
         return ie
