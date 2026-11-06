@@ -133,6 +133,8 @@ def _saved_playlist_error_reply(e: playlists.SavedPlaylistError) -> str:
         return f"Invalid position. Playlist has {e.size} songs."
     if isinstance(e, playlists.PlaylistExists):
         return config.PLAYLIST_ALREADY_EXISTS
+    if isinstance(e, playlists.PlaylistNameTooLong):
+        return config.PLAYLIST_NAME_TOO_LONG
     if isinstance(e, playlists.OnlySongInPlaylist):
         return "Can't remove the only song from playlist."
     raise e

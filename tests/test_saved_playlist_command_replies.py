@@ -36,6 +36,20 @@ def _run_playlist_command(monkeypatch, command, function, error, *args):
     return sent
 
 
+def test_save_with_a_too_long_name_replies_name_too_long(monkeypatch):
+    monkeypatch.setattr(
+        playlists, "save", _fail_with(playlists.PlaylistNameTooLong())
+    )
+    controller = types.SimpleNamespace(
+        playlist=types.SimpleNamespace(playque=[plain_song()])
+    )
+    ctx, sent = command_ctx(controller)
+
+    run(Music._playlist_save.callback(Music(None), ctx, "p"))
+
+    assert sent == [config.PLAYLIST_NAME_TOO_LONG]
+
+
 @pytest.mark.parametrize(
     "command, function, args",
     [
