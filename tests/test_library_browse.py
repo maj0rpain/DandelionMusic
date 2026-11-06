@@ -227,6 +227,27 @@ class TestTracks:
             "OK Computer",
             "Kid A",
         }
+        albums = []
+        for _, album, _ in c.tracks():
+            if album not in albums:
+                albums.append(album)
+        assert albums == library.albums_of(INDEX, "Radiohead")
+
+    def test_the_discography_queues_albums_in_browse_order(self):
+        index = {
+            "Radiohead": {
+                "Amnesiac": [library_song("01 - a"), library_song("02 - b")],
+                "OK Computer": [library_song("01 - c")],
+                "kid A": [library_song("01 - d")],
+            }
+        }
+        got = library.tracks_for(index, "Radiohead")
+        assert [(a, f) for _, a, f in got] == [
+            ("Amnesiac", "01 - a.flac"),
+            ("Amnesiac", "02 - b.flac"),
+            ("kid A", "01 - d.flac"),
+            ("OK Computer", "01 - c.flac"),
+        ]
 
     def test_the_root_stands_for_nothing(self):
         assert cursor().tracks() == []
