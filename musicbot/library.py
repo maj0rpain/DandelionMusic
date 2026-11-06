@@ -137,7 +137,8 @@ def index_generation() -> int:
 def albums_of(index: LibraryIndex, artist: str) -> List[str]:
     """The artist's album names in browse order (str.casefold); empty
     for a missing artist. The one album-ordering rule, shared by the
-    browser's listing and sample_track."""
+    browser's listing, sample_track and tracks_for (the discography
+    queue)."""
     return sorted(index.get(artist, {}), key=str.casefold)
 
 
@@ -563,8 +564,8 @@ def tracks_for(
         ]
     return [
         (artist, album_name, song.filename)
-        for album_name, songs in albums.items()
-        for song in songs
+        for album_name in albums_of(index, artist)
+        for song in albums[album_name]
     ]
 
 
