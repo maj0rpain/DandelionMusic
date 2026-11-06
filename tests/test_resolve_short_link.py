@@ -7,15 +7,15 @@ import pytest
 from aiohttp import web
 from aiohttp.test_utils import TestServer
 
-from helpers import run
 from musicbot import linkutils
+
+from helpers import run
 
 
 @asynccontextmanager
 async def serving():
     async def asleep(request):
-        await asyncio.sleep(2)
-        return web.Response(text="late")
+        await asyncio.Event().wait()
 
     app = web.Application()
     app.router.add_get("/a", lambda r: web.HTTPFound("/b"))
@@ -70,7 +70,7 @@ def test_refused_connection_raises():
 
 
 def test_slow_server_raises(monkeypatch):
-    monkeypatch.setattr(linkutils, "HTTP_TIMEOUT", 0.2)
+    monkeypatch.setattr(linkutils, "HTTP_TIMEOUT", 0.05)
 
     async def scenario():
         async with serving() as server:

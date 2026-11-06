@@ -144,6 +144,22 @@ def test_resolved_unknown_url_is_unsupported(
     assert str(e.value) == config.SONGINFO_UNSUPPORTED
 
 
+def test_resolved_non_url_is_unsupported_not_searched(
+    monkeypatch, worker_loop, extracted
+):
+    _resolver(monkeypatch, "just some words")
+    searched = []
+    monkeypatch.setattr(
+        loader, "_search_youtube", lambda q: searched.append(q) or [{}]
+    )
+
+    with pytest.raises(SongError) as e:
+        loader._load_song(SHORT)
+
+    assert str(e.value) == config.SONGINFO_UNSUPPORTED
+    assert searched == []
+
+
 def test_resolved_short_link_is_unsupported_after_one_resolution(
     monkeypatch, worker_loop, extracted
 ):

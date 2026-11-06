@@ -19,7 +19,17 @@ SPOTIFY_ID = "4uLU6hMCjMI75M1A2tKUQC"
 SPOTIFY = f"https://open.spotify.com/track/{SPOTIFY_ID}"
 
 
-@pytest.mark.parametrize("link", [YOUTUBE, YOUTU_BE, SOUNDCLOUD, SPOTIFY])
+@pytest.mark.parametrize(
+    "link",
+    [
+        YOUTUBE,
+        YOUTU_BE,
+        SOUNDCLOUD,
+        SPOTIFY,
+        "https://on.soundcloud.com/AbC123",
+        "https://spotify.link/xyz",
+    ],
+)
 def test_supported_link_is_returned(link):
     assert Button.get_links(f"listen to {link} now") == [link]
 
@@ -270,10 +280,3 @@ def test_an_unresolved_command_channel_directs_the_panel_nowhere():
     effects = react({A: SILENT_OUTCOME}, command_channel=2, resolves=False)
 
     assert effects.directed == []
-
-
-@pytest.mark.parametrize(
-    "link", ["https://on.soundcloud.com/AbC123", "https://spotify.link/xyz"]
-)
-def test_short_link_is_returned(link):
-    assert Button.get_links(f"listen to {link} now") == [link]

@@ -298,6 +298,8 @@ def _load_song(track: str) -> LoadResult:
             raise SongError(config.SONGINFO_ERROR) from e
         track = normalize_track(track)
         host = identify_url(track)
+        if host == SiteTypes.NOT_URL:
+            raise SongError(config.SONGINFO_UNSUPPORTED)
 
     if host == SiteTypes.NOT_URL:
         data = _search_youtube(track)[0]

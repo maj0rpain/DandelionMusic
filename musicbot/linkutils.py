@@ -445,13 +445,13 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
             return SiteTypes.UNKNOWN
         return SiteTypes.LOCAL_LIBRARY
 
-    if (urlparse(url).hostname or "").lower() in SHORT_LINK_HOSTS:
+    parsed = urlparse(url)
+    if (parsed.hostname or "").lower() in SHORT_LINK_HOSTS:
         return SiteTypes.SHORT_LINK
 
     if ie := get_ie(url):
         return ie
 
-    parsed = urlparse(url)
     if (
         parsed.scheme.lower() in ("http", "https")
         and not _is_disallowed_host(parsed.hostname)
