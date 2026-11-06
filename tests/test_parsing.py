@@ -78,6 +78,30 @@ class TestParseExpire:
 
 
 class TestIdentifyUrl:
+    @pytest.mark.parametrize(
+        "text",
+        [
+            "re:zero",
+            "nier:automata",
+            "c418:sweden",
+            "localhost:8000/a.mp3",
+        ],
+    )
+    def test_colon_text_without_a_scheme_is_not_a_url(self, text):
+        assert identify_url(text) is SiteTypes.NOT_URL
+
+    @pytest.mark.parametrize(
+        "text, ie_name",
+        [
+            ("ytsearch:foo", "youtube:search"),
+            ("scsearch:foo", "soundcloud:search"),
+        ],
+    )
+    def test_search_prefixes_resolve_to_their_extractor(self, text, ie_name):
+        result = identify_url(text)
+        assert not isinstance(result, SiteTypes)
+        assert result.IE_NAME == ie_name
+
     def test_plain_text_is_not_a_url(self):
         assert identify_url("some song name") is SiteTypes.NOT_URL
 

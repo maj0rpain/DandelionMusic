@@ -415,6 +415,12 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     if not url_regex.fullmatch(url):
         return SiteTypes.NOT_URL
 
+    # word:word text is not a URL; an extractor may still claim it
+    # (ytsearch:, scsearch:), otherwise it is a search query. A first
+    # colon followed by "/" (file:/, concat:/) keeps its classification.
+    if not _is_single_url(url) and not url.partition(":")[2].startswith("/"):
+        return get_ie(url) or SiteTypes.NOT_URL
+
     if spotify_regex.match(url):
         return SiteTypes.SPOTIFY
 
