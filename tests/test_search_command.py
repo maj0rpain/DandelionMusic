@@ -8,7 +8,7 @@ from musicbot.commands import music
 from musicbot.commands.music import Music
 from discord_fakes import RecordingCtx
 from musicbot.loader import SongError
-from helpers import run
+from helpers import plain_song, run
 
 
 def test_a_search_error_propagates_and_nothing_is_sent(monkeypatch):
@@ -26,13 +26,7 @@ def test_a_search_error_propagates_and_nothing_is_sent(monkeypatch):
 
 
 def test_search_offers_the_loaders_songs_as_its_picks(monkeypatch):
-    from musicbot.song import Song
-    from musicbot.linkutils import SiteTypes
-
-    songs = [
-        Song(SiteTypes.YT_DLP, webpage_url=f"https://yt/{i}", title=f"T{i}")
-        for i in (1, 2)
-    ]
+    songs = [plain_song("T1"), plain_song("T2")]
 
     async def search_youtube(query, count):
         return songs
