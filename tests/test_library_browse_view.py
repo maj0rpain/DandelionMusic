@@ -460,9 +460,7 @@ async def settle():
 
 
 STALE = Enrichment(
-    stats=external_stats(
-        listeners=424242, tags=("stale-tag",), popularity=77
-    ),
+    stats=external_stats(listeners=424242, tags=("stale-tag",), popularity=77),
     art=ArtInfo(url=None, data=b"\x89PNG", extension="png"),
 )
 
