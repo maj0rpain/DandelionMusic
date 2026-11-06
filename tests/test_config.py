@@ -6,6 +6,7 @@ whitelist, which the database owns instead.
 """
 
 import re
+import shlex
 from pathlib import Path
 
 import jsonc
@@ -228,6 +229,34 @@ def test_dockerfile_apt_installs_are_minimal_and_clean():
             continue
         assert "curl" not in c.split() and "unzip" not in c.split()
         assert "rm -rf /var/lib/apt/lists/*" in c
+
+
+def _declared_variable_names(command):
+    keyword, _, rest = command.partition(" ")
+    rest = rest.strip()
+    if keyword == "ARG":
+        return [rest.split("=")[0]]
+    if "=" in rest.split()[0]:
+        return [pair.split("=")[0] for pair in shlex.split(rest)]
+    return [rest.split()[0]]
+
+
+def test_dockerfile_declares_no_bot_setting_as_arg_or_env():
+    from config.config import ENV_ALIASES, Config
+
+    settings = {
+        name
+        for name in vars(Config)
+        if name.isupper() and not name.startswith("_")
+    } | set(ENV_ALIASES)
+    for command in _dockerfile_commands():
+        if command.split()[0] not in ("ARG", "ENV"):
+            continue
+        for name in _declared_variable_names(command):
+            assert name not in settings, (
+                f"Dockerfile instruction bakes a bot setting into the "
+                f"image: {command}"
+            )
 
 
 def _compose_services():
