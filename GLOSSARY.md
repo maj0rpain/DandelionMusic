@@ -18,4 +18,6 @@
 
 **Player panel**: A guild's playback-facing side in Discord: the channel the bot posts playback news to (now playing, skipped tracks), and the one message whose buttons follow the playback state. _Avoid_: view, now-playing message.
 
+**Message link**: a `discord.com/channels/<guild>/<channel>/<message>` URL used as a track; playing it plays that message's attachments, and only a member who can read that message in the same guild may play it.
+
 **Failed track**: A track that could not be played: its start failed (its stream could not be loaded, or it has no stream URL), or it ended on its own without producing any audio. A failed track is reported on the player panel and removed from the queue, whatever the loop mode. A user's skip or stop is never a failure. _Avoid_: dead song, broken track.
