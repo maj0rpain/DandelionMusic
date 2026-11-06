@@ -65,6 +65,7 @@ def downloader(monkeypatch):
         ydl.add_info_extractor(cls())
     monkeypatch.setattr(loader, "_downloader", ydl)
     _Target.calls = 0
+    _Shortener.result = {}
     return ydl
 
 
@@ -105,8 +106,7 @@ def test_chain_of_several_hops_loads_the_final_stream(downloader, monkeypatch):
 
     downloader.add_info_extractor(Middle())
     _first_hop(monkeypatch, _Shortener)
-    _hop("https://middle.test/x")
-    _Shortener.result["ie_key"] = Middle.ie_key()
+    _hop("https://middle.test/x", ie_key=Middle.ie_key())
 
     result = loader._load_song(SHORT)
 
@@ -136,8 +136,7 @@ def test_playlist_url_entries_stay_unresolved(downloader, monkeypatch):
 
 def test_unresolvable_target_raises_songinfo_error(downloader, monkeypatch):
     _first_hop(monkeypatch, _Shortener)
-    _hop("https://failing.test/x")
-    _Shortener.result["ie_key"] = _FailingTarget.ie_key()
+    _hop("https://failing.test/x", ie_key=_FailingTarget.ie_key())
 
     with pytest.raises(SongError) as info:
         loader._load_song(SHORT)
