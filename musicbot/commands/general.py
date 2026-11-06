@@ -47,15 +47,24 @@ async def _apply_setting(ctx, descriptor: SettingDescriptor, value):
         await ctx.send(refusal)
         return
     sett = get_settings(ctx)
+    failure = f"`Error: Setting {descriptor.name} could not be updated.`"
+    if value is None:
+        if not await sett.reset_setting(descriptor.name, ctx):
+            await ctx.send(failure)
+            return
+        await ctx.send(
+            config.SETTING_RESET.format(
+                descriptor.name, descriptor.show(ctx, descriptor.default)
+            )
+        )
+        return
     try:
         updated = await sett.update_setting(descriptor.name, value, ctx)
     except ConversionError as e:
         await ctx.send(f"`Error: {e}`")
         return
     if not updated:
-        await ctx.send(
-            f"`Error: Setting {descriptor.name} could not be updated.`"
-        )
+        await ctx.send(failure)
         return
     await ctx.send(
         f"Setting `{descriptor.name}` updated to"
@@ -81,6 +90,7 @@ def _setting_subcommand(descriptor: SettingDescriptor, owner: str):
         co_varnames=("self", "ctx", descriptor.param_name)
         + code.co_varnames[3:]
     )
+    callback.__defaults__ = (None,)
     callback.__annotations__ = {
         "ctx": commands.Context,
         descriptor.param_name: descriptor.param_type,
