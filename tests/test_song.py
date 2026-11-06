@@ -6,7 +6,7 @@ from datetime import datetime, timezone
 from musicbot.linkutils import SiteTypes
 from musicbot.playlists import PlaylistRef, SavedEntry
 from musicbot.settings import SavedPlaylist
-from musicbot.song import Song
+from musicbot.song import LoadResult, Song
 
 URL = "https://example.invalid/track"
 
@@ -80,3 +80,9 @@ def test_format_output_of_a_title_less_song_shows_its_webpage_url():
 
         assert "None" not in embed.description
         assert URL in embed.description
+
+
+def test_of_song_is_a_single_untruncated_result():
+    song = Song(SiteTypes.YT_DLP, "https://example.invalid/a")
+
+    assert LoadResult.of_song(song) == LoadResult([song], True, None)
