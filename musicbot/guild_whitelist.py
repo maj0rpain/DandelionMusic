@@ -162,31 +162,34 @@ async def import_env_whitelist(session_factory: SessionFactory):
     async with session_factory() as session:
         if await session.get(BotState, ENV_WHITELIST_IMPORTED) is not None:
             return
-        # Two things are tolerated here. Rows that already exist (a
-        # restored backup can have rows without the marker) are skipped
-        # below. A concurrent import in another process sharing the
-        # database, which commits between the marker check above and
-        # our commit, is handled at the commit: we lose the race and
-        # roll back. Either would otherwise raise IntegrityError out of
-        # MusicBot.start() and the bot would never log in.
+        # Tolerated: rows that already exist (a restored backup can have
+        # rows without the marker) are skipped below, and duplicate env
+        # entries are imported once. A concurrent import in another
+        # process sharing the database, which commits between the marker
+        # check above and our commit, is a lost race: an IntegrityError
+        # at the commit counts as one only if the marker row exists
+        # after the rollback. Any other IntegrityError is re-raised so
+        # startup fails instead of running with an empty (admit-all)
+        # whitelist.
+        wanted = {int(guild_id) for guild_id in config.GUILD_WHITELIST}
         existing = await _listed(session)
-        for guild_id in config.GUILD_WHITELIST:
-            if int(guild_id) not in existing:
-                session.add(WhitelistedGuild(guild_id=str(guild_id)))
+        for guild_id in sorted(wanted - existing):
+            session.add(WhitelistedGuild(guild_id=str(guild_id)))
         session.add(
-            BotState(
-                key=ENV_WHITELIST_IMPORTED,
-                value=str(len(config.GUILD_WHITELIST)),
-            )
+            BotState(key=ENV_WHITELIST_IMPORTED, value=str(len(wanted)))
         )
         try:
             await session.commit()
         except IntegrityError:
             await session.rollback()
-            return
+            async with session_factory() as check:
+                marker = await check.get(BotState, ENV_WHITELIST_IMPORTED)
+            if marker is not None:
+                return
+            raise
     if config.GUILD_WHITELIST:
         print(
-            f"Imported {len(config.GUILD_WHITELIST)} guild(s) from the"
+            f"Imported {len(wanted)} guild(s) from the"
             " GUILD_WHITELIST environment variable into the database."
             " That variable is no longer read after this point - manage"
             " the whitelist with d!guild_whitelist and remove it from"

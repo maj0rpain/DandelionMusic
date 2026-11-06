@@ -55,6 +55,52 @@ class TimerPort(Protocol):
         pass
 
 
+class _AudioProbe(discord.AudioSource):
+    """A pass-through audio source: forwards `read()`, `is_opus()`,
+    `cleanup()` and every other attribute read and write (`volume`,
+    `original`) to the source it wraps, and records whether any
+    `read()` returned a non-empty frame. That flag is the only work it
+    does on discord.py's audio thread."""
+
+    _OWN = ("_wrapped", "produced_audio")
+
+    def __init__(self, wrapped):
+        object.__setattr__(self, "_wrapped", wrapped)
+        object.__setattr__(self, "produced_audio", False)
+
+    def read(self):
+        frame = self._wrapped.read()
+        if frame:
+            self.produced_audio = True
+        return frame
+
+    def is_opus(self):
+        return self._wrapped.is_opus()
+
+    def cleanup(self):
+        self._wrapped.cleanup()
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+    def __setattr__(self, name, value):
+        if name in self._OWN:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._wrapped, name, value)
+
+
+class _PlayingTrack:
+    """The playing track: its song, its audio probe, and whether
+    Playback itself ended it (a handover or stop(), never a failure).
+    One record per play(), so the three cannot go out of step."""
+
+    def __init__(self, song: "Song", probe: _AudioProbe):
+        self.song = song
+        self.probe = probe
+        self.ended_by_us = False
+
+
 class PlaybackState(Enum):
     """IDLE: nothing playing, paused or pending. STARTING: a track is
     claimed but its preload has not finished. ACTIVE: the voice client
@@ -79,6 +125,7 @@ class Playback:
         preload: Callable[["Song"], Awaitable[bool]],
         make_source: Callable[["Song"], object],
         next_track: Callable[[bool], Optional["Song"]],
+        drop_failed: Callable[[], Optional["Song"]],
         clear_queue: Callable[[], None],
         schedule_preload: Callable[[], None],
         announce: Callable[["Song"], Awaitable[None]],
@@ -97,6 +144,7 @@ class Playback:
         self._preload = preload
         self._make_source = make_source
         self._next_track = next_track
+        self._drop_failed = drop_failed
         self._clear_queue = clear_queue
         self._schedule_preload = schedule_preload
         self._announce = announce
@@ -129,6 +177,10 @@ class Playback:
         # True for the whole of teardown(): a track-end hop that lands
         # meanwhile must not start the idle timer.
         self._disconnecting = False
+        # the playing track's song, audio probe and ended-by-us flag,
+        # replaced as one record when a track is handed to the voice
+        # client
+        self._track: Optional[_PlayingTrack] = None
 
     # -- state -------------------------------------------------------
 
@@ -161,8 +213,10 @@ class Playback:
         return self._generation
 
     def _invalidate_start(self):
-        """Drops a pending start, if any, so that it plays nothing once
-        its preload returns."""
+        """Drops a pending start or hand-over, so that a pending start
+        plays nothing once its preload returns and no advance takes a
+        hand-over picked before the intent that cancelled it."""
+        self._next_song = None
         if self._start_pending:
             self._generation += 1
             self._start_pending = False
@@ -234,6 +288,7 @@ class Playback:
         # stopping an active voice client runs an `after` callback;
         # its _advance() finds the queue empty and idle, so
         # save_backup() keeps this snapshot
+        self._mark_ended_by_us()
         self._voice_client().stop()
 
     def toggle_pause(self) -> PauseState:
@@ -330,6 +385,17 @@ class Playback:
             # move or reconnect, when a real track end must advance.
             return
 
+        track = self._track
+        if (
+            track is not None
+            and not track.ended_by_us
+            and not track.probe.produced_audio
+        ):
+            # ended on its own having played nothing: a failed track,
+            # guarded like a start by a token of its own
+            self._spawn(self._fail_track(track.song, self._claim_start()))
+            return
+
         self._advance()
 
     def _advance(self, forced=False):
@@ -344,25 +410,54 @@ class Playback:
         self.save_backup()
 
         if next_song is None:
-            # nothing left to advance to - the next song to start is a
-            # fresh one
-            self._playing = False
-            if not self._timer.triggered and self._voice_client():
-                self._spawn(self.start_idle_timer(self._humans_present()))
+            self._go_idle()
             return
 
         self._spawn_start(next_song)
+
+    def _go_idle(self):
+        """Nothing is left to play: the next song to start is a fresh
+        one, and the idle timer starts."""
+        self._playing = False
+        if not self._timer.triggered and self._voice_client():
+            self._spawn(self.start_idle_timer(self._humans_present()))
+
+    def _mark_ended_by_us(self):
+        """Playback itself is ending the playing track (a handover or
+        stop()): that end is never a failure."""
+        if self._track is not None:
+            self._track.ended_by_us = True
 
     def _hand_over_to(self, song: "Song"):
         """With a track active, picks `song` as the next one and stops
         the voice client: the after= hop of the track does the advance.
         """
         self._next_song = song
+        self._mark_ended_by_us()
         self._voice_client().stop()
 
     def _spawn_start(self, song: "Song"):
         """Claims a start for `song` and spawns its play."""
         self._spawn(self._play(song, self._claim_start()))
+
+    async def _fail_track(self, song: "Song", generation: int):
+        """The one failed-track path: reports `song`, drops it from the
+        queue (no rotation, no play history), writes the backup without
+        it and starts the new head, or goes idle. A start overtaken
+        before or during the report drops and starts nothing."""
+        await self._report_skipped(song)
+        if self._drop_if_overtaken(generation):
+            return
+
+        next_song = self._drop_failed()
+        self._write_backup()
+
+        if next_song is None:
+            self._start_pending = False
+            self._go_idle()
+            return
+
+        self._spawn_start(next_song)
 
     async def _play(self, song: "Song", generation: int) -> bool:
         """True when `song` was handed to the voice client; False for a
@@ -373,10 +468,7 @@ class Playback:
             return False
 
         if not preloaded:
-            await self._report_skipped(song)
-            if self._drop_if_overtaken(generation):
-                return False
-            self.skip(forced=True)
+            await self._fail_track(song, generation)
             return False
 
         if song.url is None:
@@ -385,14 +477,15 @@ class Playback:
                 " Refusing to play a song without direct url.",
                 file=sys.stderr,
             )
-            self.skip(forced=True)
+            await self._fail_track(song, generation)
             return False
 
         # Claimed before play() rather than after it, because play()
         # starts the audio thread there and then: a source that yields
         # nothing (a truncated file, a stream URL that died) ends
-        # immediately, and its after= hop advances an empty queue,
-        # which clears this flag. Reading it afterwards would see the
+        # immediately, and its after= hop takes the failed-track path,
+        # which clears this flag when the queue runs dry. Reading it
+        # afterwards would see the
         # value that callback left, announce a track that has already
         # finished, and leave the flag set with nothing playing -
         # silencing the next genuine start. A play() that raises below
@@ -403,8 +496,10 @@ class Playback:
         # token that guards the start is _claim_start()'s
         self._start_pending = False
         try:
+            probe = _AudioProbe(self._make_source(song))
+            self._track = _PlayingTrack(song, probe)
             self._voice_client().play(
-                self._make_source(song),
+                probe,
                 after=self._track_end_callback(generation),
             )
         except discord.ClientException:
