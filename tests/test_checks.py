@@ -126,7 +126,7 @@ def test_owner_check(monkeypatch, extra_owners, author_id, is_owner, allowed):
     if allowed:
         assert run(owner_check(ctx)) is True
     else:
-        with pytest.raises(NotOwner):
+        with pytest.raises(NotOwner, match="You do not own this bot."):
             run(owner_check(ctx))
 
 

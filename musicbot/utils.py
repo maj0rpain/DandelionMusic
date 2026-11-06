@@ -217,12 +217,18 @@ async def settings_admin_check(ctx: Context):
     raise CheckError(config.USER_MISSING_PERMISSIONS)
 
 
+async def is_bot_owner(bot, user) -> bool:
+    """Whether `user` is a bot owner: listed in EXTRA_OWNERS, or the
+    application owner. EXTRA_OWNERS is checked first, so an extra owner
+    costs no application-info lookup."""
+    if user.id in config.EXTRA_OWNERS:
+        return True
+    return bool(await bot.is_owner(user))
+
+
 async def owner_check(ctx: Context):
     """Check if the user is the owner of the bot"""
-    if ctx.author.id in config.EXTRA_OWNERS:
-        return True
-    owner = await ctx.bot.is_owner(ctx.author)
-    if owner:
+    if await is_bot_owner(ctx.bot, ctx.author):
         return True
     raise NotOwner("You do not own this bot.")
 
