@@ -60,7 +60,7 @@ Button play plugin:
 Custom Cookies:
 * Extract cookies.txt from your browser using your preferred method
 * Save it as a new file inside `config/cookies/`, for example `config/cookies/my-cookies.txt`. Do not overwrite the tracked placeholder `config/cookies/cookies.txt`; git ignores every other file in that directory, so your cookies can't be committed by accident
-* Set `COOKIE_PATH` in your `.env` file to that file, for example `COOKIE_PATH=config/cookies/my-cookies.txt` (`Config` is read-only, so it is not set in `config.py`)
+* Set `COOKIE_PATH` in your `.env` file to that file, for example `COOKIE_PATH=config/cookies/my-cookies.txt` (`.env` overrides the `config.py` defaults and keeps a per-host path out of a tracked file)
 
 ### Docker
 
@@ -85,7 +85,7 @@ After the bot has joined your server, use ```d!help``` to display help and comma
 
 
 ```
-d!p / d!yt [link/video title/key words/playlist-link/soundcloud link/spotify link/bandcamp link/twitter link]
+d!play / d!p / d!yt [link/video title/key words/playlist-link/soundcloud link/spotify link/bandcamp link/twitter link]
 ```
 
 * Plays the audio of supported website
@@ -93,12 +93,6 @@ d!p / d!yt [link/video title/key words/playlist-link/soundcloud link/spotify lin
     - The title of a video ex. (Gennifer Flowers - Fever Dolls)
     - A link to a YouTube playlist
 * If a song is playing, it will be added to queue
-
-```
-d!play / d!p / d!yt
-```
-
-* Same as above: `d!p` and `d!yt` are aliases of `d!play`.
 
 ```
 d!playnext / d!pn [link/video title/key words]
@@ -168,7 +162,7 @@ d!playlist / d!pl
     - `d!playlist remove (name)` / `d!pl r (name)`: deletes a playlist
     - `d!playlist list` / `d!pl li`: lists the saved playlists
     - `d!playlist show (name)` / `d!pl sw (name)`: shows the songs of a playlist
-    - `d!playlist add_song (playlist) (song)` / `d!pl as (name) (song)`: adds a song to a playlist
+    - `d!playlist add_song (name) (song)` / `d!pl as (name) (song)`: adds a song to a playlist
     - `d!playlist remove_song (name) (position)` / `d!pl rs (name) (position)`: removes a song from a playlist
     - `d!playlist move_song (name) (from) (to)` / `d!pl ms (name) (from) (to)`: moves a song within a playlist
 

@@ -40,7 +40,7 @@ def _commands():
 
 
 def test_no_upstream_links():
-    cookies = (ROOT / "config/cookies/cookies.txt").read_text()
+    cookies = (ROOT / "config/cookies/cookies.txt").read_text(encoding="utf-8")
     assert UPSTREAM not in README
     assert UPSTREAM not in cookies
 
@@ -63,5 +63,5 @@ def test_placeholder_cookies_file_stays_tracked():
 
 
 def test_dockerignore_excludes_the_cookies_directory():
-    lines = (ROOT / ".dockerignore").read_text().splitlines()
+    lines = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
     assert "config/cookies/*" in [line.strip() for line in lines]
