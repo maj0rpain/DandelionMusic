@@ -251,9 +251,9 @@ class PlayerPanel:
 
         `send(view)` is an async callable that sends the message,
         carrying `view` when it is not None, and returns what it sent.
-        That becomes the player message; an interaction stands for its
-        original response. Returns what `send` returned. When `send`
-        raises, the error propagates and no message is recorded.
+        That becomes the player message. Returns what `send` returned.
+        When `send` raises, the error propagates and no message is
+        recorded.
         """
         async with self._lock:
             await self._take_down()
@@ -261,10 +261,7 @@ class PlayerPanel:
             view = self._layout(snapshot)
             res = await send(view)
             self._view = view
-            if isinstance(res, discord.Interaction):
-                self._message = await res.original_response()
-            else:
-                self._message = res
+            self._message = res
             self._drawn = snapshot
         return res
 

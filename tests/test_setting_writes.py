@@ -8,7 +8,7 @@ from sqlalchemy.exc import OperationalError
 from sqlalchemy import select
 
 from musicbot import settings
-from musicbot.settings import GuildSettings, default_settings
+from musicbot.settings import GuildSettings, SETTINGS, default_settings
 
 from db_seam import in_memory_db
 from helpers import run
@@ -78,9 +78,15 @@ def test_a_failed_commit_returns_false_and_stores_nothing():
         failing = FailingCommit(factory)
         ctx = ctx_for(failing)
 
-        assert await sett.update_setting("announce_songs", True, ctx) is False
+        assert (
+            await sett.update_setting(SETTINGS["announce_songs"], True, ctx)
+            is False
+        )
         failing.failing = False
-        assert await sett.update_setting("default_volume", 50, ctx) is True
+        assert (
+            await sett.update_setting(SETTINGS["default_volume"], 50, ctx)
+            is True
+        )
 
         assert sett.announce_songs is False
         stored = await row(factory)
@@ -95,7 +101,9 @@ def test_an_update_for_a_guild_without_a_row_returns_false():
         sett = GuildSettings(guild_id="nope", **default_settings())
 
         assert (
-            await sett.update_setting("default_volume", 50, ctx_for(factory))
+            await sett.update_setting(
+                SETTINGS["default_volume"], 50, ctx_for(factory)
+            )
             is False
         )
         assert sett.default_volume == 100
@@ -107,11 +115,14 @@ def test_a_failed_reset_returns_false_and_stores_nothing():
     async def test(factory):
         sett = await seeded(factory)
         ctx = ctx_for(factory)
-        assert await sett.update_setting("default_volume", 50, ctx) is True
+        assert (
+            await sett.update_setting(SETTINGS["default_volume"], 50, ctx)
+            is True
+        )
 
         assert (
             await sett.reset_setting(
-                "default_volume", ctx_for(FailingCommit(factory))
+                SETTINGS["default_volume"], ctx_for(FailingCommit(factory))
             )
             is False
         )
@@ -128,8 +139,8 @@ def test_gathered_updates_of_different_settings_both_persist():
         ctx = ctx_for(factory)
 
         results = await asyncio.gather(
-            sett.update_setting("announce_songs", True, ctx),
-            sett.update_setting("default_volume", 30, ctx),
+            sett.update_setting(SETTINGS["announce_songs"], True, ctx),
+            sett.update_setting(SETTINGS["default_volume"], 30, ctx),
         )
 
         assert results == [True, True]
@@ -164,11 +175,11 @@ def test_concurrent_updates_of_one_setting_leave_memory_equal_to_the_row():
 
         ctx = ctx_for(holding)
         first = asyncio.create_task(
-            sett.update_setting("default_volume", 10, ctx)
+            sett.update_setting(SETTINGS["default_volume"], 10, ctx)
         )
         await first_committing.wait()
         second = asyncio.create_task(
-            sett.update_setting("default_volume", 20, ctx)
+            sett.update_setting(SETTINGS["default_volume"], 20, ctx)
         )
         await asyncio.sleep(0)
         await asyncio.sleep(0)

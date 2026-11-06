@@ -170,20 +170,3 @@ def test_view_path_not_done_returns_original_response(monkeypatch):
     interaction.response.send_message.assert_awaited_once_with(
         "x", view="VIEW"
     )
-
-
-def test_response_send_message_with_interaction(monkeypatch):
-    interaction = make_interaction(False)
-    ctx, parent, _ = make_send_ctx(monkeypatch, interaction)
-    assert run(ctx.response_send_message("x")) == "first"
-    interaction.response.send_message.assert_awaited_once_with("x")
-    parent.assert_not_awaited()
-
-
-def test_response_send_message_without_interaction_goes_via_send(
-    monkeypatch,
-):
-    ctx, parent, panel = make_send_ctx(monkeypatch, None)
-    assert run(ctx.response_send_message("x")) == "sent"
-    panel.attach.assert_awaited_once()
-    parent.assert_awaited_once_with("x", view="VIEW")

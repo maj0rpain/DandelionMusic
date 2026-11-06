@@ -157,9 +157,12 @@ async def owner_check(ctx: Context):
 def joining_command(func):
     """Marks a command as a joining command (GLOSSARY.md): one that
     may bring the bot into the invoker's voice channel, or move it
-    there, when it runs or later, when a pick in a view it opened
-    acts in its name. A command that opens a view whose picks may
-    later join voice must carry the marker too: a pick joins through
+    there, once its own checks on its input have passed, or later,
+    when a pick from a message it sent acts in its name. A marked
+    Music command joins in its body, after its input checks, through
+    Music._enter; the hooks never join. A command that opens a view
+    whose picks may later join voice must carry the marker too: a
+    pick joins through
     that command's context (a library search or browse pick) or
     is admitted as RequestKind.PICK (a search pick). Opt-in: a
     command without it never joins. Place it below the command
@@ -280,7 +283,7 @@ class Timer:
         # the loop, which would otherwise clear self._task while
         # leaving the real task alive and still due to fire. No caller
         # does that today: discord.py's audio thread only hops to the
-        # loop, and next_song() and add_task() are loop-only.
+        # loop, and skip() and add_task() are loop-only.
         try:
             current = asyncio.current_task()
         except RuntimeError:
