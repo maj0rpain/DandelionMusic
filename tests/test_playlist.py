@@ -140,3 +140,25 @@ class TestInsertNext:
         playlist = Playlist()
         playlist.insert_next(plain_song("x"))
         assert [s.title for s in playlist.playque] == ["x"]
+
+
+class TestDropHead:
+    @pytest.mark.parametrize("loop", list(LoopMode))
+    def test_removes_the_head_without_rotating_or_recording(self, loop):
+        playlist = filled("a", "b", "c")
+        playlist.loop = loop
+
+        new_head = playlist.drop_head()
+
+        assert new_head.title == "b"
+        assert [s.title for s in playlist.playque] == ["b", "c"]
+        assert list(playlist.playhistory) == []
+
+    @pytest.mark.parametrize("loop", list(LoopMode))
+    def test_returns_none_when_the_queue_is_now_empty(self, loop):
+        playlist = filled("a")
+        playlist.loop = loop
+
+        assert playlist.drop_head() is None
+        assert len(playlist) == 0
+        assert list(playlist.playhistory) == []

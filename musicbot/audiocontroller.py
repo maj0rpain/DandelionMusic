@@ -75,6 +75,7 @@ class AudioController(object):
             preload=self._preload,
             make_source=self._make_source,
             next_track=lambda forced: self.playlist.next(forced),
+            drop_failed=lambda: self.playlist.drop_head(),
             clear_queue=self._clear_queue,
             schedule_preload=self._schedule_preload,
             announce=self.panel.announce,
