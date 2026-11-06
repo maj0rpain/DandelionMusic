@@ -176,7 +176,8 @@ class PlaybackVoiceClient:
         self.source = source
         self.playing = True
         self._after = after
-        if not self.produces_nothing:
+        silent, self.produces_nothing = self.produces_nothing, False
+        if not silent:
             source.read()
 
     def detach_after(self):

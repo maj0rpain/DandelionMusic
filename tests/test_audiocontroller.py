@@ -2497,7 +2497,7 @@ async def _cmd_skip(controller):
 
 
 async def _cmd_back(controller):
-    controller.playback.back(_old_track(controller))
+    controller.prev_song()
 
 
 async def _cmd_newer_start(controller):
@@ -2513,7 +2513,7 @@ async def _cmd_disconnect(controller):
     [
         (_cmd_stop, ["first"], []),
         (_cmd_skip, ["first", "second"], ["second"]),
-        (_cmd_back, ["first", "old"], ["first", "second"]),
+        (_cmd_back, ["first", "old"], ["old", "first", "second"]),
         (_cmd_newer_start, ["first", "second"], ["first", "second"]),
     ],
 )
@@ -2524,6 +2524,7 @@ def test_a_command_overtakes_a_failure_notice_in_flight(
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
     _silent_voice(controller)
+    _old_track(controller)
 
     _bounded(
         controller, lambda: _end_with_notice_in_flight(controller, command)
@@ -2560,7 +2561,7 @@ def test_a_disconnect_overtaking_a_failure_notice_keeps_backup_no_idle(
     [
         (_cmd_stop, []),
         (_cmd_skip, ["second"]),
-        (_cmd_back, ["old"]),
+        (_cmd_back, None),
     ],
 )
 def test_a_user_command_on_a_track_with_no_audio_is_not_a_failure(
@@ -2579,6 +2580,10 @@ def test_a_user_command_on_a_track_with_no_audio_is_not_a_failure(
     _run_playing(controller, scenario, runner=_bounded)
 
     assert controller.panel.skipped == []
+    if command is _cmd_back:
+        # the queue's real step-back: history under OFF/SINGLE, rotation
+        # under ALL
+        played = ["second"] if mode == LoopMode.ALL else ["old"]
     assert _played(controller)[1:] == played
     if command is _cmd_stop:
         assert _titles(controller) == []
