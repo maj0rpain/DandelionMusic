@@ -1,5 +1,9 @@
 name: checks
-on: [push, pull_request]
+on:
+  push:
+    branches: ['**']
+  pull_request:
+  workflow_call:
 jobs:
   run-checks:
     runs-on: ubuntu-latest
@@ -10,7 +14,7 @@ jobs:
           python-version: "3.13"
 
       - name: Run checks
-        run: uv run --group dev pre-commit run --all
+        run: uv run --locked --group dev pre-commit run --all
 
   run-tests:
     runs-on: ubuntu-latest
@@ -21,7 +25,7 @@ jobs:
           python-version: "3.13"
 
       - name: Run tests
-        run: uv run --group dev pytest
+        run: uv run --locked --group dev pytest
 
   docker-build:
     runs-on: ubuntu-latest
