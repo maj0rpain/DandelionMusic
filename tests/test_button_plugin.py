@@ -84,7 +84,7 @@ class FakeController:
 
 
 @dataclass(frozen=True)
-class Reaction:
+class ReactionEffects:
     processed: list
     sent: list
     events: list
@@ -155,7 +155,7 @@ def react(
         emoji=SimpleNamespace(name="x", id=None),
     )
     run(Button(bot).on_raw_reaction_add(event))
-    return Reaction(
+    return ReactionEffects(
         controller.processed,
         sent,
         guild.events,
@@ -171,9 +171,9 @@ B = "https://www.youtube.com/watch?v=bbbbbbbbbbb"
 
 
 def test_failing_link_replies_and_next_link_is_processed():
-    result = react({A: loader.SongError("bad link"), B: SILENT_OUTCOME})
-    assert result.processed == [A, B]
-    assert result.sent == ["bad link"]
+    effects = react({A: loader.SongError("bad link"), B: SILENT_OUTCOME})
+    assert effects.processed == [A, B]
+    assert effects.sent == ["bad link"]
 
 
 def test_reaction_in_a_thread_is_processed():
@@ -181,9 +181,9 @@ def test_reaction_in_a_thread_is_processed():
 
 
 def test_unresolvable_channel_does_nothing():
-    result = react({A: SILENT_OUTCOME}, resolves=False)
-    assert result.processed == []
-    assert result.sent == []
+    effects = react({A: SILENT_OUTCOME}, resolves=False)
+    assert effects.processed == []
+    assert effects.sent == []
 
 
 @pytest.mark.parametrize("kind", ["track", "album", "playlist"])
@@ -195,11 +195,11 @@ def test_spotify_uri_returns_the_open_link(kind):
 
 
 def test_reacting_to_a_spotify_uri_processes_the_open_link():
-    result = react(
+    effects = react(
         {SPOTIFY: SILENT_OUTCOME},
         content=f"spotify:track:{SPOTIFY_ID}",
     )
-    assert result.processed == [SPOTIFY]
+    assert effects.processed == [SPOTIFY]
 
 
 def test_truncated_playlist_sends_exactly_the_notice():
@@ -211,9 +211,9 @@ def test_truncated_playlist_sends_exactly_the_notice():
 @pytest.mark.parametrize("announce", [True, False])
 def test_started_link_sends_what_render_returns(announce):
     outcome = EnqueueOutcome(OutcomeKind.STARTED, song=plain_song("a"))
-    result = react({A: outcome}, announce_songs=announce)
+    effects = react({A: outcome}, announce_songs=announce)
     expected = render(outcome, announce)
-    assert result.sent == ([] if expected is None else [expected.embed.title])
+    assert effects.sent == ([] if expected is None else [expected.embed.title])
 
 
 def test_several_links_send_each_outcome_and_the_error_in_link_order():
@@ -221,7 +221,7 @@ def test_several_links_send_each_outcome_and_the_error_in_link_order():
         OutcomeKind.QUEUED, song=plain_song("a"), position=2
     )
     playlist = EnqueueOutcome(OutcomeKind.PLAYLIST, count=4)
-    result = react(
+    effects = react(
         {
             A: queued,
             B: loader.SongError("bad link"),
@@ -229,8 +229,8 @@ def test_several_links_send_each_outcome_and_the_error_in_link_order():
             YOUTUBE: playlist,
         }
     )
-    assert result.processed == [A, B, SOUNDCLOUD, YOUTUBE]
-    assert result.sent == [
+    assert effects.processed == [A, B, SOUNDCLOUD, YOUTUBE]
+    assert effects.sent == [
         "Added to queue - position 2",
         "bad link",
         render(playlist, False).text,
@@ -238,27 +238,27 @@ def test_several_links_send_each_outcome_and_the_error_in_link_order():
 
 
 def test_reaction_outside_the_command_channel_is_refused_silently():
-    result = react({A: SILENT_OUTCOME}, command_channel=3)
-    assert (result.processed, result.sent) == ([], [])
-    assert result.events == []
+    effects = react({A: SILENT_OUTCOME}, command_channel=3)
+    assert (effects.processed, effects.sent) == ([], [])
+    assert effects.events == []
 
 
 def test_reaction_from_outside_voice_is_refused_silently():
-    result = react({A: SILENT_OUTCOME}, in_voice=False)
-    assert (result.processed, result.sent) == ([], [])
-    assert result.events == []
+    effects = react({A: SILENT_OUTCOME}, in_voice=False)
+    assert (effects.processed, effects.sent) == ([], [])
+    assert effects.events == []
 
 
 def test_reaction_while_idle_connects_and_queues():
-    result = react({A: SILENT_OUTCOME})
-    assert result.processed == [A]
-    assert result.events == [("connect", "mine")]
+    effects = react({A: SILENT_OUTCOME})
+    assert effects.processed == [A]
+    assert effects.events == [("connect", "mine")]
 
 
 def test_a_configured_command_channel_is_the_panels_fallback_destination():
-    result = react({A: SILENT_OUTCOME}, command_channel=2)
+    effects = react({A: SILENT_OUTCOME}, command_channel=2)
 
-    ((channel, replace),) = result.directed
+    ((channel, replace),) = effects.directed
     assert (channel.id, replace) == (2, False)
 
 
@@ -267,6 +267,6 @@ def test_no_configured_command_channel_directs_the_panel_nowhere():
 
 
 def test_an_unresolved_command_channel_directs_the_panel_nowhere():
-    result = react({A: SILENT_OUTCOME}, command_channel=2, resolves=False)
+    effects = react({A: SILENT_OUTCOME}, command_channel=2, resolves=False)
 
-    assert result.directed == []
+    assert effects.directed == []
