@@ -28,6 +28,7 @@ from discord_fakes import (
     situation,
 )
 from helpers import run
+from message_link_fakes import FOREIGN_LINK
 
 
 class RecordingController:
@@ -138,6 +139,16 @@ def test_play_with_no_track_and_no_file_does_not_join(callback):
     guild, ctx, cog, sent = body_ctx(callback.name)
     invoke(cog, ctx, callback.callback)
     assert sent == [config.PLAY_ARGS_MISSING]
+    assert joins(guild) == []
+
+
+@pytest.mark.parametrize("callback", [Music._play, Music._play_next])
+def test_play_with_a_message_link_the_member_cannot_read_does_not_join(
+    callback,
+):
+    guild, ctx, cog, sent = body_ctx(callback.name)
+    invoke(cog, ctx, callback.callback, track=FOREIGN_LINK)
+    assert [str(m) for m in sent] == [config.MESSAGE_LINK_FORBIDDEN]
     assert joins(guild) == []
 
 

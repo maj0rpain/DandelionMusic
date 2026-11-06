@@ -198,6 +198,11 @@ class Music(commands.Cog):
         if track is None:
             await ctx.send(config.PLAY_ARGS_MISSING)
             return
+        try:
+            await check_message_link(track, ctx.guild, ctx.author)
+        except SongError as e:
+            await ctx.send(e)
+            return
 
         await self._enter(ctx)
         await ctx.defer()

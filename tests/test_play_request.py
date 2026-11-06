@@ -16,6 +16,7 @@ COMMANDS = [("_play", False), ("_play_next", True)]
 
 def run_command(name, ctx, monkeypatch, **kwargs):
     reached = []
+    ctx.guild = ctx.author = None  # no message link: never read
 
     async def play_song(self, ctx, track, playnext=False):
         reached.append((track, playnext))
