@@ -21,7 +21,12 @@ from mutagen.id3 import (
 from mutagen.aiff import AIFF
 from mutagen.wave import WAVE
 
-from musicbot.audiotags import AudioTags, read_artwork, read_tags
+from musicbot.audiotags import (
+    _FORMATS,
+    AudioTags,
+    read_artwork,
+    read_tags,
+)
 
 FIXTURES = Path(__file__).parent / "fixtures"
 
@@ -333,3 +338,46 @@ def test_strict_on_a_missing_file_raises_oserror_and_prints_nothing(
     with pytest.raises(OSError):
         reader(tmp_path / "gone.mp3", strict=True)
     assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("maker", [make_flac, make_aiff, make_wav])
+def test_lossless_files_keep_their_bit_depth(maker, tmp_path):
+    assert read_tags(maker(tmp_path)).bit_depth is not None
+
+
+@pytest.mark.parametrize("maker", [make_mp3, make_wma, make_mp4])
+def test_lossy_files_have_no_bit_depth(maker, tmp_path):
+    assert read_tags(maker(tmp_path)).bit_depth is None
+
+
+class _Info:
+    def __init__(self, **attrs):
+        self.__dict__.update(attrs)
+
+
+def _depth_reader(audio_type):
+    return next(
+        row for row in _FORMATS if audio_type in row.types
+    ).bit_depth
+
+
+def test_mp4_reader_keeps_the_depth_of_alac():
+    info = _Info(codec="alac", bits_per_sample=24)
+    assert _depth_reader(MP4)(info) == 24
+
+
+def test_mp4_reader_gives_none_for_aac():
+    info = _Info(codec="mp4a.40.2", bits_per_sample=16)
+    assert _depth_reader(MP4)(info) is None
+
+
+def test_fallback_reader_keeps_a_reported_depth():
+    assert _depth_reader(object)(_Info(bits_per_sample=24)) == 24
+
+
+def test_fallback_reader_gives_none_without_the_attribute():
+    assert _depth_reader(object)(_Info()) is None
+
+
+def test_fallback_reader_gives_none_for_zero():
+    assert _depth_reader(object)(_Info(bits_per_sample=0)) is None
