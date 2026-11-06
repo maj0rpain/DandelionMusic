@@ -549,9 +549,7 @@ class AudioController(object):
 
         added = [song for song in loaded_tail if song is not None]
         if added:
-            rest = await self.enqueue(added)
-            if rest.kind is OutcomeKind.REFUSED_NOT_IN_VOICE:
-                return refused
+            await self.enqueue(added)
 
         return EnqueueOutcome(
             OutcomeKind.LIBRARY_PICK,
