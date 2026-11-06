@@ -64,15 +64,15 @@ class PanelMessage:
             self.store.add_view(view, self.id)
 
     async def edit(self, *, view):
+        if view is None:
+            self.strips_saw_finished.append(
+                self.shown is not None and self.shown.is_finished()
+            )
         if self.errors:
             raise self.errors.pop(0)
         self.edits.append(view)
         if self.store is not None:
             self.store._synced_message_views.pop(self.id, None)
-        if view is None:
-            self.strips_saw_finished.append(
-                self.shown is not None and self.shown.is_finished()
-            )
         self.show(view)
 
 
@@ -785,6 +785,7 @@ def test_attach_stops_the_replaced_view_when_its_strip_fails(attached):
     rig.attach(PanelMessage())
 
     assert view.is_finished()
+    assert old.strips_saw_finished == [True]
 
 
 def test_an_inactive_refresh_stops_the_view_before_the_strip(attached):
@@ -824,18 +825,26 @@ def test_a_failed_refresh_edit_leaves_the_old_view_live(attached, capsys):
     assert old.is_finished()
 
 
+def edit_taking_down(rig):
+    """`(redrawn, edit)`: an edit that takes the panel down before it
+    finishes, collecting the views it was asked to draw."""
+    redrawn = []
+
+    async def edit(*, view):
+        await rig.panel.playback_ended()
+        if view is not None:
+            redrawn.append(view)
+
+    return redrawn, edit
+
+
 def test_a_refresh_edit_finishing_after_a_take_down_stops_the_new_view(
     attached,
 ):
     rig, message = attached
     rig.controller.snapshot = snap(volume=0)
 
-    redrawn = []
-
-    async def edit_after_take_down(*, view):
-        await rig.panel.playback_ended()
-        if view is not None:
-            redrawn.append(view)
+    redrawn, edit_after_take_down = edit_taking_down(rig)
 
     message.edit = edit_after_take_down
 
@@ -909,12 +918,7 @@ def test_a_recovery_edit_finishing_after_a_take_down_stops_the_new_view(
     fresh = PanelMessage(channel)
     channel.fetch_result = fresh
 
-    redrawn = []
-
-    async def edit_after_take_down(*, view):
-        await rig.panel.playback_ended()
-        if view is not None:
-            redrawn.append(view)
+    redrawn, edit_after_take_down = edit_taking_down(rig)
 
     fresh.edit = edit_after_take_down
 
@@ -926,13 +930,18 @@ def test_a_recovery_edit_finishing_after_a_take_down_stops_the_new_view(
 def test_a_take_down_after_a_raising_send_stops_nothing(attached):
     rig, old = attached
 
+    handed = []
+
     async def send(view):
+        handed.append(view)
         raise RuntimeError("no permission")
 
     with pytest.raises(RuntimeError):
         run(rig.panel.attach(send))
 
     run(rig.panel.playback_ended())
+
+    assert not handed[0].is_finished()
 
 
 def test_a_take_down_after_an_attach_without_buttons_stops_nothing():
@@ -942,6 +951,7 @@ def test_a_take_down_after_an_attach_without_buttons_stops_nothing():
 
     run(rig.panel.playback_ended())
 
+    assert message.shown is None
     assert message.edits == []
 
 
