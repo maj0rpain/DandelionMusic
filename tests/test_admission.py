@@ -98,9 +98,15 @@ def rows():
                 "move",
             ),
             (
-                f"{n}: bots-only channel, rule off, stays",
+                f"{n}: bots-only channel, rule off, moves",
                 kind,
                 {"bot": BOTS_ONLY, "rule": False},
+                "move",
+            ),
+            (
+                f"{n}: bots-only channel, rule off, author not in voice",
+                kind,
+                {"bot": BOTS_ONLY, "rule": False, "author": None},
                 "admitted",
             ),
             (
@@ -382,6 +388,22 @@ def test_admission_table(kind, spec, outcome, no_sleep):
     allow = spec.pop("allow_disconnecting", False)
     guild, ctx = situation(kind, **spec)
     if outcome in ("connect", "move", "admitted"):
+        expected_join = {
+            "connect": admission.Join.CONNECT,
+            "move": admission.Join.MOVE,
+            "admitted": admission.Join.NONE,
+        }[outcome]
+        admitted = run(
+            admission.check(
+                ctx,
+                None if kind in admission.COMMAND_KINDS else kind,
+                allow_disconnecting=allow,
+            )
+        )
+        assert admitted.join is expected_join
+        assert admitted.join_needed is (
+            expected_join is not admission.Join.NONE
+        )
         controller = run_request(ctx, kind, allow)
         assert controller is ctx.bot.sessions.controller(guild)
         expected = {
@@ -407,15 +429,17 @@ def test_a_failed_connect_is_refused_and_logged(kind, capsys):
     assert "TimeoutError" in capsys.readouterr().err
 
 
+@pytest.mark.parametrize("rule", [True, False])
 @pytest.mark.parametrize("kind", JOINING, ids=lambda k: k.name)
-def test_a_failed_move_is_refused_and_logged(kind, capsys, no_sleep):
-    guild, ctx = situation(kind, bot=BOTS_ONLY)
+def test_a_failed_move_is_refused_and_logged(kind, rule, capsys, no_sleep):
+    guild, ctx = situation(kind, bot=BOTS_ONLY, rule=rule)
     guild.fail = discord.ClientException("Not connected to voice")
     with pytest.raises(CheckError) as exc:
         run_request(ctx, kind)
     assert str(exc.value) == config.VOICE_CONNECT_FAILED
     assert guild.events == [("move", "b")]
     assert "Not connected to voice" in capsys.readouterr().err
+    assert guild.voice_client.channel.name == "a"
 
 
 @pytest.mark.parametrize("kind", EVERY, ids=lambda k: k.name)

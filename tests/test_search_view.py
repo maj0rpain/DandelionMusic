@@ -78,7 +78,7 @@ class FakeContext:
     """The bot is already in voice, so a pick needs no join."""
 
     def __init__(self, user_id=OWNER):
-        self.author = SimpleNamespace(id=user_id)
+        self.author = SimpleNamespace(id=user_id, voice=None)
         self.interaction = None
         self.guild = VoiceGuild()
         self.guild.put_bot_in(self.guild.channel("in voice"))
