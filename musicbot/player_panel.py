@@ -11,6 +11,7 @@ and reads the controller only through a getter:
 
 import asyncio
 import sys
+from dataclasses import dataclass
 from traceback import print_exc
 from typing import Callable, Optional
 
@@ -21,107 +22,130 @@ from musicbot import admission
 from musicbot.panel_snapshot import PanelSnapshot
 from musicbot.views import MusicButton
 
-__all__ = ["PanelSnapshot", "PlayerPanel", "build_view"]
+__all__ = [
+    "PanelHooks",
+    "PanelSnapshot",
+    "PlayerPanel",
+    "build_view",
+    "send_song_info",
+]
 
 INVALID_WEBHOOK_TOKEN = 50027
 
 
+@dataclass(frozen=True)
+class PanelHooks:
+    """The panel's click hooks: what the current-song and queue buttons
+    run, and the step awaited after a successful click - `after_skip`
+    for the `SKIP_IDS` buttons, `after_other` for every other."""
+
+    current_song: Optional[Callable]
+    queue: Optional[Callable]
+    after_skip: Optional[Callable]
+    after_other: Optional[Callable]
+
+
+SKIP_IDS = frozenset({"prev", "next"})
+
+
+async def send_song_info(ctx, song) -> None:
+    """The current-song reply: the queue-empty message when `song` is
+    `None`, otherwise the song's info embed."""
+    if song is None:
+        await ctx.send(config.QUEUE_EMPTY)
+        return
+    await ctx.send(embed=song.format_output(config.SONGINFO_SONGINFO))
+
+
 def build_view(
-    snapshot: PanelSnapshot,
-    on_current_song,
-    on_queue,
-    after_skip,
-    after_other,
+    snapshot: PanelSnapshot, hooks: PanelHooks
 ) -> Optional[discord.ui.View]:
     """The player buttons, a pure function of `snapshot`: `None` while
     inactive. The playback buttons call the clicking context's
-    controller; the current-song and queue buttons run the callbacks
-    given. After a successful click, `prev` and `next` await
-    `after_skip(ctx)` and every other button `after_other(ctx)`."""
+    controller; the current-song and queue buttons run `hooks`'
+    callbacks. After a successful click, the `SKIP_IDS` buttons await
+    `hooks.after_skip(ctx)` and every other button
+    `hooks.after_other(ctx)`."""
     if not snapshot.active:
         return None
 
+    def music_button(*args, custom_id, **kwargs):
+        after = (
+            hooks.after_skip if custom_id in SKIP_IDS else hooks.after_other
+        )
+        return MusicButton(*args, after=after, custom_id=custom_id, **kwargs)
+
     view = discord.ui.View(timeout=None)
     for button in (
-        MusicButton(
+        music_button(
             lambda ctx: ctx.audiocontroller.prev_song(),
             admission.RequestKind.DJ_PLAYER_BUTTON,
-            after=after_skip,
             custom_id="prev",
             disabled=not snapshot.has_previous,
             emoji="⏮️",
         ),
-        MusicButton(
+        music_button(
             lambda ctx: ctx.audiocontroller.pause(),
             admission.RequestKind.DJ_PLAYER_BUTTON,
-            after=after_other,
             custom_id="pause",
             emoji="▶️" if snapshot.paused else "⏸️",
         ),
-        MusicButton(
+        music_button(
             lambda ctx: ctx.audiocontroller.skip(),
             admission.RequestKind.DJ_PLAYER_BUTTON,
-            after=after_skip,
             custom_id="next",
             disabled=not snapshot.has_next,
             emoji="⏭️",
         ),
-        MusicButton(
+        music_button(
             lambda ctx: ctx.audiocontroller.loop(),
             admission.RequestKind.DJ_PLAYER_BUTTON,
-            after=after_other,
             custom_id="loop",
             disabled=snapshot.queue_empty,
             emoji="🔁",
             label="Loop: " + snapshot.loop_mode,
         ),
-        MusicButton(
-            on_current_song,
-            after=after_other,
+        music_button(
+            hooks.current_song,
             custom_id="current_song",
             row=1,
             disabled=snapshot.current_song is None,
             emoji="💿",
         ),
-        MusicButton(
+        music_button(
             lambda ctx: ctx.audiocontroller.shuffle(),
             admission.RequestKind.DJ_PLAYER_BUTTON,
-            after=after_other,
             custom_id="shuffle",
             row=1,
             disabled=snapshot.queue_empty,
             emoji="🔀",
         ),
-        MusicButton(
-            on_queue,
-            after=after_other,
+        music_button(
+            hooks.queue,
             custom_id="queue",
             row=1,
             disabled=snapshot.queue_empty,
             emoji="📜",
         ),
-        MusicButton(
+        music_button(
             lambda ctx: ctx.audiocontroller.stop(),
             admission.RequestKind.DJ_PLAYER_BUTTON,
-            after=after_other,
             custom_id="stop",
             row=1,
             emoji="⏹️",
             style=discord.ButtonStyle.red,
         ),
-        MusicButton(
+        music_button(
             lambda ctx: ctx.audiocontroller.volume_down(),
             admission.RequestKind.DJ_PLAYER_BUTTON,
-            after=after_other,
             custom_id="volume_down",
             row=2,
             disabled=snapshot.volume == 0,
             emoji="🔉",
         ),
-        MusicButton(
+        music_button(
             lambda ctx: ctx.audiocontroller.volume_up(),
             admission.RequestKind.DJ_PLAYER_BUTTON,
-            after=after_other,
             custom_id="volume_up",
             row=2,
             disabled=snapshot.volume == 100,
@@ -185,10 +209,7 @@ class PlayerPanel:
 
         return build_view(
             snapshot,
-            self.current_song,
-            self.queue,
-            after_skip,
-            after_other,
+            PanelHooks(self.current_song, self.queue, after_skip, after_other),
         )
 
     # -- the player message --------------------------------------------
@@ -325,11 +346,7 @@ class PlayerPanel:
     # -- button callbacks -----------------------------------------------
 
     async def current_song(self, ctx) -> None:
-        song = self._snapshot().current_song
-        if song is None:
-            await ctx.send(config.QUEUE_EMPTY)
-            return
-        await ctx.send(embed=song.format_output(config.SONGINFO_SONGINFO))
+        await send_song_info(ctx, self._snapshot().current_song)
 
     async def queue(self, ctx) -> None:
         controller = self._controller()
