@@ -181,7 +181,7 @@ class SettingDescriptor:
 
     def show(self, ctx: "Context", stored: Any) -> Any:
         "The settings embed's value for this setting"
-        if not stored:
+        if stored is None:
             return SettingsEmbed.FIELD_EMPTY
         shown = self.resolve(ctx, stored)
         return self.invalid if shown is None else shown
