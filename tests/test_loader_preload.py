@@ -290,3 +290,15 @@ def test_a_result_that_is_not_single_fails_the_preload(monkeypatch, result):
     song = _song(title="stale title")
     assert run(loader.preload(song)) is Preload.FAILED
     assert song.title == "stale title"
+
+
+def test_a_flac_attachment_without_a_stream_url_is_extracted(monkeypatch):
+    cdn = "https://cdn.discordapp.com/attachments/1/2/a.flac?ex=65&is=1"
+
+    async def load(lane, track):
+        return loader._load_song(track)
+
+    monkeypatch.setattr(loader, "_load", load)
+    song = Song(SiteTypes.YT_DLP, cdn)
+    assert run(loader.preload(song)) == Preload.EXTRACTED
+    assert song.url is not None

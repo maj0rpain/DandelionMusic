@@ -11,6 +11,7 @@ from pathlib import Path
 import jsonc
 import pytest
 
+from config.config import Config as ConfigClass
 from config.utils import alchemize_url, ensure_sqlite_parent, get_env_var
 
 REPO_ROOT = Path(__file__).parent.parent
@@ -545,3 +546,10 @@ def test_config_no_longer_writes_anything():
 
     for gone in ("save", "_update_env_files", "_replace_env_var"):
         assert not hasattr(config, gone), f"{gone} is still there"
+
+
+def test_env_sample_supported_extensions_match_the_default(config_factory):
+    sample = (REPO_ROOT / ".env.sample").read_text()
+    (line,) = re.findall(r"^SUPPORTED_EXTENSIONS=.*$", sample, re.M)
+    config = config_factory(SECRETS_ENV + line + "\n")
+    assert config.SUPPORTED_EXTENSIONS == ConfigClass.SUPPORTED_EXTENSIONS
