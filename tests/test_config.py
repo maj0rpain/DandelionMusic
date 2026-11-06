@@ -301,7 +301,9 @@ def test_library_hint_without_a_prefix(config_factory, slash, shown):
 )
 def test_library_hints_name_a_bang_prefix(config_factory, key):
     cfg = config_factory("BOT_TOKEN=x\nBOT_PREFIX=!\n")
-    assert "`!library refresh`" in getattr(cfg, key)
+    text = getattr(cfg, key)
+    assert "`!library refresh`" in text
+    assert "d!" not in text
 
 
 def test_no_language_file_string_holds_a_literal_d_bang():
