@@ -110,3 +110,8 @@ class LoadResult:
     songs: List[Song]
     single: bool
     truncation: Optional[Truncation] = None
+
+    @classmethod
+    def of_song(cls, song: Song) -> "LoadResult":
+        """The result of an input that named one track."""
+        return cls([song], True)

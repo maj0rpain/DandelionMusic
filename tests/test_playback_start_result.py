@@ -53,19 +53,10 @@ def test_start_returns_false_for_a_failed_preload(
             monkeypatch,
             stub_loader.Preload.FAILED,
         )
-        controller.command_channel = types_channel()
         return await _release(release, task)
 
     assert _run(controller, scenario) is False
     assert controller.guild.voice_client.played == []
-
-
-def types_channel():
-    class Channel:
-        async def send(self, *args, **kwargs):
-            pass
-
-    return Channel()
 
 
 def test_start_returns_false_for_a_song_without_a_direct_url(

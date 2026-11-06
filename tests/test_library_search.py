@@ -12,30 +12,16 @@ import difflib
 import pytest
 
 from musicbot import library
-from musicbot.library import LibrarySong, SearchResult
-
-
-def make_song(title, **kw):
-    return LibrarySong(
-        filename=kw.get("filename", title + ".flac"),
-        title=title,
-        duration=kw.get("duration"),
-        year=kw.get("year"),
-        genre=kw.get("genre"),
-        fmt=kw.get("fmt", "FLAC"),
-        bitrate=kw.get("bitrate"),
-        sample_rate=kw.get("sample_rate"),
-        bit_depth=kw.get("bit_depth"),
-    )
-
+from musicbot.library import SearchResult
+from library_fakes import library_song
 
 INDEX = {
     "Radiohead": {
-        "OK Computer": [make_song("Airbag"), make_song("Karma Police")],
-        "In Rainbows": [make_song("Nude")],
+        "OK Computer": [library_song("Airbag"), library_song("Karma Police")],
+        "In Rainbows": [library_song("Nude")],
     },
-    "The Beatles": {"Abbey Road": [make_song("Come Together")]},
-    "Theo": {"Short": [make_song("Track")]},
+    "The Beatles": {"Abbey Road": [library_song("Come Together")]},
+    "Theo": {"Short": [library_song("Track")]},
 }
 
 
@@ -148,7 +134,7 @@ class TestSearch:
         ]
 
     def test_album_wins_a_tie_against_its_own_track(self):
-        index = {"A": {"Same Name": [make_song("Same Name")]}}
+        index = {"A": {"Same Name": [library_song("Same Name")]}}
         assert library.search(index, "Same Name")[0].kind == "album"
 
 
@@ -173,18 +159,18 @@ class TestStats:
         """A single oddly-encoded bonus track must not decide the
         label."""
         songs = [
-            make_song("a", bit_depth=16, sample_rate=44100),
-            make_song("b", bit_depth=16, sample_rate=44100),
-            make_song("c", bit_depth=24, sample_rate=96000),
+            library_song("a", bit_depth=16, sample_rate=44100),
+            library_song("b", bit_depth=16, sample_rate=44100),
+            library_song("c", bit_depth=24, sample_rate=96000),
         ]
         assert library._quality(songs) == "16-bit / 44.1 kHz"
 
     def test_quality_falls_back_to_bitrate(self):
-        songs = [make_song("a", bitrate=320000, fmt="MP3")]
+        songs = [library_song("a", bitrate=320000, fmt="MP3")]
         assert library._quality(songs) == "320 kbps"
 
     def test_quality_is_none_without_stream_info(self):
-        assert library._quality([make_song("a")]) is None
+        assert library._quality([library_song("a")]) is None
 
 
 def test_search_result_shape():

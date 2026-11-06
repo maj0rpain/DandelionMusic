@@ -35,7 +35,7 @@ def drive(monkeypatch, listed, scenario):
             monkeypatch.setattr(bot, "register", register)
             monkeypatch.setattr(bot.sessions, "load_settings", load_settings)
             monkeypatch.setattr(
-                type(bot.update_views), "is_running", lambda self: True
+                type(bot.refresh_panels), "is_running", lambda self: True
             )
             await scenario(bot)
 
