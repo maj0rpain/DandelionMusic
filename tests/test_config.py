@@ -244,11 +244,7 @@ def _declared_variable_names(command):
 def test_dockerfile_declares_no_bot_setting_as_arg_or_env():
     from config.config import ENV_ALIASES, Config
 
-    settings = {
-        name
-        for name in vars(Config)
-        if name.isupper() and not name.startswith("_")
-    } | set(ENV_ALIASES)
+    settings = {*Config.as_dict(), *ENV_ALIASES}
     for command in _dockerfile_commands():
         if command.split()[0] not in ("ARG", "ENV"):
             continue
