@@ -1,6 +1,4 @@
-import ast
-from pathlib import Path
-
+from helpers import imported_roots
 from musicbot import library_display, library_session
 
 
@@ -28,15 +26,11 @@ class TestTrim:
 
 class TestTheSeam:
     def test_imports_nothing_from_the_project(self):
-        source = Path(library_display.__file__).read_text(encoding="utf-8")
-        names = set()
-        for node in ast.walk(ast.parse(source)):
-            if isinstance(node, ast.Import):
-                names.update(a.name for a in node.names)
-            elif isinstance(node, ast.ImportFrom):
-                names.add(node.module)
-        assert not {
-            n for n in names if n.split(".")[0] in {"musicbot", "config"}
+        # "" is the root of a relative import
+        assert not imported_roots(library_display) & {
+            "musicbot",
+            "config",
+            "",
         }
 
     def test_session_re_exports_none_of_the_helpers(self):

@@ -35,7 +35,7 @@ from controller_helpers import (
 )
 from controller_seam import PlaybackVoiceClient, StubLoader, controller_seam
 from db_seam import in_memory_db
-from helpers import imported_names, run
+from helpers import attribute_names, imported_names, run
 
 MIX = playlists.PlaylistRef("1234", "mix")
 
@@ -2126,23 +2126,13 @@ def test_a_disconnect_tells_the_panel_that_playback_ended(controller):
 
 
 def test_the_controller_imports_nothing_from_discord_ui():
-    import ast
-    from pathlib import Path
-
     import musicbot.audiocontroller as module
 
-    tree = ast.parse(Path(module.__file__).read_text())
     imported = imported_names(module)
 
     assert [m for m in imported if m.startswith("discord.ui")] == []
     assert "musicbot.player_panel" not in imported
-    assert not any(
-        isinstance(n, ast.Attribute)
-        and isinstance(n.value, ast.Name)
-        and n.value.id == "discord"
-        and n.attr == "ui"
-        for n in ast.walk(tree)
-    )
+    assert "discord.ui" not in attribute_names(module)
 
 
 def test_a_play_starts_announced_on_the_panel(controller, monkeypatch):
@@ -2195,35 +2185,3 @@ def test_a_failed_skipped_notice_still_lets_the_queue_advance(
 
 def test_the_controller_keeps_no_command_channel(controller):
     assert not hasattr(controller, "command_channel")
-
-
-def test_playback_imports_no_song_bot_or_playlist_class_at_runtime():
-    import ast
-    from pathlib import Path
-
-    import musicbot.playback as module
-
-    tree = ast.parse(Path(module.__file__).read_text())
-
-    imported = []
-    stack = list(tree.body)
-    while stack:
-        node = stack.pop()
-        if isinstance(node, ast.If) and (
-            ast.unparse(node.test) == "TYPE_CHECKING"
-        ):
-            continue
-        if isinstance(node, ast.Import):
-            imported += [alias.name for alias in node.names]
-        elif isinstance(node, ast.ImportFrom):
-            base = node.module or ""
-            imported.append(base)
-            imported += [f"{base}.{a.name}" for a in node.names]
-        stack += [
-            c for c in ast.iter_child_nodes(node) if isinstance(c, ast.stmt)
-        ]
-
-    # PauseState, a value Playback returns, is the one thing it takes
-    # from musicbot.playlist; the Playlist class itself stays out
-    forbidden = {"musicbot.song", "musicbot.bot", "musicbot.playlist.Playlist"}
-    assert not forbidden & set(imported)

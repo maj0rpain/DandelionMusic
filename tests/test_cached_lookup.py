@@ -3,7 +3,7 @@
 import asyncio
 
 from musicbot.cached_lookup import ByteBoundedStore, CachedLookup
-from helpers import FakeClock, imported_names, run
+from helpers import FakeClock, imported_roots, run
 
 
 class FakeBackend:
@@ -326,6 +326,6 @@ def test_store_clear_resets_the_total():
 def test_the_module_imports_only_the_standard_library_it_names():
     from musicbot import cached_lookup
 
-    roots = {n.split(".")[0] for n in imported_names(cached_lookup)}
+    roots = imported_roots(cached_lookup)
     # __future__ is allowed too, should the module ever need it
     assert roots - {"__future__"} == {"asyncio", "sys", "time", "typing"}

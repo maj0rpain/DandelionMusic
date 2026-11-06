@@ -14,7 +14,7 @@ import pytest
 
 from musicbot import library, library_browse
 
-from helpers import imported_names
+from helpers import imported_names, imported_roots
 from library_fakes import library_song
 
 # Album contents are in the filename order build_index() produces, and
@@ -361,10 +361,7 @@ class TestTheSeam:
 
     def test_the_cursor_imports_nothing_but_typing_and_the_index(self):
         imports = imported_names(library_browse)
-        assert {name.split(".")[0] for name in imports} == {
-            "typing",
-            "musicbot",
-        }
+        assert imported_roots(library_browse) == {"typing", "musicbot"}
         assert {n for n in imports if n.startswith("musicbot")} == {
             "musicbot",
             "musicbot.library",
