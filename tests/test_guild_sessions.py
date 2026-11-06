@@ -522,9 +522,11 @@ class CountingLoader:
         self.calls = 0
         self.failures = failures
         self.release = None
+        self.entered = asyncio.Event()
 
     async def __call__(self, guilds):
         self.calls += 1
+        self.entered.set()
         if self.release is not None:
             await self.release.wait()
         if self.calls <= self.failures:
@@ -550,7 +552,7 @@ def test_concurrent_ensures_share_one_load():
             asyncio.ensure_future(sessions.get_or_create(guild)),
             asyncio.ensure_future(sessions._ensure_settings(guild)),
         ]
-        await asyncio.sleep(0)
+        await loader.entered.wait()
         loader.release.set()
         await asyncio.gather(*calls)
         return calls[0].result(), calls[2].result()
@@ -589,7 +591,7 @@ def test_a_failed_shared_load_reaches_every_waiter_and_is_retried():
             asyncio.ensure_future(sessions._ensure_settings(guild))
             for _ in range(2)
         ]
-        await asyncio.sleep(0)
+        await loader.entered.wait()
         loader.release.set()
         results = await asyncio.gather(*calls, return_exceptions=True)
         unregistered = sessions.settings(guild) is None
@@ -602,3 +604,21 @@ def test_a_failed_shared_load_reaches_every_waiter_and_is_retried():
     assert unregistered
     assert retried is sessions.settings(guild)
     assert loader.calls == 2
+
+
+def test_a_guild_discarded_during_its_load_is_not_registered():
+    loader = CountingLoader()
+    sessions = _counting_sessions(loader)
+    guild = FakeGuild(1)
+
+    async def scenario():
+        loader.release = asyncio.Event()
+        load = asyncio.ensure_future(sessions.load_settings([guild]))
+        await loader.entered.wait()
+        await sessions.discard(guild)
+        loader.release.set()
+        await load
+
+    run(scenario())
+
+    assert sessions.settings(guild) is None

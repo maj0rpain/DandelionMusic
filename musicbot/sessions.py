@@ -115,16 +115,21 @@ class GuildSessions(Generic[Guild, Panel, Controller, Settings]):
                 raise result
 
     async def _load_fresh(self, guilds: list) -> None:
+        me = asyncio.current_task()
         try:
             loaded = await self._load_settings(guilds)
             for guild, sett in loaded.items():
-                self._settings.setdefault(guild, sett)
+                # a guild discarded mid-load lost its entry: not registered
+                if self._loading.get(guild) is me:
+                    self._settings.setdefault(guild, sett)
         finally:
             for guild in guilds:
-                self._loading.pop(guild, None)
+                if self._loading.get(guild) is me:
+                    del self._loading[guild]
 
     async def _ensure_settings(self, guild: Guild) -> Settings:
-        if guild not in self._settings:
+        # a guild discarded mid-load is loaded afresh
+        while guild not in self._settings:
             await self.load_settings([guild])
         return self._settings[guild]
 
@@ -166,6 +171,7 @@ class GuildSessions(Generic[Guild, Panel, Controller, Settings]):
             self._controllers.pop(guild, None)
             self._panels.pop(guild, None)
             self._settings.pop(guild, None)
+            self._loading.pop(guild, None)
 
     async def reset(self, guild: Guild, reason: str = "reset") -> Controller:
         """Replace the guild's controller with a fresh one, keeping
