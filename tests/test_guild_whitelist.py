@@ -241,8 +241,7 @@ class TestEnvImport:
         assert not with_db(scenario).enabled
 
     def test_tolerates_rows_that_already_exist(self, monkeypatch):
-        """A missing marker does not imply an empty table: two processes
-        sharing one database can both pass the guard, and a restored
+        """A missing marker does not imply an empty table: a restored
         backup can have rows without the marker. Inserting blindly
         raised IntegrityError out of MusicBot.start() and the bot never
         logged in."""
