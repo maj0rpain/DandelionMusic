@@ -137,7 +137,8 @@ def read_tags(path: Path, *, strict: bool = False) -> AudioTags:
         return _EMPTY_TAGS
 
     try:
-        keys = _format_of(audio).keys
+        fmt = _format_of(audio)
+        keys = fmt.keys
         title = _first_str(audio, keys["title"])
         artist = _first_str(audio, keys["artist"])
         album = _first_str(audio, keys["album"])
@@ -154,7 +155,7 @@ def read_tags(path: Path, *, strict: bool = False) -> AudioTags:
         # placeholder one for AAC), and none of them carry every field
         bitrate = getattr(info, "bitrate", None) or None
         sample_rate = getattr(info, "sample_rate", None) or None
-        bit_depth = _format_of(audio).bit_depth(info)
+        bit_depth = fmt.bit_depth(info)
     except Exception as e:
         _raise_if_io(e, strict)
         print(
