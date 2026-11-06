@@ -497,6 +497,87 @@ def test_a_message_attached_during_a_refetch_survives_its_failure(expired):
     assert newer.edits[-1:] == [None]
 
 
+GONE = [
+    pytest.param(discord.NotFound, 404, 10008, id="not-found-10008"),
+    pytest.param(discord.NotFound, 404, 10003, id="not-found-other-code"),
+]
+LOST = [
+    pytest.param(discord.Forbidden, 403, 50001, id="forbidden-50001"),
+    pytest.param(discord.Forbidden, 403, 0, id="forbidden-other-code"),
+]
+
+
+@pytest.mark.parametrize("cls, status, code", GONE)
+def test_a_not_found_edit_forgets_the_message_silently(
+    attached, capsys, cls, status, code
+):
+    rig, message = attached
+    old_view = message.shown
+    message.errors = [coded_error(cls, status, code)]
+    rig.controller.snapshot = snap(volume=0)
+    rig.refresh()
+    rig.controller.snapshot = snap(volume=5)
+
+    rig.refresh()
+
+    assert message.edits == [] and old_view.is_finished()
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("cls, status, code", LOST)
+def test_a_forbidden_edit_forgets_the_message_and_logs_once(
+    attached, capsys, cls, status, code
+):
+    rig, message = attached
+    old_view = message.shown
+    message.errors = [coded_error(cls, status, code)]
+    rig.controller.snapshot = snap(volume=0)
+    rig.refresh()
+    rig.controller.snapshot = snap(volume=5)
+
+    rig.refresh()
+
+    assert message.edits == [] and old_view.is_finished()
+    err = capsys.readouterr().err
+    assert err.count("Lost access to the player message:") == 1
+
+
+@pytest.mark.parametrize("cls, status, code", GONE + LOST)
+def test_a_message_attached_during_a_failing_edit_survives(
+    attached, cls, status, code
+):
+    rig, message = attached
+    # the attach's take-down strip uses the first error up
+    message.errors = [coded_error(cls, status, code)] * 2
+    newer = PanelMessage()
+    rig.controller.snapshot = snap(volume=0)
+    attach_during(rig, newer, message, "edit")
+
+    rig.refresh()
+    run(rig.panel.playback_ended())
+
+    assert newer.edits[-1:] == [None]
+
+
+@pytest.mark.parametrize("cls, status, code", GONE + LOST)
+def test_a_message_attached_after_a_forget_is_the_player_message(
+    attached, cls, status, code
+):
+    rig, message = attached
+    message.errors = [coded_error(cls, status, code)]
+    rig.controller.snapshot = snap(volume=0)
+    rig.refresh()
+    newer = PanelMessage()
+    rig.attach(newer)
+    rig.controller.snapshot = snap(volume=5)
+
+    rig.refresh()
+    run(rig.panel.playback_ended())
+
+    assert len(newer.edits) == 2 and newer.edits[0] is not None
+    assert newer.edits[-1] is None
+
+
 def test_a_message_attached_during_an_edit_is_drawn_as_attached(attached):
     rig, message = attached
     newer = PanelMessage()
