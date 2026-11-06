@@ -1,3 +1,4 @@
+import re
 import sys
 import atexit
 import asyncio
@@ -15,6 +16,7 @@ from yt_dlp.utils import DownloadError
 
 from config import config
 from musicbot import library
+from musicbot.message_link import MESSAGE_LINK_PATTERN
 from musicbot.audiotags import nice_title, read_tags
 from musicbot.song import LoadResult, Song
 from musicbot.utils import wrap_stdio
@@ -27,6 +29,7 @@ from musicbot.linkutils import (
     fetch_spotify,
     identify_url,
     normalize_track,
+    resolve_short_link,
     init as init_session,
     stop as stop_session,
 )
@@ -289,11 +292,24 @@ def _load_song(track: str) -> LoadResult:
     truncation = None
     host = identify_url(track)
 
+    if host == SiteTypes.SHORT_LINK:
+        # resolved once; the result is never resolved again
+        try:
+            track = _loop.run_until_complete(resolve_short_link(track))
+        except Exception as e:
+            raise SongError(config.SONGINFO_ERROR) from e
+        track = normalize_track(track)
+        host = identify_url(track)
+        # the message-link gate ran on the short link as typed; a
+        # resolved Discord message link would skip it
+        if host == SiteTypes.NOT_URL or re.match(MESSAGE_LINK_PATTERN, track):
+            raise SongError(config.SONGINFO_UNSUPPORTED)
+
     if host == SiteTypes.NOT_URL:
         data = _search_youtube(track)[0]
         host = SiteTypes.YT_DLP
 
-    elif host == SiteTypes.UNKNOWN:
+    elif host in (SiteTypes.UNKNOWN, SiteTypes.SHORT_LINK):
         raise SongError(config.SONGINFO_UNSUPPORTED)
 
     elif host == SiteTypes.SPOTIFY:

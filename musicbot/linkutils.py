@@ -194,11 +194,18 @@ def _is_disallowed_host(host: Optional[str]) -> bool:
     )
 
 
+# Hosts of link shorteners; matched exactly (case-insensitive).
+SHORT_LINK_HOSTS = frozenset(
+    {"on.soundcloud.com", "spotify.link", "spotify.app.link"}
+)
+
+
 class SiteTypes(Enum):
     SPOTIFY = auto()
     YT_DLP = auto()
     CUSTOM = auto()
     LOCAL_LIBRARY = auto()
+    SHORT_LINK = auto()
     UNKNOWN = auto()
     NOT_URL = auto()
 
@@ -242,6 +249,15 @@ async def get_soup(url: str) -> BeautifulSoup:
         page = await response.text()
 
     return BeautifulSoup(page, "html.parser")
+
+
+async def resolve_short_link(url: str) -> str:
+    """The URL a short link redirects to: one GET with redirects
+    followed, the body never read. Raises on a 4xx/5xx or any
+    network or timeout error."""
+    async with get_session().get(url, allow_redirects=True) as response:
+        response.raise_for_status()
+        return str(response.url)
 
 
 async def _scrape_track(url: str) -> tuple[str, str]:
@@ -462,10 +478,13 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
             return SiteTypes.UNKNOWN
         return SiteTypes.LOCAL_LIBRARY
 
+    parsed = urlparse(url)
+    if (parsed.hostname or "").lower() in SHORT_LINK_HOSTS:
+        return SiteTypes.SHORT_LINK
+
     if ie := get_ie(url):
         return ie
 
-    parsed = urlparse(url)
     if (
         parsed.scheme.lower() in ("http", "https")
         and not _is_disallowed_host(parsed.hostname)
