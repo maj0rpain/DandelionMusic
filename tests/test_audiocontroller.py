@@ -1274,13 +1274,13 @@ def test_stop_ends_a_sweep_even_when_songs_are_queued_again(
         futures = _gated_preload(stub_loader, "b")
         await _start_playing(controller)
         controller.stop()
-        await controller.enqueue([songs[0], songs[2]])
         await _settle()
+        controller.playlist.add(songs[2])
         futures[0].set_result(stub_loader.Preload.EXTRACTED)
 
     _run(controller, scenario)
 
-    assert _preloaded(stub_loader).count("c") == 1
+    assert "c" not in _preloaded(stub_loader)
 
 
 def test_a_new_sweep_supersedes_the_running_one(
