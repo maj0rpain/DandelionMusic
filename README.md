@@ -264,8 +264,8 @@ d!shutdown
 ### Building a Windows exe
 
 ```
-uv sync --frozen --group build
-uv run python -m config.build
+uv sync --locked --group build
+uv run --locked python -m config.build
 ```
 
 This produces `dist/DandelionMusic.exe` via PyInstaller (see `config/build.py` for the bundled data and hidden imports). CI runs it on tag pushes (`.github/workflows/release.yml`).
