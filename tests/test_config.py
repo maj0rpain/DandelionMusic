@@ -6,12 +6,16 @@ whitelist, which the database owns instead.
 """
 
 import re
+import shlex
 from pathlib import Path
 
 import jsonc
 import pytest
 
+from config.config import Config as ConfigClass
 from config.utils import alchemize_url, ensure_sqlite_parent, get_env_var
+
+from helpers import dockerfile_commands
 
 REPO_ROOT = Path(__file__).parent.parent
 
@@ -139,15 +143,6 @@ def test_config_rejects_a_non_bare_driver_naming_only_the_driver(
     assert "secret" not in msg
 
 
-def _dockerfile_commands():
-    text = (REPO_ROOT / "Dockerfile").read_text()
-    return [
-        c.strip()
-        for c in text.replace("\\\n", " ").splitlines()
-        if c.strip() and not c.strip().startswith("#")
-    ]
-
-
 def _uv_sync_index(commands):
     (index,) = _indices_where(
         commands, lambda c: c.startswith("RUN") and "uv sync" in c
@@ -156,10 +151,11 @@ def _uv_sync_index(commands):
 
 
 def test_dockerfile_installs_db_drivers_without_dev():
-    commands = _dockerfile_commands()
+    commands = dockerfile_commands()
     run = commands[_uv_sync_index(commands)]
+    assert "--frozen" not in run
     for flag in (
-        "--frozen",
+        "--locked",
         "--no-cache",
         "--no-dev",
         "--extra postgres",
@@ -174,13 +170,13 @@ def _indices_where(commands, predicate):
 
 def test_dockerfile_runs_as_a_non_root_user():
     users = [
-        c.split()[1] for c in _dockerfile_commands() if c.split()[0] == "USER"
+        c.split()[1] for c in dockerfile_commands() if c.split()[0] == "USER"
     ]
     assert users and users[-1].split(":")[0] not in ("root", "0")
 
 
 def test_dockerfile_copies_source_only_after_dependencies():
-    commands = _dockerfile_commands()
+    commands = dockerfile_commands()
     sync = _uv_sync_index(commands)
     (copy_all,) = _indices_where(commands, lambda c: c.startswith("COPY . ."))
     assert copy_all > sync
@@ -203,7 +199,7 @@ def _image_tag(image):
 def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
     import re
 
-    commands = _dockerfile_commands()
+    commands = dockerfile_commands()
     images = [c.split()[1] for c in commands if c.startswith("FROM")]
     copied = []
     for c in commands:
@@ -219,7 +215,7 @@ def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
 
 
 def test_dockerfile_apt_installs_are_minimal_and_clean():
-    commands = _dockerfile_commands()
+    commands = dockerfile_commands()
     sync = _uv_sync_index(commands)
     for i in _indices_where(commands, lambda c: "apt-get" in c):
         assert commands[i].startswith("RUN") and i < sync
@@ -228,6 +224,43 @@ def test_dockerfile_apt_installs_are_minimal_and_clean():
             continue
         assert "curl" not in c.split() and "unzip" not in c.split()
         assert "rm -rf /var/lib/apt/lists/*" in c
+
+
+def _declared_variable_names(command):
+    keyword, _, rest = command.partition(" ")
+    rest = rest.strip()
+    keyword = keyword.upper()
+    if keyword == "ARG":
+        return [token.split("=")[0] for token in shlex.split(rest)]
+    if "=" in rest.split()[0]:
+        return [pair.split("=")[0] for pair in shlex.split(rest)]
+    return [rest.split()[0]]
+
+
+def test_declared_variable_names_reads_every_name_in_any_case():
+    assert _declared_variable_names("ARG FOO BOT_TOKEN") == [
+        "FOO",
+        "BOT_TOKEN",
+    ]
+    assert _declared_variable_names("arg A=1 BOT_TOKEN=x") == [
+        "A",
+        "BOT_TOKEN",
+    ]
+    assert _declared_variable_names("env A=1 B=2") == ["A", "B"]
+
+
+def test_dockerfile_declares_no_bot_setting_as_arg_or_env():
+    from config.config import ENV_ALIASES, Config
+
+    settings = {*Config.as_dict(), *ENV_ALIASES}
+    for command in dockerfile_commands():
+        if command.split()[0].upper() not in ("ARG", "ENV"):
+            continue
+        for name in _declared_variable_names(command):
+            assert name not in settings, (
+                f"Dockerfile instruction bakes a bot setting into the "
+                f"image: {command}"
+            )
 
 
 def _compose_services():
@@ -239,6 +272,31 @@ def _compose_services():
 
 def test_compose_bgutil_provider_publishes_no_host_port():
     assert "ports" not in _compose_services()["bgutil-provider"]
+
+
+def test_compose_library_mount_defaults_to_relative_music_dir():
+    volumes = _compose_services()["doybot"]["volumes"]
+    mounts = [v for v in volumes if ":/music" in v]
+    assert len(mounts) == 1
+    source, target, mode = mounts[0].rsplit(":", 2)
+    assert (target, mode) == ("/music", "ro")
+    match = re.fullmatch(r"\$\{MUSIC_LIBRARY_HOST_PATH:-(.*)\}", source)
+    assert match and match.group(1) == "./music"
+
+
+def test_default_library_dir_is_tracked_and_kept_out_of_git_and_image():
+    assert (REPO_ROOT / "music" / ".gitkeep").is_file()
+    ignored = (REPO_ROOT / ".gitignore").read_text().splitlines()
+    assert "/music/*" in ignored and "!/music/.gitkeep" in ignored
+    assert "music/" in (REPO_ROOT / ".dockerignore").read_text().splitlines()
+
+
+def test_env_sample_documents_compose_only_library_host_path():
+    from config.config import parse_env_file
+
+    text, keys = parse_env_file(str(REPO_ROOT / ".env.sample"))
+    assert "MUSIC_LIBRARY_HOST_PATH" in text
+    assert "MUSIC_LIBRARY_HOST_PATH" not in keys
 
 
 def test_compose_pulled_images_are_pinned():
@@ -545,3 +603,10 @@ def test_config_no_longer_writes_anything():
 
     for gone in ("save", "_update_env_files", "_replace_env_var"):
         assert not hasattr(config, gone), f"{gone} is still there"
+
+
+def test_env_sample_supported_extensions_match_the_default(config_factory):
+    sample = (REPO_ROOT / ".env.sample").read_text()
+    (line,) = re.findall(r"^SUPPORTED_EXTENSIONS=.*$", sample, re.M)
+    config = config_factory(SECRETS_ENV + line + "\n")
+    assert config.SUPPORTED_EXTENSIONS == ConfigClass.SUPPORTED_EXTENSIONS

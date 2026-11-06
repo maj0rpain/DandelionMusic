@@ -91,7 +91,7 @@ class Config:
     ENABLE_LOCAL_LIBRARY = False
 
     # root folder for the local music library, expected to contain
-    # Artist/Album/song.ext (extensions from SUPPORTED_EXTENSIONS)
+    # Artist/Album/song.ext (extensions from LIBRARY_EXTENSIONS)
     MUSIC_LIBRARY_PATH = ""
 
     # extensions the local library indexer treats as playable audio
@@ -127,6 +127,12 @@ class Config:
         ".m4v",
         ".ogg",
         ".mov",
+        ".flac",
+        ".m4a",
+        ".opus",
+        ".aac",
+        ".aiff",
+        ".wma",
     )
 
     COOKIE_PATH = "config/cookies/cookies.txt"
@@ -135,6 +141,11 @@ class Config:
 
     # whether to tell users the bot is disconnecting
     ANNOUNCE_DISCONNECT = True
+
+    # what a request is told while the bot is leaving the voice channel
+    DISCONNECTING_MESSAGE = (
+        "I'm leaving the voice channel - try again in a moment."
+    )
 
     ENABLE_PLAYLISTS = True
 

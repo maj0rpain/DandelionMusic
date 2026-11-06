@@ -29,9 +29,10 @@ services:
       # Container-side overrides, applied on top of env_file, for
       # settings whose .env value describes the *host*.
       #
-      # MUSIC_LIBRARY_PATH in .env is a host path (F:/Music); inside
-      # the container the library is always at the read-only mount
-      # below, so the host value must not be passed through.
+      # MUSIC_LIBRARY_PATH in .env may be a host path; the host folder
+      # mounted at /music comes from MUSIC_LIBRARY_HOST_PATH (below).
+      # Inside the container the library is always at that read-only
+      # mount, so the .env value must not be passed through.
       - MUSIC_LIBRARY_PATH=/music
       # Default the database into the mounted ./data directory, so a
       # deployment that sets nothing still keeps it on the host rather
@@ -59,12 +60,13 @@ services:
       # restricted-content playback silently loses its cookies (yt-dlp
       # skips an unreadable cookiefile rather than failing).
       - ./config/cookies:/app/config/cookies:ro
-      # Host path to the music library. Set MUSIC_LIBRARY_HOST_PATH in
-      # .env to point this somewhere else; the default preserves the
-      # path this file used to hardcode. (The bot warns about
-      # MUSIC_LIBRARY_HOST_PATH as an unknown variable when run
-      # outside Docker - it is read by Compose, not by the bot.)
-      - ${MUSIC_LIBRARY_HOST_PATH:-F:/Music}:/music:ro
+      # Host folder mounted read-only at /music. The default is the
+      # in-repo ./music directory (tracked via .gitkeep, contents
+      # ignored), so a fresh clone starts on any OS. Set
+      # MUSIC_LIBRARY_HOST_PATH in .env to use your own library. (The
+      # bot warns about MUSIC_LIBRARY_HOST_PATH as an unknown variable
+      # when run outside Docker - it is read by Compose, not by the bot.)
+      - ${MUSIC_LIBRARY_HOST_PATH:-./music}:/music:ro
     networks:
       - bridge
     depends_on:

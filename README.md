@@ -75,6 +75,10 @@ For cookies, follow the custom cookies steps above; compose mounts `config/cooki
 
 The container runs as UID 1000 (user `app`). When upgrading an existing deployment, run `sudo chown -R 1000:1000 data/` once; without it the bot cannot write its database. Also either remove the `backup` volume or chown it the same way. If your host user is not UID 1000, you can instead set `user:` on the bot (`doybot`) service in the compose file and chown `data/` and the `backup` volume to that UID, accepting that the fallback `log.txt` and the yt-dlp/deno caches may then not be writable.
 
+The compose file mounts a music library folder read-only at `/music`. Its host source is `MUSIC_LIBRARY_HOST_PATH` (read by Docker Compose, not by the bot), which defaults to the repo's `./music` directory, so a fresh clone starts on any OS. To use your library, set `MUSIC_LIBRARY_HOST_PATH` in `.env` and also `ENABLE_LOCAL_LIBRARY=True`.
+
+**Upgrade note:** earlier versions defaulted this mount to `F:/Music`. If you relied on that default, set `MUSIC_LIBRARY_HOST_PATH=F:/Music` in `.env`, or the library will appear empty.
+
 Environment variables are described by the comments in `.env.sample`.
 
 ## Commands:
@@ -337,8 +341,8 @@ d!help [command]
 ### Building a Windows exe
 
 ```
-uv sync --frozen --group build
-uv run python -m config.build
+uv sync --locked --group build
+uv run --locked python -m config.build
 ```
 
 This produces `dist/DandelionMusic.exe` via PyInstaller (see `config/build.py` for the bundled data and hidden imports). CI runs it on tag pushes (`.github/workflows/release.yml`).

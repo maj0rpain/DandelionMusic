@@ -6,7 +6,7 @@
 # every push to master (after lint, test and docker-build pass).
 # Secrets and local state must not be in that layer.
 #
-# The project is `virtual` in uv.lock, so `uv sync --frozen` never
+# The project is `virtual` in uv.lock, so `uv sync --locked` never
 # builds it - only pyproject.toml and uv.lock are needed at sync time,
 # and musicbot/, config/, run.py and assets/ at runtime. Nothing below
 # is required for either.
@@ -21,6 +21,7 @@ config/cookies/*
 # by docker-compose.yaml at run time.
 settings.db
 data/
+music/
 backup/
 log.txt
 
@@ -60,7 +61,6 @@ graft/
 .github/
 docs/
 tests/
-heroku-legacy/
 CLAUDE.md
 README.md
 LICENSE
