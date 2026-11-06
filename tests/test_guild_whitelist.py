@@ -257,6 +257,73 @@ class TestEnvImport:
 
         assert with_db(scenario) == [111, 222]
 
+    @pytest.mark.parametrize("entries", [[111, 111], ["111", 111]])
+    def test_duplicate_entries_import_each_guild_once(
+        self, monkeypatch, capsys, entries
+    ):
+        monkeypatch.setattr(config, "GUILD_WHITELIST", entries)
+
+        async def scenario(factory):
+            await import_env_whitelist(factory)
+            async with factory() as session:
+                marker = await session.get(BotState, ENV_WHITELIST_IMPORTED)
+            return list(await load(factory)), marker
+
+        listed, marker = with_db(scenario)
+        assert listed == [111]
+        assert marker is not None and marker.value == "1"
+        assert "Imported 1 guild(s)" in capsys.readouterr().out
+
+    def test_an_integrity_error_without_a_marker_is_re_raised(
+        self, monkeypatch, capsys
+    ):
+        from sqlalchemy.exc import IntegrityError
+
+        monkeypatch.setattr(config, "GUILD_WHITELIST", [111])
+        error = IntegrityError("commit", {}, Exception("boom"))
+
+        class Failing:
+            def __init__(self, inner):
+                self._inner = inner
+
+            def __call__(self):
+                session = self._inner()
+                session.commit = self._fail
+                return session
+
+            async def _fail(self):
+                raise error
+
+        async def scenario(factory):
+            with pytest.raises(IntegrityError) as raised:
+                await import_env_whitelist(Failing(factory))
+            async with factory() as session:
+                marker = await session.get(BotState, ENV_WHITELIST_IMPORTED)
+            return raised.value, marker, await load(factory)
+
+        raised, marker, loaded = with_db(scenario)
+        assert raised is error
+        assert marker is None
+        assert not loaded.ids
+        assert "Imported" not in capsys.readouterr().out
+
+    def test_existing_rows_count_toward_the_marker_and_notice(
+        self, monkeypatch, capsys
+    ):
+        monkeypatch.setattr(config, "GUILD_WHITELIST", [111, 222])
+
+        async def scenario(factory):
+            await seed_whitelist(factory, 111)
+            await import_env_whitelist(factory)
+            async with factory() as session:
+                marker = await session.get(BotState, ENV_WHITELIST_IMPORTED)
+            return list(await load(factory)), marker
+
+        listed, marker = with_db(scenario)
+        assert listed == [111, 222]
+        assert marker.value == "2"
+        assert "Imported 2 guild(s)" in capsys.readouterr().out
+
     def test_marker_is_written_even_with_an_empty_env_var(self, monkeypatch):
         monkeypatch.setattr(config, "GUILD_WHITELIST", [])
 
