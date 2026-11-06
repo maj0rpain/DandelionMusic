@@ -1,3 +1,4 @@
+import re
 import sys
 import atexit
 import asyncio
@@ -15,6 +16,7 @@ from yt_dlp.utils import DownloadError
 
 from config import config
 from musicbot import library
+from musicbot.message_link import MESSAGE_LINK_PATTERN
 from musicbot.audiotags import nice_title, read_tags
 from musicbot.song import LoadResult, Song
 from musicbot.utils import wrap_stdio
@@ -298,7 +300,9 @@ def _load_song(track: str) -> LoadResult:
             raise SongError(config.SONGINFO_ERROR) from e
         track = normalize_track(track)
         host = identify_url(track)
-        if host == SiteTypes.NOT_URL:
+        # the message-link gate ran on the short link as typed; a
+        # resolved Discord message link would skip it
+        if host == SiteTypes.NOT_URL or re.match(MESSAGE_LINK_PATTERN, track):
             raise SongError(config.SONGINFO_UNSUPPORTED)
 
     if host == SiteTypes.NOT_URL:

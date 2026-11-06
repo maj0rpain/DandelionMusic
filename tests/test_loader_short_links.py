@@ -182,3 +182,16 @@ def test_unknown_url_off_the_list_never_calls_the_resolver(
 
     assert str(e.value) == config.SONGINFO_UNSUPPORTED
     assert resolver.calls == []
+
+
+def test_resolved_discord_message_link_is_unsupported_not_extracted(
+    monkeypatch, worker_loop, extracted
+):
+    calls, _ = extracted
+    _resolver(monkeypatch, "https://discord.com/channels/1/2/3")
+
+    with pytest.raises(SongError) as e:
+        loader._load_song(SHORT)
+
+    assert str(e.value) == config.SONGINFO_UNSUPPORTED
+    assert calls == []

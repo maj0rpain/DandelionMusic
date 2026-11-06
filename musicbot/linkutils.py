@@ -255,7 +255,7 @@ async def resolve_short_link(url: str) -> str:
     """The URL a short link redirects to: one GET with redirects
     followed, the body never read. Raises on a 4xx/5xx or any
     network or timeout error."""
-    async with get_session().get(url) as response:
+    async with get_session().get(url, allow_redirects=True) as response:
         response.raise_for_status()
         return str(response.url)
 
