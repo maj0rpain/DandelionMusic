@@ -241,7 +241,7 @@ def test_lastfm_artist_reads_its_counters_under_stats(rig, lastfm, no_spotify):
                         {"#text": "https://img/small.png"},
                         {"#text": "https://img/large.png"},
                     ],
-                    "stats": {"listeners": "1200", "playcount": "34000"},
+                    "stats": {"listeners": "1200"},
                     "tags": {"tag": [{"name": "rock"}, {"name": "alt"}]},
                 }
             }
@@ -252,10 +252,8 @@ def test_lastfm_artist_reads_its_counters_under_stats(rig, lastfm, no_spotify):
 
     assert result.stats == ExternalStats(
         listeners=1200,
-        playcount=34000,
         tags=("rock", "alt"),
         popularity=None,
-        followers=None,
         release_date=None,
     )
     assert result.art == ArtInfo(
@@ -271,7 +269,6 @@ def test_lastfm_album_reads_its_counters_at_the_top_level(
             "album.getInfo": {
                 "album": {
                     "listeners": "500",
-                    "playcount": "9000",
                     "image": [{"#text": "https://img/cover.png"}],
                     "tags": {"tag": [{"name": "art rock"}]},
                 }
@@ -283,10 +280,8 @@ def test_lastfm_album_reads_its_counters_at_the_top_level(
 
     assert result.stats == ExternalStats(
         listeners=500,
-        playcount=9000,
         tags=("art rock",),
         popularity=None,
-        followers=None,
         release_date=None,
     )
     assert result.art == ArtInfo(
@@ -321,7 +316,7 @@ def test_lastfm_zero_and_unparseable_counters_are_absent(
         {
             "artist.getInfo": {
                 "artist": {
-                    "stats": {"listeners": "0", "playcount": "lots"},
+                    "stats": {"listeners": "0"},
                     "tags": {"tag": [{"name": "jazz"}]},
                 }
             }
@@ -330,11 +325,7 @@ def test_lastfm_zero_and_unparseable_counters_are_absent(
 
     stats = rig.artist().stats
 
-    assert (stats.listeners, stats.playcount, stats.tags) == (
-        None,
-        None,
-        ("jazz",),
-    )
+    assert (stats.listeners, stats.tags) == (None, ("jazz",))
 
 
 def test_lastfm_empty_string_tag_container_means_no_tags(
@@ -381,15 +372,35 @@ def test_lastfm_all_empty_node_is_no_match(rig, lastfm, no_spotify):
     assert (result.stats, result.art) == (None, None)
 
 
+def test_lastfm_node_with_only_a_playcount_is_no_match(
+    rig, lastfm, no_spotify
+):
+    lastfm(
+        {
+            "artist.getInfo": {
+                "artist": {
+                    "image": [{"#text": ""}],
+                    "stats": {"listeners": "0", "playcount": "5000"},
+                    "tags": "",
+                }
+            }
+        }
+    )
+
+    result = rig.artist()
+
+    assert (result.stats, result.art) == (None, None)
+
+
 def test_a_lastfm_parse_error_loses_only_lastfm(rig, lastfm, spotify):
     # #16's deliberate behaviour change: a malformed Last.fm response
     # is a transient Last.fm failure, not the whole enrichment's
     lastfm({"artist.getInfo": {"artist": {"image": "not-a-list"}}})
-    spotify(FakeSpotify(artists=[{"popularity": 70, "images": []}]))
+    spotify(FakeSpotify(artists=[{"images": []}]))
 
     stats = rig.artist().stats
 
-    assert stats.popularity == 70
+    assert stats.popularity is None
     assert stats.listeners is None
 
 
@@ -399,8 +410,6 @@ def test_spotify_artist(rig, spotify, no_lastfm):
             artists=[
                 {
                     "images": [{"url": "https://sp/artist.jpg"}],
-                    "popularity": 81,
-                    "followers": {"total": 5000000},
                 }
             ]
         )
@@ -410,10 +419,8 @@ def test_spotify_artist(rig, spotify, no_lastfm):
 
     assert result.stats == ExternalStats(
         listeners=None,
-        playcount=None,
         tags=(),
-        popularity=81,
-        followers=5000000,
+        popularity=None,
         release_date=None,
     )
     assert result.art == ArtInfo(
@@ -439,10 +446,8 @@ def test_spotify_album(rig, spotify, no_lastfm):
 
     assert result.stats == ExternalStats(
         listeners=None,
-        playcount=None,
         tags=(),
         popularity=77,
-        followers=None,
         release_date="1997-05-21",
     )
     assert result.art == ArtInfo(
@@ -991,7 +996,7 @@ def test_an_index_rebuild_clears_all_six_lookups(rig, reads, lastfm, spotify):
     )
     client = spotify(
         FakeSpotify(
-            artists=[{"popularity": 1, "images": []}],
+            artists=[{"images": []}],
             albums=[{"images": [], "release_date": "2000"}],
         )
     )
