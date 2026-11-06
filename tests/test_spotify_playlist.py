@@ -205,6 +205,16 @@ class NothingSpotify(FakeSpotify):
         return None
 
 
+API_UNAVAILABLE_CASES = pytest.mark.parametrize(
+    "api",
+    [
+        PagedSpotify(RuntimeError("boom"), first_raises=True),
+        NothingSpotify([]),
+    ],
+    ids=["first-page-failure", "nothing"],
+)
+
+
 def _scraping(monkeypatch, count, song_count):
     async def get_soup(u):
         return _page(count, song_count)
@@ -238,14 +248,7 @@ def test_first_page_failure_falls_back_to_the_public_page(
 
 
 @pytest.mark.parametrize("list_type", ["playlist", "album"])
-@pytest.mark.parametrize(
-    "api",
-    [
-        PagedSpotify(RuntimeError("boom"), first_raises=True),
-        NothingSpotify([]),
-    ],
-    ids=["first-page-failure", "nothing"],
-)
+@API_UNAVAILABLE_CASES
 def test_failed_api_falls_back_to_the_public_page(monkeypatch, api, list_type):
     monkeypatch.setattr(linkutils, "spotify_api", api)
     _scraping(monkeypatch, 30, 50)
@@ -299,14 +302,7 @@ def test_paging_failure_after_page_one_does_not_scrape(monkeypatch):
     assert result.truncation == Truncation(4, TruncationReason.API_ERROR)
 
 
-@pytest.mark.parametrize(
-    "api",
-    [
-        PagedSpotify(RuntimeError("boom"), first_raises=True),
-        NothingSpotify([]),
-    ],
-    ids=["first-page-failure", "nothing"],
-)
+@API_UNAVAILABLE_CASES
 def test_playlist_fallback_still_logs_the_api_error(monkeypatch, capsys, api):
     monkeypatch.setattr(linkutils, "spotify_api", api)
     _scraping(monkeypatch, 3, 3)
