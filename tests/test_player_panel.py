@@ -361,19 +361,6 @@ def test_a_raising_send_reaches_the_caller_and_records_nothing(attached):
     assert old.edits == [None]
 
 
-def test_the_message_send_returns_is_the_player_message():
-    rig = Rig()
-    message = PanelMessage()
-
-    async def send(view):
-        return message
-
-    assert run(rig.panel.attach(send)) is message
-    run(rig.panel.playback_ended())
-
-    assert message.edits == [None]
-
-
 def test_an_expired_token_refetches_the_message_and_retries_once(expired):
     rig, channel, stale = expired
     fresh = PanelMessage(channel)

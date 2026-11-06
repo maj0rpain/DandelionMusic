@@ -287,7 +287,7 @@ class AudioController(object):
         """Ends the current track and moves on to the next one,
         ignoring a single-track loop. Runs on the event loop only -
         raises RuntimeError anywhere else."""
-        self.playback.skip(True)
+        self.playback.skip(forced=True)
 
     async def play_song(self, song: Song) -> bool:
         """Plays a song object."""
