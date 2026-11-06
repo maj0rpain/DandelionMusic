@@ -11,9 +11,8 @@ import pytest
 
 from config import config
 from musicbot import loader
-from musicbot.linkutils import SiteTypes
-from musicbot.song import LoadResult, Song
-from helpers import run
+from musicbot.song import LoadResult
+from helpers import plain_song, run
 
 URL = "https://example.invalid/a.mp3"
 
@@ -30,7 +29,7 @@ class FakePool:
         outcome = (
             self.outcomes.pop(0)
             if self.outcomes
-            else LoadResult.of_song(Song(SiteTypes.YT_DLP, URL, title="ok"))
+            else LoadResult.of_song(plain_song("ok"))
         )
         if isinstance(outcome, str) and outcome == "break":
             future.set_exception(BrokenProcessPool("worker died"))

@@ -11,32 +11,28 @@ from musicbot.outcome import EnqueueOutcome, OutcomeKind, render, send_outcome
 from musicbot.song import Song
 from musicbot.truncation import Truncation, TruncationReason
 
-from helpers import run
-
-
-def _song():
-    return Song(SiteTypes.YT_DLP, "https://example.com/a", title="Tune")
+from helpers import plain_song, run
 
 
 def test_started_with_announcements_on_says_nothing():
-    outcome = EnqueueOutcome(OutcomeKind.STARTED, song=_song())
+    outcome = EnqueueOutcome(OutcomeKind.STARTED, song=plain_song())
     assert render(outcome, True) is None
 
 
 def test_started_with_announcements_off_says_now_playing():
-    outcome = EnqueueOutcome(OutcomeKind.STARTED, song=_song())
+    outcome = EnqueueOutcome(OutcomeKind.STARTED, song=plain_song())
     reply = render(outcome, False)
     assert reply.embed.title == "Now Playing"
 
 
 def test_start_failed_says_nothing():
-    outcome = EnqueueOutcome(OutcomeKind.START_FAILED, song=_song())
+    outcome = EnqueueOutcome(OutcomeKind.START_FAILED, song=plain_song())
     assert render(outcome, False) is None
     assert render(outcome, True) is None
 
 
 def test_queued_shows_position():
-    outcome = EnqueueOutcome(OutcomeKind.QUEUED, song=_song(), position=3)
+    outcome = EnqueueOutcome(OutcomeKind.QUEUED, song=plain_song(), position=3)
     reply = render(outcome, True)
     assert reply.embed.title == "Added to queue - position 3"
 

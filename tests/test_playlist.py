@@ -8,22 +8,14 @@ re-derives that, so these are the tests that pin it down.
 
 import pytest
 
-from musicbot.linkutils import SiteTypes
 from musicbot.playlist import LoopMode, Playlist, PlaylistError
-
-
-def song(title):
-    from musicbot.song import Song
-
-    return Song(
-        SiteTypes.YT_DLP, f"https://example.invalid/{title}", title=title
-    )
+from helpers import plain_song
 
 
 def filled(*titles):
     playlist = Playlist()
     for title in titles:
-        playlist.add(song(title))
+        playlist.add(plain_song(title))
     return playlist
 
 
@@ -136,15 +128,15 @@ class TestHistoryBounds:
 class TestInsertNext:
     def test_goes_right_after_the_current_track(self):
         playlist = filled("a", "b", "c")
-        playlist.insert_next(song("x"))
+        playlist.insert_next(plain_song("x"))
         assert [s.title for s in playlist.playque] == ["a", "x", "b", "c"]
 
     def test_goes_after_a_lone_current_track(self):
         playlist = filled("current")
-        playlist.insert_next(song("x"))
+        playlist.insert_next(plain_song("x"))
         assert [s.title for s in playlist.playque] == ["current", "x"]
 
     def test_becomes_the_head_of_an_empty_queue(self):
         playlist = Playlist()
-        playlist.insert_next(song("x"))
+        playlist.insert_next(plain_song("x"))
         assert [s.title for s in playlist.playque] == ["x"]

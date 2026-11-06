@@ -6,26 +6,19 @@ import pytest
 from config import config
 from musicbot import playlists
 from musicbot.commands.music import Music
-from musicbot.linkutils import SiteTypes
 from musicbot.outcome import EnqueueOutcome, OutcomeKind, render
-from musicbot.song import Song
 from controller_helpers import (
     ProcessController,
     _fake_ffmpeg,
     _run,
     command_ctx,
 )
-from helpers import run
-
-
-def _song():
-    return Song(SiteTypes.YT_DLP, "https://example.invalid/a", title="a")
-
+from helpers import plain_song, run
 
 OUTCOMES = [
-    EnqueueOutcome(OutcomeKind.STARTED, song=_song()),
-    EnqueueOutcome(OutcomeKind.QUEUED, song=_song(), position=3),
-    EnqueueOutcome(OutcomeKind.START_FAILED, song=_song()),
+    EnqueueOutcome(OutcomeKind.STARTED, song=plain_song()),
+    EnqueueOutcome(OutcomeKind.QUEUED, song=plain_song(), position=3),
+    EnqueueOutcome(OutcomeKind.START_FAILED, song=plain_song()),
 ]
 
 
