@@ -1268,9 +1268,7 @@ def test_stop_ends_a_sweep_even_when_songs_are_queued_again(
     controller, stub_loader, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
-    songs = _songs(controller, "a", "b", "c")
-    for song in songs:
-        controller.playlist.add(song)
+    songs = _queue(controller, "a", "b", "c")
 
     async def scenario():
         futures = _gated_preload(stub_loader, "b")
@@ -1309,9 +1307,7 @@ def test_teardown_ends_a_sweep_awaiting_a_preload(
     controller, stub_loader, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
-    songs = _songs(controller, "a", "b", "c")
-    for song in songs:
-        controller.playlist.add(song)
+    songs = _queue(controller, "a", "b", "c")
 
     async def scenario():
         futures = _gated_preload(stub_loader, "b")
@@ -1380,9 +1376,7 @@ def test_a_sweep_skips_a_song_removed_while_it_awaited_an_earlier_one(
     controller, stub_loader, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
-    songs = _songs(controller, "a", "b", "c", "d")
-    for song in songs:
-        controller.playlist.add(song)
+    songs = _queue(controller, "a", "b", "c", "d")
 
     async def scenario():
         futures = _gated_preload(stub_loader, "b")
