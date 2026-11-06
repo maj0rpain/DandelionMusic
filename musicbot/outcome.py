@@ -23,6 +23,14 @@ class OutcomeKind(Enum):
 
 
 @dataclass(frozen=True)
+class BatchReport:
+    """A request that reports as a batch (a PLAYLIST outcome), with the
+    `truncation` of a cut-short Spotify playlist, if any."""
+
+    truncation: Optional[Truncation] = None
+
+
+@dataclass(frozen=True)
 class EnqueueOutcome:
     """What adding a request's songs to the queue did. `position`
     (QUEUED only) numbers the queue as `d!queue` does: the current

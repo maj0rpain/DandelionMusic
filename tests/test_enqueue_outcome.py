@@ -4,7 +4,7 @@ real controller with the loader stubbed."""
 import asyncio
 
 from musicbot.commands.music import Music
-from musicbot.outcome import OutcomeKind
+from musicbot.outcome import BatchReport, OutcomeKind
 from musicbot.song import LoadResult
 from musicbot.truncation import Truncation, TruncationReason
 from controller_helpers import (
@@ -123,23 +123,14 @@ def test_enqueue_of_one_song_with_batch_is_a_playlist(controller, monkeypatch):
     _fake_ffmpeg(monkeypatch)
     songs = _songs(controller, "a")
 
-    outcome = _run(controller, lambda: controller.enqueue(songs, batch=True))
-
-    assert outcome.kind is OutcomeKind.PLAYLIST
-    assert outcome.count == 1
-    assert _titles(controller) == ["a"]
-
-
-def test_enqueue_next_with_batch_is_a_playlist(controller, monkeypatch):
-    _fake_ffmpeg(monkeypatch)
-    (added,) = _songs(controller, "a")
-
     outcome = _run(
-        controller, lambda: controller.enqueue_next(added, batch=True)
+        controller, lambda: controller.enqueue(songs, batch=BatchReport())
     )
 
     assert outcome.kind is OutcomeKind.PLAYLIST
     assert outcome.count == 1
+    assert outcome.truncation is None
+    assert _titles(controller) == ["a"]
 
 
 def test_process_song_playnext_of_a_one_item_playlist_keeps_truncation(

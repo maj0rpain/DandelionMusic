@@ -18,9 +18,8 @@ import discord
 from config import config
 
 from musicbot import library, loader, playlists, utils
-from musicbot.outcome import EnqueueOutcome, OutcomeKind
+from musicbot.outcome import BatchReport, EnqueueOutcome, OutcomeKind
 from musicbot.song import Song
-from musicbot.truncation import Truncation
 from musicbot.linkutils import SiteTypes
 from musicbot.panel_snapshot import PanelSnapshot
 from musicbot.playback import Playback, PlaybackState
@@ -319,16 +318,15 @@ class AudioController(object):
         placed: List[Song],
         first_index: int,
         start: Optional[OutcomeKind],
-        batch: bool,
-        truncation: Optional[Truncation],
+        batch: Optional[BatchReport],
     ) -> EnqueueOutcome:
         """A batch load, or a placed count other than 1, reports
         PLAYLIST; else the single song's outcome."""
-        if batch or len(placed) != 1:
+        if batch is not None or len(placed) != 1:
             return EnqueueOutcome(
                 OutcomeKind.PLAYLIST,
                 count=len(placed),
-                truncation=truncation,
+                truncation=batch.truncation if batch else None,
             )
         return AudioController._single_outcome(placed[0], first_index, start)
 
@@ -336,8 +334,7 @@ class AudioController(object):
         self,
         song: Song,
         *,
-        batch: bool = False,
-        truncation: Optional[Truncation] = None,
+        batch: Optional[BatchReport] = None,
     ) -> EnqueueOutcome:
         """Puts `song` directly after the current track, refreshes the
         backup and starts playing if nothing is (see ensure_playing()).
@@ -345,20 +342,19 @@ class AudioController(object):
         index, start = await self._place_and_start(
             lambda: self.playlist.insert_next(song)
         )
-        return self._outcome([song], index, start, batch, truncation)
+        return self._outcome([song], index, start, batch)
 
     async def enqueue(
         self,
         songs: Iterable[Song],
         *,
-        batch: bool = False,
-        truncation: Optional[Truncation] = None,
+        batch: Optional[BatchReport] = None,
     ) -> EnqueueOutcome:
         """Appends `songs` to the queue, refreshes the backup once and
         starts playing if nothing is (see ensure_playing()).
 
         Returns PLAYLIST when it places more than one song or `batch`
-        is set, else the single song's outcome."""
+        is given, else the single song's outcome."""
         placed = list(songs)
 
         def place() -> int:
@@ -368,7 +364,7 @@ class AudioController(object):
             return first_index
 
         first_index, start = await self._place_and_start(place)
-        return self._outcome(placed, first_index, start, batch, truncation)
+        return self._outcome(placed, first_index, start, batch)
 
     async def restore(self) -> RestoreResult:
         """Reloads the playlist backup and starts its head.
@@ -427,15 +423,10 @@ class AudioController(object):
             what = f"a playlist ({len(added)} track(s)) via {track!r}"
         print(f"{user} queued {what} in guild {self.guild.name!r}")
 
+        batch = None if result.single else BatchReport(result.truncation)
         if playnext and len(added) == 1:
-            return await self.enqueue_next(
-                added[0],
-                batch=not result.single,
-                truncation=result.truncation,
-            )
-        return await self.enqueue(
-            added, batch=not result.single, truncation=result.truncation
-        )
+            return await self.enqueue_next(added[0], batch=batch)
+        return await self.enqueue(added, batch=batch)
 
     async def process_local_tracks(
         self,
