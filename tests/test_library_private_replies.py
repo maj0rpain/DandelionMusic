@@ -67,8 +67,11 @@ def test_no_results_reply_is_private_and_mention_free(monkeypatch):
         assert kw["content"] == config.LIBRARY_SEARCH_NO_RESULTS.format(
             query="q"
         )
-        assert kw["allowed_mentions"].everyone is False
         assert isinstance(kw["allowed_mentions"], discord.AllowedMentions)
+        assert (
+            kw["allowed_mentions"].to_dict()
+            == discord.AllowedMentions.none().to_dict()
+        )
 
 
 def test_search_results_reply_is_private_only_for_slash(monkeypatch):
