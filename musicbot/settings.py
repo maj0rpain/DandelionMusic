@@ -361,13 +361,10 @@ class GuildSettings(Base):
         self,
         descriptor: SettingDescriptor,
         ctx: "Context",
-        choose: Callable[[SettingDescriptor], Any],
+        value: Any,
     ) -> bool:
-        "Stores choose(descriptor); False for a failed database write"
+        "Stores the resolved value; False for a failed database write"
         setting = descriptor.name
-        value = choose(descriptor)
-        if isawaitable(value):
-            value = await value
         async with _setting_lock(self.guild_id):
             try:
                 async with ctx.bot.DbSession() as session:
@@ -387,15 +384,16 @@ class GuildSettings(Base):
     async def update_setting(
         self, descriptor: SettingDescriptor, value: Any, ctx: "Context"
     ) -> bool:
-        return await self._store_setting(
-            descriptor, ctx, lambda d: d.converter(ctx, value)
-        )
+        value = descriptor.converter(ctx, value)
+        if isawaitable(value):
+            value = await value
+        return await self._store_setting(descriptor, ctx, value)
 
     async def reset_setting(
         self, descriptor: SettingDescriptor, ctx: "Context"
     ) -> bool:
         "Stores the setting's descriptor default, bypassing its converter"
-        return await self._store_setting(descriptor, ctx, lambda d: d.default)
+        return await self._store_setting(descriptor, ctx, descriptor.default)
 
 
 # The longest saved-playlist name `playlists.save` accepts; also the
