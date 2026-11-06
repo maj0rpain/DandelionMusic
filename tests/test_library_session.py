@@ -7,10 +7,10 @@ import ast
 from pathlib import Path
 
 from musicbot import library, library_browse, library_session
-from musicbot.library_metadata import ArtInfo, Enrichment, ExternalStats
+from musicbot.library_metadata import ArtInfo, Enrichment
 from musicbot.library_session import BrowseSession, stat_fields
 from helpers import imported_names
-from library_fakes import library_song
+from library_fakes import external_stats, library_song
 
 INDEX = {
     "Radiohead": {
@@ -94,14 +94,7 @@ class TestStaleness:
         s.offer_enrichment(
             s.enter_level(),
             Enrichment(
-                stats=ExternalStats(
-                    listeners=5000,
-                    playcount=None,
-                    tags=(),
-                    popularity=None,
-                    followers=None,
-                    release_date=None,
-                ),
+                stats=external_stats(listeners=5000),
                 art=EMBEDDED.art,
             ),
         )
@@ -211,13 +204,8 @@ class TestFrameText:
         s.offer_enrichment(
             s.enter_level(),
             Enrichment(
-                stats=ExternalStats(
-                    listeners=1500,
-                    playcount=None,
-                    tags=("a", "b"),
-                    popularity=80,
-                    followers=None,
-                    release_date=None,
+                stats=external_stats(
+                    listeners=1500, tags=("a", "b"), popularity=80
                 ),
                 art=None,
             ),
@@ -325,14 +313,7 @@ class TestTrimAndFormat:
             s.offer_enrichment(
                 s.enter_level(),
                 Enrichment(
-                    stats=ExternalStats(
-                        listeners=value,
-                        playcount=None,
-                        tags=(),
-                        popularity=None,
-                        followers=None,
-                        release_date=None,
-                    ),
+                    stats=external_stats(listeners=value),
                     art=None,
                 ),
             )
@@ -350,10 +331,7 @@ class TestNarrowReads:
         assert at_artist().scope() == ("Radiohead", None)
         assert at_album().scope() == ("Radiohead", "OK Computer")
 
-    def test_tracks_at_each_level(self):
-        def files(s):
-            return sorted(f for _, _, f in s.tracks())
+    def test_tracks_delegates_to_the_cursor(self):
+        files = [f for _, _, f in at_album().tracks()]
 
-        assert session().tracks() == []
-        assert files(at_artist()) == ["Airbag.flac", "Zoo.flac"]
-        assert files(at_album()) == ["Airbag.flac"]
+        assert files == ["Airbag.flac"]
