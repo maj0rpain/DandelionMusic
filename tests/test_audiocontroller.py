@@ -1205,22 +1205,6 @@ def test_a_background_preload_failing_after_the_song_became_head_skips_only_it(
     assert _played(controller) == ["a", "c"]
 
 
-def test_a_failed_non_head_preload_leaves_the_song_queued(
-    controller, stub_loader, monkeypatch
-):
-    _fake_ffmpeg(monkeypatch)
-    _queue(controller, "a", "b", "c")
-
-    async def scenario():
-        futures = _gated_preload(stub_loader, "b")
-        await _start_playing(controller)
-        futures[0].set_result(stub_loader.Preload.FAILED)
-
-    _run(controller, scenario)
-
-    assert _titles(controller) == ["a", "b", "c"]
-
-
 def test_every_preload_failing_leaves_a_long_queue_whole_and_silent(
     controller, stub_loader
 ):

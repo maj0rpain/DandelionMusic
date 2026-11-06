@@ -557,12 +557,16 @@ class AudioController(object):
     def _schedule_preload(self):
         """Preloads the first MAX_SONG_PRELOAD songs asynchronously,
         superseding any sweep already running."""
+        self.add_task(self._preload_songs(self._end_sweep()))
+
+    def _end_sweep(self) -> int:
+        """Ends the running preload sweep; returns the new sweep number."""
         self._sweep += 1
-        self.add_task(self._preload_songs(self._sweep))
+        return self._sweep
 
     def stop(self):
         """Stops the player and removes all songs from the queue"""
-        self._sweep += 1
+        self._end_sweep()
         self.playback.stop()
 
     def prev_song(self) -> bool:
@@ -597,7 +601,7 @@ class AudioController(object):
         await self.playback.start_idle_timer(restart)
 
     async def udisconnect(self, reason: str):
-        self._sweep += 1
+        self._end_sweep()
         async with self.playback.teardown() as had_session:
             return await self._udisconnect(reason, had_session)
 
