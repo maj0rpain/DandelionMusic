@@ -39,7 +39,7 @@ class Song:
         self.url = url
         self.title = title
         self.uploader = uploader
-        self.duration = duration
+        self.duration = None if duration is None else round(duration)
         self.thumbnail = thumbnail
         self.saved_entry = saved_entry
 
@@ -97,6 +97,9 @@ class Song:
 
         for k, v in data.items():
             if hasattr(self, k) and v:
+                if k == "duration":
+                    # yt-dlp reports float seconds for some sites
+                    v = round(v)
                 setattr(self, k, v)
 
 

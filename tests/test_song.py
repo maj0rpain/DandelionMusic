@@ -1,6 +1,10 @@
 """Song: per-track metadata, and how it refers to a saved playlist."""
 
 import pickle
+
+import pytest
+
+from config import config
 from datetime import datetime, timezone
 
 from musicbot.linkutils import SiteTypes
@@ -86,3 +90,59 @@ def test_of_song_is_a_single_untruncated_result():
     song = Song(SiteTypes.YT_DLP, "https://example.invalid/a")
 
     assert LoadResult.of_song(song) == LoadResult([song], True, None)
+
+
+def _song(**kw):
+    return Song(SiteTypes.YT_DLP, "https://example.com/w", **kw)
+
+
+def _duration_field(song):
+    (field,) = [
+        f
+        for f in song.format_output("t").fields
+        if f.name == config.SONGINFO_DURATION
+    ]
+    return field.value
+
+
+@pytest.mark.parametrize(
+    "given, stored, shown",
+    [
+        (213.333, 213, "0:03:33"),
+        (213.6, 214, "0:03:34"),
+        (213, 213, "0:03:33"),
+        (0.3, 0, "0:00:00"),
+    ],
+)
+def test_update_stores_a_whole_second_duration_and_shows_it(
+    given, stored, shown
+):
+    song = _song()
+    song.update({"duration": given})
+    assert song.duration == stored
+    assert type(song.duration) is int
+    assert _duration_field(song) == shown
+
+
+def test_constructor_rounds_a_fractional_duration():
+    song = _song(duration=213.6)
+    assert song.duration == 214
+    assert type(song.duration) is int
+
+
+def test_update_from_a_song_rounds_its_fractional_duration():
+    other = _song()
+    other.duration = 213.6
+    song = _song()
+    song.update(other)
+    assert song.duration == 214
+    assert type(song.duration) is int
+
+
+@pytest.mark.parametrize("update", [None, {"duration": None}])
+def test_a_song_with_no_duration_shows_unknown(update):
+    song = _song()
+    if update:
+        song.update(update)
+    assert song.duration is None
+    assert _duration_field(song) == config.SONGINFO_UNKNOWN
