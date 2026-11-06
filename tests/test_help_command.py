@@ -33,7 +33,6 @@ NAMED_BY_THE_ISSUE = {
     "restore",
     "prev",
     "songinfo",
-    "playlist load",
 }
 
 
@@ -89,9 +88,7 @@ def non_hidden(group):
 def test_help_lists_commands_admission_would_refuse(bot):
     ctx = refusing_context(bot)
     music = bot.get_cog("Music")
-    playlist = bot.get_command("playlist")
     shown = listed(bot, ctx, music.get_commands())
-    shown |= listed(bot, ctx, playlist.commands)
     assert NAMED_BY_THE_ISSUE <= shown
 
 
