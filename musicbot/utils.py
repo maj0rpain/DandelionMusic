@@ -283,7 +283,7 @@ class Timer:
         # the loop, which would otherwise clear self._task while
         # leaving the real task alive and still due to fire. No caller
         # does that today: discord.py's audio thread only hops to the
-        # loop, and next_song() and add_task() are loop-only.
+        # loop, and skip() and add_task() are loop-only.
         try:
             current = asyncio.current_task()
         except RuntimeError:

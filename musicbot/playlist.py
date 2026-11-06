@@ -157,10 +157,6 @@ class Playlist:
         del self.playque[oldindex]
         self.playque.insert(newindex, song)
 
-    def empty(self):
-        self.playque.clear()
-        self.playhistory.clear()
-
     def queue_embed(self) -> Embed:
         return songs_embed(
             config.QUEUE_TITLE.format(tracks_number=len(self.playque)),
