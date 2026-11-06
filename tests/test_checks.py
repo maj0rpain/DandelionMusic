@@ -30,6 +30,7 @@ from musicbot.utils import (
 )
 from discord_fakes import (
     PLAYER_BUTTONS,
+    admission_settings,
     FakeInteraction,
     VoiceGuild,
     invoke_music_hooks,
@@ -140,22 +141,13 @@ COMMAND_CHANNEL = 7
 def voice_ctx(
     guild,
     author_in=None,
-    rule=True,
-    command_channel=None,
     dj_role=None,
     admin=False,
-    owner=False,
     roles=(),
 ):
-    sett = types.SimpleNamespace(
-        command_channel=command_channel,
-        user_must_be_in_vc=rule,
-        dj_role=dj_role,
-        vc_timeout=True,  # get_or_create() does not autojoin
-    )
+    sett = admission_settings(dj_role=dj_role)
     bot = make_bot(
         {guild: types.SimpleNamespace(command_channel=None)},
-        is_owner=owner,
         settings={guild: sett},
     )
     author = types.SimpleNamespace(
@@ -228,30 +220,10 @@ def slash_ctx(guild, author_in, **kwargs):
 
 
 class TestMusicBeforeInvoke:
-    """Music.cog_before_invoke defers a slash command just before a
-    join it needs, so a slow connect cannot time the interaction
-    out, and leaves every other command as it was."""
-
-    def test_defers_publicly_before_connecting(self):
-        guild = VoiceGuild()
-        ctx = slash_ctx(guild, guild.channel("a"))
-        run(invoke_music_hooks(Music(None), ctx))
-        assert guild.events == [("defer", False), ("connect", "a")]
-
-    def test_defers_before_moving(self, no_sleep):
-        guild = VoiceGuild()
-        guild.put_bot_in(guild.channel("a", bots=1))
-        ctx = slash_ctx(guild, guild.channel("b"))
-        run(invoke_music_hooks(Music(None), ctx))
-        assert guild.events == [("defer", False), ("move", "b")]
-
-    def test_neither_defers_nor_joins_without_a_join(self):
-        guild = VoiceGuild()
-        here = guild.channel("a", humans=1)
-        guild.put_bot_in(here)
-        ctx = slash_ctx(guild, here)
-        run(invoke_music_hooks(Music(None), ctx))
-        assert guild.events == []
+    """Music.cog_before_invoke directs the player panel to the
+    command's channel, and a defer in the command body after it does
+    not raise. The deferral before a join is covered by the
+    tests/test_admission.py table and TestJoiningCommand."""
 
     def test_directs_the_panel_to_the_channel_not_the_context(self):
         guild = VoiceGuild()
@@ -374,14 +346,9 @@ def test_the_joining_music_commands_are_exactly_the_marked_ones():
 
 
 class TestNonJoiningCommand:
-    """An unmarked music command never touches voice, so while the bot
-    is idle it has no voice requirement to refuse on."""
-
-    def test_skips_the_voice_permission_check_while_idle(self):
-        guild = VoiceGuild()
-        ctx = voice_ctx(guild, guild.channel("a", connect=False, speak=False))
-        ctx.command = command_of(Music, "playlist list")
-        assert run(admission.check(ctx)).audiocontroller is not None
+    """An unmarked music command never touches voice: it does not
+    connect or move the bot. Its lack of a voice requirement is
+    covered by the tests/test_admission.py table."""
 
     def test_does_not_connect_while_idle(self):
         guild = VoiceGuild()
@@ -461,17 +428,6 @@ def press(ctx, custom_id):
 
 class TestButtons:
     @pytest.mark.parametrize("custom_id", PLAYER_BUTTONS)
-    def test_a_player_button_does_not_connect(self, custom_id):
-        """With no voice client a player button is refused instead:
-        a stale player panel must not act on a bot out of voice."""
-        guild = VoiceGuild()
-        ctx = voice_ctx(guild, guild.channel("a"), admin=True)
-        sent, ran = press(ctx, custom_id)
-        assert sent == [config.NOT_CONNECTED_MESSAGE]
-        assert ran == []
-        assert guild.events == []
-
-    @pytest.mark.parametrize("custom_id", PLAYER_BUTTONS)
     def test_a_player_button_runs_on_a_connected_bot_without_joining(
         self, custom_id
     ):
@@ -506,40 +462,6 @@ class TestButtons:
         sent, ran = press(ctx, custom_id)
         assert sent == []
         assert ran == [ctx]
-
-    def test_a_player_button_refuses_a_user_outside_voice_while_idle(self):
-        guild = VoiceGuild()
-        ctx = voice_ctx(guild, None)
-        sent, ran = press(ctx, "queue")
-        assert sent == [config.NOT_CONNECTED_MESSAGE]
-        assert ran == []
-
-    def test_a_player_button_obeys_the_command_channel(self):
-        guild = VoiceGuild()
-        here = guild.channel("a", humans=1)
-        guild.put_bot_in(here)
-        ctx = voice_ctx(guild, here, command_channel=COMMAND_CHANNEL + 1)
-        sent, ran = press(ctx, "queue")
-        assert sent == [config.WRONG_CHANNEL_MESSAGE]
-        assert ran == []
-
-    def test_a_player_button_obeys_the_voice_rule(self):
-        guild = VoiceGuild()
-        guild.put_bot_in(guild.channel("a", humans=1))
-        # with a DJ role set, a non-DJ is not let through as one
-        ctx = voice_ctx(guild, guild.channel("b"), dj_role=99)
-        sent, ran = press(ctx, "queue")
-        assert sent == [config.USER_NOT_IN_VC_MESSAGE]
-        assert ran == []
-
-    def test_a_player_button_obeys_the_dj_check(self):
-        guild = VoiceGuild()
-        here = guild.channel("a", humans=1)
-        guild.put_bot_in(here)
-        ctx = voice_ctx(guild, here, dj_role=99)
-        sent, ran = press(ctx, "next")
-        assert sent == [config.NOT_A_DJ]
-        assert ran == []
 
     def test_a_search_pick_connects(self):
         guild = VoiceGuild()
@@ -592,7 +514,7 @@ def registered(cmd):
 
 
 @pytest.fixture
-def admitting_play_check(monkeypatch):
+def admitting_admission(monkeypatch):
     # every check behind the playlist gate admits
     async def admit(ctx, kind=None):
         return types.SimpleNamespace(audiocontroller=None)
@@ -612,7 +534,7 @@ def test_cog_check_gates_before_other_refusals(cmd, monkeypatch):
 
 
 @pytest.mark.parametrize("cmd", commands_under_gate(), ids=lambda c: c.name)
-def test_gate_admits_while_enabled(cmd, monkeypatch, admitting_play_check):
+def test_gate_admits_while_enabled(cmd, monkeypatch, admitting_admission):
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", True)
     cog, cmd = registered(cmd)
     ctx = types.SimpleNamespace(command=cmd)
@@ -633,7 +555,7 @@ def test_autocomplete_offers_nothing_while_disabled(monkeypatch):
 
 
 def test_cog_check_admits_a_button_context_with_no_command(
-    monkeypatch, admitting_play_check
+    monkeypatch, admitting_admission
 ):
     # a component interaction's context carries no command
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", False)

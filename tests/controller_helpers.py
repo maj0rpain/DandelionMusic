@@ -110,7 +110,7 @@ def _backup(controller, tmp_path):
 def _write_backup(controller):
     """Writes the playlist backup and nothing else; it skips the write
     only when the queue is empty and nothing is playing."""
-    controller.playback.queue_changed()
+    controller.playback.save_backup()
 
 
 def _titles(controller):
