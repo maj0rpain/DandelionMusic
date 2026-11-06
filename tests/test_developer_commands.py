@@ -4,9 +4,11 @@ contexts."""
 import asyncio
 import types
 
-from musicbot.commands.developer import Developer
+from musicbot.commands.developer import OUTPUT_FORMAT, Developer
 from developer_fakes import FakeBot, FakeCtx
 from helpers import run
+
+PREFIX, SUFFIX = OUTPUT_FORMAT.split("{}")
 
 
 def execute(code):
@@ -54,13 +56,13 @@ def test_execute_ignores_concurrent_prints(capsys):
 def test_execute_sends_long_output_as_ordered_code_block_pages():
     sent = execute("for i in range(600):\n    print(f'line {i:04d}')")
     assert len(sent) > 1
-    assert all(p.startswith("```\n") and p.endswith("\n```") for p in sent)
-    body = "\n".join(p[5:-4] for p in sent)
+    assert all(p.startswith(PREFIX) and p.endswith(SUFFIX) for p in sent)
+    body = "\n".join(p[len(PREFIX) : -len(SUFFIX)] for p in sent)
     assert body.splitlines() == [f"line {i:04d}" for i in range(600)]
 
 
 def test_execute_sends_short_output_as_one_code_block_page():
-    assert execute("print('hi')") == ["```\n\u200bhi\n```"]
+    assert execute("print('hi')") == [OUTPUT_FORMAT.format("hi")]
 
 
 def test_execute_no_output_sends_nothing_after_bots_own_message():
