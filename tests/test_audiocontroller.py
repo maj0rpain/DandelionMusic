@@ -30,7 +30,7 @@ from controller_helpers import (
     _song,
     _songs,
     _titles,
-    _write_backup,
+    _save_backup,
     sleep_forever,
 )
 from controller_seam import PlaybackVoiceClient, StubLoader, controller_seam
@@ -70,7 +70,7 @@ def test_controller_pickles_its_playlist_into_the_temp_backup_dir(
 ):
     _queue(controller, "first track", "second track")
 
-    _write_backup(controller)
+    _save_backup(controller)
 
     backup = tmp_path / "backup" / f"playlist_{controller.guild.id}.pickle"
     with open(backup, "rb") as f:
@@ -104,7 +104,7 @@ def test_seam_leaves_no_stub_and_no_backup_behind(tmp_path, monkeypatch):
     with controller_seam(work) as (built, _):
         assert isinstance(sys.modules["musicbot.loader"], StubLoader)
         _queue(built, "probe")
-        _write_backup(built)
+        _save_backup(built)
 
     after = sys.modules.get("musicbot.loader")
     assert after is before
@@ -309,7 +309,7 @@ def _restore_while_active(controller, monkeypatch, tmp_path, pause):
 
     async def scenario():
         await controller.ensure_playing()
-        _write_backup(controller)
+        _save_backup(controller)
         if pause:
             controller.guild.voice_client.pause()
         before = (controller.playlist, backup.read_bytes())
@@ -882,7 +882,7 @@ async def _start_then_disconnect(controller):
     track's after= callback."""
     controller.bot.loop = asyncio.get_running_loop()
     await controller.ensure_playing()
-    _write_backup(controller)
+    _save_backup(controller)
     await _settle()
     after = _end_track(controller.guild.voice_client)
     controller.guild.voice_client = None
@@ -1508,6 +1508,20 @@ def _pending_start(controller, stub_loader, monkeypatch, *titles, result=None):
     return release, task, slow
 
 
+def _local_batch(controller, stub_loader, monkeypatch, loadable, picked):
+    """Stubs the loader to load the `loadable` titles (None for any other
+    uri) and returns the local batch of the `picked` titles."""
+    by_uri = {
+        f"/music/{s.title}.mp3": s for s in _songs(controller, *loadable)
+    }
+
+    async def load_local_songs(uris):
+        return [by_uri.get(u) for u in uris]
+
+    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
+    return [LocalTrack(f"/music/{t}.mp3", f"Name {t}") for t in picked]
+
+
 def _without_url(controller, title):
     song = _song(controller, title)
     song.url = None
@@ -1594,22 +1608,14 @@ def test_the_inactivity_timeout_of_a_paused_bot_disconnects(
 def test_a_local_batch_during_a_pending_start_starts_nothing_new(
     controller, stub_loader, monkeypatch
 ):
-    by_uri = {f"/music/{s.title}.mp3": s for s in _songs(controller, "a", "b")}
-
-    async def load_local_songs(uris):
-        return [by_uri[u] for u in uris]
-
-    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
+    batch = _local_batch(controller, stub_loader, monkeypatch, "ab", "ab")
 
     async def scenario():
         release, task, _ = _pending_start(
             controller, stub_loader, monkeypatch, "slow"
         )
         await _settle()
-        await controller.process_local_tracks(
-            [LocalTrack(f"/music/{t}.mp3", f"Name {t}") for t in ["a", "b"]],
-            "test",
-        )
+        await controller.process_local_tracks(batch, "test")
         release.set()
         await _finish(task)
 
@@ -2088,33 +2094,27 @@ def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
 
 
 @pytest.mark.parametrize(
-    "loaded, requested, count, skipped",
+    "loaded, requested, skipped",
     [
-        (("a", "c"), ["a", "b", "c"], 2, ["b"]),
-        (("a", "b"), ["a", "b"], 2, []),
+        (("a", "c"), ["a", "b", "c"], ["b"]),
+        (("a", "b"), ["a", "b"], []),
     ],
 )
 def test_a_local_batch_reports_what_it_loaded_and_skipped(
-    controller, stub_loader, monkeypatch, loaded, requested, count, skipped
+    controller, stub_loader, monkeypatch, loaded, requested, skipped
 ):
-    by_uri = {f"/music/{s.title}.mp3": s for s in _songs(controller, *loaded)}
-
-    async def load_local_songs(uris):
-        return [by_uri.get(u) for u in uris]
-
-    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
+    batch = _local_batch(
+        controller, stub_loader, monkeypatch, loaded, requested
+    )
 
     async def scenario():
-        return await controller.process_local_tracks(
-            [LocalTrack(f"/music/{t}.mp3", f"Name {t}") for t in requested],
-            "test",
-        )
+        return await controller.process_local_tracks(batch, "test")
 
     outcome = _run(controller, scenario)
 
     assert (outcome.kind.value, outcome.count, outcome.skipped) == (
         "library_pick",
-        count,
+        len(loaded),
         tuple(f"Name {t}" for t in skipped),
     )
 
