@@ -29,7 +29,7 @@ Obtained keys must be entered into the ```.env``` file as environment variables
 
 #### Requirements
 
-Skip Python and uv if you've decided to use the pre-built exe. You still need ffmpeg (and opus) installed and on PATH.
+Skip Python and uv if you've decided to use the pre-built exe. You still need ffmpeg installed and on PATH.
 
 * Installation of Python 3.13+
 * Installation of [uv](https://docs.astral.sh/uv/getting-started/installation/)

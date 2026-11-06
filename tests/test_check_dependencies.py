@@ -16,6 +16,16 @@ OLD_SL_VERSION = (
 OLD_5_1_VERSION = """
 ffmpeg version 5.1.git Copyright (c) 2000-2022 the FFmpeg developers
 built with gcc 12.1.0 (Rev2, Built by MSYS2 project)
+configuration: --disable-programs --enable-ffmpeg --disable-doc\
+ --enable-w32threads --enable-openssl --extra-ldflags=-static\
+ --pkg-config='pkg-config --static --with-path=/usr/local/lib/pkgconfig'
+libavutil      57. 33.101 / 57. 33.101
+libavcodec     59. 42.102 / 59. 42.102
+libavformat    59. 30.100 / 59. 30.100
+libavdevice    59.  8.101 / 59.  8.101
+libavfilter     8. 46.103 /  8. 46.103
+libswscale      6.  8.103 /  6.  8.103
+libswresample   4.  8.100 /  4.  8.100
 """.strip()
 
 
