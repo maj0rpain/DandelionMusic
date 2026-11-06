@@ -17,3 +17,5 @@
 **Playback** - one guild's start/advance/stop state machine over its voice connection: which track is starting or playing, which comes next, and when the playlist backup is written. Distinct from a guild session (the guild's settings, controller and player panel, `GuildSessions`). Its states are idle, starting (a track is claimed but its preload has not finished) and active (playing or paused).
 
 **Player panel**: A guild's playback-facing side in Discord: the channel the bot posts playback news to (now playing, skipped tracks), and the one message whose buttons follow the playback state. _Avoid_: view, now-playing message.
+
+**Failed track**: A track that could not be played: its start failed (its stream could not be loaded, or it has no stream URL), or it ended on its own without producing any audio. A failed track is reported on the player panel and removed from the queue, whatever the loop mode. A user's skip or stop is never a failure. _Avoid_: dead song, broken track.

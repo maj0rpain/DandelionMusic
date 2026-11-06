@@ -93,6 +93,14 @@ class Playlist:
 
         return self.playque[0]
 
+    def drop_head(self) -> Optional[Song]:
+        """Removes the head of the queue without rotating or adding it
+        to the play history, in every loop mode. Returns the new head,
+        or None when the queue is now empty."""
+        if self.playque:
+            self.playque.popleft()
+        return self.playque[0] if self.playque else None
+
     def prev(self) -> Optional[Song]:
         if self.loop != LoopMode.ALL:
             if len(self.playhistory) != 0:
