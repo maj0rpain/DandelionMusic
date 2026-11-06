@@ -68,7 +68,7 @@ Compose builds the image locally; there is no pre-built image to pull.
 
 1. Copy the sample environment file: `cp .env.sample .env`
 2. Set `BOT_TOKEN` in `.env`
-3. Set `MUSIC_LIBRARY_HOST_PATH` in `.env` to the folder with your music on the host. It defaults to `F:/Music`
+3. Set `MUSIC_LIBRARY_HOST_PATH` in `.env` to the folder with your music on the host. It defaults to `./music`; to use the library, also set `ENABLE_LOCAL_LIBRARY=True` (see below)
 4. Build and start the bot: `docker compose up -d --build`
 
 For cookies, follow the custom cookies steps above; compose mounts `config/cookies/` read-only.
@@ -247,17 +247,18 @@ d!library refresh / d!lib refresh
 d!settings / d!setting / d!set
 ```
 * No Arguments: Lists server settings
-* Arguments: (setting) (value)
+* Arguments: (setting) [value]
 * Example: d!setting start_voice_channel ChannelName
+* Omit the value to reset a setting to its default
 * One subcommand per setting:
-    - `d!setting command_channel (value)`
-    - `d!setting start_voice_channel (value)`
-    - `d!setting dj_role (value)`
-    - `d!setting user_must_be_in_vc (value)`
-    - `d!setting button_emote (value)`
-    - `d!setting default_volume (value)`
-    - `d!setting vc_timeout (value)`
-    - `d!setting announce_songs (value)`
+    - `d!setting command_channel [value]`
+    - `d!setting start_voice_channel [value]`
+    - `d!setting dj_role [value]`
+    - `d!setting user_must_be_in_vc [value]`
+    - `d!setting button_emote [value]`
+    - `d!setting default_volume [value]`
+    - `d!setting vc_timeout [value]`
+    - `d!setting announce_songs [value]`
 * Administrators only
 
 ```
