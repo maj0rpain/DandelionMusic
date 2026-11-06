@@ -75,7 +75,7 @@ def factory():
 
 @pytest.fixture
 def sessions(factory):
-    return GuildSessions(FakePanel, factory, load_settings)
+    return GuildSessions(lambda guild: FakePanel(), factory, load_settings)
 
 
 def test_get_or_create_registers_settings_and_a_controller(sessions):
@@ -129,7 +129,7 @@ def test_discard_disposes_the_controller_and_drops_both_halves(controller):
     # is the real one: its timer and pending tasks must not survive
     guild = controller.guild
     sessions = GuildSessions(
-        FakePanel, lambda g, panel: controller, load_settings
+        lambda guild: FakePanel(), lambda g, panel: controller, load_settings
     )
 
     async def scenario():
@@ -305,7 +305,9 @@ def run_reset(guild, channel):
     from musicbot.commands.general import General
     from musicbot.utils import CheckError
 
-    sessions = GuildSessions(FakePanel, ResettableController, load_settings)
+    sessions = GuildSessions(
+        lambda guild: FakePanel(), ResettableController, load_settings
+    )
     sent = []
 
     async def defer():
@@ -411,7 +413,9 @@ def test_button_plugin_ignores_a_message_from_an_unregistered_guild():
         absolutely_ready = asyncio.get_running_loop().create_future()
         absolutely_ready.set_result(True)
         bot = types.SimpleNamespace(
-            sessions=GuildSessions(FakePanel, FakeController, load_settings),
+            sessions=GuildSessions(
+                lambda guild: FakePanel(), FakeController, load_settings
+            ),
             user=object(),
             absolutely_ready=absolutely_ready,
         )
