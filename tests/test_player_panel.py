@@ -361,26 +361,17 @@ def test_a_raising_send_reaches_the_caller_and_records_nothing(attached):
     assert old.edits == [None]
 
 
-def test_an_interactions_original_response_is_the_player_message():
+def test_the_message_send_returns_is_the_player_message():
     rig = Rig()
-    response = PanelMessage()
-
-    class Responded(discord.Interaction):
-        def __init__(self):
-            pass
-
-        async def original_response(self):
-            return response
-
-    interaction = Responded()
+    message = PanelMessage()
 
     async def send(view):
-        return interaction
+        return message
 
-    assert run(rig.panel.attach(send)) is interaction
+    assert run(rig.panel.attach(send)) is message
     run(rig.panel.playback_ended())
 
-    assert response.edits == [None]
+    assert message.edits == [None]
 
 
 def test_an_expired_token_refetches_the_message_and_retries_once(expired):
