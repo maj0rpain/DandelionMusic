@@ -107,3 +107,13 @@ def test_setup_hook_survives_a_failed_index_build(monkeypatch, capsys):
         synced,
         "Traceback" in err and "index exploded" in err,
     ) == (["ext.a", "ext.b"], [True], True)
+
+
+def test_track_path_from_uri_is_none_for_a_file_that_cannot_be_stat(
+    tree, monkeypatch
+):
+    library.build_index()
+    uri = library.song_uri("A1", "Al1", "t1.flac")
+    assert library.track_path_from_uri(uri) is not None
+    fail_stat(monkeypatch, "is_file", tree / "A1" / "Al1" / "t1.flac")
+    assert library.track_path_from_uri(uri) is None

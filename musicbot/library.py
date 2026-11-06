@@ -488,7 +488,9 @@ def track_path_from_uri(uri: str) -> Optional[Path]:
         artist, album, filename = path.relative_to(root).parts
     except ValueError:
         return None
-    if song_path(artist, album, filename) != path or not path.is_file():
+    if song_path(artist, album, filename) != path or not _stat_ok(
+        path, Path.is_file
+    ):
         return None
     return path
 
