@@ -12,9 +12,9 @@ import types
 import pytest
 
 from config import config
-from musicbot import admission
 from musicbot.admission import RequestKind as K
 from musicbot.audiocontroller import RestoreResult
+from musicbot.bot import MusicBot
 from musicbot.commands import music
 from musicbot.commands.music import Music
 from musicbot.loader import SongError
@@ -151,7 +151,10 @@ def test_a_slash_play_with_no_track_and_no_file_does_not_join():
     [
         (RecordingController(backup=None), config.QUEUE_EMPTY),
         (RecordingController(), config.QUEUE_EMPTY),
-        (RecordingController(readable=False), config.RESTORE_BACKUP_UNREADABLE),
+        (
+            RecordingController(readable=False),
+            config.RESTORE_BACKUP_UNREADABLE,
+        ),
     ],
     ids=["no backup", "empty backup", "unreadable backup"],
 )
@@ -214,8 +217,11 @@ def test_search_with_a_song_error_replies_and_does_not_join(monkeypatch):
 def search_results(monkeypatch):
     songs = [
         types.SimpleNamespace(
-            webpage_url="https://example.com/a", title="A", uploader="u",
-            duration=1, thumbnail=None,
+            webpage_url="https://example.com/a",
+            title="A",
+            uploader="u",
+            duration=1,
+            thumbnail=None,
         )
     ]
 
@@ -272,9 +278,7 @@ def test_a_pick_from_the_search_results_joins_and_plays(monkeypatch):
     "callback, playnext",
     [(Music._play, False), (Music._play_next, True)],
 )
-def test_play_with_a_track_defers_then_connects_then_plays(
-    callback, playnext
-):
+def test_play_with_a_track_defers_then_connects_then_plays(callback, playnext):
     before = RecordingController()
     after = RecordingController()
     guild, ctx, cog, sent = body_ctx(callback.name, before)
@@ -324,7 +328,9 @@ def test_prev_with_history_connects_then_plays_it():
 def existing_playlist(monkeypatch):
     contents = types.SimpleNamespace(
         ref=None,
-        entries=[types.SimpleNamespace(url="https://example.com/a", title="t")],
+        entries=[
+            types.SimpleNamespace(url="https://example.com/a", title="t")
+        ],
     )
 
     async def get(session_factory, ref):
@@ -368,7 +374,9 @@ def test_restore_with_a_failing_connect_keeps_the_backup_and_starts_nothing():
     guild.fail = TimeoutError()
     with pytest.raises(CheckError) as info:
         invoke(cog, ctx, Music._restore.callback)
-    assert str(info.value) == config.VOICE_CONNECT_FAILED
+    # the bot's own error handler is what replies to the raised refusal
+    run(MusicBot.on_command_error(None, ctx, info.value))
+    assert [str(m) for m in sent] == [config.VOICE_CONNECT_FAILED]
     assert controller.queue == ["x"]
     assert controller.calls == []
 
