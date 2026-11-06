@@ -1,4 +1,4 @@
-"""MusicBot.update_views refreshes every guild's player panel even when
+"""MusicBot.refresh_panels refreshes every guild's player panel even when
 one guild's refresh fails, and names the failing guild in the log.
 """
 
@@ -39,7 +39,7 @@ def test_failing_refresh_does_not_stop_other_guilds_and_names_the_guild(
             _Panel("ok", refreshed),
         ]
     )
-    run(MusicBot.update_views.coro(bot))
+    run(MusicBot.refresh_panels.coro(bot))
     err = capsys.readouterr().err
     assert (
         refreshed,

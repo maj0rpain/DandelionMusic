@@ -8,6 +8,7 @@ import asyncio
 
 import pytest
 
+from config import config
 from musicbot.commands.music import Music
 from musicbot.loader import SongError
 from musicbot.outcome import OutcomeKind
@@ -187,3 +188,14 @@ def test_play_replies_with_the_load_error():
     run(Music(None)._play_song(ctx, "x"))
 
     assert sent == ["nope"]
+
+
+def test_songinfo_replies_queue_empty_when_active_with_an_empty_queue(
+    controller,
+):
+    controller.guild.voice_client.playing = True
+    ctx, sent = command_ctx(controller)
+
+    run(Music._songinfo.callback(Music(None), ctx))
+
+    assert sent == [config.QUEUE_EMPTY]

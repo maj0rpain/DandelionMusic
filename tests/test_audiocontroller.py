@@ -1363,6 +1363,13 @@ def test_the_snapshot_has_previous_only_with_history(controller):
     assert controller.panel_snapshot().has_previous
 
 
+def test_current_song_is_nothing_when_active_with_an_empty_queue(controller):
+    controller.guild.voice_client.playing = True
+
+    assert controller.current_song is None
+    assert controller.panel_snapshot().current_song is None
+
+
 def test_the_snapshot_reports_an_empty_queue(controller):
     controller.guild.voice_client.playing = True
 

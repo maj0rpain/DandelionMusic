@@ -703,7 +703,7 @@ class Library(commands.Cog):
         return True
 
     async def cog_before_invoke(self, ctx):
-        ctx.bot.sessions.panel(ctx.guild).direct_to(ctx.channel)
+        ctx.bot.sessions.direct_panel(ctx.guild, ctx.channel)
 
     # `lib` is a prefix-only alias: discord.py registers aliases for
     # the text form of a hybrid command, not as extra slash commands,
@@ -775,7 +775,7 @@ class Library(commands.Cog):
             # matches the deferral above, and matches the hit-list send
             # below. Without it Context.send takes its public-message
             # path, which moves the playback controls off the
-            # now-playing message and onto this one - which the
+            # player panel and onto this one - which the
             # ephemeral deferral then hides from everyone but the
             # searcher.
             if ctx.interaction is not None:
