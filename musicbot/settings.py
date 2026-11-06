@@ -1,6 +1,4 @@
 import asyncio
-import json
-import os
 import re
 import weakref
 from dataclasses import dataclass
@@ -43,8 +41,6 @@ from musicbot.utils import get_emoji
 if TYPE_CHECKING:
     from musicbot.bot import MusicBot, Context
 
-DIR_PATH = os.path.dirname(os.path.realpath(__file__))
-LEGACY_SETTINGS = DIR_PATH + "/generated/settings.json"
 # use String for ids to be sure we won't hit overflow
 ID_LENGTH = 25  # more than enough to be sure :)
 DiscordIdStr = Annotated[str, ID_LENGTH]
@@ -363,18 +359,12 @@ class GuildSettings(Base):
 
     async def _store_setting(
         self,
-        setting: str,
+        descriptor: SettingDescriptor,
         ctx: "Context",
-        choose: Callable[[SettingDescriptor], Any],
+        value: Any,
     ) -> bool:
-        "Stores choose(descriptor); False for an unknown setting"
-        descriptor = SETTINGS.get(setting)
-        if descriptor is None:
-            return False
-
-        value = choose(descriptor)
-        if isawaitable(value):
-            value = await value
+        "Stores the resolved value; False for a failed database write"
+        setting = descriptor.name
         async with _setting_lock(self.guild_id):
             try:
                 async with ctx.bot.DbSession() as session:
@@ -392,15 +382,18 @@ class GuildSettings(Base):
         return True
 
     async def update_setting(
-        self, setting: str, value: Any, ctx: "Context"
+        self, descriptor: SettingDescriptor, value: Any, ctx: "Context"
     ) -> bool:
-        return await self._store_setting(
-            setting, ctx, lambda d: d.converter(ctx, value)
-        )
+        value = descriptor.converter(ctx, value)
+        if isawaitable(value):
+            value = await value
+        return await self._store_setting(descriptor, ctx, value)
 
-    async def reset_setting(self, setting: str, ctx: "Context") -> bool:
+    async def reset_setting(
+        self, descriptor: SettingDescriptor, ctx: "Context"
+    ) -> bool:
         "Stores the setting's descriptor default, bypassing its converter"
-        return await self._store_setting(setting, ctx, lambda d: d.default)
+        return await self._store_setting(descriptor, ctx, descriptor.default)
 
 
 # The longest saved-playlist name `playlists.save` accepts; also the
@@ -551,33 +544,3 @@ def run_migrations(connection):
         exec("def run():\n" + code, variables)
         variables["run"]()
     connection.commit()
-
-
-async def extract_legacy_settings(bot: "MusicBot"):
-    "Load settings from deprecated json file to DB"
-    if not os.path.isfile(LEGACY_SETTINGS):
-        return
-    with open(LEGACY_SETTINGS) as file:
-        json_data = json.load(file)
-    async with bot.DbSession() as session:
-        existing = (
-            (
-                await session.execute(
-                    select(GuildSettings.guild_id).where(
-                        GuildSettings.guild_id.in_(list(json_data))
-                    )
-                )
-            )
-            .scalars()
-            .fetchall()
-        )
-        for guild_id, data in json_data.items():
-            if guild_id in existing:
-                continue
-            new_settings = default_settings()
-            new_settings.update(
-                {k: v for k, v in data.items() if k in new_settings}
-            )
-            session.add(GuildSettings(guild_id=guild_id, **new_settings))
-        await session.commit()
-    os.rename(LEGACY_SETTINGS, LEGACY_SETTINGS + ".back")

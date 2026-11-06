@@ -6,7 +6,6 @@ __pycache__
 /dist
 
 /config.json
-/config/config_comments.json
 /settings.db
 /data/*
 !/data/.gitkeep
@@ -28,3 +27,7 @@ backup
 # contents are not.
 /handoffs/*
 !/handoffs/.gitkeep
+
+# Real cookies files: only the placeholder is tracked.
+/config/cookies/*
+!/config/cookies/cookies.txt

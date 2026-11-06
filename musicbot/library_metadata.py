@@ -64,7 +64,6 @@ class _AlbumKey(NamedTuple):
 class _LastfmInfo(NamedTuple):
     image_url: Optional[str]
     listeners: Optional[int]
-    playcount: Optional[int]
     tags: Tuple[str, ...]
 
 
@@ -141,7 +140,6 @@ def _parse_lastfm(data: dict) -> Optional[_LastfmInfo]:
     # album.getInfo puts the same keys at the top level
     counters = node.get("stats") or node
     listeners = _as_int(counters.get("listeners"))
-    playcount = _as_int(counters.get("playcount"))
     tags = _lastfm_tags(node)
 
     images = node.get("image") or []
@@ -153,20 +151,18 @@ def _parse_lastfm(data: dict) -> Optional[_LastfmInfo]:
         ),
         None,
     )
-    if not (image_url or listeners or playcount or tags):
+    if not (image_url or listeners or tags):
         return None
     return _LastfmInfo(
         image_url=image_url,
         listeners=listeners,
-        playcount=playcount,
         tags=tags,
     )
 
 
 class _SpotifyInfo(NamedTuple):
     image_url: Optional[str]
-    popularity: Optional[int]  # 0-100
-    followers: Optional[int]  # artist level only
+    popularity: Optional[int]  # 0-100, album level only
     release_date: Optional[str]  # album level only
 
 
@@ -177,10 +173,8 @@ class ExternalStats(NamedTuple):
     what the responding backend knew."""
 
     listeners: Optional[int]  # Last.fm
-    playcount: Optional[int]  # Last.fm scrobbles
     tags: Tuple[str, ...]  # Last.fm community tags
-    popularity: Optional[int]  # Spotify, 0-100
-    followers: Optional[int]  # Spotify, artist level
+    popularity: Optional[int]  # Spotify, album level, 0-100
     release_date: Optional[str]  # Spotify, album level
 
 
@@ -196,10 +190,8 @@ def _external_stats(
         return None
     return ExternalStats(
         listeners=lastfm.listeners if lastfm else None,
-        playcount=lastfm.playcount if lastfm else None,
         tags=lastfm.tags if lastfm else (),
         popularity=spotify.popularity if spotify else None,
-        followers=spotify.followers if spotify else None,
         release_date=spotify.release_date if spotify else None,
     )
 
@@ -225,8 +217,7 @@ def _spotify_artist_sync(client: Spotify, name: str) -> Optional[_SpotifyInfo]:
     images = item.get("images", [])
     return _SpotifyInfo(
         image_url=images[0]["url"] if images else None,
-        popularity=item.get("popularity"),
-        followers=(item.get("followers") or {}).get("total"),
+        popularity=None,
         release_date=None,
     )
 
@@ -253,7 +244,6 @@ def _spotify_album_sync(
     return _SpotifyInfo(
         image_url=images[0]["url"] if images else None,
         popularity=popularity,
-        followers=None,
         release_date=item.get("release_date"),
     )
 
@@ -295,7 +285,7 @@ class Enricher:
 
     - `clock`: monotonic seconds, shared by all six lookups.
     - `spotify`: the enrichment Spotify client, or None to turn
-      Spotify off; exposed as the read-only `spotify` attribute.
+      Spotify off.
     - `lastfm_session`: zero-argument getter of the HTTP session used
       for Last.fm. Whether Last.fm is on is a live read of
       `config.LASTFM_API_KEY`.

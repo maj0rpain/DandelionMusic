@@ -168,17 +168,19 @@ class Music(commands.Cog):
         return True
 
     async def cog_before_invoke(self, ctx):
-        # Joining voice waits until here, after every check (command
-        # level dj_check included) has passed, so a refused command
-        # never makes the bot join. A slow connect must not push a
-        # slash command past Discord's 3-second deadline, so it is
-        # deferred first - publicly, as the reply that follows is.
-        # Only a joining command (@joining_command) ever needs a join.
+        # The hook never joins voice: a joining command joins in its
+        # own body (_enter), once its checks on its input have passed.
+        ctx.bot.sessions.direct_panel(ctx.guild, ctx.channel)
+
+    async def _enter(self, ctx):
+        """Joins voice for a joining command, after its own input
+        checks. A slow connect must not push a slash command past
+        Discord's 3-second deadline, so it is deferred first -
+        publicly, as the reply that follows is. Acts on the guild's
+        current controller, not the one cog_check saw."""
         if ctx.admitted.join_needed:
             await ctx.defer()
-        # the guild's current controller, not the one cog_check saw
         ctx.audiocontroller = await ctx.admitted.enter()
-        ctx.bot.sessions.direct_panel(ctx.guild, ctx.channel)
 
     @commands.hybrid_command(
         name="play",
@@ -196,7 +198,13 @@ class Music(commands.Cog):
         if track is None:
             await ctx.send(config.PLAY_ARGS_MISSING)
             return
+        try:
+            await check_message_link(track, ctx.guild, ctx.author)
+        except SongError as e:
+            await ctx.send(e)
+            return
 
+        await self._enter(ctx)
         await ctx.defer()
         await self._play_song(ctx, track, playnext=playnext)
 
@@ -376,7 +384,10 @@ class Music(commands.Cog):
     @joining_command
     async def _restore(self, ctx):
         await ctx.defer()  # restoring extracts the head of the backup
-        result = await ctx.audiocontroller.restore()
+        result = ctx.audiocontroller.load_backup()
+        if result is RestoreResult.READY:
+            await self._enter(ctx)
+            result = await ctx.audiocontroller.start_restored()
         if result is RestoreResult.REFUSED_WHILE_ACTIVE:
             await ctx.send(config.RESTORE_WHILE_ACTIVE)
         elif result is RestoreResult.REFUSED_WHILE_DISCONNECTING:
@@ -408,10 +419,14 @@ class Music(commands.Cog):
     @commands.check(dj_check)
     @joining_command
     async def _prev(self, ctx):
+        if not ctx.audiocontroller.playlist.has_prev():
+            await ctx.send(config.NO_PREVIOUS_TRACK)
+            return
+        await self._enter(ctx)
         if ctx.audiocontroller.prev_song():
             await ctx.send("Playing previous song :track_previous:")
         else:
-            await ctx.send("No previous track.")
+            await ctx.send(config.NO_PREVIOUS_TRACK)
 
     @commands.hybrid_command(
         name="songinfo",
@@ -530,6 +545,7 @@ class Music(commands.Cog):
         if contents is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
+        await self._enter(ctx)
         outcome = await ctx.audiocontroller.enqueue(
             (
                 Song(
