@@ -41,7 +41,7 @@ from discord_fakes import (
     http_error,
     make_bot,
 )
-from helpers import attribute_names, run
+from helpers import attribute_names, imported_names, run
 from library_fakes import external_stats, library_song
 
 INDEX = {
@@ -1445,6 +1445,7 @@ def test_a_library_pick_is_admitted_on_the_clicks_own_context(monkeypatch):
 
 def test_the_library_command_module_does_not_know_song_uri():
     assert "library.song_uri" not in attribute_names(library_commands)
+    assert "musicbot.library.song_uri" not in imported_names(library_commands)
 
 
 def test_a_library_pick_with_no_reply_deletes_its_placeholder(monkeypatch):

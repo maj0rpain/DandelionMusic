@@ -263,12 +263,21 @@ def _recording_check(monkeypatch, controller=None, refuse=None):
     return calls, events
 
 
-def test_admit_click_checks_the_ctx_and_kind_it_is_given(monkeypatch):
+def _admitted_call(monkeypatch, kind):
     inter, ctx = click_interaction()
     calls, _ = _recording_check(monkeypatch)
+    run(admit_click(inter, kind))
+    return ctx, calls
 
-    run(admit_click(inter, RequestKind.PICK))
-    assert calls == [(ctx, RequestKind.PICK)]
+
+def test_admit_click_checks_the_ctx_built_from_the_interaction(monkeypatch):
+    ctx, calls = _admitted_call(monkeypatch, RequestKind.PICK)
+    assert [c for c, _ in calls] == [ctx]
+
+
+def test_admit_click_checks_the_kind_it_is_given(monkeypatch):
+    _, calls = _admitted_call(monkeypatch, RequestKind.PLAYER_BUTTON)
+    assert [k for _, k in calls] == [RequestKind.PLAYER_BUTTON]
 
 
 def test_admit_click_enters_after_an_admit_and_returns_the_controller(
