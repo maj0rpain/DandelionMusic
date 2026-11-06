@@ -1,4 +1,5 @@
 import asyncio
+import functools
 import time
 from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
@@ -11,7 +12,6 @@ from musicbot import library, linkutils
 from musicbot.linkutils import spotify_api
 from musicbot.audiotags import read_artwork, read_tags
 from musicbot.cached_lookup import ByteBoundedStore, CachedLookup
-
 
 # prefix of every line this module logs and of its lookup labels
 _LOG_PREFIX = "library_metadata: "
@@ -409,11 +409,17 @@ class Enricher:
         )
 
     async def _tags_backend(self, path: Path) -> _Tags:
-        tags = await _off_loop(_file_executor, read_tags, path)
+        tags = await _off_loop(
+            _file_executor, functools.partial(read_tags, strict=True), path
+        )
         return _Tags(tags.album_artist, tags.artist, tags.album)
 
     async def _artwork_backend(self, path: Path) -> Optional[ArtInfo]:
-        embedded = await _off_loop(_file_executor, read_artwork, path)
+        embedded = await _off_loop(
+            _file_executor,
+            functools.partial(read_artwork, strict=True),
+            path,
+        )
         if embedded is None:
             return None
         data, extension = embedded

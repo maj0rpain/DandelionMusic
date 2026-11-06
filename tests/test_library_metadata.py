@@ -8,7 +8,7 @@ except in the Spotify client-limit tests, which build real spotipy
 The library is real: MP3s written under `tmp_path` and indexed by
 `library.build_index()`. By default they are untagged, so the tag read
 falls back to the folder names and there is no embedded cover. Local
-reads are counted, held and failed by wrapping the public `read_tags`
+reads are counted and held by wrapping the public `read_tags`
 and `read_artwork` names `library_metadata` imports.
 """
 
@@ -568,30 +568,26 @@ def test_an_album_timeout_is_logged_with_label_and_key(
 
 class CountingReads:
     """Wrappers around the real `read_tags` and `read_artwork` that
-    `library_metadata` imports, counting reads per path and optionally
-    failing them; installed on the module."""
+    `library_metadata` imports, counting reads per path; installed on
+    the module. They forward `strict` and inject no failures: a failing
+    read is made with a real file."""
 
     def __init__(self, monkeypatch, artwork=None):
         self.tag_reads = []
         self.artwork_reads = []
-        self.fail = set()  # "read_tags" and/or "read_artwork"
         self._artwork = artwork or audiotags.read_artwork
         monkeypatch.setattr(library_metadata, "read_tags", self.read_tags)
         monkeypatch.setattr(
             library_metadata, "read_artwork", self.read_artwork
         )
 
-    def read_tags(self, path):
+    def read_tags(self, path, *, strict=False):
         self.tag_reads.append(path)
-        if "read_tags" in self.fail:
-            raise OSError("unreadable")
-        return audiotags.read_tags(path)
+        return audiotags.read_tags(path, strict=strict)
 
-    def read_artwork(self, path):
+    def read_artwork(self, path, *, strict=False):
         self.artwork_reads.append(path)
-        if "read_artwork" in self.fail:
-            raise OSError("unreadable")
-        return self._artwork(path)
+        return self._artwork(path, strict=strict)
 
 
 @pytest.fixture
@@ -624,8 +620,8 @@ def test_stalled_spotify_does_not_starve_file_reads(
         both = asyncio.Event()
 
         def stamp(name, real):
-            def read(path):
-                result = real(path)
+            def read(path, *, strict=False):
+                result = real(path, strict=strict)
                 finished[name] = time.monotonic()
                 if len(finished) == 2:
                     loop.call_soon_threadsafe(both.set)
@@ -859,37 +855,85 @@ def test_a_file_without_a_cover_is_read_once_across_two_calls(
     assert len(reads.tag_reads) == 1
 
 
-@pytest.mark.parametrize("failing", ["read_tags", "read_artwork"])
+TAGGED = dict(album_artist="Tag Artist", album="Tag Album", cover=b"png-bytes")
+
+
+@pytest.fixture
+def lastfm_for(monkeypatch):
+    """Installs a fake Last.fm session on a rig, answering with an
+    empty album."""
+
+    def install(rig):
+        monkeypatch.setattr(config, "LASTFM_API_KEY", "test-key")
+        rig.session = FakeLastfm({"album.getInfo": {"album": {}}})
+        return rig.session
+
+    return install
+
+
+def queried_albums(session):
+    return [(q["artist"], q["album"]) for q in session.queries]
+
+
+def hide(path):
+    """Moves the file aside, so reading it is a real
+    FileNotFoundError (wrapped by mutagen); returns the way back."""
+    aside = path.with_name(path.name + ".aside")
+    path.rename(aside)
+    return lambda: aside.rename(path)
+
+
 def test_a_failed_local_read_is_refused_until_the_cooldown_passes(
-    rig, reads, clock, no_lastfm, failing
+    tagged_rig, lastfm_for, monkeypatch
 ):
-    reads.fail.add(failing)
-    attempts = lambda: len(  # noqa: E731
-        reads.tag_reads if failing == "read_tags" else reads.artwork_reads
+    rig = tagged_rig(
+        {("Radiohead", "OK Computer", "01.mp3"): TAGGED},
     )
+    session = lastfm_for(rig)
+    reads = CountingReads(monkeypatch)
+    sample = library.song_path("Radiohead", "OK Computer", "01.mp3")
+    restore = hide(sample)
 
     first = rig.album()
     rig.album()
-    assert attempts() == 1  # refused, not retried
-    assert first == Enrichment(stats=None, art=None)
 
-    clock.now += 61
-    reads.fail.clear()
-    rig.album()
+    assert first.art is None
+    assert len(reads.tag_reads) == 1  # refused, not retried
+    assert len(reads.artwork_reads) == 1
+    assert queried_albums(session) == [("Radiohead", "OK Computer")]
 
-    assert attempts() == 2
+    restore()
+    rig.clock.now += 61
+    again = rig.album()
+
+    assert len(reads.tag_reads) == 2
+    assert len(reads.artwork_reads) == 2
+    assert again.art.data == b"png-bytes"
+    assert queried_albums(session)[-1] == ("Tag Artist", "Tag Album")
 
 
-def test_a_failed_local_read_is_logged_with_its_label(
-    rig, reads, no_lastfm, capsys
+def test_a_failed_local_read_is_logged_once_with_its_label(
+    tagged_rig, no_lastfm, capsys
 ):
-    reads.fail.add("read_artwork")
+    rig = tagged_rig({("Radiohead", "OK Computer", "01.mp3"): TAGGED})
+    hide(library.song_path("Radiohead", "OK Computer", "01.mp3"))
 
     rig.album()
 
-    assert "library_metadata: reading artwork failed for " in (
-        capsys.readouterr().err
-    )
+    err = capsys.readouterr().err
+    assert "library_metadata: reading artwork failed for " in err
+    assert "audiotags:" not in err
+
+
+def test_a_file_without_a_cover_is_not_retried_after_the_cooldown(
+    rig, reads, no_lastfm
+):
+    rig.album()
+    rig.clock.now += 61
+    rig.album()
+
+    assert len(reads.artwork_reads) == 1
+    assert len(reads.tag_reads) == 1
 
 
 def build_many_albums(make_library, count):
@@ -928,7 +972,8 @@ def test_covers_are_held_within_32_mb(
 ):
     rig = Rig(build_many_albums(make_library, 5))
     reads = CountingReads(
-        monkeypatch, artwork=lambda path: (b"x" * cover_size, "png")
+        monkeypatch,
+        artwork=lambda path, strict=False: (b"x" * cover_size, "png"),
     )
     first = library.song_path("Artist", "Album 000", "01.mp3")
 
