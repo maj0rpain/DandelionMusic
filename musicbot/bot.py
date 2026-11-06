@@ -8,7 +8,7 @@ import discord
 from discord.ext import commands, tasks
 from discord.ext.commands.view import StringView
 from discord import app_commands
-from discord.ext.commands import DefaultHelpCommand, NotOwner
+from discord.ext.commands import DefaultHelpCommand
 from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine
 from sqlalchemy.orm import sessionmaker
 
@@ -253,8 +253,8 @@ class MusicBot(commands.Bot):
         await self.sessions.discard(guild)
 
     async def on_command_error(self, ctx, error):
-        # A SongError is a user-facing message; it may arrive wrapped in
-        # a command-invoke error and the hybrid/app-command wrapper.
+        # Classify the unwrapped error: ignored, the user's input, a
+        # refusal, a song error, or a failure (the only one logged).
         inner = error
         while isinstance(
             inner,
@@ -265,12 +265,26 @@ class MusicBot(commands.Bot):
             ),
         ):
             inner = inner.original
+        if isinstance(inner, commands.CommandNotFound):
+            return
         if isinstance(inner, loader.SongError):
             await ctx.send(inner)
             return
+        if isinstance(inner, commands.UserInputError):
+            message = str(inner)
+            command = getattr(ctx, "command", None)
+            if command is not None:
+                usage = f"{ctx.prefix}{command.qualified_name}"
+                if command.signature:
+                    usage += f" {command.signature}"
+                message += f"\nUsage: {usage}"
+            await ctx.send(message)
+            return
+        if isinstance(inner, (commands.CheckFailure, CheckError)):
+            await ctx.send(inner)
+            return
         await ctx.send(error)
-        if not isinstance(error, (CheckError, NotOwner)):
-            print_exception(error)
+        print_exception(error)
 
     async def on_hybrid_command_error(self, ctx, error):
         await self.on_command_error(ctx, error)
