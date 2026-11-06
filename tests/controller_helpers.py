@@ -107,6 +107,12 @@ def _backup(controller, tmp_path):
         return [song.title for song in pickle.load(f).playque]
 
 
+def _write_backup(controller):
+    """Writes the playlist backup and nothing else; it skips the write
+    only when the queue is empty and nothing is playing."""
+    controller.playback.queue_changed()
+
+
 def _titles(controller):
     return [song.title for song in controller.playlist.playque]
 
