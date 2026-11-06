@@ -18,7 +18,7 @@ is built from the state in one synchronous call, so it cannot describe
 two levels.
 """
 
-from typing import TYPE_CHECKING, List, NamedTuple, Optional, Tuple
+from typing import TYPE_CHECKING, Callable, List, NamedTuple, Optional, Tuple
 
 from musicbot import library, library_browse, library_display
 
@@ -72,41 +72,39 @@ def _fmt_years(stats: library.LevelStats) -> Optional[str]:
 Field = Tuple[str, str]
 
 
-def stat_fields(screen: library_browse.Screen, external) -> List[Field]:
-    """The `(name, value)` stat fields of one screen, empty ones left
-    out - a grid of dashes reads worse than a short grid.
-
-    Branches on `screen.kind`: "artist" is the root (its `counts`),
-    "album" and "song" are below it (its `stats`). `external` is the
-    drawn enrichment's stats, or None."""
+def _root_fields(screen: library_browse.Screen, external) -> List[Field]:
     fields: List[Field] = []
-
-    def add(name: str, value) -> None:
-        if value:
-            fields.append((name, str(value)))
-
-    if screen.kind == "artist":
-        if screen.counts is None:
-            return fields
-        artists, albums, songs = screen.counts
-        add("Artists", f"{artists:,}")
-        add("Albums", f"{albums:,}")
-        add("Songs", f"{songs:,}")
+    if screen.counts is None:
         return fields
+    artists, albums, songs = screen.counts
+    _add(fields, "Artists", f"{artists:,}")
+    _add(fields, "Albums", f"{albums:,}")
+    _add(fields, "Songs", f"{songs:,}")
+    return fields
+
+
+def _artist_fields(screen: library_browse.Screen, external) -> List[Field]:
+    fields: List[Field] = []
     local = screen.stats
     if local is None:
         return fields
-    if screen.kind != "song":
-        add("Albums", local.albums)
-        add("Tracks", local.tracks)
-        add("Runtime", _fmt_duration(local.runtime))
-        add("Years", _fmt_years(local))
-        add("Formats", ", ".join(local.formats))
-        if external:
-            add("Listeners", _fmt_count(external.listeners))
+    _add(fields, "Albums", local.albums)
+    _add(fields, "Tracks", local.tracks)
+    _add(fields, "Runtime", _fmt_duration(local.runtime))
+    _add(fields, "Years", _fmt_years(local))
+    _add(fields, "Formats", ", ".join(local.formats))
+    if external:
+        _add(fields, "Listeners", _fmt_count(external.listeners))
+    return fields
+
+
+def _album_fields(screen: library_browse.Screen, external) -> List[Field]:
+    fields: List[Field] = []
+    local = screen.stats
+    if local is None:
         return fields
-    add("Tracks", local.tracks)
-    add("Runtime", _fmt_duration(local.runtime))
+    _add(fields, "Tracks", local.tracks)
+    _add(fields, "Runtime", _fmt_duration(local.runtime))
     # the tag-derived year is the one that matches these files;
     # Spotify's release date is only a fallback, and only its year is
     # worth the width
@@ -115,8 +113,9 @@ def stat_fields(screen: library_browse.Screen, external) -> List[Field]:
         if external and external.release_date
         else None
     )
-    add("Year", year)
-    add(
+    _add(fields, "Year", year)
+    _add(
+        fields,
         "Format",
         " · ".join(
             part
@@ -128,8 +127,9 @@ def stat_fields(screen: library_browse.Screen, external) -> List[Field]:
         ),
     )
     if external:
-        add("Listeners", _fmt_count(external.listeners))
-        add(
+        _add(fields, "Listeners", _fmt_count(external.listeners))
+        _add(
+            fields,
             "Popularity",
             (
                 f"{external.popularity}/100"
@@ -138,6 +138,72 @@ def stat_fields(screen: library_browse.Screen, external) -> List[Field]:
             ),
         )
     return fields
+
+
+def _add(fields: List[Field], name: str, value) -> None:
+    if value:
+        fields.append((name, str(value)))
+
+
+class QueueAction(NamedTuple):
+    """The Queue button: its label and the source text the queued
+    tracks are recorded with."""
+
+    label: str
+    source: str
+
+
+class _Level(NamedTuple):
+    # the title's icon kind and which scope element it names; None
+    # for `title_scope` means the fixed `title_fixed` text
+    title_icon: str
+    title_scope: Optional[int]
+    title_fixed: str
+    # the breadcrumb: the scope elements shown, in order, after the
+    # leading text (None: no footer)
+    footer_lead: Optional[str]
+    footer_album: bool
+    # None at the root, where neither Queue nor Back is drawn
+    queue_label: Optional[str]
+    queue_source: str
+    stat_builder: Callable[[library_browse.Screen, object], List[Field]]
+
+
+# Keyed by `Screen.kind`, which names what the *entries* are, so
+# "artist" = root, "album" = artist level, "song" = album level.
+_LEVELS = {
+    "artist": _Level(
+        "artist", None, "Artists", None, False, None, "", _root_fields
+    ),
+    "album": _Level(
+        "artist",
+        0,
+        "",
+        "Artists › ",
+        False,
+        "Queue this Artist",
+        "browse: entire discography of {0}",
+        _artist_fields,
+    ),
+    "song": _Level(
+        "album",
+        1,
+        "",
+        "",
+        True,
+        "Queue this Album",
+        "browse: entire album {0} - {1}",
+        _album_fields,
+    ),
+}
+
+
+def stat_fields(screen: library_browse.Screen, external) -> List[Field]:
+    """The `(name, value)` stat fields of one screen, empty ones left
+    out - a grid of dashes reads worse than a short grid.
+
+    `external` is the drawn enrichment's stats, or None."""
+    return _LEVELS[screen.kind].stat_builder(screen, external)
 
 
 def _description(screen: library_browse.Screen, external) -> Optional[str]:
@@ -170,8 +236,8 @@ class Frame(NamedTuple):
     kind: str
     # the buttons
     # None at the root, where neither Queue nor Back is drawn; below
-    # it, the Queue button's label (and Back is drawn)
-    queue_label: Optional[str]
+    # it, the Queue button (and Back is drawn)
+    queue: Optional[QueueAction]
     show_prev: bool
     show_next: bool
     # the embed
@@ -268,14 +334,11 @@ class BrowseSession:
     def _title(screen: library_browse.Screen) -> str:
         """Only the current scope, prefixed with the icon for what that
         scope is - the path to it lives in the footer."""
-        if screen.kind == "artist":
-            return f"{library_display.KIND_EMOJI['artist']} Artists"
-        artist, album = screen.scope
-        if screen.kind == "album":
-            name, kind = artist, "artist"
-        else:
-            name, kind = album, "album"
-        icon = library_display.KIND_EMOJI[kind]
+        level = _LEVELS[screen.kind]
+        icon = library_display.KIND_EMOJI[level.title_icon]
+        if level.title_scope is None:
+            return f"{icon} {level.title_fixed}"
+        name = screen.scope[level.title_scope]
         trimmed = library_display.trim(name, library_display.NAME_TITLE_LIMIT)
         return f"{icon} {trimmed}"
 
@@ -283,22 +346,25 @@ class BrowseSession:
     def _footer(screen: library_browse.Screen) -> Optional[str]:
         """In the breadcrumb the icons mark entities only - the leading
         "Artists" names the root screen rather than an artist."""
-        if screen.kind == "artist":
+        level = _LEVELS[screen.kind]
+        if level.footer_lead is None:
             return None
         artist_name, album_name = screen.scope
-        artist = f"{library_display.KIND_EMOJI['artist']} {artist_name}"
-        if screen.kind == "album":
-            return f"Artists › {artist}"
-        icon = library_display.KIND_EMOJI["album"]
-        return f"{artist} › {icon} {album_name}"
+        text = f"{level.footer_lead}{library_display.KIND_EMOJI['artist']} "
+        text += artist_name
+        if level.footer_album:
+            icon = library_display.KIND_EMOJI["album"]
+            text += f" › {icon} {album_name}"
+        return text
 
     @staticmethod
-    def _queue_label(screen: library_browse.Screen) -> Optional[str]:
-        if screen.kind == "artist":
+    def _queue(screen: library_browse.Screen) -> Optional[QueueAction]:
+        level = _LEVELS[screen.kind]
+        if level.queue_label is None:
             return None
-        if screen.kind == "album":
-            return "Queue this Artist"
-        return "Queue this Album"
+        return QueueAction(
+            level.queue_label, level.queue_source.format(*screen.scope)
+        )
 
     def frame(self) -> Frame:
         cursor = self._cursor
@@ -321,7 +387,7 @@ class BrowseSession:
             entries=cursor.page_entries(),
             labels=cursor.page_labels(),
             kind=screen.kind,
-            queue_label=self._queue_label(screen),
+            queue=self._queue(screen),
             show_prev=cursor.has_prev(),
             show_next=cursor.has_next(),
             title=self._title(screen),
