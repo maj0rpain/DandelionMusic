@@ -392,3 +392,115 @@ def test_a_failed_move_does_not_block_the_next_edit():
         return await load(factory)
 
     assert run_with_db(test) == [A, B]
+
+
+async def _seed(factory, blob, name="mix"):
+    async with factory() as session:
+        session.add(SavedPlaylist(guild_id=GUILD, name=name, songs_json=blob))
+        await session.commit()
+
+
+LEGACY = '["https://a.example/1", "https://b.example/2"]'
+
+
+def test_a_legacy_bare_string_blob_reads_back_untitled_and_is_not_rewritten():
+    async def test(factory):
+        await _seed(factory, LEGACY)
+        return await load(factory), await stored_json(factory)
+
+    entries, stored = run_with_db(test)
+
+    assert entries == [
+        PlaylistEntry("https://a.example/1", None),
+        PlaylistEntry("https://b.example/2", None),
+    ]
+    assert stored == LEGACY
+
+
+def test_an_entry_without_a_title_reads_back_untitled():
+    async def test(factory):
+        await _seed(factory, '[{"url": "u"}]')
+        return await load(factory)
+
+    assert run_with_db(test) == [PlaylistEntry("u", None)]
+
+
+UNREADABLE = [
+    "not json",
+    '{"url": "u"}',
+    '[{"title": "t"}]',
+    '[{"url": 5}]',
+    "[5]",
+    '[{"url": "u", "title": 5}]',
+]
+
+
+@pytest.mark.parametrize("blob", UNREADABLE)
+def test_get_on_an_unreadable_blob_raises_and_logs_the_row(blob, capsys):
+    async def test(factory):
+        await _seed(factory, blob)
+        await load(factory)
+
+    with pytest.raises(playlists.CorruptPlaylist) as raised:
+        run_with_db(test)
+
+    assert isinstance(raised.value, playlists.SavedPlaylistError)
+    assert "mix" in str(raised.value)
+    err = capsys.readouterr().err
+    assert GUILD in err and "mix" in err
+
+
+@pytest.mark.parametrize(
+    "edit",
+    [
+        lambda f: playlists.add_songs(f, MIX, [A]),
+        lambda f: playlists.remove_song(f, MIX, 1),
+        lambda f: playlists.move_song(f, MIX, 1, 2),
+        lambda f: playlists.set_title(f, MIX, "u", "x"),
+    ],
+    ids=["add_songs", "remove_song", "move_song", "set_title"],
+)
+def test_an_edit_on_an_unreadable_blob_raises_and_writes_nothing(edit):
+    blob = "not json"
+
+    async def test(factory):
+        await _seed(factory, blob)
+        try:
+            await edit(factory)
+        except playlists.CorruptPlaylist:
+            return await stored_json(factory)
+        return None
+
+    assert run_with_db(test) == blob
+
+
+def test_delete_removes_an_unreadable_row():
+    async def test(factory):
+        await _seed(factory, "not json")
+        await playlists.delete(factory, MIX)
+        return await playlists.list_names(factory, GUILD)
+
+    assert run_with_db(test) == []
+
+
+def test_an_edit_that_changes_a_legacy_blob_stores_todays_format():
+    async def test(factory):
+        await _seed(factory, LEGACY)
+        await playlists.move_song(factory, MIX, 1, 2)
+        return await stored_json(factory)
+
+    assert run_with_db(test) == json.dumps(
+        [
+            {"url": "https://b.example/2", "title": None},
+            {"url": "https://a.example/1", "title": None},
+        ]
+    )
+
+
+def test_a_no_op_edit_on_a_legacy_blob_leaves_its_bytes():
+    async def test(factory):
+        await _seed(factory, LEGACY)
+        await playlists.move_song(factory, MIX, 1, 1)
+        return await stored_json(factory)
+
+    assert run_with_db(test) == LEGACY

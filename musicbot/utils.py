@@ -195,6 +195,12 @@ def get_emoji(bot: MusicBot, string: str) -> Optional[Union[str, Emoji]]:
     return string
 
 
+def bare_url(url: str) -> str:
+    """A url's bare form when ``url_regex`` matches it, else the url."""
+    match = url_regex.fullmatch(url)
+    return match.group("bare") if match else url
+
+
 def songs_embed(title: str, songs: Iterable[Song]) -> Embed:
     embed = Embed(
         title=title,
@@ -202,9 +208,7 @@ def songs_embed(title: str, songs: Iterable[Song]) -> Embed:
     )
 
     for counter, song in enumerate(songs, start=1):
-        song_title = song.title or url_regex.fullmatch(song.webpage_url).group(
-            "bare"
-        )
+        song_title = song.title or bare_url(song.webpage_url)
         # file:// isn't a scheme Discord renders as a clickable link -
         # show plain title text instead of a dead-looking markdown
         # link (matches Song.format_output()'s handling of this).

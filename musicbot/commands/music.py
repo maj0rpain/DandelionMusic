@@ -18,7 +18,8 @@ from musicbot.audiocontroller import (
 )
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
-from musicbot.linkutils import get_site_type, url_regex
+from musicbot.linkutils import get_site_type
+from musicbot.message_link import check_message_link
 from musicbot.views import MusicButton, OwnedView
 
 
@@ -126,6 +127,8 @@ def _saved_playlist_error_reply(e: playlists.SavedPlaylistError) -> str:
     """The reply text for a saved-playlist failure."""
     if isinstance(e, playlists.PlaylistNotFound):
         return config.PLAYLIST_NOT_FOUND
+    if isinstance(e, playlists.CorruptPlaylist):
+        return config.PLAYLIST_CORRUPT
     if isinstance(e, playlists.InvalidPosition):
         return f"Invalid position. Playlist has {e.size} songs."
     if isinstance(e, playlists.PlaylistExists):
@@ -371,6 +374,8 @@ class Music(commands.Cog):
         result = await ctx.audiocontroller.restore()
         if result is RestoreResult.REFUSED_WHILE_ACTIVE:
             await ctx.send(config.RESTORE_WHILE_ACTIVE)
+        elif result is RestoreResult.BACKUP_UNREADABLE:
+            await ctx.send(config.RESTORE_BACKUP_UNREADABLE)
         elif result is RestoreResult.NOTHING_TO_RESTORE:
             await ctx.send(config.QUEUE_EMPTY)
         else:
@@ -508,9 +513,13 @@ class Music(commands.Cog):
         name: str,
     ):
         await ctx.defer()
-        contents = await playlists.get(
-            ctx.bot.DbSession, _playlist_ref(ctx, name)
-        )
+        try:
+            contents = await playlists.get(
+                ctx.bot.DbSession, _playlist_ref(ctx, name)
+            )
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
+            return
         if contents is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
@@ -583,10 +592,14 @@ class Music(commands.Cog):
     ):
         await ctx.defer()
 
-        contents = await playlists.get(
-            ctx.bot.DbSession,
-            _playlist_ref(ctx, playlist),
-        )
+        try:
+            contents = await playlists.get(
+                ctx.bot.DbSession,
+                _playlist_ref(ctx, playlist),
+            )
+        except playlists.SavedPlaylistError as e:
+            await ctx.send(_saved_playlist_error_reply(e))
+            return
         if contents is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
@@ -596,7 +609,7 @@ class Music(commands.Cog):
             embed = Embed(title=contents.ref.name)
             for song in part:
                 url = song.url
-                title = song.title or url_regex.fullmatch(url).group("bare")
+                title = song.title or utils.bare_url(url)
                 embed.add_field(
                     name=str(i), value=f"[{title}]({url})", inline=False
                 )
@@ -620,6 +633,7 @@ class Music(commands.Cog):
     ):
         await ctx.defer()
         try:
+            await check_message_link(track, ctx.guild, ctx.author)
             result = await loader.load_song(track)
         except SongError as e:
             await ctx.send(e)

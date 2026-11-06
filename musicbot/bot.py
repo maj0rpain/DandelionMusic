@@ -20,7 +20,6 @@ from musicbot.settings import (
     GuildSettings,
     run_migrations,
     extract_legacy_settings,
-    migrate_old_playlists,
 )
 from musicbot import guild_whitelist
 from musicbot.player_panel import PlayerPanel
@@ -113,7 +112,6 @@ class MusicBot(commands.Bot):
         async with self.db_engine.connect() as connection:
             await connection.run_sync(run_migrations)
         await extract_legacy_settings(self)
-        await migrate_old_playlists(self)
         await guild_whitelist.import_env_whitelist(self.DbSession)
 
         loader.init()
@@ -173,25 +171,50 @@ class MusicBot(commands.Bot):
             raise failure
 
     async def on_ready(self):
-        await self.sessions.load_settings(self.guilds)
+        try:
+            await self._register_guilds()
+        finally:
+            print(config.STARTUP_COMPLETE_MESSAGE)
 
-        # read once for the whole sweep rather than per guild
-        whitelist = await guild_whitelist.load(self.DbSession)
+            if not self.refresh_panels.is_running():
+                self.refresh_panels.start()
+
+            if not self.absolutely_ready.done():
+                self.absolutely_ready.set_result(True)
+
+    async def _register_guilds(self):
+        """The startup sweep: every step is isolated, so one failure is
+        logged and never keeps the bot from becoming ready."""
+        try:
+            await self.sessions.load_settings(self.guilds)
+        except Exception as e:
+            self._log_failure("Loading settings failed:", e)
+
+        # read once for the whole sweep rather than per guild; a failed
+        # load fails closed: no guild is left, none is registered
+        try:
+            whitelist = await guild_whitelist.load(self.DbSession)
+        except Exception as e:
+            self._log_failure("Loading the whitelist failed:", e)
+            return
         for guild in self.guilds:
             if not whitelist.admits(guild.id):
                 print(f"{guild.name} is not whitelisted, leaving.")
                 await self._leave(guild)
                 continue
-            await self.register(guild)
+            try:
+                await self.register(guild)
+            except Exception as e:
+                self._log_failure(
+                    f"Registration failed for guild {guild.name}:", e
+                )
+                continue
             print("Joined {}".format(guild.name))
 
-        print(config.STARTUP_COMPLETE_MESSAGE)
-
-        if not self.refresh_panels.is_running():
-            self.refresh_panels.start()
-
-        if not self.absolutely_ready.done():
-            self.absolutely_ready.set_result(True)
+    @staticmethod
+    def _log_failure(message, error):
+        print(message, file=sys.stderr, flush=True)
+        print_exception(error)
 
     async def _leave(self, guild):
         """Leave an unadmitted guild; a failure is logged with the

@@ -1,3 +1,4 @@
+import os
 import sys
 import asyncio
 from itertools import islice
@@ -21,6 +22,7 @@ from musicbot import library, loader, playlists, utils
 from musicbot.outcome import BatchReport, EnqueueOutcome, OutcomeKind
 from musicbot.song import Song
 from musicbot.linkutils import SiteTypes
+from musicbot.message_link import check_message_link
 from musicbot.panel_snapshot import PanelSnapshot
 from musicbot.playback import Playback, PlaybackState
 from musicbot.playlist import Playlist, LoopMode, LoopState
@@ -42,6 +44,7 @@ class RestoreResult(Enum):
     RESTORED = auto()
     NOTHING_TO_RESTORE = auto()
     REFUSED_WHILE_ACTIVE = auto()
+    BACKUP_UNREADABLE = auto()
 
 
 class AudioController(object):
@@ -64,6 +67,7 @@ class AudioController(object):
         self.pickle_file = Path("backup") / f"playlist_{guild.id}.pickle"
         self.pickle_file.parent.mkdir(parents=True, exist_ok=True)
         self.guild = guild
+        self._log_label = f"{guild.name!r} ({guild.id})"
 
         sett = bot.sessions.settings(guild)
         self._volume: int = sett.default_volume
@@ -88,12 +92,14 @@ class AudioController(object):
             humans_present=self._humans_present,
             on_play_failed=lambda: self.udisconnect("playback error"),
             get_loop=lambda: self.bot.loop,
-            log_label=f"{guild.name!r} ({guild.id})",
+            log_label=self._log_label,
         )
 
         # according to Python documentation, we need
         # to keep strong references to all tasks
         self._tasks = set()
+        # the number of the sweep allowed to start preloads
+        self._sweep = 0
 
     @property
     def current_song(self) -> Optional[Song]:
@@ -117,8 +123,27 @@ class AudioController(object):
             print_exc(file=sys.stderr)
 
     def _write_backup(self):
-        with open(self.pickle_file, "wb") as f:
-            pickle.dump(self.playlist, f)
+        """Best-effort, atomic backup write; never raises. The previous
+        backup survives any failure."""
+        tmp = self.pickle_file.with_name(self.pickle_file.name + ".tmp")
+        try:
+            with open(tmp, "wb") as f:
+                pickle.dump(self.playlist, f)
+                f.flush()
+                os.fsync(f.fileno())
+            os.replace(tmp, self.pickle_file)
+        except Exception as e:
+            print(
+                f"Playlist backup write failed in guild "
+                f"{self._log_label}: {e!r}",
+                file=sys.stderr,
+            )
+            if not isinstance(e, OSError):
+                print_exc(file=sys.stderr)
+            try:
+                tmp.unlink(missing_ok=True)
+            except Exception:
+                pass
 
     def _humans_present(self) -> bool:
         return not all(m.bot for m in self.guild.voice_client.channel.members)
@@ -376,10 +401,19 @@ class AudioController(object):
         the backup or the queue: starting the head then would make
         discord.py refuse play() and the controller disconnect (#24).
         Reports NOTHING_TO_RESTORE, playing nothing, when there is no
-        queue to restore."""
+        queue to restore, and BACKUP_UNREADABLE, changing nothing, when
+        the backup exists but cannot be loaded."""
         if not self.is_idle():
             return RestoreResult.REFUSED_WHILE_ACTIVE
-        self.load_pickle_playlist()
+        try:
+            self.load_pickle_playlist()
+        except Exception as e:
+            print(
+                f"Playlist backup unreadable in guild "
+                f"{self._log_label}: {e!r}",
+                file=sys.stderr,
+            )
+            return RestoreResult.BACKUP_UNREADABLE
         if not self.playlist:
             return RestoreResult.NOTHING_TO_RESTORE
         await self.play_song(self.playlist[0])
@@ -406,6 +440,7 @@ class AudioController(object):
         # A failed load raises SongError, which the caller turns into a
         # Discord reply; it still has to leave a trace here.
         try:
+            await check_message_link(track, self.guild, user)
             result = await loader.load_song(track)
         except loader.SongError:
             print(
@@ -510,11 +545,13 @@ class AudioController(object):
     async def dispose(self, reason: str = "left guild"):
         """Tear this controller down for good: disconnect, then cancel
         every task add_task() still has pending."""
-        await self.udisconnect(reason)
-        for task in list(self._tasks):
-            task.cancel()
-        # after the tasks: one of them may have started it
-        self.timer.cancel()
+        try:
+            await self.udisconnect(reason)
+        finally:
+            for task in list(self._tasks):
+                task.cancel()
+            # after the tasks: one of them may have started it
+            self.timer.cancel()
 
     async def _preload(self, song: Song) -> bool:
         """Preloads `song`; when that ran a fresh extraction, refreshes
@@ -536,35 +573,36 @@ class AudioController(object):
                 print_exc(file=sys.stderr)
         return True
 
-    async def _preload_songs(self):
-        rerun_needed = False
+    async def _preload_songs(self, sweep: int):
+        """The warm-up sweep: preloads the songs behind the head and
+        nothing else. It never removes a song, whatever a preload
+        returns: a failure may be temporary, and a song that cannot be
+        played is reported and skipped when it reaches the head. It
+        ends, between songs, once `sweep` is no longer the current
+        sweep; it is never cancelled, so a preload shared with the
+        head play is not failed under it."""
         for song in list(
             islice(self.playlist.playque, 1, config.MAX_SONG_PRELOAD)
         ):
-            if not await self._preload(song):
-                # Not the head: while this preload ran, the song may
-                # have become the current one, and the failed-track
-                # path (Playback's drop_head) is the only owner of the
-                # head. Removing it here too would make that path drop
-                # the song behind it.
-                queue = self.playlist.playque
-                if queue and queue[0] is song:
-                    continue
-                try:
-                    queue.remove(song)
-                    rerun_needed = True
-                except ValueError:
-                    # already removed
-                    pass
-        if rerun_needed:
-            self.add_task(self._preload_songs())
+            if sweep != self._sweep:
+                return
+            if song not in self.playlist.playque:
+                continue
+            await self._preload(song)
 
     def _schedule_preload(self):
-        """Preloads the first MAX_SONG_PRELOAD songs asynchronously"""
-        self.add_task(self._preload_songs())
+        """Preloads the first MAX_SONG_PRELOAD songs asynchronously,
+        superseding any sweep already running."""
+        self.add_task(self._preload_songs(self._end_sweep()))
+
+    def _end_sweep(self) -> int:
+        """Ends the running preload sweep; returns the new sweep number."""
+        self._sweep += 1
+        return self._sweep
 
     def stop(self):
         """Stops the player and removes all songs from the queue"""
+        self._end_sweep()
         self.playback.stop()
 
     def prev_song(self) -> bool:
@@ -599,6 +637,7 @@ class AudioController(object):
         await self.playback.start_idle_timer(restart)
 
     async def udisconnect(self, reason: str):
+        self._end_sweep()
         async with self.playback.teardown() as had_session:
             return await self._udisconnect(reason, had_session)
 
@@ -630,14 +669,21 @@ class AudioController(object):
                 )
             return False
         print(f"Disconnecting from guild {self.guild.name!r} ({reason})")
+        # guild.voice_client is guild-global and the sound below awaits,
+        # so it can vanish or be replaced meanwhile: hold the one being
+        # closed, and close it only if it is still the guild's. Closing
+        # a stale client would make discord.py unregister whatever
+        # client has taken its place.
+        voice_client = self.guild.voice_client
         if config.ANNOUNCE_DISCONNECT:
             try:
-                self.guild.voice_client.play(
+                voice_client.play(
                     discord.FFmpegPCMAudio(asset("disconnect.mp3"))
                 )
-                while self.guild.voice_client.is_playing():
+                while voice_client.is_playing():
                     await asyncio.sleep(1)
             except Exception:
                 print_exc(file=sys.stderr)
-        await self.guild.voice_client.disconnect(force=True)
+        if self.guild.voice_client is voice_client:
+            await voice_client.disconnect(force=True)
         return True

@@ -270,6 +270,7 @@ def test_unsupported_picture_mime_gives_no_cover(maker, tmp_path):
     path = maker(tmp_path)
     tag(path, {}, [(PictureType.COVER_FRONT, "-->")])
     assert read_artwork(path) is None
+    assert read_artwork(path, strict=True) is None
 
 
 def test_flac_without_front_marked_picture_gives_the_first(tmp_path):
@@ -305,6 +306,7 @@ def test_cover_larger_than_max_bytes_gives_none(tmp_path):
     path = make_flac(tmp_path)
     tag(path, {}, [(PictureType.COVER_FRONT, "image/jpeg")])
     assert read_artwork(path, max_bytes=3) is None
+    assert read_artwork(path, max_bytes=3, strict=True) is None
     assert read_artwork(path, max_bytes=4) is not None
 
 
@@ -314,3 +316,20 @@ def test_corrupt_file_gives_empty_tags_and_no_cover(suffix, tmp_path):
     path.write_bytes(b"not audio at all" * 8)
     assert read_tags(path) == AudioTags(*[None] * 10)
     assert read_artwork(path) is None
+    assert read_tags(path, strict=True) == AudioTags(*[None] * 10)
+    assert read_artwork(path, strict=True) is None
+
+
+def test_default_mode_on_a_missing_file_gives_empty_and_no_cover(tmp_path):
+    path = tmp_path / "gone.mp3"
+    assert read_tags(path) == AudioTags(*[None] * 10)
+    assert read_artwork(path) is None
+
+
+@pytest.mark.parametrize("reader", [read_tags, read_artwork])
+def test_strict_on_a_missing_file_raises_oserror_and_prints_nothing(
+    reader, tmp_path, capsys
+):
+    with pytest.raises(OSError):
+        reader(tmp_path / "gone.mp3", strict=True)
+    assert capsys.readouterr().err == ""
