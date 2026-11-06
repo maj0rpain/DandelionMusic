@@ -9,7 +9,7 @@ from musicbot import loader
 from musicbot.outcome import EnqueueOutcome, OutcomeKind, render
 from musicbot.plugins.button import Button
 from musicbot.truncation import Truncation, TruncationReason
-from discord_fakes import VoiceGuild, make_bot
+from discord_fakes import VoiceGuild, admission_settings, make_bot
 from helpers import plain_song, run
 
 YOUTUBE = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -110,7 +110,7 @@ def react(
     channel = FakeChannel(message)
     known = {channel.id: channel}
     controller = FakeController(outcomes)
-    sett = SimpleNamespace(
+    sett = admission_settings(
         button_emote="x",
         command_channel=command_channel,
         user_must_be_in_vc=True,

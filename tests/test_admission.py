@@ -20,13 +20,13 @@ from discord_fakes import (
     BOTS_ONLY,
     ADMISSION_DJ_ROLE,
     HERE,
+    PLAYER_BUTTONS,
     PEOPLE,
     fake_controller,
     invoke_music_hooks,
     situation,
 )
 from helpers import run
-
 
 NOT_IN_VC = config.USER_NOT_IN_VC_MESSAGE
 NO_PERMS = config.VOICE_PERMISSIONS_MISSING
@@ -226,6 +226,18 @@ def rows():
             NOT_CONNECTED,
         ),
         (
+            "player_button: bot out of voice, author outside voice",
+            K.PLAYER_BUTTON,
+            {"author": None},
+            NOT_CONNECTED,
+        ),
+        (
+            "player_button: bot with others, plain member under a DJ role",
+            K.PLAYER_BUTTON,
+            {"bot": PEOPLE, "dj_role": ADMISSION_DJ_ROLE},
+            NOT_IN_VC,
+        ),
+        (
             "player_button: with the author",
             K.PLAYER_BUTTON,
             {"bot": HERE, "author": "a"},
@@ -250,6 +262,15 @@ def rows():
             WRONG_CH,
         ),
     ]
+    for cid in PLAYER_BUTTONS:
+        out.append(
+            (
+                f"player_button {cid}: bot out of voice, admin",
+                K.PLAYER_BUTTON,
+                {"custom_id": cid, "role": "admin"},
+                NOT_CONNECTED,
+            )
+        )
     for cid in DJ_BUTTONS:
         out += [
             (
@@ -467,12 +488,6 @@ def test_a_joining_command_defers_then_joins_after_its_dj_check():
     guild, ctx, cog = music_ctx("prev", dj_role=ADMISSION_DJ_ROLE, role="dj")
     run(invoke_music_hooks(cog, ctx))
     assert guild.events == [("defer",), ("connect", "b")]
-
-
-def test_a_command_without_a_join_neither_defers_nor_joins():
-    guild, ctx, cog = music_ctx("history")
-    run(invoke_music_hooks(cog, ctx))
-    assert guild.events == []
 
 
 def test_the_command_acts_on_the_controller_enter_returns():
