@@ -22,15 +22,18 @@ OUTCOMES = [
 ]
 
 
-@pytest.mark.parametrize("playnext", [False, True])
 @pytest.mark.parametrize("announce", [True, False])
 @pytest.mark.parametrize("outcome", OUTCOMES, ids=lambda o: o.kind.name)
-def test_play_sends_exactly_what_render_returns(outcome, announce, playnext):
+def test_play_sends_exactly_what_render_returns(outcome, announce):
+    """d!playnext reaches this same `_play_song` reply path, and the reply
+    depends only on the returned outcome. Where playnext places the song
+    is tested against a real controller in test_playnext.py and
+    test_enqueue_outcome.py."""
     ctx, sent = command_ctx(
         ProcessController(outcome), announce_songs=announce
     )
 
-    run(Music(None)._play_song(ctx, "t", playnext=playnext))
+    run(Music(None)._play_song(ctx, "t"))
 
     expected = render(outcome, announce)
     assert sent == ([] if expected is None else [expected.embed.title])

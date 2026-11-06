@@ -56,6 +56,13 @@ class GuildSessions(Generic[Guild, Panel, Controller, Settings]):
     def panel(self, guild: Guild) -> Optional[Panel]:
         return self._panels.get(guild)
 
+    def direct_panel(
+        self, guild: Guild, channel, *, replace: bool = True
+    ) -> None:
+        panel = self._panels.get(guild)
+        if panel is not None:
+            panel.direct_to(channel, replace=replace)
+
     def panels(self) -> Iterator[Panel]:
         # a snapshot, like __iter__
         return iter(list(self._panels.values()))

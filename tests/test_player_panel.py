@@ -680,3 +680,56 @@ def test_a_failed_announcement_is_logged_and_not_raised(directed, capsys):
     skipped(rig)
 
     assert "Failed to send a playback message" in capsys.readouterr().err
+
+
+# --- the post-click steps ---
+
+
+class StepCtx:
+    def __init__(self):
+        self.author = "alice"
+        self.sent = []
+
+    async def send(self, text, **kwargs):
+        self.sent.append(text)
+
+
+def click_after(custom_id):
+    """Awaits the `after` step the layout attached to `custom_id` on an
+    attached panel, with the snapshot changed first so a refresh shows
+    as an edit: (the click ctx, the panel message)."""
+    rig = Rig()
+    message = PanelMessage()
+    views = []
+
+    async def send(view):
+        views.append(view)
+        return message
+
+    run(rig.panel.attach(send))
+    rig.controller.snapshot = snap(volume=0)
+    ctx = StepCtx()
+    run(buttons(views[0])[custom_id]._after(ctx))
+    return ctx, message
+
+
+@pytest.mark.parametrize("custom_id", ["prev", "next"])
+def test_a_skip_clicks_step_posts_the_notice_and_leaves_the_message(
+    custom_id,
+):
+    ctx, message = click_after(custom_id)
+
+    assert ctx.sent == ["alice Skipped a Song"]
+    assert message.edits == []
+
+
+@pytest.mark.parametrize(
+    "custom_id",
+    [b for b in PLAYER_BUTTONS if b not in ("prev", "next")],
+)
+def test_every_other_clicks_step_edits_the_message_once(custom_id):
+    ctx, message = click_after(custom_id)
+
+    assert ctx.sent == []
+    assert len(message.edits) == 1
+    assert buttons(message.edits[0])["volume_down"].disabled

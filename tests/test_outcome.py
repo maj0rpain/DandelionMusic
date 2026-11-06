@@ -1,7 +1,17 @@
+import ast
+import types
+from pathlib import Path
+
+import pytest
+
 from config import config
-from musicbot.outcome import EnqueueOutcome, OutcomeKind, render
+from musicbot import outcome as outcome_module
+from musicbot.linkutils import SiteTypes
+from musicbot.outcome import EnqueueOutcome, OutcomeKind, render, send_outcome
+from musicbot.song import Song
 from musicbot.truncation import Truncation, TruncationReason
-from helpers import plain_song
+
+from helpers import plain_song, run
 
 
 def test_started_with_announcements_on_says_nothing():
@@ -45,7 +55,7 @@ def test_truncated_playlist_says_how_many_of_how_many():
 
 def _library(count, skipped):
     outcome = EnqueueOutcome(
-        OutcomeKind.PLAYLIST, count=count, skipped=skipped
+        OutcomeKind.LIBRARY_PICK, count=count, skipped=tuple(skipped)
     )
     return render(outcome, True).text
 
@@ -68,3 +78,49 @@ def test_library_pick_elides_skipped_files_past_five():
         "0.mp3, 1.mp3, 2.mp3, 3.mp3, 4.mp3, and 2 more. "
         "The index may be stale - ask the bot owner to run `d!lib refresh`."
     )
+
+
+def _send(settings):
+    sent = []
+
+    async def send(message=None, **kwargs):
+        sent.append((message, kwargs.get("embed")))
+
+    ctx = types.SimpleNamespace(
+        send=send,
+        guild=object(),
+        bot=types.SimpleNamespace(
+            sessions=types.SimpleNamespace(settings=lambda _guild: settings)
+        ),
+    )
+    outcome = EnqueueOutcome(
+        OutcomeKind.STARTED,
+        song=Song(SiteTypes.YT_DLP, "https://example.invalid/a", title="a"),
+    )
+    run(send_outcome(ctx, outcome))
+    return sent
+
+
+@pytest.mark.parametrize("announce", [True, False])
+def test_send_outcome_follows_the_guilds_announce_songs(announce):
+    settings = types.SimpleNamespace(announce_songs=announce)
+    sent = _send(settings)
+    assert bool(sent) is (not announce)
+
+
+def test_send_outcome_with_missing_settings_is_treated_as_announcements_off():
+    sent = _send(None)
+    assert len(sent) == 1
+
+
+def test_outcome_module_imports_neither_utils_nor_the_controller():
+    names = set()
+    tree = ast.parse(Path(outcome_module.__file__).read_text())
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Import):
+            names.update(a.name for a in node.names)
+        elif isinstance(node, ast.ImportFrom):
+            names.add(node.module)
+            names.update(f"{node.module}.{a.name}" for a in node.names)
+    assert "musicbot.utils" not in names
+    assert "musicbot.audiocontroller" not in names

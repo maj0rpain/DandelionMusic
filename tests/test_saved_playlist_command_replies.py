@@ -27,7 +27,7 @@ def _fail_with(error):
 
 def _run_playlist_command(monkeypatch, command, function, error, *args):
     async def load_song(track):
-        return LoadResult([plain_song()], True)
+        return LoadResult.of_song(plain_song())
 
     monkeypatch.setattr(music.loader, "load_song", load_song)
     monkeypatch.setattr(playlists, function, _fail_with(error))

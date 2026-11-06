@@ -29,7 +29,7 @@ class FakePool:
         outcome = (
             self.outcomes.pop(0)
             if self.outcomes
-            else LoadResult([plain_song("ok")], True)
+            else LoadResult.of_song(plain_song("ok"))
         )
         if isinstance(outcome, str) and outcome == "break":
             future.set_exception(BrokenProcessPool("worker died"))
