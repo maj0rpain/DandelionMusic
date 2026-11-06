@@ -16,9 +16,8 @@ import pytest
 
 from musicbot import playlists
 from musicbot.library import LocalTrack
-from musicbot.playlist import LoopMode
+from musicbot.playlist import LoopMode, PauseState
 from musicbot.commands.music import Music
-from musicbot.playlist import PauseState
 from controller_helpers import (
     _backup,
     _backup_path,
@@ -2453,6 +2452,7 @@ def test_pause_and_resume_work_when_the_backup_write_fails(
 
 
 def test_an_enqueue_works_when_the_backup_write_fails(controller, monkeypatch):
+    _fake_ffmpeg(monkeypatch)
     _queue(controller, "current")
     songs = _songs(controller, "a")
     _fail_replace(controller, monkeypatch)
