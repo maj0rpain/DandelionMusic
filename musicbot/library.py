@@ -428,6 +428,14 @@ def song_uri(artist: str, album: str, filename: str) -> str:
     return song_path(artist, album, filename).as_uri()
 
 
+class LocalTrack(NamedTuple):
+    """A library track handed to the controller: the `song_uri` it
+    loads by and the name it is reported by when it cannot be loaded."""
+
+    uri: str
+    name: str
+
+
 def track_path_from_uri(uri: str) -> Optional[Path]:
     """The playable path of a local-library URI, or None if refused.
 

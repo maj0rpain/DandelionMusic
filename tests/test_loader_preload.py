@@ -26,10 +26,6 @@ def _song(**kw):
     return Song(SiteTypes.YT_DLP, URL, **kw)
 
 
-def _single(song):
-    return LoadResult([song], True)
-
-
 def _never_loads(monkeypatch):
     async def load(lane, track):
         raise AssertionError("preload extracted a song that was current")
@@ -51,7 +47,7 @@ def test_a_song_whose_stream_url_has_not_expired_is_current(monkeypatch):
 
 def test_a_fresh_extraction_updates_the_song_and_reports_it(monkeypatch):
     async def load(lane, track):
-        return _single(
+        return LoadResult.of_song(
             Song(
                 SiteTypes.YT_DLP,
                 track,
@@ -95,7 +91,7 @@ def test_a_caller_awaiting_an_inflight_extraction_is_told_its_outcome(
         async def load(lane, track):
             await release.wait()
             if extracted:
-                return _single(
+                return LoadResult.of_song(
                     Song(SiteTypes.YT_DLP, track, url="https://s.invalid")
                 )
             raise loader.SongError("gone")
@@ -120,7 +116,7 @@ def test_cancelling_one_waiter_leaves_the_owner_and_other_waiters_alone(
 
         async def load(lane, track):
             await release.wait()
-            return _single(
+            return LoadResult.of_song(
                 Song(SiteTypes.YT_DLP, track, url="https://s.invalid")
             )
 
@@ -160,7 +156,7 @@ def _fresh_load(monkeypatch):
 
     async def load(lane, track):
         calls.append(track)
-        return _single(
+        return LoadResult.of_song(
             Song(SiteTypes.YT_DLP, track, url="https://s.invalid/new")
         )
 
@@ -251,7 +247,7 @@ def test_load_in_the_preload_lane_dispatches_there_and_stamps_the_clock(
 
     async def run_sync(lane, f, *args):
         lanes.append(lane)
-        return _single(Song(SiteTypes.YT_DLP, URL))
+        return LoadResult.of_song(Song(SiteTypes.YT_DLP, URL))
 
     monkeypatch.setattr(loader, "_run_sync", run_sync)
     result = run(loader._load(loader.Lane.PRELOAD, URL))
@@ -266,7 +262,7 @@ def test_preload_extracts_in_the_preload_lane(monkeypatch):
 
     async def load(lane, track):
         lanes.append(lane)
-        return _single(
+        return LoadResult.of_song(
             Song(SiteTypes.YT_DLP, track, url="https://s.invalid/new")
         )
 

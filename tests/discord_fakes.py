@@ -1,6 +1,6 @@
 """Shared Discord stand-ins for the tests: the click FakeInteraction,
 make_bot, the voice fakes, RecordingCtx, http_error and the
-player view's button ids. Import them rather than writing a per-file
+player panel's button ids. Import them rather than writing a per-file
 copy.
 """
 
@@ -135,10 +135,10 @@ class VoiceGuild:
 class FakeInteraction:
     """A component click. Records `deferred`, `messages` (direct
     responses) and `followups`. Its client answers get_context with
-    the context and has no controller or player panel for any guild
-    (unless a `panel` is given), so a click ends after its action."""
+    the context and has no controller for any guild, so a click ends
+    after its action."""
 
-    def __init__(self, ctx, custom_id="x", user_id=1, panel=None):
+    def __init__(self, ctx, custom_id="x", user_id=1):
         self.guild = ctx.guild
         self.user = types.SimpleNamespace(id=user_id)
         self.data = {"custom_id": custom_id}
@@ -168,9 +168,7 @@ class FakeInteraction:
 
         self.client = types.SimpleNamespace(
             get_context=get_context,
-            sessions=types.SimpleNamespace(
-                controller=lambda guild: None, panel=lambda guild: panel
-            ),
+            sessions=types.SimpleNamespace(controller=lambda guild: None),
         )
 
 
@@ -208,7 +206,7 @@ def coded_error(cls, status, code):
 EXPIRED = coded_error(discord.HTTPException, 401, 50027)
 
 
-# The player view's button ids, in its order. Hand-written because
+# The player panel's button ids, in its order. Hand-written because
 # parametrize reads it at collection; test_player_panel checks it
 # against the real view.
 PLAYER_BUTTONS = [
