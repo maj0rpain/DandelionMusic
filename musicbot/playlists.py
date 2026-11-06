@@ -25,7 +25,7 @@ from sqlalchemy import delete as sql_delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from musicbot.settings import SavedPlaylist
+from musicbot.settings import PLAYLIST_NAME_MAX_LENGTH, SavedPlaylist
 
 SessionFactory = Callable[[], AsyncSession]
 
@@ -75,6 +75,10 @@ class CorruptPlaylist(SavedPlaylistError):
 
 class PlaylistExists(SavedPlaylistError):
     pass
+
+
+class PlaylistNameTooLong(SavedPlaylistError):
+    """A name over PLAYLIST_NAME_MAX_LENGTH characters cannot be saved."""
 
 
 class InvalidPosition(SavedPlaylistError):
@@ -177,6 +181,8 @@ async def save(
     playlist: PlaylistRef,
     songs: Iterable[PlaylistEntry],
 ) -> None:
+    if len(playlist.name) > PLAYLIST_NAME_MAX_LENGTH:
+        raise PlaylistNameTooLong(playlist.name)
     async with session_factory() as session:
         session.add(
             SavedPlaylist(
