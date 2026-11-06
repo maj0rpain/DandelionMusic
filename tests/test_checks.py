@@ -20,7 +20,6 @@ from musicbot.commands.library import Library, queue_songs
 from musicbot.views import MusicButton
 from musicbot.commands.music import Music, SearchView, SongButton
 from musicbot import admission
-from musicbot.admission import RequestKind
 from musicbot.utils import (
     CheckError,
     chunks,
@@ -419,11 +418,11 @@ def recording_send(ctx):
     return sent
 
 
-def press(ctx, custom_id, kind=RequestKind.PLAYER_BUTTON):
+def press(ctx, custom_id):
     """Clicks a MusicButton: (what was sent, what ran)."""
     sent = recording_send(ctx)
     ran = []
-    click(MusicButton(ran.append, kind, custom_id=custom_id), ctx, custom_id)
+    click(MusicButton(ran.append, custom_id=custom_id), ctx, custom_id)
     return sent, ran
 
 

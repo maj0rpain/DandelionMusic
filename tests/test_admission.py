@@ -20,7 +20,6 @@ from discord_fakes import (
     BOTS_ONLY,
     ADMISSION_DJ_ROLE,
     HERE,
-    PLAYER_BUTTONS,
     PEOPLE,
     fake_controller,
     invoke_music_hooks,
@@ -262,11 +261,11 @@ def rows():
             WRONG_CH,
         ),
     ]
-    for cid in PLAYER_BUTTONS:
+    for cid, kind in PANEL_BUTTONS:
         out.append(
             (
-                f"player_button {cid}: bot out of voice, admin",
-                K.PLAYER_BUTTON,
+                f"{kind.name.lower()} {cid}: bot out of voice, admin",
+                kind,
                 {"custom_id": cid, "role": "admin"},
                 NOT_CONNECTED,
             )
