@@ -223,10 +223,12 @@ class TestTracks:
         c = cursor()
         c.descend("Radiohead")
         assert len(c.tracks()) == 5
-        assert {album for _, album, _ in c.tracks()} == {
-            "OK Computer",
-            "Kid A",
-        }
+        albums = []
+        for _, album, _ in c.tracks():
+            if album not in albums:
+                albums.append(album)
+        assert set(albums) == {"OK Computer", "Kid A"}
+        assert albums == library.albums_of(INDEX, "Radiohead")
 
     def test_the_discography_queues_albums_in_browse_order(self):
         index = {
