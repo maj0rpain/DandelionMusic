@@ -32,10 +32,12 @@ NOT_CONNECTED = config.NOT_CONNECTED_MESSAGE
 NOT_DJ = config.NOT_A_DJ
 
 
-def run_request(ctx, kind):
+def run_request(ctx, kind, allow_disconnecting=False):
     async def go():
         admitted = await admission.check(
-            ctx, None if kind in admission.COMMAND_KINDS else kind
+            ctx,
+            None if kind in admission.COMMAND_KINDS else kind,
+            allow_disconnecting=allow_disconnecting,
         )
         return await admitted.enter()
 
@@ -330,6 +332,46 @@ def rows():
             NOT_IN_VC,
         ),
     ]
+    # a controller that is disconnecting refuses a joining request
+    gone = {"disconnecting": True}
+    for kind in JOINING:
+        out.append(
+            (
+                f"{kind.name.lower()}: disconnecting, refused, no join",
+                kind,
+                gone,
+                config.DISCONNECTING_MESSAGE,
+            )
+        )
+    for kind in (K.COMMAND, K.PLAYER_BUTTON, K.DJ_PLAYER_BUTTON):
+        out.append(
+            (
+                f"{kind.name.lower()}: disconnecting, admitted",
+                kind,
+                {**gone, "bot": HERE, "author": "a", "role": "admin"},
+                "admitted",
+            )
+        )
+    out += [
+        (
+            "joining_command: disconnecting, wrong channel first",
+            K.JOINING_COMMAND,
+            {**gone, "wrong_channel": True},
+            WRONG_CH,
+        ),
+        (
+            "joining_command: disconnecting, allowed, connects as today",
+            K.JOINING_COMMAND,
+            {**gone, "allow_disconnecting": True},
+            "connect",
+        ),
+        (
+            "joining_command: disconnecting, allowed, bots-only moves",
+            K.JOINING_COMMAND,
+            {**gone, "allow_disconnecting": True, "bot": BOTS_ONLY},
+            "move",
+        ),
+    ]
     return out
 
 
@@ -342,6 +384,8 @@ ROWS = rows()
     ids=[r[0] for r in ROWS],
 )
 def test_admission_table(kind, spec, outcome, no_sleep):
+    spec = dict(spec)
+    allow = spec.pop("allow_disconnecting", False)
     guild, ctx = situation(kind, **spec)
     if outcome in ("connect", "move", "admitted"):
         expected_join = {
@@ -351,14 +395,16 @@ def test_admission_table(kind, spec, outcome, no_sleep):
         }[outcome]
         admitted = run(
             admission.check(
-                ctx, None if kind in admission.COMMAND_KINDS else kind
+                ctx,
+                None if kind in admission.COMMAND_KINDS else kind,
+                allow_disconnecting=allow,
             )
         )
         assert admitted.join is expected_join
         assert admitted.join_needed is (
             expected_join is not admission.Join.NONE
         )
-        controller = run_request(ctx, kind)
+        controller = run_request(ctx, kind, allow)
         assert controller is ctx.bot.sessions.controller(guild)
         expected = {
             "connect": [("connect", "b")],
@@ -368,7 +414,7 @@ def test_admission_table(kind, spec, outcome, no_sleep):
         assert guild.events == expected
     else:
         with pytest.raises(CheckError) as exc:
-            run_request(ctx, kind)
+            run_request(ctx, kind, allow)
         assert str(exc.value) == outcome
         assert guild.events == []
 

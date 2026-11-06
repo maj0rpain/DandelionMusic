@@ -47,11 +47,18 @@ class _FailingApi:
 def test_a_failed_spotify_lookup_is_a_could_not_load_error(
     monkeypatch, worker_loop, exc
 ):
+    page_error = aiohttp.ClientConnectionError("page down")
+
+    async def get_soup(url):
+        raise page_error
+
     monkeypatch.setattr(linkutils, "spotify_api", _FailingApi(exc))
+    monkeypatch.setattr(linkutils, "get_soup", get_soup)
     with pytest.raises(SongError) as info:
         loader._load_song(TRACK)
     assert str(info.value) == config.SONGINFO_ERROR
-    assert info.value.__cause__ is exc
+    assert info.value.__cause__ is page_error
+    assert page_error.__context__ is exc
 
 
 class _Always429(BaseHTTPRequestHandler):

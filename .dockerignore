@@ -21,6 +21,7 @@ config/cookies/cookies.txt
 # by docker-compose.yaml at run time.
 settings.db
 data/
+music/
 backup/
 log.txt
 
@@ -60,7 +61,6 @@ graft/
 .github/
 docs/
 tests/
-heroku-legacy/
 CLAUDE.md
 README.md
 LICENSE

@@ -159,8 +159,9 @@ class General(commands.Cog):
     @commands.check(dj_check)
     async def _reset(self, ctx):
         await ctx.defer()
-        # a refused user resets nothing
-        await admission.check(ctx)
+        # a refused user resets nothing; a reset is the recovery from a
+        # disconnect in progress, so that one refusal is skipped
+        await admission.check(ctx, allow_disconnecting=True)
         was_connected = ctx.guild.voice_client is not None
         # reset() disposes of the old controller, which disconnects it -
         # so not here as well: a second udisconnect() would back the

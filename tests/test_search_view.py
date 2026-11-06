@@ -64,6 +64,9 @@ class FakeFollowup:
 
 
 class NamedController:
+    def is_disconnecting(self):
+        return False
+
     async def dispose(self, reason=None):
         pass
 
