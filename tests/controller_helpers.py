@@ -87,7 +87,8 @@ class _FakeFFmpeg:
         self.kwargs = kwargs
 
     def read(self):
-        return b""
+        # one whole 16-bit stereo PCM frame (20 ms at 48 kHz)
+        return b"\x01\x00" * 1920
 
 
 def _fake_ffmpeg(monkeypatch):
