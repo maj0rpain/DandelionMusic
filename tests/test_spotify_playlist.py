@@ -196,3 +196,166 @@ def test_fetch_spotify_with_credentials_looks_the_track_up_by_id(
     )
     assert calls == [track_id]
     assert result == linkutils.SpotifyTrack('T - A "Topic"')
+
+
+class NothingSpotify(FakeSpotify):
+    """The API answers every request with nothing."""
+
+    def _page(self):
+        return None
+
+
+def _scraping(monkeypatch, count, song_count):
+    async def get_soup(u):
+        return _page(count, song_count)
+
+    monkeypatch.setattr(linkutils, "get_soup", get_soup)
+
+
+def _fetch(list_type="playlist"):
+    return run(linkutils.fetch_spotify_playlist("u", list_type, "p"))
+
+
+@pytest.mark.parametrize(
+    "song_count, expected",
+    [
+        (50, Truncation(50, TruncationReason.API_UNAVAILABLE)),
+        (30, None),
+        (None, None),
+    ],
+)
+def test_first_page_failure_falls_back_to_the_public_page(
+    monkeypatch, song_count, expected
+):
+    api = PagedSpotify(RuntimeError("boom"), first_raises=True)
+    monkeypatch.setattr(linkutils, "spotify_api", api)
+    _scraping(monkeypatch, 30, song_count)
+
+    result = _fetch()
+
+    assert result == linkutils.SpotifyTracks(
+        [url(n) for n in range(30)], expected
+    )
+
+
+@pytest.mark.parametrize(
+    "api",
+    [
+        PagedSpotify(RuntimeError("boom"), first_raises=True),
+        NothingSpotify([]),
+    ],
+    ids=["first-page-failure", "nothing"],
+)
+def test_album_falls_back_to_the_public_page(monkeypatch, api):
+    monkeypatch.setattr(linkutils, "spotify_api", api)
+    _scraping(monkeypatch, 30, 50)
+
+    result = _fetch("album")
+
+    assert len(result.links) == 30
+    assert result.truncation == Truncation(
+        50, TruncationReason.API_UNAVAILABLE
+    )
+
+
+def test_api_returning_nothing_falls_back_to_the_public_page(monkeypatch):
+    monkeypatch.setattr(linkutils, "spotify_api", NothingSpotify([]))
+    _scraping(monkeypatch, 30, 50)
+
+    result = _fetch()
+
+    assert len(result.links) == 30
+    assert result.truncation == Truncation(
+        50, TruncationReason.API_UNAVAILABLE
+    )
+
+
+def test_api_returning_nothing_raises_in_the_pure_reader(monkeypatch):
+    monkeypatch.setattr(linkutils, "spotify_api", NothingSpotify([]))
+
+    with pytest.raises(linkutils.SpotifyApiReturnedNothing):
+        fetch_playlist_with_api(SpotifyPlaylistTypes.PLAYLIST, "p")
+
+
+def test_api_and_public_page_failing_raises_the_page_error(monkeypatch):
+    api_error = RuntimeError("api")
+    page_error = RuntimeError("page")
+    monkeypatch.setattr(
+        linkutils, "spotify_api", PagedSpotify(api_error, first_raises=True)
+    )
+
+    async def get_soup(u):
+        raise page_error
+
+    monkeypatch.setattr(linkutils, "get_soup", get_soup)
+
+    with pytest.raises(RuntimeError) as info:
+        _fetch()
+
+    assert info.value is page_error
+    assert info.value.__context__ is api_error
+
+
+def test_paging_failure_after_page_one_does_not_scrape(monkeypatch):
+    monkeypatch.setattr(
+        linkutils, "spotify_api", PagedSpotify(RuntimeError("boom"))
+    )
+
+    async def get_soup(u):
+        raise AssertionError("scraped")
+
+    monkeypatch.setattr(linkutils, "get_soup", get_soup)
+
+    result = _fetch()
+
+    assert result.truncation == Truncation(4, TruncationReason.API_ERROR)
+
+
+@pytest.mark.parametrize(
+    "api",
+    [
+        PagedSpotify(RuntimeError("boom"), first_raises=True),
+        NothingSpotify([]),
+    ],
+    ids=["first-page-failure", "nothing"],
+)
+def test_playlist_fallback_still_logs_the_api_error(monkeypatch, capsys, api):
+    monkeypatch.setattr(linkutils, "spotify_api", api)
+    _scraping(monkeypatch, 3, 3)
+
+    _fetch()
+
+    err = capsys.readouterr().err
+    assert "ERROR: Spotify API returned error for" in err
+    assert "Traceback" in err
+
+
+def test_fallback_with_an_empty_public_page_returns_empty(monkeypatch):
+    monkeypatch.setattr(linkutils, "spotify_api", NothingSpotify([]))
+    _scraping(monkeypatch, 0, 0)
+
+    assert _fetch() == linkutils.SpotifyTracks([], None)
+
+
+def test_track_whose_api_lookup_raises_falls_back_to_the_page_title(
+    monkeypatch, capsys
+):
+    class FailingApi:
+        def track(self, code):
+            raise RuntimeError("boom")
+
+    async def get_soup(u):
+        return BeautifulSoup(
+            "<title>T - song and lyrics by A | Spotify</title>",
+            "html.parser",
+        )
+
+    monkeypatch.setattr(linkutils, "spotify_api", FailingApi())
+    monkeypatch.setattr(linkutils, "get_soup", get_soup)
+
+    result = run(linkutils.fetch_spotify("https://open.spotify.com/track/abc"))
+
+    assert result == linkutils.SpotifyTrack('T - A "Topic"')
+    err = capsys.readouterr().err
+    assert "ERROR: Spotify API returned error for track abc:" in err
+    assert "Traceback" in err
