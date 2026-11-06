@@ -247,6 +247,15 @@ async def get_soup(url: str) -> BeautifulSoup:
     return BeautifulSoup(page, "html.parser")
 
 
+async def resolve_short_link(url: str) -> str:
+    """The URL a short link redirects to: one GET with redirects
+    followed, the body never read. Raises on a 4xx/5xx or any
+    network or timeout error."""
+    async with get_session().get(url) as response:
+        response.raise_for_status()
+        return str(response.url)
+
+
 async def fetch_spotify(
     url: str,
 ) -> Union[SpotifyTrack, SpotifyTracks]:

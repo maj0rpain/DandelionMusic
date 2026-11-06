@@ -28,6 +28,7 @@ from musicbot.linkutils import (
     fetch_spotify,
     identify_url,
     normalize_track,
+    resolve_short_link,
     init as init_session,
     stop as stop_session,
 )
@@ -289,6 +290,15 @@ def _load_song(track: str) -> LoadResult:
     track = normalize_track(track)
     truncation = None
     host = identify_url(track)
+
+    if host == SiteTypes.SHORT_LINK:
+        # resolved once; the result is never resolved again
+        try:
+            track = _loop.run_until_complete(resolve_short_link(track))
+        except Exception as e:
+            raise SongError(config.SONGINFO_ERROR) from e
+        track = normalize_track(track)
+        host = identify_url(track)
 
     if host == SiteTypes.NOT_URL:
         data = _search_youtube(track)[0]
