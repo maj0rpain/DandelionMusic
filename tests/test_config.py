@@ -5,8 +5,10 @@ Config is read-only now: the .env write-back that used to live here
 whitelist, which the database owns instead.
 """
 
+import re
 from pathlib import Path
 
+import jsonc
 import pytest
 
 from config.utils import alchemize_url, ensure_sqlite_parent, get_env_var
@@ -275,15 +277,79 @@ def test_extra_owners_defaults_to_empty(config_factory):
     assert config_factory(SECRETS_ENV).EXTRA_OWNERS == []
 
 
-def test_message_strings_do_not_pick_up_stray_substitutions(
-    config_factory,
-):
-    """config.Formatter is a string.Template with an empty delimiter,
-    so any bare identifier in en.json that matches a config key is
-    substituted. Naming a setting inside its own message renders the
-    value instead of the name."""
-    config = config_factory(SECRETS_ENV)
-    assert "True" not in config.VC_TIMEOUT_EDIT_DISABLED
+def _expected_text(raw, mapping):
+    """raw with only `{name}` occurrences of names in mapping replaced."""
+    return re.sub(
+        r"\{(\w+)\}",
+        lambda m: (
+            str(mapping[m.group(1)]) if m.group(1) in mapping else m.group(0)
+        ),
+        raw,
+    )
+
+
+def _check_rendered(raw, rendered, mapping, path=""):
+    if isinstance(raw, str):
+        assert rendered == _expected_text(raw, mapping), path
+    elif isinstance(raw, dict):
+        assert rendered.keys() == raw.keys(), path
+        for k, v in raw.items():
+            _check_rendered(v, rendered[k], mapping, f"{path}/{k}")
+
+
+def test_en_json_renders_only_braced_config_names(config_factory):
+    """Every en.json string comes out as its raw text with only the
+    braced config names filled: a bare word that equals a config key
+    stays literal, runtime placeholders reach their .format() call."""
+    from config.config import Config
+    from config.utils import CONFIG_DIRS
+
+    shipped = [d for d in CONFIG_DIRS if (Path(d) / "en.json").is_file()]
+    assert shipped == [str(REPO_ROOT / "config")]
+    raw = jsonc.loads((REPO_ROOT / "config" / "en.json").read_text("utf-8"))
+
+    keep = {"DATABASE_URL", "COOKIE_PATH", "EMBED_COLOR"}
+    sentinels = {
+        k: f"SENTINEL<{k}>"
+        for k, v in Config.as_dict().items()
+        if isinstance(v, str) and k not in keep
+    }
+    env = "".join(f"{k}={v}\n" for k, v in sentinels.items())
+    config = config_factory(env)
+
+    mapping = {**Config.as_dict(), **sentinels}
+    mapping["prefix"] = sentinels["BOT_PREFIX"]
+    rendered = {**config.messages, **config.dicts}
+    _check_rendered(raw, rendered, mapping)
+
+
+def test_double_braces_are_not_a_load_time_escape():
+    from config.utils import Formatter
+
+    text = Formatter("{{SEARCH_RESULTS}} {{}} {x:>3}").format(
+        {"SEARCH_RESULTS": "5"}
+    )
+    assert text == "{5} {{}} {x:>3}"
+
+
+def test_truncation_notice_does_not_leak_the_spotify_secret(config_factory):
+    config = config_factory(
+        "BOT_TOKEN=t\nSPOTIFY_ID=\nSPOTIFY_SECRET=s3cr3t-sentinel\n"
+    )
+    notice = config.SPOTIFY_TRUNCATED_NO_API
+    assert "SPOTIFY_ID" in notice and "SPOTIFY_SECRET" in notice
+    assert "s3cr3t-sentinel" not in notice
+
+
+def test_library_messages_name_the_setting_not_its_value(config_factory):
+    config = config_factory("BOT_TOKEN=t\nMUSIC_LIBRARY_PATH=/host/secret\n")
+    for text in (
+        config.LIBRARY_NOT_CONFIGURED,
+        config.LIBRARY_EMPTY,
+        config.HELP_LIBRARY_REFRESH_LONG,
+    ):
+        assert "MUSIC_LIBRARY_PATH" in text
+        assert "/host/secret" not in text
 
 
 class TestEnsureSqliteParent:
