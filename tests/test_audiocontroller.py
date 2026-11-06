@@ -17,6 +17,7 @@ import pytest
 from musicbot import playlists
 from musicbot.library import LocalTrack
 from musicbot.commands.music import Music
+from musicbot.playlist import PauseState
 from controller_helpers import (
     _backup,
     _backup_path,
@@ -2280,16 +2281,37 @@ def test_a_disconnect_goes_through_when_the_backup_write_fails(
     assert _titles(controller) == []
 
 
-def test_pause_and_enqueue_work_when_the_backup_write_fails(
+def test_pause_and_resume_work_when_the_backup_write_fails(
     controller, monkeypatch
 ):
+    _queue(controller, "current")
+    _fail_replace(controller, monkeypatch)
+    results = []
+
+    async def scenario():
+        client = controller.guild.voice_client
+        client.playing = True
+        results.append(controller.pause())
+        results.append((client.is_paused(), client.is_playing()))
+        results.append(controller.pause())
+        results.append((client.is_paused(), client.is_playing()))
+
+    _run(controller, scenario)
+
+    assert results == [
+        PauseState.PAUSED,
+        (True, False),
+        PauseState.RESUMED,
+        (False, True),
+    ]
+
+
+def test_an_enqueue_works_when_the_backup_write_fails(controller, monkeypatch):
     _queue(controller, "current")
     songs = _songs(controller, "a")
     _fail_replace(controller, monkeypatch)
 
     async def scenario():
-        controller.guild.voice_client.playing = True
-        controller.pause()
         await controller.enqueue(songs)
 
     _run(controller, scenario)
@@ -2297,25 +2319,44 @@ def test_pause_and_enqueue_work_when_the_backup_write_fails(
     assert _titles(controller) == ["current", "a"]
 
 
-@pytest.mark.parametrize(
-    "error", [OSError("disk full"), RuntimeError("cannot pickle")]
-)
+def test_back_starts_the_previous_song_when_the_backup_write_fails(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "first", "second")
+    _fail_replace(controller, monkeypatch)
+    results = []
+
+    async def scenario(c):
+        c.skip()
+        await _settle()
+        results.append(c.prev_song())
+
+    _run_playing(controller, scenario)
+
+    assert results == [True]
+    assert _titles(controller)[0] == "first"
+    assert not controller.is_idle()
+
+
+def _fail_pickle(controller, monkeypatch, error=None):
+    ac = sys.modules[type(controller).__module__]
+
+    def failing(*args, **kwargs):
+        raise error or RuntimeError("cannot pickle")
+
+    monkeypatch.setattr(ac.pickle, "dump", failing)
+
+
+@pytest.mark.parametrize("fail", [_fail_replace, _fail_pickle])
 def test_a_failed_write_keeps_the_previous_backup_and_leaves_no_temp_file(
-    controller, monkeypatch, tmp_path, error
+    controller, monkeypatch, tmp_path, fail
 ):
     _queue(controller, "good")
     _save_backup(controller)
     before = _backup_path(controller, tmp_path).read_bytes()
     _queue(controller, "newer")
-    ac = sys.modules[type(controller).__module__]
-    if isinstance(error, OSError):
-        _fail_replace(controller, monkeypatch, error)
-    else:
-
-        def failing(*args, **kwargs):
-            raise error
-
-        monkeypatch.setattr(ac.pickle, "dump", failing)
+    fail(controller, monkeypatch)
 
     _save_backup(controller)
 

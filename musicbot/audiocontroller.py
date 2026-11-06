@@ -66,6 +66,7 @@ class AudioController(object):
         self.pickle_file = Path("backup") / f"playlist_{guild.id}.pickle"
         self.pickle_file.parent.mkdir(parents=True, exist_ok=True)
         self.guild = guild
+        self._log_label = f"{guild.name!r} ({guild.id})"
 
         sett = bot.sessions.settings(guild)
         self._volume: int = sett.default_volume
@@ -89,7 +90,7 @@ class AudioController(object):
             humans_present=self._humans_present,
             on_play_failed=lambda: self.udisconnect("playback error"),
             get_loop=lambda: self.bot.loop,
-            log_label=f"{guild.name!r} ({guild.id})",
+            log_label=self._log_label,
         )
 
         # according to Python documentation, we need
@@ -130,7 +131,7 @@ class AudioController(object):
         except Exception as e:
             print(
                 f"Playlist backup write failed in guild "
-                f"{self.guild.name!r} ({self.guild.id}): {e!r}",
+                f"{self._log_label}: {e!r}",
                 file=sys.stderr,
             )
             if not isinstance(e, OSError):
@@ -405,7 +406,7 @@ class AudioController(object):
         except Exception as e:
             print(
                 f"Playlist backup unreadable in guild "
-                f"{self.guild.name!r} ({self.guild.id}): {e!r}",
+                f"{self._log_label}: {e!r}",
                 file=sys.stderr,
             )
             return RestoreResult.BACKUP_UNREADABLE
