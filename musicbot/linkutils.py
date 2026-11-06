@@ -1,5 +1,6 @@
 import re
 import sys
+import socket
 import ipaddress
 import asyncio
 from enum import Enum, auto
@@ -157,6 +158,18 @@ def get_session() -> ClientSession:
     return session
 
 
+def _legacy_ipv4(host: str) -> Optional[ipaddress.IPv4Address]:
+    """The IPv4 address a legacy spelling (`127.1`, `2130706433`,
+    `0x7f000001`, `0177.0.0.1`) stands for, as getaddrinfo reads it;
+    `None` for anything else. Parses the text only; no DNS lookup."""
+    if ":" in host or not re.fullmatch(r"[0-9a-fx.]+", host):
+        return None
+    try:
+        return ipaddress.IPv4Address(socket.inet_aton(host))
+    except OSError:
+        return None
+
+
 def _is_disallowed_host(host: Optional[str]) -> bool:
     """True for localhost and literal loopback, private, link-local or
     unspecified addresses. Reads the text only; no DNS lookup."""
@@ -168,7 +181,9 @@ def _is_disallowed_host(host: Optional[str]) -> bool:
     try:
         address = ipaddress.ip_address(host)
     except ValueError:
-        return False
+        address = _legacy_ipv4(host)
+        if address is None:
+            return False
     if isinstance(address, ipaddress.IPv6Address) and address.ipv4_mapped:
         address = address.ipv4_mapped
     return (

@@ -120,6 +120,10 @@ class TestIdentifyUrl:
             "http://0.0.0.0/a.mp3",
             "http://[::]/a.mp3",
             "http://[::ffff:127.0.0.1]/a.mp3",
+            "http://2130706433/a.mp3",
+            "http://127.1/a.mp3",
+            "http://0x7f000001/a.mp3",
+            "http://0177.0.0.1/a.mp3",
         ],
     )
     def test_a_refused_direct_media_link_is_unknown(self, url):
