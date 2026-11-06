@@ -356,9 +356,7 @@ class _Info:
 
 
 def _depth_reader(audio_type):
-    return next(
-        row for row in _FORMATS if audio_type in row.types
-    ).bit_depth
+    return next(row for row in _FORMATS if audio_type in row.types).bit_depth
 
 
 def test_mp4_reader_keeps_the_depth_of_alac():
