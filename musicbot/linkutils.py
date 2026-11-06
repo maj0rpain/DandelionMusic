@@ -259,6 +259,15 @@ async def _scrape_track(url: str) -> tuple[str, str]:
     return title_str, ""
 
 
+def _log_api_error(kind, code) -> None:
+    """Logs the exception being handled as a Spotify API error."""
+    print(
+        f"ERROR: Spotify API returned error for {kind} {code}:",
+        file=sys.stderr,
+    )
+    print_exc(file=sys.stderr)
+
+
 async def fetch_spotify(
     url: str,
 ) -> Union[SpotifyTrack, SpotifyTracks]:
@@ -278,11 +287,7 @@ async def fetch_spotify(
             title = track_data["name"]
             artist = track_data["artists"][0]["name"]
         except Exception:
-            print(
-                f"ERROR: Spotify API returned error for track {code}:",
-                file=sys.stderr,
-            )
-            print_exc(file=sys.stderr)
+            _log_api_error("track", code)
             # raised inside the except, so the API error is its context
             title, artist = await _scrape_track(url)
     else:
@@ -307,11 +312,7 @@ async def fetch_spotify_playlist(
                 SpotifyPlaylistTypes(list_type), code
             )
         except Exception:
-            print(
-                f"ERROR: Spotify API returned error for {list_type} {code}:",
-                file=sys.stderr,
-            )
-            print_exc(file=sys.stderr)
+            _log_api_error(list_type, code)
             # raised inside the except, so the API error is its context
             return await _scrape_playlist(
                 url, TruncationReason.API_UNAVAILABLE
@@ -361,16 +362,10 @@ def fetch_playlist_with_api(
             raise SpotifyApiReturnedNothing(
                 f"Spotify API returned nothing for {list_type} {code}"
             )
-    except SpotifyApiReturnedNothing:
-        raise
     except Exception:
         if not pages:
             raise
-        print(
-            f"ERROR: Spotify API returned error for {list_type} {code}:",
-            file=sys.stderr,
-        )
-        print_exc(file=sys.stderr)
+        _log_api_error(list_type, code)
         api_failed = True
 
     links = []

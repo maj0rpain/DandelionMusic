@@ -238,6 +238,7 @@ def test_first_page_failure_falls_back_to_the_public_page(
     )
 
 
+@pytest.mark.parametrize("list_type", ["playlist", "album"])
 @pytest.mark.parametrize(
     "api",
     [
@@ -246,23 +247,11 @@ def test_first_page_failure_falls_back_to_the_public_page(
     ],
     ids=["first-page-failure", "nothing"],
 )
-def test_album_falls_back_to_the_public_page(monkeypatch, api):
+def test_failed_api_falls_back_to_the_public_page(monkeypatch, api, list_type):
     monkeypatch.setattr(linkutils, "spotify_api", api)
     _scraping(monkeypatch, 30, 50)
 
-    result = _fetch("album")
-
-    assert len(result.links) == 30
-    assert result.truncation == Truncation(
-        50, TruncationReason.API_UNAVAILABLE
-    )
-
-
-def test_api_returning_nothing_falls_back_to_the_public_page(monkeypatch):
-    monkeypatch.setattr(linkutils, "spotify_api", NothingSpotify([]))
-    _scraping(monkeypatch, 30, 50)
-
-    result = _fetch()
+    result = _fetch(list_type)
 
     assert len(result.links) == 30
     assert result.truncation == Truncation(
