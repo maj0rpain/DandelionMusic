@@ -124,6 +124,7 @@ class General(commands.Cog):
         help=config.HELP_DISCONNECT_SHORT,
         aliases=["dc"],
     )
+    @commands.check(dj_check)
     async def _disconnect(self, ctx):
         await ctx.defer()  # ANNOUNCE_DISCONNECT will take a while
         audiocontroller = await (await admission.check(ctx)).enter()
@@ -139,6 +140,7 @@ class General(commands.Cog):
         aliases=["rs", "restart"],
     )
     @joining_command
+    @commands.check(dj_check)
     async def _reset(self, ctx):
         await ctx.defer()
         # a refused user resets nothing
