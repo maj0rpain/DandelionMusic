@@ -6,6 +6,7 @@ whitelist, which the database owns instead.
 """
 
 import re
+import shlex
 from pathlib import Path
 
 import jsonc
@@ -222,6 +223,43 @@ def test_dockerfile_apt_installs_are_minimal_and_clean():
             continue
         assert "curl" not in c.split() and "unzip" not in c.split()
         assert "rm -rf /var/lib/apt/lists/*" in c
+
+
+def _declared_variable_names(command):
+    keyword, _, rest = command.partition(" ")
+    rest = rest.strip()
+    keyword = keyword.upper()
+    if keyword == "ARG":
+        return [token.split("=")[0] for token in shlex.split(rest)]
+    if "=" in rest.split()[0]:
+        return [pair.split("=")[0] for pair in shlex.split(rest)]
+    return [rest.split()[0]]
+
+
+def test_declared_variable_names_reads_every_name_in_any_case():
+    assert _declared_variable_names("ARG FOO BOT_TOKEN") == [
+        "FOO",
+        "BOT_TOKEN",
+    ]
+    assert _declared_variable_names("arg A=1 BOT_TOKEN=x") == [
+        "A",
+        "BOT_TOKEN",
+    ]
+    assert _declared_variable_names("env A=1 B=2") == ["A", "B"]
+
+
+def test_dockerfile_declares_no_bot_setting_as_arg_or_env():
+    from config.config import ENV_ALIASES, Config
+
+    settings = {*Config.as_dict(), *ENV_ALIASES}
+    for command in dockerfile_commands():
+        if command.split()[0].upper() not in ("ARG", "ENV"):
+            continue
+        for name in _declared_variable_names(command):
+            assert name not in settings, (
+                f"Dockerfile instruction bakes a bot setting into the "
+                f"image: {command}"
+            )
 
 
 def _compose_services():

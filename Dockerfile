@@ -14,9 +14,6 @@ COPY pyproject.toml uv.lock ./
 RUN uv sync --locked --no-cache --no-dev \
         --extra postgres --extra mysql
 
-ARG HEROKU_DB
-ENV HEROKU_DB=$HEROKU_DB
-
 COPY . .
 
 ENV PATH="/app/.venv/bin:${PATH}"
