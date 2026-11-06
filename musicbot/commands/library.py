@@ -21,7 +21,7 @@ from musicbot.utils import (
 )
 from musicbot.library_display import KIND_EMOJI, trim
 from musicbot.library_session import BrowseSession, Frame
-from musicbot.views import OwnedView
+from musicbot.views import OwnedView, admit_click
 
 PAGE_SIZE = 25
 
@@ -162,7 +162,7 @@ class QueueLevelButton(_BrowseItem, discord.ui.Button):
         )
 
 
-async def queue_songs(ctx, interaction, triples, source: str) -> None:
+async def queue_songs(interaction, triples, source: str) -> None:
     """Queues (artist, album, filename) triples and reports the
     result ephemerally. Shared by the browser and the search results -
     the browser always works within one artist, but a search hit list
@@ -207,12 +207,10 @@ async def queue_songs(ctx, interaction, triples, source: str) -> None:
     # all. enter() turns a failed connect into a CheckError, so
     # it is reported as one rather than as a song-info error.
     try:
-        admitted = await admission.check(ctx, admission.RequestKind.PICK)
-        controller = await admitted.enter()
-        tracks = [
-            library.LocalTrack(library.song_uri(*triple), triple[2])
-            for triple in triples
-        ]
+        ctx, controller = await admit_click(
+            interaction, admission.RequestKind.PICK
+        )
+        tracks = [library.LocalTrack.of(*triple) for triple in triples]
         outcome = await controller.process_local_tracks(
             tracks, source, user=ctx.author
         )
@@ -302,7 +300,7 @@ class LibraryView(OwnedView):
         second click while the batch is still loading would queue the
         same album or discography twice over."""
         with self.busy():
-            await queue_songs(self.ctx, interaction, triples, source)
+            await queue_songs(interaction, triples, source)
 
 
 class LibraryBrowseView(LibraryView):

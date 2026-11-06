@@ -43,6 +43,15 @@ def test_song_path_makes_no_resolve_call_after_build(root, monkeypatch):
     assert uri == expected.as_uri()
 
 
+def test_local_track_of_a_triple_is_its_song_uri_and_filename(root):
+    library.build_index()
+    track = library.LocalTrack.of("A", "B", "t.flac")
+    assert (track.uri, track.name) == (
+        library.song_uri("A", "B", "t.flac"),
+        "t.flac",
+    )
+
+
 @pytest.mark.parametrize("value", ["", "missing"])
 def test_unset_or_not_a_directory_falls_back_to_resolving_the_config_path(
     root, monkeypatch, tmp_path, value
