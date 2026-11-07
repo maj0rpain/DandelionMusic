@@ -64,27 +64,42 @@ def allow_every_host(monkeypatch):
     monkeypatch.setattr(linkutils, "_is_disallowed_host", lambda host: False)
 
 
-def test_redirect_chain_returns_the_final_url(allow_every_host):
+class Resolved:
+    """What resolving one path of the local server did."""
+
+    def __init__(self, base, url, error, hits):
+        self.base = base
+        self.url = url
+        self.error = error
+        self.hits = hits
+
+    def at(self, path):
+        return self.base + path
+
+
+def _resolve(path):
     async def scenario():
         async with serving() as server:
-            url = await linkutils.resolve_short_link(
-                str(server.make_url("/a"))
-            )
-            return url, str(server.make_url("/final?si=1"))
+            base = str(server.make_url("/")).rstrip("/")
+            url = error = None
+            try:
+                url = await linkutils.resolve_short_link(base + path)
+            except Exception as exc:
+                error = exc
+            return Resolved(base, url, error, list(server.hits))
 
-    url, expected = run(scenario())
+    return run(scenario())
 
-    assert url == expected
+
+def test_redirect_chain_returns_the_final_url(allow_every_host):
+    got = _resolve("/a")
+
+    assert got.url == got.at("/final?si=1")
 
 
 @pytest.mark.parametrize("path", ["/gone", "/boom", "/to-gone", "/to-boom"])
 def test_error_status_raises(path, allow_every_host):
-    async def scenario():
-        async with serving() as server:
-            await linkutils.resolve_short_link(str(server.make_url(path)))
-
-    with pytest.raises(Exception):
-        run(scenario())
+    assert _resolve(path).error is not None
 
 
 def test_refused_connection_raises():
@@ -100,54 +115,27 @@ def test_refused_connection_raises():
 
 @pytest.mark.parametrize("path", sorted("/" + n for n in REFUSED_TARGETS))
 def test_redirect_to_a_disallowed_target_is_refused(path):
-    async def scenario():
-        async with serving() as server:
-            with pytest.raises(linkutils.RefusedRedirect):
-                await linkutils.resolve_short_link(str(server.make_url(path)))
-            return list(server.hits)
+    got = _resolve(path)
 
-    assert run(scenario()) == []
+    assert isinstance(got.error, linkutils.RefusedRedirect)
+    assert got.hits == []
 
 
 def test_chain_of_ten_redirects_resolves(allow_every_host):
-    async def scenario():
-        async with serving() as server:
-            url = await linkutils.resolve_short_link(
-                str(server.make_url("/chain/9"))
-            )
-            return url, str(server.make_url("/final"))
+    got = _resolve("/chain/9")
 
-    url, expected = run(scenario())
-
-    assert url == expected
+    assert got.url == got.at("/final")
 
 
 def test_chain_of_eleven_redirects_is_refused(allow_every_host):
-    async def scenario():
-        async with serving() as server:
-            await linkutils.resolve_short_link(
-                str(server.make_url("/chain/10"))
-            )
-
-    with pytest.raises(linkutils.RefusedRedirect):
-        run(scenario())
+    assert isinstance(_resolve("/chain/10").error, linkutils.RefusedRedirect)
 
 
 def test_redirect_loop_is_refused(allow_every_host):
-    async def scenario():
-        async with serving() as server:
-            await linkutils.resolve_short_link(str(server.make_url("/loop")))
-
-    with pytest.raises(linkutils.RefusedRedirect):
-        run(scenario())
+    assert isinstance(_resolve("/loop").error, linkutils.RefusedRedirect)
 
 
 def test_redirect_without_location_returns_its_own_url(allow_every_host):
-    async def scenario():
-        async with serving() as server:
-            url = str(server.make_url("/not-modified"))
-            return await linkutils.resolve_short_link(url), url
+    got = _resolve("/not-modified")
 
-    got, url = run(scenario())
-
-    assert got == url
+    assert got.url == got.at("/not-modified")
