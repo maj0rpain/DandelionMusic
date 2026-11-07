@@ -30,8 +30,7 @@ from musicbot.settings import (
     ENV_WHITELIST_IMPORTED,
     BotState,
 )
-from musicbot import settings
-from db_seam import FailingSessionFactory, in_memory_db, seed_whitelist
+from db_seam import FailingSessionFactory, seed_whitelist, with_db
 from developer_fakes import FakeBot, FakeCtx, LeavingGuild
 from discord_fakes import run_command_checks
 from helpers import run
@@ -41,16 +40,6 @@ async def _marker(factory):
     """The `BotState` row recording the env import, or None."""
     async with factory() as session:
         return await session.get(BotState, ENV_WHITELIST_IMPORTED)
-
-
-def with_db(scenario):
-    """Run `scenario(factory)` against a fresh in-memory database."""
-
-    async def go():
-        async with in_memory_db(settings) as factory:
-            return await scenario(factory)
-
-    return run(go())
 
 
 class TestAdmission:

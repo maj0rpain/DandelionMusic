@@ -36,6 +36,8 @@ from musicbot.library import SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment
 from config import config
 from discord_fakes import (
+    EditRecordingMessage,
+    FakeFollowup,
     VoiceGuild,
     context_client,
     admission_settings,
@@ -1045,24 +1047,11 @@ def test_search_select_cuts_labels_like_the_browse_select():
 # --- Timeout ---
 
 
-class Followup:
-    """A click's followup webhook: records edit_message(id, ...)."""
-
-    def __init__(self, fail=False):
-        self.edits = []
-        self.fail = fail
-
-    async def edit_message(self, message_id, **kwargs):
-        if self.fail:
-            raise http_error()
-        self.edits.append((message_id, kwargs))
-
-
 class ClickInteraction:
     def __init__(self, user_id=AUTHOR_ID, message_id=MESSAGE_ID, fail=False):
         self.user = SimpleNamespace(id=user_id)
         self.message = SimpleNamespace(id=message_id)
-        self.followup = Followup(fail=fail)
+        self.followup = FakeFollowup(fail=fail)
         self.original_edits = []
         self.deleted = 0
         self.sent = []
@@ -1088,7 +1077,7 @@ class ClickInteraction:
 
 
 def timeout_message(cls, fail=False):
-    """A `cls` (Message / WebhookMessage) that records its edits."""
+    """A `cls` (a WebhookMessage) that records its edits."""
 
     class Recording(cls):
         def __init__(self):
@@ -1290,7 +1279,7 @@ def test_timeout_without_a_click_edits_the_original_response():
 
 def test_timeout_after_a_click_still_edits_a_prefix_message_directly():
     async def go():
-        message = timeout_message(discord.Message)
+        message = EditRecordingMessage()
         view = timeout_view(message)
         click = ClickInteraction()
         assert await view.interaction_check(click)

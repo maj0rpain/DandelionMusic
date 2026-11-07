@@ -104,11 +104,12 @@ def test_the_subcommands_are_exactly_the_described_settings():
         ("button_emote", THUMBS_UP, THUMBS_UP, THUMBS_UP),
         ("default_volume", 50, "50", 50),
         ("vc_timeout", True, "True", True),
-        ("announce_songs", True, "True", True),
+        ("announce_songs", False, "False", False),
     ],
 )
 def test_a_setting_update_is_confirmed(name, arg, confirmation, stored):
     sett = stored_settings()
+    assert getattr(sett, name) != stored
 
     sent = invoke_setting(name, arg, sett)
 
@@ -122,14 +123,15 @@ def assert_failed(sent, sett, reply):
     assert stored_values(sett) == stored_values(stored_settings())
 
 
+async def execute_matching_no_row(self, statement):
+    return types.SimpleNamespace(rowcount=0)
+
+
 @pytest.fixture
 def missing_row(monkeypatch):
     "The settings row is gone: the update matches no row"
 
-    async def execute(self, statement):
-        return types.SimpleNamespace(rowcount=0)
-
-    monkeypatch.setattr(FakeDbSession, "execute", execute)
+    monkeypatch.setattr(FakeDbSession, "execute", execute_matching_no_row)
 
 
 FAILED = "`Error: Setting default_volume could not be updated.`"
@@ -150,6 +152,24 @@ def test_a_failed_write_is_reported_on_reset(missing_row):
 
     assert_failed(sent, sett, FAILED)
     assert not any(m and "reset to" in m for m in sent)
+
+
+def test_the_update_and_failure_replies_come_from_the_catalogue(
+    monkeypatch,
+):
+    monkeypatch.setattr(config, "SETTING_UPDATED", "UPD[{}|{}]")
+    monkeypatch.setattr(config, "SETTING_UPDATE_FAILED", "FAIL[{}]")
+
+    updated = invoke_setting("default_volume", 50, stored_settings())
+    monkeypatch.setattr(FakeDbSession, "execute", execute_matching_no_row)
+    failed_update = invoke_setting("default_volume", 50, stored_settings())
+    failed_reset = invoke_setting(
+        "default_volume", NO_VALUE, stored_settings()
+    )
+
+    assert updated[-1] == "UPD[default_volume|50]"
+    assert failed_update[-1] == "FAIL[default_volume]"
+    assert failed_reset[-1] == "FAIL[default_volume]"
 
 
 def test_an_invalid_emoji_is_reported():
@@ -328,6 +348,7 @@ def test_a_prefix_subcommand_converts_its_argument(
     subcommand's parameter type before the setting is updated"""
     command = bound_subcommand(name)
     sett = stored_settings()
+    assert getattr(sett, name) != stored
     sent = []
 
     run(command.invoke(prefix_ctx(sent, sett, argument)))
@@ -360,14 +381,26 @@ def reset_text(name):
 @pytest.mark.parametrize("name", list(ARGS))
 def test_a_subcommand_without_a_value_resets_the_setting(name):
     sett = stored_settings()
-    if getattr(sett, name) == SETTINGS[name].default:
-        setattr(sett, name, True)  # announce_songs defaults to False
     assert getattr(sett, name) != SETTINGS[name].default
 
     sent = invoke_setting(name, NO_VALUE, sett)
 
     assert sent[-1] == reset_text(name)
     assert getattr(sett, name) == SETTINGS[name].default
+
+
+def test_an_announce_songs_reset_is_confirmed_as_false():
+    sent = invoke_setting("announce_songs", NO_VALUE, stored_settings())
+
+    assert sent[-1] == "Setting `announce_songs` reset to False!"
+
+
+def test_every_stored_setting_differs_from_its_default():
+    sett = stored_settings()
+
+    same = [n for n, d in SETTINGS.items() if getattr(sett, n) == d.default]
+
+    assert same == []
 
 
 def test_a_reset_is_confirmed_with_the_value_the_embed_shows():

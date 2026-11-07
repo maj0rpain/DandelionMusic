@@ -1,9 +1,9 @@
 """An in-memory database with the real schema, for tests.
 
-Shared by the saved-playlists tests and the AudioController tests, so
-the StaticPool detail lives in one place. It also holds the
-real-`MusicBot` harness (`run_musicbot`, `MusicBotRun`) that the
-`on_ready` and whitelist-admission tests share.
+Shared by the saved-playlists, guild whitelist, guild settings and
+AudioController tests, so the StaticPool detail lives in one place. It
+also holds the real-`MusicBot` harness (`run_musicbot`, `MusicBotRun`)
+that the `on_ready`, whitelist-admission and voice-state tests share.
 """
 
 import asyncio
@@ -40,6 +40,56 @@ async def seed_whitelist(factory, *ids):
         for guild_id in ids:
             session.add(WhitelistedGuild(guild_id=str(guild_id)))
         await session.commit()
+
+
+async def seed_settings(factory, *ids):
+    """Commit a default `GuildSettings` row for each id."""
+    from musicbot.settings import GuildSettings, default_settings
+
+    async with factory() as session:
+        for guild_id in ids:
+            session.add(
+                GuildSettings(guild_id=str(guild_id), **default_settings())
+            )
+        await session.commit()
+
+
+def with_db(test):
+    """Run `test(factory)` in one event loop against a fresh in-memory
+    database and return its result."""
+    from helpers import run
+    from musicbot import settings
+
+    async def main():
+        async with in_memory_db(settings) as factory:
+            return await test(factory)
+
+    return run(main())
+
+
+class FailingCommit:
+    """Wraps a session factory so each session's `commit` raises `error`
+    (an exception instance, or a zero-argument callable making one)
+    while `failing` is true, otherwise commits. Counts the attempts."""
+
+    def __init__(self, factory, error):
+        self.factory = factory
+        self.error = error
+        self.failing = True
+        self.attempts = 0
+
+    def __call__(self):
+        session = self.factory()
+        commit = session.commit
+
+        async def commit_or_fail():
+            self.attempts += 1
+            if self.failing:
+                raise self.error() if callable(self.error) else self.error
+            await commit()
+
+        session.commit = commit_or_fail
+        return session
 
 
 class FailingSessionFactory:

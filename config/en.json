@@ -12,6 +12,8 @@
   "ALREADY_CONNECTED_MESSAGE": "Error: Already connected to a voice channel",
   "NOT_A_DJ": "You are not a DJ",
   "SETTING_RESET": "Setting `{}` reset to {}!",
+  "SETTING_UPDATED": "Setting `{}` updated to {}!",
+  "SETTING_UPDATE_FAILED": "`Error: Setting {} could not be updated.`",
   "UNKNOWN_SETTING": "Unknown setting `{}`",
   "USER_MISSING_PERMISSIONS": "You don't have permissions for this",
   "VOICE_PERMISSIONS_MISSING": "The bot needs VC permissions connect and speak",
