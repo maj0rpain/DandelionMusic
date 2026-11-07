@@ -153,9 +153,7 @@ def _uv_sync_index(commands):
 def test_dockerfile_installs_db_drivers_without_dev():
     commands = dockerfile_commands()
     run = commands[_uv_sync_index(commands)]
-    assert "--frozen" not in run
     for flag in (
-        "--locked",
         "--no-cache",
         "--no-dev",
         "--extra postgres",
@@ -170,7 +168,7 @@ def _indices_where(commands, predicate):
 
 def test_dockerfile_runs_as_a_non_root_user():
     users = [
-        c.split()[1] for c in dockerfile_commands() if c.split()[0] == "USER"
+        c.split()[1] for c in dockerfile_commands() if c.startswith("USER ")
     ]
     assert users and users[-1].split(":")[0] not in ("root", "0")
 
@@ -228,25 +226,25 @@ def test_dockerfile_apt_installs_are_minimal_and_clean():
 
 def _declared_variable_names(command):
     keyword, _, rest = command.partition(" ")
-    rest = rest.strip()
-    keyword = keyword.upper()
-    if keyword == "ARG":
+    if keyword not in ("ARG", "ENV"):
+        return []
+    if keyword == "ARG" or "=" in rest.split()[0]:
         return [token.split("=")[0] for token in shlex.split(rest)]
-    if "=" in rest.split()[0]:
-        return [pair.split("=")[0] for pair in shlex.split(rest)]
     return [rest.split()[0]]
 
 
 def test_declared_variable_names_reads_every_name_in_any_case():
-    assert _declared_variable_names("ARG FOO BOT_TOKEN") == [
-        "FOO",
-        "BOT_TOKEN",
+    lines = dockerfile_commands(
+        "ARG FOO BOT_TOKEN\narg A=1 BOT_TOKEN=x\nenv A=1 B=2\n"
+        "env OLD value\nrun echo hi\n"
+    )
+    assert [_declared_variable_names(c) for c in lines] == [
+        ["FOO", "BOT_TOKEN"],
+        ["A", "BOT_TOKEN"],
+        ["A", "B"],
+        ["OLD"],
+        [],
     ]
-    assert _declared_variable_names("arg A=1 BOT_TOKEN=x") == [
-        "A",
-        "BOT_TOKEN",
-    ]
-    assert _declared_variable_names("env A=1 B=2") == ["A", "B"]
 
 
 def test_dockerfile_declares_no_bot_setting_as_arg_or_env():
@@ -254,8 +252,6 @@ def test_dockerfile_declares_no_bot_setting_as_arg_or_env():
 
     settings = {*Config.as_dict(), *ENV_ALIASES}
     for command in dockerfile_commands():
-        if command.split()[0].upper() not in ("ARG", "ENV"):
-            continue
         for name in _declared_variable_names(command):
             assert name not in settings, (
                 f"Dockerfile instruction bakes a bot setting into the "

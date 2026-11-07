@@ -1,11 +1,10 @@
 """Structural tests over the repository's CI and release pipeline files."""
 
-import re
 from pathlib import Path
 
 import yaml
 
-from helpers import dockerfile_commands
+from helpers import dockerfile_commands, shell_commands
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
@@ -20,24 +19,16 @@ def _triggers(workflow):
     return workflow[True] if True in workflow else workflow["on"]
 
 
-def _split_commands(text):
-    return [
-        c.strip()
-        for c in re.split(r"&&|\n", text.replace("\\\n", " "))
-        if c.strip()
-    ]
-
-
 def _uv_commands():
     found = []
     for path in sorted(WORKFLOWS.glob("*.y*ml")):
         for job in _load(path.name)["jobs"].values():
             for step in job.get("steps", []):
-                for c in _split_commands(step.get("run", "")):
+                for c in shell_commands(step.get("run", "")):
                     found.append((path.name, c))
     for line in dockerfile_commands():
-        if line.startswith("RUN"):
-            for c in _split_commands(line[3:]):
+        if line.startswith("RUN "):
+            for c in shell_commands(line[4:]):
                 found.append(("Dockerfile", c))
     return [
         (f, c)

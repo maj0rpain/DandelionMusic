@@ -4,8 +4,10 @@ import types
 
 from helpers import (
     attribute_names,
+    dockerfile_commands,
     imported_names,
     imported_roots,
+    shell_commands,
     type_checking_imports,
 )
 
@@ -102,3 +104,23 @@ def test_attribute_names_are_name_dot_attr_pairs(tmp_path):
 def test_an_attribute_on_a_non_name_gives_nothing(tmp_path):
     module = module_of(tmp_path, "x = f().attr\ny = a[0].attr\n")
     assert attribute_names(module) == set()
+
+
+def test_dockerfile_commands_normalise_keywords_and_spacing():
+    text = "from x\nRun\tapt  get\n  Arg   A=1\nCMD\n"
+    assert dockerfile_commands(text) == [
+        "FROM x",
+        "RUN apt  get",
+        "ARG A=1",
+        "CMD",
+    ]
+
+
+def test_dockerfile_commands_join_continuations_and_drop_noise():
+    text = "# c\n\nRUN a \\\n  && b\n   # indented\n"
+    assert dockerfile_commands(text) == ["RUN a    && b"]
+
+
+def test_shell_commands_split_in_order_stripped_and_drop_empties():
+    text = "a && && b\nc \\\n d && e\n"
+    assert shell_commands(text) == ["a", "b", "c   d", "e"]
