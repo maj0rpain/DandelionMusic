@@ -19,14 +19,12 @@ from musicbot.utils import CheckError, joining_command
 from helpers import run
 
 
-def admission_without_join(controller, on_enter=None):
-    """A fake admission needing no join: `enter()` returns `controller()`
-    (called each time), after calling `on_enter()` when given."""
+def admission_without_join(current_controller):
+    """A fake admission needing no join: `enter()` returns
+    `current_controller()` (called each time)."""
 
     async def enter():
-        if on_enter is not None:
-            on_enter()
-        return controller()
+        return current_controller()
 
     return types.SimpleNamespace(join_needed=False, enter=enter)
 
@@ -202,12 +200,7 @@ class RecordingCtx:
         self.bot = bot
         self.message = types.SimpleNamespace(attachments=[], reference=None)
         self.audiocontroller = None
-        self.joined = []
-
-        self.admitted = admission_without_join(
-            lambda: self.audiocontroller,
-            lambda: self.joined.append("enter"),
-        )
+        self.admitted = admission_without_join(lambda: self.audiocontroller)
 
     async def defer(self):
         self.deferred = True

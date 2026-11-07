@@ -395,31 +395,9 @@ class TestNonJoiningCommand:
 
 
 class TestJoiningCommand:
-    """The hooks never join; the command body's _enter does."""
-
-    def test_the_hooks_do_not_connect_while_idle(self):
-        guild = VoiceGuild()
-        ctx = slash_ctx(guild, guild.channel("a"))
-        ctx.command = command_of(Music, "play")
-        run(invoke_music_hooks(Music(None), ctx))
-        assert guild.events == []
-
-    def test_the_hooks_do_not_move_out_of_a_bots_only_channel(self, no_sleep):
-        guild = VoiceGuild()
-        guild.put_bot_in(guild.channel("a", bots=1))
-        ctx = slash_ctx(guild, guild.channel("b"))
-        ctx.command = command_of(Music, "prev")
-        run(invoke_music_hooks(Music(None), ctx))
-        assert guild.events == []
-
-    def test_enter_defers_and_connects_while_idle(self):
-        guild = VoiceGuild()
-        ctx = slash_ctx(guild, guild.channel("a"))
-        ctx.command = command_of(Music, "play")
-        cog = Music(None)
-        run(invoke_music_hooks(cog, ctx))
-        run(cog._enter(ctx))
-        assert guild.events == [("defer", False), ("connect", "a")]
+    """A joining command's body, through _enter, defers and moves the bot
+    out of a bots-only channel (the hooks never join: see
+    tests/test_admission.py)."""
 
     def test_enter_defers_and_moves_out_of_a_bots_only_channel(self, no_sleep):
         guild = VoiceGuild()

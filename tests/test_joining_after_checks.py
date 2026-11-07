@@ -34,7 +34,10 @@ from message_link_fakes import FOREIGN_LINK
 
 class RecordingController:
     """The controller as the commands see it: it records what they ask
-    of it. `backup` is what load_backup() loads into the queue."""
+    of it. `backup` is what load_backup() loads into the queue; with
+    `disconnecting` it refuses as a disconnect that began after the
+    hooks admitted the request (is_disconnecting() stays False); `events`,
+    when set, gets ("load_backup",) appended by load_backup()."""
 
     def __init__(
         self,
@@ -45,6 +48,7 @@ class RecordingController:
         loop=None,
         disconnect_on_prev=False,
         prev_result=True,
+        disconnecting=False,
     ):
         self.name = "controller"
         self.backup = None if backup is None else list(backup)
@@ -52,8 +56,10 @@ class RecordingController:
         self.active = active
         self.readable = readable
         self.disconnecting = False
+        self.disconnect_on_load = disconnecting
         self.disconnect_on_prev = disconnect_on_prev
         self.prev_result = prev_result
+        self.events = None
         self.calls = []
         self.playlist = Playlist()
         self.playlist.playhistory.extend(history)
@@ -64,6 +70,11 @@ class RecordingController:
         return self.disconnecting
 
     def load_backup(self):
+        if self.events is not None:
+            self.events.append(("load_backup",))
+        if self.disconnecting or self.disconnect_on_load:
+            # began disconnecting after the hooks admitted the request
+            return RestoreResult.REFUSED_WHILE_DISCONNECTING
         if self.active:
             return RestoreResult.REFUSED_WHILE_ACTIVE
         if not self.readable:
@@ -182,13 +193,24 @@ def test_a_slash_play_with_no_track_and_no_file_does_not_join():
             RecordingController(readable=False),
             config.RESTORE_BACKUP_UNREADABLE,
         ),
+        (
+            RecordingController(disconnecting=True),
+            config.DISCONNECTING_MESSAGE,
+        ),
     ],
-    ids=["no backup", "empty backup", "unreadable backup"],
+    ids=[
+        "no backup",
+        "empty backup",
+        "unreadable backup",
+        "disconnecting",
+    ],
 )
-def test_restore_with_nothing_to_restore_does_not_join(controller, reply):
+def test_a_restore_refusal_replies_and_does_not_join(controller, reply):
     guild, ctx, cog, sent = body_ctx("restore", controller, role="dj")
+    controller.events = guild.events
     invoke(cog, ctx, Music._restore.callback)
     assert sent == [reply]
+    assert guild.events == [("defer",), ("load_backup",)]
     assert joins(guild) == []
 
 
@@ -197,8 +219,10 @@ def test_restore_while_active_does_not_move_the_bot():
     guild, ctx, cog, sent = body_ctx(
         "restore", controller, bot=BOTS_ONLY, role="dj"
     )
+    controller.events = guild.events
     invoke(cog, ctx, Music._restore.callback)
     assert sent == [config.RESTORE_WHILE_ACTIVE]
+    assert guild.events == [("defer",), ("load_backup",)]
     assert joins(guild) == []
 
 
