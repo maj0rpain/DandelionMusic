@@ -7,7 +7,6 @@ finished registering its guilds.
 
 import asyncio
 import contextlib
-import inspect
 import types
 
 import discord
@@ -37,8 +36,12 @@ from discord_fakes import (
     situation,
     FakeInteraction,
     VoiceGuild,
+    check_error_message,
+    command_of,
+    context_client,
     invoke_music_hooks,
     make_bot,
+    run_command_checks,
 )
 from helpers import run
 
@@ -158,11 +161,13 @@ def voice_ctx(
     author_in=None,
     dj_role=None,
     admin=False,
+    owner=False,
     roles=(),
 ):
     sett = admission_settings(dj_role=dj_role)
     bot = make_bot(
         {guild: fake_controller()},
+        is_owner=owner,
         settings={guild: sett},
     )
     author = types.SimpleNamespace(
@@ -185,12 +190,6 @@ async def join(ctx):
     await (await admission.check(ctx)).enter()
 
 
-def refusal(coro):
-    with pytest.raises(CheckError) as exc:
-        run(coro)
-    return str(exc.value)
-
-
 class TestDjCheck:
     def ctx(self, **kwargs):
         return voice_ctx(VoiceGuild(), **kwargs)
@@ -204,7 +203,15 @@ class TestDjCheck:
 
     def test_refuses_a_member_without_the_set_dj_role(self):
         ctx = self.ctx(dj_role=99, roles=[5])
-        assert refusal(dj_check(ctx)) == config.NOT_A_DJ
+        assert check_error_message(dj_check(ctx)) == config.NOT_A_DJ
+
+    def test_admits_an_admin_with_a_dj_role_set(self):
+        ctx = self.ctx(dj_role=99, roles=[5], admin=True)
+        assert run(dj_check(ctx)) is True
+
+    def test_admits_the_application_owner_with_a_dj_role_set(self):
+        ctx = self.ctx(dj_role=99, roles=[5], owner=True)
+        assert run(dj_check(ctx)) is True
 
 
 def slash_ctx(guild, author_in, **kwargs):
@@ -259,11 +266,6 @@ class TestMusicBeforeInvoke:
 
         run(scenario())
         assert guild.events == [("defer", False), ("connect", "a")]
-
-
-def command_of(cog, name):
-    """A cog's command by its qualified name."""
-    return {c.qualified_name: c for c in cog(None).walk_commands()}[name]
 
 
 @pytest.mark.parametrize(
@@ -331,11 +333,8 @@ def test_a_failed_join_from_the_library_says_so():
     async def edit_original_response(content):
         replies.append(content)
 
-    async def get_context(inter):
-        return ctx
-
     interaction = types.SimpleNamespace(
-        client=types.SimpleNamespace(get_context=get_context),
+        client=context_client(ctx),
         response=types.SimpleNamespace(
             is_done=lambda: False, send_message=send_message
         ),
@@ -676,23 +675,6 @@ GATED_COMMANDS = {
 }
 
 
-async def run_checks(cmd, ctx):
-    """The command's own checks, in discord.py's order."""
-    for check in cmd.checks:
-        result = check(ctx)
-        if inspect.isawaitable(result):
-            await result
-
-
-def refusal_of(cmd, ctx):
-    """The CheckError message a command's own checks raise, or None."""
-    try:
-        run(run_checks(cmd, ctx))
-    except CheckError as e:
-        return str(e)
-    return None
-
-
 def test_the_commands_needing_a_dj_are_exactly_the_listed_ones(monkeypatch):
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", True)
     refused = set()
@@ -702,16 +684,23 @@ def test_the_commands_needing_a_dj_are_exactly_the_listed_ones(monkeypatch):
                 admission.RequestKind.COMMAND, dj_role=ADMISSION_DJ_ROLE
             )
             ctx.audiocontroller = types.SimpleNamespace(is_active=lambda: True)
-            if refusal_of(cmd, ctx) == config.NOT_A_DJ:
+            refusal = check_error_message(run_command_checks(cmd, ctx))
+            if refusal == config.NOT_A_DJ:
                 refused.add(cmd.qualified_name)
+            if cmd.qualified_name in NEEDS_A_DJ:
+                assert dj_check in cmd.checks, cmd.qualified_name
     assert refused == NEEDS_A_DJ
 
 
-def gated_command_context(name, role=None, dj_role=ADMISSION_DJ_ROLE):
+def gated_command_context(name, role=None):
     """(guild, ctx, calls, deferred) for the gated command `name`."""
     cog, kind, bot_channel, author = GATED_COMMANDS[name]
     guild, ctx = situation(
-        kind, bot=bot_channel, author=author, role=role, dj_role=dj_role
+        kind,
+        bot=bot_channel,
+        author=author,
+        role=role,
+        dj_role=ADMISSION_DJ_ROLE,
     )
     ctx.command = command_of(cog, name)
     calls = []
@@ -748,14 +737,10 @@ def invoke_gated(name, ctx):
     cb = getattr(cog, f"_{name}").callback
 
     async def scenario():
-        await run_checks(ctx.command, ctx)
+        await run_command_checks(ctx.command, ctx)
         await cb(cog(None), ctx)
 
-    try:
-        run(scenario())
-    except CheckError as e:
-        return str(e)
-    return None
+    return check_error_message(scenario())
 
 
 @pytest.mark.parametrize("name", list(GATED_COMMANDS))
@@ -771,20 +756,8 @@ def test_a_non_dj_is_refused_and_nothing_happens(name):
 
 
 @pytest.mark.parametrize("name", list(GATED_COMMANDS))
-@pytest.mark.parametrize(
-    "role, dj_role",
-    [
-        ("dj", ADMISSION_DJ_ROLE),
-        ("admin", ADMISSION_DJ_ROLE),
-        ("owner", ADMISSION_DJ_ROLE),
-        (None, None),
-    ],
-    ids=["dj", "admin", "owner", "no-dj-role-set"],
-)
-def test_a_dj_admin_owner_or_anyone_without_a_dj_role_is_admitted(
-    name, role, dj_role, no_sleep
-):
-    _, ctx, calls, _ = gated_command_context(name, role=role, dj_role=dj_role)
+def test_a_dj_role_holder_is_admitted(name, no_sleep):
+    _, ctx, calls, _ = gated_command_context(name, role="dj")
     ctx.guild.events.clear()
     assert invoke_gated(name, ctx) is None
     assert calls
