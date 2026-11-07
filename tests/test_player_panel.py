@@ -1,6 +1,9 @@
 """The player panel over a fake message and channel: its layout, its
 refresh and the expired-token recovery, attach, the destination, and
-the click callbacks. Driven through the panel's public methods only."""
+the click callbacks, the drawn view's life (stopped whenever the panel
+lets go of its message; the view store holding only the current view),
+and a deleted player message forgotten without a log at every edit.
+Driven through the panel's public methods only."""
 
 import types
 
@@ -328,11 +331,14 @@ def test_attach_sends_no_view_while_inactive():
 
     async def send(view):
         seen.append(view)
-        return PanelMessage()
+        return message
 
+    message = PanelMessage()
     run(rig.panel.attach(send))
+    run(rig.panel.playback_ended())
 
     assert seen == [None]
+    assert message.edits == []
 
 
 def test_a_failed_strip_in_attach_is_logged_and_the_send_goes_on(
@@ -476,39 +482,46 @@ def test_a_message_attached_during_a_refetch_survives_its_failure(expired):
 
 
 GONE = [
-    pytest.param(discord.NotFound, 404, 10008, id="not-found-10008"),
-    pytest.param(discord.NotFound, 404, 10003, id="not-found-other-code"),
+    pytest.param(
+        lambda: coded_error(discord.NotFound, 404, 10008),
+        id="not-found-10008",
+    ),
+    pytest.param(
+        lambda: coded_error(discord.NotFound, 404, 10003),
+        id="not-found-other-code",
+    ),
 ]
 LOST = [
-    pytest.param(discord.Forbidden, 403, 50001, id="forbidden-50001"),
-    pytest.param(discord.Forbidden, 403, 0, id="forbidden-other-code"),
+    pytest.param(
+        lambda: coded_error(discord.Forbidden, 403, 50001),
+        id="forbidden-50001",
+    ),
+    pytest.param(
+        lambda: coded_error(discord.Forbidden, 403, 0),
+        id="forbidden-other-code",
+    ),
 ]
 
 
-@pytest.mark.parametrize("cls, status, code", GONE)
-def test_a_not_found_edit_forgets_the_message_silently(
-    attached, capsys, cls, status, code
+def with_lost_count(params, count):
+    """`params` (error factories) each with the expected count of
+    "Lost access" log lines, keeping their ids."""
+    return [
+        pytest.param(p.values[0], count, id=p.id, marks=p.marks)
+        for p in params
+    ]
+
+
+@pytest.mark.parametrize(
+    "error, lost_lines",
+    with_lost_count(GONE, 0) + with_lost_count(LOST, 1),
+)
+def test_an_unreachable_message_is_forgotten_and_a_lost_access_logged(
+    attached, capsys, error, lost_lines
 ):
     rig, message = attached
     old_view = message.shown
-    message.errors = [coded_error(cls, status, code)]
-    rig.controller.snapshot = snap(volume=0)
-    rig.refresh()
-    rig.controller.snapshot = snap(volume=5)
-
-    rig.refresh()
-
-    assert message.edits == [] and old_view.is_finished()
-    assert capsys.readouterr().err == ""
-
-
-@pytest.mark.parametrize("cls, status, code", LOST)
-def test_a_forbidden_edit_forgets_the_message_and_logs_once(
-    attached, capsys, cls, status, code
-):
-    rig, message = attached
-    old_view = message.shown
-    message.errors = [coded_error(cls, status, code)]
+    message.errors = [error()]
     rig.controller.snapshot = snap(volume=0)
     rig.refresh()
     rig.controller.snapshot = snap(volume=5)
@@ -517,16 +530,97 @@ def test_a_forbidden_edit_forgets_the_message_and_logs_once(
 
     assert message.edits == [] and old_view.is_finished()
     err = capsys.readouterr().err
-    assert err.count("Lost access to the player message:") == 1
+    assert err.count("Lost access to the player message:") == lost_lines
 
 
-@pytest.mark.parametrize("cls, status, code", GONE + LOST)
-def test_a_message_attached_during_a_failing_edit_survives(
-    attached, cls, status, code
+@pytest.mark.parametrize("error", GONE)
+def test_a_deleted_message_is_stripped_silently_by_playback_ended(
+    attached, capsys, error
 ):
     rig, message = attached
+    view = message.shown
+    message.errors = [error()]
+
+    run(rig.panel.playback_ended())
+
+    assert view.is_finished()
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("error", GONE)
+def test_a_deleted_message_is_stripped_silently_by_attach(
+    attached, capsys, error
+):
+    rig, old = attached
+    view = old.shown
+    old.errors = [error()]
+
+    rig.attach(PanelMessage())
+
+    assert view.is_finished()
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("error", GONE)
+def test_a_deleted_message_is_stripped_silently_by_an_inactive_refresh(
+    attached, capsys, error
+):
+    rig, message = attached
+    view = message.shown
+    message.errors = [error()]
+    rig.controller.snapshot = PanelSnapshot.inactive()
+
+    rig.refresh()
+
+    assert view.is_finished()
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("error", LOST)
+def test_a_lost_access_strip_is_still_logged_once(attached, capsys, error):
+    rig, message = attached
+    message.errors = [error()]
+
+    run(rig.panel.playback_ended())
+
+    err = capsys.readouterr().err
+    assert err.count("Failed to strip the player buttons:") == 1
+
+
+@pytest.mark.parametrize("error", GONE)
+def test_a_message_deleted_after_the_refetch_is_forgotten_silently(
+    expired, capsys, error
+):
+    rig, channel, stale = expired
+    fresh = PanelMessage(channel, errors=[error()])
+    channel.fetch_result = fresh
+
+    rig.refresh()
+    rig.controller.snapshot = snap(volume=10)
+    rig.refresh()
+
+    assert fresh.edits == [] and stale.edits == []
+    assert capsys.readouterr().err == ""
+
+
+@pytest.mark.parametrize("error", LOST)
+def test_a_lost_access_on_the_refetched_edit_is_still_logged(
+    expired, capsys, error
+):
+    rig, channel, stale = expired
+    channel.fetch_result = PanelMessage(channel, errors=[error()])
+
+    rig.refresh()
+
+    err = capsys.readouterr().err
+    assert err.count("Failed to update the refetched player message:") == 1
+
+
+@pytest.mark.parametrize("error", GONE + LOST)
+def test_a_message_attached_during_a_failing_edit_survives(attached, error):
+    rig, message = attached
     # the attach's take-down strip uses the first error up
-    message.errors = [coded_error(cls, status, code)] * 2
+    message.errors = [error(), error()]
     newer = PanelMessage()
     rig.controller.snapshot = snap(volume=0)
     attach_during(rig, newer, message, "edit")
@@ -537,12 +631,12 @@ def test_a_message_attached_during_a_failing_edit_survives(
     assert newer.edits[-1:] == [None]
 
 
-@pytest.mark.parametrize("cls, status, code", GONE + LOST)
+@pytest.mark.parametrize("error", GONE + LOST)
 def test_a_message_attached_after_a_forget_is_the_player_message(
-    attached, cls, status, code
+    attached, error
 ):
     rig, message = attached
-    message.errors = [coded_error(cls, status, code)]
+    message.errors = [error()]
     rig.controller.snapshot = snap(volume=0)
     rig.refresh()
     newer = PanelMessage()
@@ -1002,16 +1096,6 @@ def test_a_take_down_after_a_raising_send_stops_nothing(attached):
 
     assert not handed[0].is_finished()
 
-
-def test_a_take_down_after_an_attach_without_buttons_stops_nothing():
-    rig = Rig(PanelSnapshot.inactive())
-    message = PanelMessage()
-    rig.attach(message)
-
-    run(rig.panel.playback_ended())
-
-    assert message.shown is None
-    assert message.edits == []
 
 
 @pytest.fixture

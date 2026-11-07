@@ -11,7 +11,7 @@ and reads the controller only through a getter:
 
 import asyncio
 import sys
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from traceback import print_exc
 from typing import Callable, Optional
 
@@ -161,6 +161,28 @@ def _log(what: str) -> None:
     print_exc(file=sys.stderr)
 
 
+def _report_edit_failure(error: Exception, what: str) -> None:
+    """The one place a failed edit of the player message is reported,
+    called from the handler of `error`: a `discord.NotFound` means a
+    user deleted the message, which is normal and silent; anything else
+    is logged with `what` and a traceback. It only reports - forgetting
+    the message stays with each site."""
+    if isinstance(error, discord.NotFound):
+        return
+    _log(what)
+
+
+@dataclass(frozen=True)
+class _Held:
+    """The player message with the snapshot it was drawn from and the
+    view drawn on it (`None` while inactive), held and replaced as
+    one."""
+
+    message: object
+    snapshot: PanelSnapshot
+    view: Optional[discord.ui.View]
+
+
 class PlayerPanel:
     """One per guild. `controller()` returns the guild's controller or
     `None` (read as inactive); `settings()` its settings or `None`."""
@@ -172,10 +194,7 @@ class PlayerPanel:
         self._controller = controller
         self._settings = settings
         self._channel = None
-        self._message = None
-        self._drawn: Optional[PanelSnapshot] = None
-        # the view drawn on the player message; None without buttons
-        self._view: Optional[discord.ui.View] = None
+        self._held: Optional[_Held] = None
         self._lock = asyncio.Lock()
 
     # -- destination ---------------------------------------------------
@@ -221,30 +240,31 @@ class PlayerPanel:
         it, the one place a drawn view's life ends: stopping removes its
         buttons from discord.py's view store, which an edit with no view
         does not."""
-        view = self._view
-        self._message = None
-        self._drawn = None
-        self._view = None
-        if view is not None:
-            view.stop()
+        held = self._held
+        self._held = None
+        if held is not None and held.view is not None:
+            held.view.stop()
 
-    async def _strip(self, message, drawn) -> None:
-        """Takes the buttons off `message`; a failure is logged, never
-        raised. Nothing to do when it carries none."""
-        if drawn is None or not drawn.active:
+    def _is_current(self, message) -> bool:
+        return self._held is not None and self._held.message is message
+
+    async def _strip(self, held: _Held) -> None:
+        """Takes the buttons off the held message; a failure is
+        reported, never raised. Nothing to do when it carries none."""
+        if not held.snapshot.active:
             return
         try:
-            await message.edit(view=None)
-        except Exception:
-            _log("Failed to strip the player buttons:")
+            await held.message.edit(view=None)
+        except Exception as e:
+            _report_edit_failure(e, "Failed to strip the player buttons:")
 
     async def _take_down(self) -> None:
         """Forgets the player message and its drawn snapshot, then
         strips the old message's buttons, if there was one."""
-        message, drawn = self._message, self._drawn
+        held = self._held
         self._forget()
-        if message is not None:
-            await self._strip(message, drawn)
+        if held is not None:
+            await self._strip(held)
 
     async def attach(self, send):
         """Moves the buttons onto the message `send` sends.
@@ -260,43 +280,43 @@ class PlayerPanel:
             snapshot = self._snapshot()
             view = self._layout(snapshot)
             res = await send(view)
-            self._view = view
-            self._message = res
-            self._drawn = snapshot
+            self._held = _Held(res, snapshot, view)
         return res
 
     async def refresh(self) -> None:
         """Redraws the buttons when the snapshot changed since the
         last draw."""
-        message = self._message
-        if message is None:
+        held = self._held
+        if held is None:
             return
+        message = held.message
         snapshot = self._snapshot()
-        if snapshot == self._drawn:
+        if snapshot == held.snapshot:
             return
         if not snapshot.active:
             await self._take_down()
             return
-        view = self._layout(snapshot)
+        drawn = _Held(message, snapshot, self._layout(snapshot))
         try:
-            await message.edit(view=view)
-            self._swap_view(message, view, snapshot)
+            await message.edit(view=drawn.view)
+            self._swap_view(drawn)
         except discord.HTTPException as e:
             if e.code == INVALID_WEBHOOK_TOKEN:
-                await self._recover(message, view, snapshot)
+                await self._recover(drawn)
             elif isinstance(e, (discord.NotFound, discord.Forbidden)):
                 # The message can never be edited again: stop retrying
                 # it every tick. Deleting it is normal, so only a lost
                 # access is logged.
-                if isinstance(e, discord.Forbidden):
-                    _log("Lost access to the player message:")
+                _report_edit_failure(e, "Lost access to the player message:")
                 self._forget_if_current(message)
             else:
-                _log("Failed to update the player buttons:")
+                _report_edit_failure(e, "Failed to update the player buttons:")
 
-    async def _recover(self, message, view, snapshot) -> None:
-        """An expired token: refetch the message through its channel
-        and edit it once more. Any failure forgets the message."""
+    async def _recover(self, drawn: _Held) -> None:
+        """An expired token: refetch the message `drawn` was meant for
+        through its channel and edit it once more. Any failure forgets
+        the message."""
+        message = drawn.message
         try:
             fresh = await message.channel.fetch_message(message.id)
         except discord.NotFound:
@@ -306,36 +326,37 @@ class PlayerPanel:
             _log("Failed to refetch the player message:")
             self._forget_if_current(message)
             return
-        if self._message is not message:
+        if not self._is_current(message):
             return
-        self._message = fresh
+        self._held = replace(self._held, message=fresh)
         try:
-            await fresh.edit(view=view)
-            self._swap_view(fresh, view, snapshot)
-        except Exception:
-            _log("Failed to update the refetched player message:")
+            await fresh.edit(view=drawn.view)
+            self._swap_view(replace(drawn, message=fresh))
+        except Exception as e:
+            _report_edit_failure(
+                e, "Failed to update the refetched player message:"
+            )
             self._forget_if_current(fresh)
 
-    def _swap_view(self, message, view, snapshot) -> None:
-        """A redraw edit of `message` succeeded: `view` is now the
-        drawn one. When `message` is no longer the player message, a
-        take-down ran meanwhile and already stopped the old view, so
-        the new one is stopped at once."""
-        if self._message is not message:
-            view.stop()
+    def _swap_view(self, drawn: _Held) -> None:
+        """A redraw edit of `drawn.message` succeeded: `drawn` is now
+        what is held. When that message is no longer the player
+        message, a take-down ran meanwhile and already stopped the old
+        view, so the new one is stopped at once."""
+        if not self._is_current(drawn.message):
+            drawn.view.stop()
             return
         # The replaced view is deliberately not stopped: the new view
         # has the same custom ids under the same message id, so
         # discord.py's view store overwrote the old view's entries in
         # place, and stopping the old one now would remove the entries
         # that belong to the new view and kill the live buttons.
-        self._view = view
-        self._drawn = snapshot
+        self._held = drawn
 
     def _forget_if_current(self, message) -> None:
         """Forgets `message` only when it is still the panel's
         current one."""
-        if self._message is message:
+        if self._is_current(message):
             self._forget()
 
     async def announce(self, song) -> None:
