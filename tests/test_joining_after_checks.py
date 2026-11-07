@@ -226,7 +226,7 @@ def test_prev_refused_while_disconnecting_replies_disconnecting():
     assert sent == [config.DISCONNECTING_MESSAGE]
 
 
-def test_prev_refused_with_history_while_not_disconnecting_replies_none():
+def test_prev_refused_with_history_not_disconnecting_replies_no_prev_track():
     controller = RecordingController(history=["x"], prev_result=False)
     guild, ctx, cog, sent = body_ctx("prev", controller)
     invoke(cog, ctx, Music._prev.callback)
