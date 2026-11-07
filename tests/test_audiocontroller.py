@@ -3364,6 +3364,63 @@ def test_requests_during_the_goodbye_are_refused_and_place_nothing(
     assert state == expected
 
 
+def test_prev_during_the_goodbye_is_refused_and_changes_nothing(
+    controller, monkeypatch, tmp_path
+):
+    _quick_goodbye(monkeypatch)
+    _queue(controller, "first", "second")
+
+    def state(client):
+        return (
+            _titles(controller),
+            [s.title for s in controller.playlist.playhistory],
+            len(client.played),
+            _backup_path(controller, tmp_path).read_bytes(),
+        )
+
+    async def scenario():
+        task = await _hold_goodbye(controller)
+        _old_track(controller)
+        client = controller.guild.voice_client
+        before = state(client)
+        result = controller.prev_song()
+        await _settle()
+        after = state(client)
+        await _end_goodbye(controller, task)
+        return result, before, after
+
+    result, before, after = _run(controller, scenario)
+
+    assert result is False
+    assert after == before
+
+
+def test_prev_out_of_voice_is_refused_and_changes_nothing(
+    controller, tmp_path
+):
+    _queue(controller, "first")
+    _save_backup(controller)
+    _old_track(controller)
+    controller.guild.voice_client = None
+
+    def state():
+        return (
+            _titles(controller),
+            [s.title for s in controller.playlist.playhistory],
+            _backup_path(controller, tmp_path).read_bytes(),
+        )
+
+    before = state()
+
+    async def scenario():
+        return controller.prev_song()
+
+    result = _run(controller, scenario)
+
+    assert result is False
+    assert state() == before
+
+
 def test_a_request_after_the_goodbye_starts_on_a_reconnected_client(
     controller, monkeypatch
 ):

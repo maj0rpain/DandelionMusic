@@ -425,6 +425,8 @@ class Music(commands.Cog):
         await self._enter(ctx)
         if ctx.audiocontroller.prev_song():
             await ctx.send("Playing previous song :track_previous:")
+        elif ctx.audiocontroller.is_disconnecting():
+            await ctx.send(config.DISCONNECTING_MESSAGE)
         else:
             await ctx.send(config.NO_PREVIOUS_TRACK)
 
