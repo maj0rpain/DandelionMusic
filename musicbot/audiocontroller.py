@@ -22,7 +22,7 @@ from musicbot import library, loader, playlists, utils
 from musicbot.outcome import BatchReport, EnqueueOutcome, OutcomeKind
 from musicbot.song import Song
 from musicbot.linkutils import ALLOWED_REMOTE_SCHEMES, SiteTypes
-from musicbot.message_link import check_message_link
+from musicbot.message_link import CheckedTrack
 from musicbot.panel_snapshot import PanelSnapshot
 from musicbot.playback import Playback, PlaybackState
 from musicbot.playlist import Playlist, LoopMode, LoopState
@@ -461,7 +461,7 @@ class AudioController(object):
 
     async def process_song(
         self,
-        track: str,
+        checked: CheckedTrack,
         user: Optional[discord.abc.User] = None,
         playnext=False,
     ) -> EnqueueOutcome:
@@ -480,11 +480,10 @@ class AudioController(object):
         # A failed load raises SongError, which the caller turns into a
         # Discord reply; it still has to leave a trace here.
         try:
-            await check_message_link(track, self.guild, user)
-            result = await loader.load_song(track)
+            result = await loader.load_song(checked)
         except loader.SongError:
             print(
-                f"{user} queued {track!r} in guild {self.guild.name!r}"
+                f"{user} queued {checked.track!r} in guild {self.guild.name!r}"
                 " - could not be loaded"
             )
             raise
@@ -498,7 +497,7 @@ class AudioController(object):
         else:
             # a resolved playlist has no single title to show -
             # the input is the only useful identifier left
-            what = f"a playlist ({len(added)} track(s)) via {track!r}"
+            what = f"a playlist ({len(added)} track(s)) via {checked.track!r}"
         print(f"{user} queued {what} in guild {self.guild.name!r}")
 
         batch = None if result.single else BatchReport(result.truncation)

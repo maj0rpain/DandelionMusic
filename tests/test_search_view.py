@@ -18,8 +18,9 @@ from types import SimpleNamespace
 import discord
 
 from config import config
+from musicbot.message_link import CheckedTrack
 from musicbot.bot import MusicBot
-from musicbot.commands.music import SearchView, SongButton
+from musicbot.commands.music import Music, SearchView, SongButton
 from discord_fakes import (
     ADMISSION_CHANNEL,
     FakeInteraction,
@@ -29,6 +30,13 @@ from discord_fakes import (
     make_bot,
 )
 from helpers import run
+from message_link_fakes import (
+    FOREIGN_LINK,
+    GUILD_ID,
+    LINK,
+    LinkChannel,
+    LinkMember,
+)
 
 OWNER = 1
 OTHER = 2
@@ -129,13 +137,18 @@ class FakeCog:
 
     def __init__(self):
         self.played = []
+        self.checked = []
         self.controllers = []
         self.play_error = None
 
-    async def _play_song(self, ctx, track):
+    async def _checked_track(self, ctx, track):
+        return await Music._checked_track(self, ctx, track)
+
+    async def _play_song(self, ctx, checked):
         if self.play_error is not None:
             raise self.play_error
-        self.played.append(track)
+        self.played.append(checked.track)
+        self.checked.append(checked)
         self.controllers.append(ctx.audiocontroller.name)
 
 
@@ -166,10 +179,10 @@ class SearchInteraction(FakeInteraction):
             self.response.defer = defer
 
 
-def make_view(cog=None, message=None):
+def make_view(cog=None, message=None, urls=URLS):
     cog = cog or FakeCog()
     view = SearchView(FakeContext(OWNER))
-    for i, url in enumerate(URLS, start=1):
+    for i, url in enumerate(urls, start=1):
         view.add_item(SongButton(cog, i, url))
     view.message = message
     return view, cog
@@ -252,6 +265,49 @@ def test_the_owners_pick_queues_its_url_and_disables_the_buttons():
     assert message.edits == [{"view": view}]
     assert buttons_disabled(view)
     assert view.is_finished()
+
+
+async def message_link_click(link, *, join_needed=False):
+    """The owner picks `link`, a message link, as a guild member who can
+    read the link's channel. Returns the view, the cog and the click."""
+
+    view, cog = make_view(message=EditRecordingMessage(), urls=[link])
+    inter = SearchInteraction()
+    guild = inter.ctx.guild
+    guild.id = GUILD_ID
+    guild.get_channel_or_thread = lambda _id: LinkChannel()
+    inter.ctx.author = LinkMember(id=OWNER, guild=guild, voice=None)
+    if join_needed:
+        guild.voice_client = None
+        inter.ctx.author.voice = SimpleNamespace(
+            channel=guild.channel("author")
+        )
+    await click(view, 0, inter=inter)
+    return view, cog, inter
+
+
+def test_an_allowed_link_pick_hands_play_a_checked_track_carrying_it():
+    _view, cog, _inter = run(message_link_click(LINK))
+    assert cog.checked == [CheckedTrack(LINK, LINK)]
+
+
+def test_a_forbidden_link_pick_is_refused_without_joining_or_playing():
+    view, cog, inter = run(message_link_click(FOREIGN_LINK, join_needed=True))
+    assert cog.played == []
+    assert inter.ctx.guild.events == []
+    assert [str(a[0]) for a, _k in inter.ctx.sent] == [
+        config.MESSAGE_LINK_FORBIDDEN
+    ]
+    assert view.is_finished()
+    assert buttons_disabled(view)
+
+
+def test_a_second_click_on_a_refused_pick_is_turned_away():
+    async def go():
+        view, _cog, _inter = await message_link_click(FOREIGN_LINK)
+        return await view.interaction_check(SearchInteraction())
+
+    assert run(go()) is False
 
 
 def test_a_refused_pick_can_be_retried():

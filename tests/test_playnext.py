@@ -9,6 +9,7 @@ import asyncio
 import pytest
 
 from config import config
+from musicbot.message_link import CheckedTrack
 from musicbot.commands.music import Music
 from musicbot.loader import SongError
 from musicbot.outcome import OutcomeKind
@@ -37,7 +38,7 @@ def _suspended_loads(controller, stub_loader):
 
     async def load_song(track):
         future = asyncio.get_running_loop().create_future()
-        futures[track] = future
+        futures[track.track] = future
         return await future
 
     stub_loader.load_song = load_song
@@ -53,9 +54,11 @@ def test_interleaved_playnext_and_plain_keep_their_slots(
 
     async def go():
         pn = asyncio.ensure_future(
-            controller.process_song("pn", playnext=True)
+            controller.process_song(CheckedTrack("pn"), playnext=True)
         )
-        plain = asyncio.ensure_future(controller.process_song("plain"))
+        plain = asyncio.ensure_future(
+            controller.process_song(CheckedTrack("plain"))
+        )
         await _settle()
         order = ["plain", "pn"] if plain_first else ["pn", "plain"]
         for track in order:
@@ -79,7 +82,8 @@ def test_playnext_goes_to_index_1_and_refreshes_backup_and_preload_once(
     )
 
     _run_while_playing(
-        controller, lambda: controller.process_song("x", playnext=True)
+        controller,
+        lambda: controller.process_song(CheckedTrack("x"), playnext=True),
     )
 
     assert _titles(controller) == ["current", "x", "a", "b"]
@@ -96,7 +100,10 @@ def test_playnext_on_an_empty_queue_starts_the_track(
         _song(controller, "x")
     )
 
-    _run(controller, lambda: controller.process_song("x", playnext=True))
+    _run(
+        controller,
+        lambda: controller.process_song(CheckedTrack("x"), playnext=True),
+    )
 
     assert _titles(controller) == ["x"]
     played = controller.guild.voice_client.played
@@ -111,7 +118,8 @@ def test_playnext_one_item_playlist_goes_next(controller, stub_loader):
     )
 
     _run_while_playing(
-        controller, lambda: controller.process_song("x", playnext=True)
+        controller,
+        lambda: controller.process_song(CheckedTrack("x"), playnext=True),
     )
 
     assert _titles(controller) == ["current", "x", "a"]
@@ -124,7 +132,8 @@ def test_playnext_multi_track_playlist_is_appended(controller, stub_loader):
     )
 
     result = _run_while_playing(
-        controller, lambda: controller.process_song("x", playnext=True)
+        controller,
+        lambda: controller.process_song(CheckedTrack("x"), playnext=True),
     )
 
     assert _titles(controller) == ["current", "a", "x", "y"]
@@ -144,7 +153,7 @@ def test_unloadable_playnext_leaves_everything_alone(
 
     async def go():
         with pytest.raises(stub_loader.SongError):
-            await controller.process_song("x", playnext=True)
+            await controller.process_song(CheckedTrack("x"), playnext=True)
 
     _run_while_playing(controller, go)
 
@@ -163,13 +172,13 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
     }
 
     async def load_song(track):
-        return LoadResult.of_song(songs[track])
+        return LoadResult.of_song(songs[track.track])
 
     stub_loader.load_song = load_song
 
     async def on_send(sent):
         if len(sent) == 1:
-            await controller.process_song("plain")
+            await controller.process_song(CheckedTrack("plain"))
 
     ctx, _ = command_ctx(controller, on_send)
 
@@ -177,7 +186,7 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
     music = Music(None)
 
     async def go():
-        await music._play_song(ctx, "pn", playnext=True)
+        await music._play_song(ctx, CheckedTrack("pn"), playnext=True)
 
     _run_while_playing(controller, go)
 
@@ -187,7 +196,7 @@ def test_play_song_helper_keeps_playnext_slot_when_a_reply_interleaves(
 def test_play_replies_with_the_load_error():
     ctx, sent = command_ctx(ProcessController(SongError("nope")))
 
-    run(Music(None)._play_song(ctx, "x"))
+    run(Music(None)._play_song(ctx, CheckedTrack("x")))
 
     assert sent == ["nope"]
 
