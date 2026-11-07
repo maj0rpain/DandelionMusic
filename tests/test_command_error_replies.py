@@ -3,6 +3,7 @@ is ignored, bad input and a failed check get a reply without a
 traceback, anything else a reply and a traceback."""
 
 import types
+from typing import Callable, NamedTuple
 
 import discord
 import pytest
@@ -80,120 +81,115 @@ def _literal():
 
 USAGE = "\nUsage: d!seek <name> <count>"
 
-# One row per error: (id, error factory, command factory or None, wrappable,
-# expected sends given the error as received, whether it is printed).
-# A row that is not wrappable runs bare only.
+
+class Row(NamedTuple):
+    id: str
+    make_error: Callable
+    make_command: Callable | None
+    expected_sends: Callable  # given the error as received
+    printed: bool
+
+
 ROWS = [
-    (
+    Row(
         "unknown-command",
         lambda: commands.CommandNotFound('Command "x" is not found'),
         None,
-        True,
         lambda e: [],
         False,
     ),
-    (
+    Row(
         "missing-argument",
         _missing,
         _command,
-        True,
         lambda e: [str(e) + USAGE],
         False,
     ),
-    (
+    Row(
         "bad-argument",
         lambda: commands.BadArgument("bad value"),
         _command,
-        True,
         lambda e: ["bad value" + USAGE],
         False,
     ),
-    (
+    Row(
         "bad-literal",
         _literal,
         _command,
-        True,
         lambda e: [str(e) + USAGE],
         False,
     ),
-    (
+    Row(
         "missing-argument-no-command",
         _missing,
         None,
-        False,
         lambda e: [str(e)],
         False,
     ),
-    (
+    Row(
         "bad-argument-no-command",
         lambda: commands.BadArgument("bad value"),
         None,
-        False,
         lambda e: ["bad value"],
         False,
     ),
-    (
+    Row(
         "bad-literal-no-command",
         _literal,
         None,
-        False,
         lambda e: [str(e)],
         False,
     ),
-    (
+    Row(
         "empty-signature-no-trailing-space",
         lambda: commands.BadArgument("bad value"),
         _no_args_command,
-        False,
         lambda e: ["bad value\nUsage: d!seek"],
         False,
     ),
-    (
+    Row(
         "check-failure",
         lambda: commands.CheckFailure("check failed"),
         None,
-        True,
         lambda e: ["check failed"],
         False,
     ),
-    (
+    Row(
         "not-owner",
         lambda: commands.NotOwner("not owner"),
         None,
-        True,
         lambda e: ["not owner"],
         False,
     ),
-    (
+    Row(
         "check-error",
         lambda: CheckError(config.USER_MISSING_PERMISSIONS),
         None,
-        True,
         lambda e: [config.USER_MISSING_PERMISSIONS],
         False,
     ),
-    (
+    Row(
         "song-error",
         lambda: SongError("unsupported link"),
         None,
-        True,
         lambda e: ["unsupported link"],
         False,
     ),
-    (
+    Row(
         "failure",
         lambda: RuntimeError("boom"),
         None,
-        True,
         lambda e: [str(e)],
         True,
     ),
 ]
 
+WRAPPED_IDS = {"song-error", "failure"}
+
 CASES = [
-    pytest.param(row, wrap, id=f"{row[0]}-{wrap}")
+    pytest.param(row, wrap, id=f"{row.id}-{wrap}")
     for row in ROWS
-    for wrap in (WRAPS if row[3] else ["bare"])
+    for wrap in (WRAPS if row.id in WRAPPED_IDS else ["bare"])
 ]
 
 
@@ -219,13 +215,12 @@ def handle(bot, error, command=None):
 
 @pytest.mark.parametrize("row, wrap", CASES)
 def test_command_error_is_classified(music_bot, row, wrap):
-    _, make, make_command, _, expected_sends, is_printed = row
-    error = make()
+    error = row.make_error()
     received = WRAPS[wrap](error)
-    command = make_command() if make_command else None
+    command = row.make_command() if row.make_command else None
     sent, printed = handle(music_bot, received, command)
     # a failure is replied to and printed as received, so its text is the
     # wrapped error's
-    reply_to = received if is_printed else error
-    assert sent == expected_sends(reply_to)
-    assert printed == ([received] if is_printed else [])
+    reply_to = received if row.printed else error
+    assert sent == row.expected_sends(reply_to)
+    assert printed == ([received] if row.printed else [])
