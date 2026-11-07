@@ -1,6 +1,9 @@
 """The suite's generic shared helpers: the bounded `run(coro)`,
-`FakeClock` and the import-reading helpers `imported_names`,
-`imported_roots`, `type_checking_imports` and `attribute_names`."""
+`FakeClock`, `plain_song`, `REPO_ROOT` and the four import-reading
+helpers `imported_names`, `imported_roots`, `type_checking_imports` and
+`attribute_names`. `dockerfile_commands` (the Dockerfile reader) and
+`shell_commands` (the shell-command splitter) are readers, not
+import-reading helpers."""
 
 import ast
 import asyncio
@@ -9,6 +12,8 @@ from pathlib import Path
 
 from musicbot.linkutils import SiteTypes
 from musicbot.song import Song
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def run(coro):
@@ -137,7 +142,7 @@ def dockerfile_commands(text=None):
     keyword upper-cased and followed by exactly one space and the
     arguments unchanged (no trailing space without arguments)."""
     if text is None:
-        text = (Path(__file__).parent.parent / "Dockerfile").read_text()
+        text = (REPO_ROOT / "Dockerfile").read_text()
     commands = []
     for line in _join_continuations(text).splitlines():
         line = line.strip()

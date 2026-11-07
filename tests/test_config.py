@@ -12,12 +12,10 @@ from pathlib import Path
 import jsonc
 import pytest
 
-from config.config import Config as ConfigClass
+from config.config import Config
 from config.utils import alchemize_url, ensure_sqlite_parent, get_env_var
 
-from helpers import dockerfile_commands
-
-REPO_ROOT = Path(__file__).parent.parent
+from helpers import REPO_ROOT, dockerfile_commands
 
 SECRETS_ENV = (
     "BOT_TOKEN=real-token-abc123\n"
@@ -248,7 +246,7 @@ def test_declared_variable_names_reads_every_name_in_any_case():
 
 
 def test_dockerfile_declares_no_bot_setting_as_arg_or_env():
-    from config.config import ENV_ALIASES, Config
+    from config.config import ENV_ALIASES
 
     settings = {*Config.as_dict(), *ENV_ALIASES}
     for command in dockerfile_commands():
@@ -356,18 +354,18 @@ def test_en_json_renders_only_braced_config_names(config_factory):
     """Every en.json string comes out as its raw text with only the
     braced config names filled: a bare word that equals a config key
     stays literal, runtime placeholders reach their .format() call."""
-    from config.config import Config
     from config.utils import CONFIG_DIRS
 
     shipped = [d for d in CONFIG_DIRS if (Path(d) / "en.json").is_file()]
     assert shipped == [str(REPO_ROOT / "config")]
     raw = jsonc.loads((REPO_ROOT / "config" / "en.json").read_text("utf-8"))
 
-    keep = {"DATABASE_URL", "COOKIE_PATH", "EMBED_COLOR"}
+    # string settings Config parses at load; a sentinel would break loading
+    parsed_at_load = {"DATABASE_URL", "COOKIE_PATH", "EMBED_COLOR"}
     sentinels = {
         k: f"SENTINEL<{k}>"
         for k, v in Config.as_dict().items()
-        if isinstance(v, str) and k not in keep
+        if isinstance(v, str) and k not in parsed_at_load
     }
     env = "".join(f"{k}={v}\n" for k, v in sentinels.items())
     config = config_factory(env)
@@ -606,4 +604,4 @@ def test_env_sample_supported_extensions_match_the_default(config_factory):
     sample = (REPO_ROOT / ".env.sample").read_text()
     (line,) = re.findall(r"^SUPPORTED_EXTENSIONS=.*$", sample, re.M)
     config = config_factory(SECRETS_ENV + line + "\n")
-    assert config.SUPPORTED_EXTENSIONS == ConfigClass.SUPPORTED_EXTENSIONS
+    assert config.SUPPORTED_EXTENSIONS == Config.SUPPORTED_EXTENSIONS

@@ -1,12 +1,9 @@
 """Structural tests over the repository's CI and release pipeline files."""
 
-from pathlib import Path
-
 import yaml
 
-from helpers import dockerfile_commands, shell_commands
+from helpers import REPO_ROOT, dockerfile_commands, shell_commands
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
 WORKFLOWS = REPO_ROOT / ".github" / "workflows"
 
 
