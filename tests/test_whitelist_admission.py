@@ -76,7 +76,7 @@ def test_sweep_logs_a_failed_leave_and_goes_on(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert registered == [3]
     assert guilds[1].left
-    assert "bad" in err and "Traceback" in err
+    assert 0 <= err.find("Leaving guild bad failed:") < err.find("Traceback")
 
 
 def test_sweep_reads_the_whitelist_once(monkeypatch):
@@ -120,4 +120,4 @@ def test_join_logs_a_failed_leave_and_does_not_register(monkeypatch, capsys):
     registered = join(monkeypatch, [1], LeavingGuild(2, "bad", fail=True))
     err = capsys.readouterr().err
     assert registered == []
-    assert "bad" in err and "Traceback" in err
+    assert 0 <= err.find("Leaving guild bad failed:") < err.find("Traceback")
