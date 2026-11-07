@@ -104,11 +104,12 @@ def test_the_subcommands_are_exactly_the_described_settings():
         ("button_emote", THUMBS_UP, THUMBS_UP, THUMBS_UP),
         ("default_volume", 50, "50", 50),
         ("vc_timeout", True, "True", True),
-        ("announce_songs", True, "True", True),
+        ("announce_songs", False, "False", False),
     ],
 )
 def test_a_setting_update_is_confirmed(name, arg, confirmation, stored):
     sett = stored_settings()
+    assert getattr(sett, name) != stored
 
     sent = invoke_setting(name, arg, sett)
 
@@ -349,6 +350,7 @@ def test_a_prefix_subcommand_converts_its_argument(
     subcommand's parameter type before the setting is updated"""
     command = bound_subcommand(name)
     sett = stored_settings()
+    assert getattr(sett, name) != stored
     sent = []
 
     run(command.invoke(prefix_ctx(sent, sett, argument)))
@@ -381,14 +383,26 @@ def reset_text(name):
 @pytest.mark.parametrize("name", list(ARGS))
 def test_a_subcommand_without_a_value_resets_the_setting(name):
     sett = stored_settings()
-    if getattr(sett, name) == SETTINGS[name].default:
-        setattr(sett, name, True)  # announce_songs defaults to False
     assert getattr(sett, name) != SETTINGS[name].default
 
     sent = invoke_setting(name, NO_VALUE, sett)
 
     assert sent[-1] == reset_text(name)
     assert getattr(sett, name) == SETTINGS[name].default
+
+
+def test_an_announce_songs_reset_is_confirmed_as_false():
+    sent = invoke_setting("announce_songs", NO_VALUE, stored_settings())
+
+    assert sent[-1] == "Setting `announce_songs` reset to False!"
+
+
+def test_every_stored_setting_differs_from_its_default():
+    sett = stored_settings()
+
+    same = [n for n, d in SETTINGS.items() if getattr(sett, n) == d.default]
+
+    assert same == []
 
 
 def test_a_reset_is_confirmed_with_the_value_the_embed_shows():
