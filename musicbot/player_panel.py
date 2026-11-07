@@ -11,7 +11,8 @@ and reads the controller only through a getter:
 
 import asyncio
 import sys
-from dataclasses import dataclass, replace
+import dataclasses
+from dataclasses import dataclass
 from traceback import print_exc
 from typing import Callable, Optional
 
@@ -328,10 +329,10 @@ class PlayerPanel:
             return
         if not self._is_current(message):
             return
-        self._held = replace(self._held, message=fresh)
+        self._held = dataclasses.replace(self._held, message=fresh)
         try:
             await fresh.edit(view=drawn.view)
-            self._swap_view(replace(drawn, message=fresh))
+            self._swap_view(dataclasses.replace(drawn, message=fresh))
         except Exception as e:
             _report_edit_failure(
                 e, "Failed to update the refetched player message:"
