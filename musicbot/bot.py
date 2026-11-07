@@ -305,13 +305,17 @@ class MusicBot(commands.Bot):
         if member == self.user:
             if not guild.voice_client:
                 await asyncio.sleep(VC_CONNECT_TIMEOUT)
-            if guild.voice_client:
-                is_playing = guild.voice_client.is_playing()
+            voice_client = guild.voice_client
+            if voice_client:
+                is_playing = voice_client.is_playing()
                 await audiocontroller.start_idle_timer(is_playing)
                 if is_playing:
                     # bot was moved, restore playback
                     await asyncio.sleep(1)
-                    guild.voice_client.resume()
+                    # a disconnect or reset during the awaits cleared
+                    # or replaced it; that already handled the state
+                    if guild.voice_client is voice_client:
+                        voice_client.resume()
             else:
                 # did not reconnect, clear state
                 await audiocontroller.udisconnect("removed from voice channel")
