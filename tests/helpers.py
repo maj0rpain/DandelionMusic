@@ -1,13 +1,19 @@
 """The suite's generic shared helpers: the bounded `run(coro)`,
-`FakeClock` and the import-reading helpers `imported_names`,
-`imported_roots`, `type_checking_imports` and `attribute_names`."""
+`FakeClock`, `plain_song`, `REPO_ROOT` and the four import-reading
+helpers `imported_names`, `imported_roots`, `type_checking_imports` and
+`attribute_names`. `dockerfile_commands` (the Dockerfile reader) and
+`shell_commands` (the shell-command splitter) are readers, not
+import-reading helpers."""
 
 import ast
 import asyncio
+import re
 from pathlib import Path
 
 from musicbot.linkutils import SiteTypes
 from musicbot.song import Song
+
+REPO_ROOT = Path(__file__).resolve().parent.parent
 
 
 def run(coro):
@@ -126,12 +132,33 @@ def attribute_names(module) -> set[str]:
     }
 
 
-def dockerfile_commands():
-    """The repo Dockerfile's instructions, one string each: continuation
-    lines joined, blank lines and `#` comment lines dropped."""
-    text = (Path(__file__).parent.parent / "Dockerfile").read_text()
+def _join_continuations(text):
+    """`text` with each `\\`-newline joined to one space."""
+    return text.replace("\\\n", " ")
+
+
+def shell_commands(text):
+    """The shell commands in `text`: continuations joined, split on `&&`
+    and newlines, each piece stripped, empty pieces dropped."""
     return [
         c.strip()
-        for c in text.replace("\\\n", " ").splitlines()
-        if c.strip() and not c.strip().startswith("#")
+        for c in re.split(r"&&|\n", _join_continuations(text))
+        if c.strip()
     ]
+
+
+def dockerfile_commands(text=None):
+    """The instructions of `text` (the repo Dockerfile by default), one
+    string each: continuations joined, blank and `#` lines dropped, the
+    keyword upper-cased and followed by exactly one space and the
+    arguments unchanged (no trailing space without arguments)."""
+    if text is None:
+        text = (REPO_ROOT / "Dockerfile").read_text()
+    commands = []
+    for line in _join_continuations(text).splitlines():
+        line = line.strip()
+        if not line or line.startswith("#"):
+            continue
+        keyword, *args = re.split(r"\s+", line, maxsplit=1)
+        commands.append(" ".join([keyword.upper(), *args]))
+    return commands

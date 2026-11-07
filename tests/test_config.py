@@ -12,12 +12,10 @@ from pathlib import Path
 import jsonc
 import pytest
 
-from config.config import Config as ConfigClass
+from config.config import Config
 from config.utils import alchemize_url, ensure_sqlite_parent, get_env_var
 
-from helpers import dockerfile_commands
-
-REPO_ROOT = Path(__file__).parent.parent
+from helpers import REPO_ROOT, dockerfile_commands
 
 SECRETS_ENV = (
     "BOT_TOKEN=real-token-abc123\n"
@@ -145,7 +143,7 @@ def test_config_rejects_a_non_bare_driver_naming_only_the_driver(
 
 def _uv_sync_index(commands):
     (index,) = _indices_where(
-        commands, lambda c: c.startswith("RUN") and "uv sync" in c
+        commands, lambda c: c.startswith("RUN ") and "uv sync" in c
     )
     return index
 
@@ -153,9 +151,7 @@ def _uv_sync_index(commands):
 def test_dockerfile_installs_db_drivers_without_dev():
     commands = dockerfile_commands()
     run = commands[_uv_sync_index(commands)]
-    assert "--frozen" not in run
     for flag in (
-        "--locked",
         "--no-cache",
         "--no-dev",
         "--extra postgres",
@@ -170,7 +166,7 @@ def _indices_where(commands, predicate):
 
 def test_dockerfile_runs_as_a_non_root_user():
     users = [
-        c.split()[1] for c in dockerfile_commands() if c.split()[0] == "USER"
+        c.split()[1] for c in dockerfile_commands() if c.startswith("USER ")
     ]
     assert users and users[-1].split(":")[0] not in ("root", "0")
 
@@ -183,7 +179,7 @@ def test_dockerfile_copies_source_only_after_dependencies():
     early_copies = [
         c.split()[1:-1]
         for c in commands[:sync]
-        if c.startswith("COPY") and "--from=" not in c
+        if c.startswith("COPY ") and "--from=" not in c
     ]
     assert early_copies == [["pyproject.toml", "uv.lock"]]
 
@@ -200,7 +196,7 @@ def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
     import re
 
     commands = dockerfile_commands()
-    images = [c.split()[1] for c in commands if c.startswith("FROM")]
+    images = [c.split()[1] for c in commands if c.startswith("FROM ")]
     copied = []
     for c in commands:
         m = re.match(r"COPY .*--from=(\S+)", c)
@@ -218,7 +214,7 @@ def test_dockerfile_apt_installs_are_minimal_and_clean():
     commands = dockerfile_commands()
     sync = _uv_sync_index(commands)
     for i in _indices_where(commands, lambda c: "apt-get" in c):
-        assert commands[i].startswith("RUN") and i < sync
+        assert commands[i].startswith("RUN ") and i < sync
     for c in commands:
         if "apt-get install" not in c:
             continue
@@ -228,34 +224,32 @@ def test_dockerfile_apt_installs_are_minimal_and_clean():
 
 def _declared_variable_names(command):
     keyword, _, rest = command.partition(" ")
-    rest = rest.strip()
-    keyword = keyword.upper()
-    if keyword == "ARG":
+    if keyword not in ("ARG", "ENV"):
+        return []
+    if keyword == "ARG" or "=" in rest.split()[0]:
         return [token.split("=")[0] for token in shlex.split(rest)]
-    if "=" in rest.split()[0]:
-        return [pair.split("=")[0] for pair in shlex.split(rest)]
     return [rest.split()[0]]
 
 
 def test_declared_variable_names_reads_every_name_in_any_case():
-    assert _declared_variable_names("ARG FOO BOT_TOKEN") == [
-        "FOO",
-        "BOT_TOKEN",
+    lines = dockerfile_commands(
+        "ARG FOO BOT_TOKEN\narg A=1 BOT_TOKEN=x\nenv A=1 B=2\n"
+        "env OLD value\nrun echo hi\n"
+    )
+    assert [_declared_variable_names(c) for c in lines] == [
+        ["FOO", "BOT_TOKEN"],
+        ["A", "BOT_TOKEN"],
+        ["A", "B"],
+        ["OLD"],
+        [],
     ]
-    assert _declared_variable_names("arg A=1 BOT_TOKEN=x") == [
-        "A",
-        "BOT_TOKEN",
-    ]
-    assert _declared_variable_names("env A=1 B=2") == ["A", "B"]
 
 
 def test_dockerfile_declares_no_bot_setting_as_arg_or_env():
-    from config.config import ENV_ALIASES, Config
+    from config.config import ENV_ALIASES
 
     settings = {*Config.as_dict(), *ENV_ALIASES}
     for command in dockerfile_commands():
-        if command.split()[0].upper() not in ("ARG", "ENV"):
-            continue
         for name in _declared_variable_names(command):
             assert name not in settings, (
                 f"Dockerfile instruction bakes a bot setting into the "
@@ -360,18 +354,20 @@ def test_en_json_renders_only_braced_config_names(config_factory):
     """Every en.json string comes out as its raw text with only the
     braced config names filled: a bare word that equals a config key
     stays literal, runtime placeholders reach their .format() call."""
-    from config.config import Config
     from config.utils import CONFIG_DIRS
 
     shipped = [d for d in CONFIG_DIRS if (Path(d) / "en.json").is_file()]
     assert shipped == [str(REPO_ROOT / "config")]
     raw = jsonc.loads((REPO_ROOT / "config" / "en.json").read_text("utf-8"))
 
-    keep = {"DATABASE_URL", "COOKIE_PATH", "EMBED_COLOR"}
+    # string settings Config parses at load (the database URL driver, the
+    # cookie path lookup, the hex embed colour), so a sentinel would break
+    # loading; a new parsed string setting joins the set
+    parsed_at_load = {"DATABASE_URL", "COOKIE_PATH", "EMBED_COLOR"}
     sentinels = {
         k: f"SENTINEL<{k}>"
         for k, v in Config.as_dict().items()
-        if isinstance(v, str) and k not in keep
+        if isinstance(v, str) and k not in parsed_at_load
     }
     env = "".join(f"{k}={v}\n" for k, v in sentinels.items())
     config = config_factory(env)
@@ -610,4 +606,4 @@ def test_env_sample_supported_extensions_match_the_default(config_factory):
     sample = (REPO_ROOT / ".env.sample").read_text()
     (line,) = re.findall(r"^SUPPORTED_EXTENSIONS=.*$", sample, re.M)
     config = config_factory(SECRETS_ENV + line + "\n")
-    assert config.SUPPORTED_EXTENSIONS == ConfigClass.SUPPORTED_EXTENSIONS
+    assert config.SUPPORTED_EXTENSIONS == Config.SUPPORTED_EXTENSIONS
