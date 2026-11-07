@@ -230,8 +230,34 @@ def _failing_page(monkeypatch, error):
     monkeypatch.setattr(linkutils, "get_soup", get_soup)
 
 
+def _track_page(monkeypatch):
+    """Installs a public page for a track titled T by A."""
+
+    async def get_soup(u):
+        return BeautifulSoup(
+            "<title>T - song and lyrics by A | Spotify</title>",
+            "html.parser",
+        )
+
+    monkeypatch.setattr(linkutils, "get_soup", get_soup)
+
+
+class FailingTrackApi:
+    """A Spotify API whose track lookup raises `error`."""
+
+    def __init__(self, error):
+        self.error = error
+
+    def track(self, code):
+        raise self.error
+
+
 def _fetch(list_type="playlist"):
-    return run(linkutils.fetch_spotify_playlist("u", list_type, "p"))
+    return run(
+        linkutils.fetch_spotify_playlist(
+            "u", SpotifyPlaylistTypes(list_type), "p"
+        )
+    )
 
 
 @pytest.mark.parametrize("list_type", ["playlist", "album"])
@@ -299,18 +325,10 @@ def test_paging_failure_after_page_one_does_not_scrape(
 def test_track_whose_api_lookup_raises_falls_back_to_the_page_title(
     monkeypatch, capsys
 ):
-    class FailingApi:
-        def track(self, code):
-            raise RuntimeError("boom")
-
-    async def get_soup(u):
-        return BeautifulSoup(
-            "<title>T - song and lyrics by A | Spotify</title>",
-            "html.parser",
-        )
-
-    monkeypatch.setattr(linkutils, "spotify_api", FailingApi())
-    monkeypatch.setattr(linkutils, "get_soup", get_soup)
+    monkeypatch.setattr(
+        linkutils, "spotify_api", FailingTrackApi(RuntimeError("boom"))
+    )
+    _track_page(monkeypatch)
 
     result = run(linkutils.fetch_spotify("https://open.spotify.com/track/abc"))
 
@@ -324,14 +342,7 @@ def test_track_without_api_reads_the_page_title_and_logs_no_error(
     monkeypatch, capsys
 ):
     monkeypatch.setattr(linkutils, "spotify_api", None)
-
-    async def get_soup(u):
-        return BeautifulSoup(
-            "<title>T - song and lyrics by A | Spotify</title>",
-            "html.parser",
-        )
-
-    monkeypatch.setattr(linkutils, "get_soup", get_soup)
+    _track_page(monkeypatch)
 
     result = run(linkutils.fetch_spotify("https://open.spotify.com/track/abc"))
 
@@ -345,11 +356,7 @@ def test_track_api_and_public_page_failing_raises_the_page_error(
     api_error = RuntimeError("api")
     page_error = RuntimeError("page")
 
-    class FailingApi:
-        def track(self, code):
-            raise api_error
-
-    monkeypatch.setattr(linkutils, "spotify_api", FailingApi())
+    monkeypatch.setattr(linkutils, "spotify_api", FailingTrackApi(api_error))
     _failing_page(monkeypatch, page_error)
 
     with pytest.raises(RuntimeError) as info:

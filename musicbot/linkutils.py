@@ -8,7 +8,15 @@ from dataclasses import dataclass
 from traceback import print_exc
 from urllib.parse import urlparse
 from multiprocessing import current_process
-from typing import Dict, Optional, Union, List
+from typing import (
+    Awaitable,
+    Callable,
+    Dict,
+    Optional,
+    Union,
+    List,
+    TypeVar,
+)
 
 import requests
 from requests.adapters import HTTPAdapter
@@ -268,6 +276,9 @@ async def resolve_short_link(url: str) -> str:
         return str(response.url)
 
 
+T = TypeVar("T")
+
+
 async def _scrape_track(url: str) -> tuple[str, str]:
     """A track's title and artist, read from its public page."""
     soup = await get_soup(url)
@@ -293,8 +304,12 @@ def _log_api_error(kind: str, code: str) -> None:
 
 
 async def _api_or_public_page(
-    read_api, read_page_without_api, read_page_after_api_error, kind, code
-):
+    read_api: Callable[[], T],
+    read_page_without_api: Callable[[], Awaitable[T]],
+    read_page_after_api_error: Callable[[], Awaitable[T]],
+    kind: str,
+    code: str,
+) -> T:
     """Reads through the Spotify API when it is set up; when that raises,
     logs it and reads the public page instead. `read_api` is synchronous,
     the page reads are async."""
@@ -318,7 +333,9 @@ async def fetch_spotify(
     url = match.group()
     url_type = match.group("type")
     if url_type != "track":
-        return await fetch_spotify_playlist(url, url_type, match.group("code"))
+        return await fetch_spotify_playlist(
+            url, SpotifyPlaylistTypes(url_type), match.group("code")
+        )
 
     code = match.group("code")
 
@@ -342,12 +359,12 @@ async def fetch_spotify(
 
 
 async def fetch_spotify_playlist(
-    url: str, list_type: str, code: str
+    url: str, list_type: SpotifyPlaylistTypes, code: str
 ) -> SpotifyTracks:
     """Returns the Spotify links, and how many tracks are missing"""
 
     return await _api_or_public_page(
-        lambda: fetch_playlist_with_api(SpotifyPlaylistTypes(list_type), code),
+        lambda: fetch_playlist_with_api(list_type, code),
         lambda: _scrape_playlist(url, TruncationReason.NO_API),
         lambda: _scrape_playlist(url, TruncationReason.API_UNAVAILABLE),
         list_type,
