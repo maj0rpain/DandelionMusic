@@ -6,7 +6,7 @@ import sys
 from collections import Counter
 import os
 from pathlib import Path, PurePath, PureWindowsPath
-from typing import Dict, List, NamedTuple, Optional, Tuple
+from typing import Dict, List, NamedTuple, Optional, Tuple, TypeVar
 from urllib.parse import unquote_to_bytes
 
 from config import config
@@ -440,9 +440,10 @@ def library_root() -> Path:
     return root
 
 
-def _track_path(
-    root: PurePath, artist: str, album: str, filename: str
-) -> PurePath:
+_P = TypeVar("_P", bound=PurePath)
+
+
+def _track_path(root: _P, artist: str, album: str, filename: str) -> _P:
     """A library track's path under `root`, in `root`'s flavour."""
     return root / artist / album / filename
 
@@ -528,17 +529,17 @@ def library_path_from_uri(uri: str, root: PurePath) -> Optional[PurePath]:
 
 
 def _parse_posix_uri(
-    authority: str, tail: str, path_class: type[PurePath]
+    authority: str, tail: str, flavour: type[PurePath]
 ) -> Optional[tuple[PurePath, list[str]]]:
     """The candidate path and the segments to check, or None."""
     if authority not in ("", "localhost"):
         return None
     decoded = os.fsdecode(unquote_to_bytes(tail))
-    return path_class(decoded), decoded.split("/")
+    return flavour(decoded), decoded.split("/")
 
 
 def _parse_windows_uri(
-    authority: str, tail: str, path_class: type[PurePath]
+    authority: str, tail: str, flavour: type[PurePath]
 ) -> Optional[tuple[PurePath, list[str]]]:
     """The candidate path and the segments to check, or None."""
     host = ""
@@ -554,11 +555,11 @@ def _parse_windows_uri(
         return None
     segments = [p for seg in decoded.split("/") for p in seg.split("\\")]
     if host:
-        path = path_class("\\\\" + host + decoded.replace("/", "\\"))
+        path = flavour("\\\\" + host + decoded.replace("/", "\\"))
     elif has_drive_letter:
-        path = path_class(decoded[1:])
+        path = flavour(decoded[1:])
     else:
-        path = path_class(decoded)
+        path = flavour(decoded)
     return path, segments
 
 
