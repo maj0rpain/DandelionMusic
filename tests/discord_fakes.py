@@ -5,6 +5,7 @@ copy.
 """
 
 import asyncio
+import inspect
 import types
 from concurrent.futures import ThreadPoolExecutor
 
@@ -14,7 +15,7 @@ from musicbot import admission
 from musicbot.admission import RequestKind
 from musicbot.player_panel import PlayerPanel
 from musicbot.sessions import GuildSessions
-from musicbot.utils import joining_command
+from musicbot.utils import CheckError, joining_command
 from helpers import run
 
 
@@ -143,6 +144,16 @@ class VoiceGuild:
         self.voice_client = FakeVoiceClient(self, channel)
 
 
+def context_client(ctx, **attributes):
+    """An interaction client whose async `get_context(inter)` answers
+    `ctx`, with `attributes` as further client attributes."""
+
+    async def get_context(inter):
+        return ctx
+
+    return types.SimpleNamespace(get_context=get_context, **attributes)
+
+
 class FakeInteraction:
     """A component click. Records `deferred`, `messages` (direct
     responses) and `followups`. Its client answers get_context with
@@ -174,11 +185,8 @@ class FakeInteraction:
 
         self.followup = types.SimpleNamespace(send=followup_send)
 
-        async def get_context(inter):
-            return ctx
-
-        self.client = types.SimpleNamespace(
-            get_context=get_context,
+        self.client = context_client(
+            ctx,
             sessions=types.SimpleNamespace(controller=lambda guild: None),
         )
 
@@ -354,12 +362,38 @@ def situation(
     return guild, ctx
 
 
+def command_of(cog, name):
+    """A cog's command by its qualified name; `cog` is a cog class
+    (built over no bot) or a cog instance."""
+    if isinstance(cog, type):
+        cog = cog(None)
+    return {c.qualified_name: c for c in cog.walk_commands()}[name]
+
+
+async def run_command_checks(cmd, ctx):
+    """The command's own checks, in discord.py's order; a check's
+    result is awaited only when it is awaitable."""
+    for check in cmd.checks:
+        result = check(ctx)
+        if inspect.isawaitable(result):
+            await result
+
+
+def check_error_message(coro):
+    """Runs `coro`; the message of the CheckError it raises, or None."""
+    try:
+        run(coro)
+    except CheckError as e:
+        return str(e)
+    return None
+
+
 async def invoke_music_hooks(cog, ctx):
     """The Music cog's hooks in discord.py's order: cog_check, the
     command's own checks (none for a command-less ctx), then
     cog_before_invoke."""
     await cog.cog_check(ctx)
     command = getattr(ctx, "command", None)
-    for command_check in command.checks if command else ():
-        await command_check(ctx)
+    if command:
+        await run_command_checks(command, ctx)
     await cog.cog_before_invoke(ctx)
