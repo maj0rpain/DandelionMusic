@@ -118,6 +118,42 @@ class TestChanges:
         assert change == WhitelistChange(Outcome.ALREADY_LISTED, ())
         assert listed == [10]
 
+    def test_a_non_clash_integrity_error_on_add_is_re_raised(self):
+        from sqlalchemy.exc import IntegrityError
+
+        error = IntegrityError("flush", {}, Exception("boom"))
+
+        async def scenario(factory):
+            with pytest.raises(IntegrityError) as raised:
+                await add(
+                    FailingSessionFactory(factory, "flush", error), 20, []
+                )
+            return raised.value, await load(factory)
+
+        raised, loaded = with_db(scenario)
+        assert raised is error
+        assert not loaded.ids
+
+    def test_a_concurrent_add_of_the_same_guild_is_already_listed(
+        self, monkeypatch
+    ):
+        real_listed = guild_whitelist._listed
+
+        async def scenario(factory):
+            async def racing_listed(session):
+                found = await real_listed(session)
+                monkeypatch.setattr(guild_whitelist, "_listed", real_listed)
+                await seed_whitelist(factory, 20)
+                return found
+
+            monkeypatch.setattr(guild_whitelist, "_listed", racing_listed)
+            change = await add(factory, 20, [20])
+            return change, list(await load(factory))
+
+        change, listed = with_db(scenario)
+        assert change == WhitelistChange(Outcome.ALREADY_LISTED, ())
+        assert listed == [20]
+
     def test_guard_refuses_and_writes_nothing(self):
         async def scenario(factory):
             change = await add(factory, 20, [10, 20], protect=10)
