@@ -152,6 +152,27 @@ def test_a_failed_write_is_reported_on_reset(missing_row):
     assert not any(m and "reset to" in m for m in sent)
 
 
+def test_the_update_and_failure_replies_come_from_the_catalogue(monkeypatch):
+    monkeypatch.setattr(config, "SETTING_UPDATED", "UPD[{}|{}]")
+    monkeypatch.setattr(config, "SETTING_UPDATE_FAILED", "FAIL[{}]")
+
+    updated = invoke_setting("default_volume", 50, stored_settings())
+    with monkeypatch.context() as m:
+
+        async def execute(self, statement):
+            return types.SimpleNamespace(rowcount=0)
+
+        m.setattr(FakeDbSession, "execute", execute)
+        failed_update = invoke_setting("default_volume", 50, stored_settings())
+        failed_reset = invoke_setting(
+            "default_volume", NO_VALUE, stored_settings()
+        )
+
+    assert updated[-1] == "UPD[default_volume|50]"
+    assert failed_update[-1] == "FAIL[default_volume]"
+    assert failed_reset[-1] == "FAIL[default_volume]"
+
+
 def test_an_invalid_emoji_is_reported():
     unknown_emoji = discord.HTTPException(
         types.SimpleNamespace(status=400, reason="Bad Request"),
