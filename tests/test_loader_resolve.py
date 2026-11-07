@@ -69,11 +69,11 @@ def downloader(monkeypatch):
     return ydl
 
 
-def _first_hop(monkeypatch, cls):
+def _route_input_to(monkeypatch, cls):
     monkeypatch.setattr(loader, "identify_url", lambda url: cls)
 
 
-def _hop(target, **extra):
+def _shortener_returns(target, **extra):
     _Shortener.result = {
         "_type": "url",
         "url": target,
@@ -83,8 +83,8 @@ def _hop(target, **extra):
 
 
 def test_short_link_loads_as_the_targets_stream(downloader, monkeypatch):
-    _first_hop(monkeypatch, _Shortener)
-    _hop(TARGET)
+    _route_input_to(monkeypatch, _Shortener)
+    _shortener_returns(TARGET)
 
     result = loader._load_song(SHORT)
 
@@ -105,8 +105,8 @@ def test_chain_of_several_hops_loads_the_final_stream(downloader, monkeypatch):
             }
 
     downloader.add_info_extractor(Middle())
-    _first_hop(monkeypatch, _Shortener)
-    _hop("https://middle.test/x", ie_key=Middle.ie_key())
+    _route_input_to(monkeypatch, _Shortener)
+    _shortener_returns("https://middle.test/x", ie_key=Middle.ie_key())
 
     result = loader._load_song(SHORT)
 
@@ -114,8 +114,8 @@ def test_chain_of_several_hops_loads_the_final_stream(downloader, monkeypatch):
 
 
 def test_url_transparent_keeps_outer_title(downloader, monkeypatch):
-    _first_hop(monkeypatch, _Shortener)
-    _hop(TARGET, _type="url_transparent", title="outer title")
+    _route_input_to(monkeypatch, _Shortener)
+    _shortener_returns(TARGET, _type="url_transparent", title="outer title")
 
     song = loader._load_song(SHORT).songs[0]
 
@@ -123,7 +123,7 @@ def test_url_transparent_keeps_outer_title(downloader, monkeypatch):
 
 
 def test_playlist_url_entries_stay_unresolved(downloader, monkeypatch):
-    _first_hop(monkeypatch, _Playlist)
+    _route_input_to(monkeypatch, _Playlist)
 
     result = loader._load_song("https://list.test/p")
 
@@ -135,8 +135,10 @@ def test_playlist_url_entries_stay_unresolved(downloader, monkeypatch):
 
 
 def test_unresolvable_target_raises_songinfo_error(downloader, monkeypatch):
-    _first_hop(monkeypatch, _Shortener)
-    _hop("https://failing.test/x", ie_key=_FailingTarget.ie_key())
+    _route_input_to(monkeypatch, _Shortener)
+    _shortener_returns(
+        "https://failing.test/x", ie_key=_FailingTarget.ie_key()
+    )
 
     with pytest.raises(SongError) as info:
         loader._load_song(SHORT)
