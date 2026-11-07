@@ -190,7 +190,8 @@ class Admission:
     async def enter(self) -> AudioController:
         """Joins when a join is needed, and returns the guild's
         current controller."""
-        if self._target is not None:
+        if self.join_needed:
+            assert self._target is not None
             await _connect(self._ctx, self._target)
         return get_audiocontroller(self._ctx)
 
