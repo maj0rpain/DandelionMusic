@@ -145,4 +145,8 @@ def test_bare_library_reply_names_the_non_hidden_subcommands(bot):
     group = bot.get_command("library")
     ctx = SimpleNamespace(send=send, command=group)
     run(group.callback(bot.get_cog("Library"), ctx))
+    names = sorted(c.name for c in group.commands if not c.hidden)
+    expected = "Use subcommands: " + ", ".join(f"`{n}`" for n in names) + "."
+    assert sent == [expected]
+    assert "refresh" not in sent[0]
     assert sent == ["Use subcommands: `browse`, `search`."]
