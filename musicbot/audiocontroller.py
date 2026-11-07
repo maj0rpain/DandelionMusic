@@ -33,6 +33,12 @@ from enum import Enum, auto
 
 _T = TypeVar("_T")
 
+# The start kinds `_refusal()` can answer with.
+_REFUSALS = (
+    OutcomeKind.REFUSED_DISCONNECTING,
+    OutcomeKind.REFUSED_NOT_IN_VOICE,
+)
+
 # avoiding circular import
 if TYPE_CHECKING:
     from musicbot.bot import MusicBot
@@ -311,9 +317,13 @@ class AudioController(object):
 
     def _refusal(self) -> Optional[OutcomeKind]:
         """The one guard every placement passes: the refusal kind when
-        a request's songs may not be placed now, else `None`. Out of
-        voice means the guild has no voice client at all; a client that
-        exists but is not connected (a move, a reconnect) is not."""
+        a request's songs may not be placed now, else `None`.
+        Disconnecting is checked first, so teardown wins over out of
+        voice. Out of voice means the guild has no voice client at
+        all; a client that exists but is not connected (a move, a
+        reconnect) is not."""
+        if self.is_disconnecting():
+            return OutcomeKind.REFUSED_DISCONNECTING
         if self.guild.voice_client is None:
             return OutcomeKind.REFUSED_NOT_IN_VOICE
         return None
@@ -362,8 +372,11 @@ class AudioController(object):
         start: Optional[OutcomeKind],
         batch: Optional[BatchReport],
     ) -> EnqueueOutcome:
-        """A batch load, or a placed count other than 1, reports
-        PLAYLIST; else the single song's outcome."""
+        """A refusal start kind is the refusal outcome; a batch load,
+        or a placed count other than 1, reports PLAYLIST; else the
+        single song's outcome."""
+        if start in _REFUSALS:
+            return EnqueueOutcome(start)
         if batch is not None or len(placed) != 1:
             return EnqueueOutcome(
                 OutcomeKind.PLAYLIST,
@@ -381,13 +394,9 @@ class AudioController(object):
         """Puts `song` directly after the current track, refreshes the
         backup and starts playing if nothing is (see ensure_playing()).
         Reports as enqueue() does."""
-        if self.is_disconnecting():
-            return EnqueueOutcome(OutcomeKind.REFUSED_DISCONNECTING)
         index, start = await self._place_and_start(
             lambda: self.playlist.insert_next(song)
         )
-        if start is OutcomeKind.REFUSED_NOT_IN_VOICE:
-            return EnqueueOutcome(start)
         return self._outcome([song], index, start, batch)
 
     async def enqueue(
@@ -401,8 +410,6 @@ class AudioController(object):
 
         Returns PLAYLIST when it places more than one song or `batch`
         is given, else the single song's outcome."""
-        if self.is_disconnecting():
-            return EnqueueOutcome(OutcomeKind.REFUSED_DISCONNECTING)
         placed = list(songs)
 
         def place() -> int:
@@ -412,8 +419,6 @@ class AudioController(object):
             return first_index
 
         first_index, start = await self._place_and_start(place)
-        if start is OutcomeKind.REFUSED_NOT_IN_VOICE:
-            return EnqueueOutcome(start)
         return self._outcome(placed, first_index, start, batch)
 
     def load_backup(self) -> RestoreResult:
@@ -528,15 +533,9 @@ class AudioController(object):
             f" in guild {self.guild.name!r}"
         )
 
-        def refusal() -> Optional[EnqueueOutcome]:
-            if self.is_disconnecting():
-                return EnqueueOutcome(OutcomeKind.REFUSED_DISCONNECTING)
-            kind = self._refusal()
-            return None if kind is None else EnqueueOutcome(kind)
-
-        refused = refusal()
+        refused = self._refusal()
         if refused is not None:
-            return refused
+            return EnqueueOutcome(refused)
 
         uris = [track.uri for track in tracks]
         songs: List[Optional[Song]] = []
@@ -555,31 +554,21 @@ class AudioController(object):
         if self.is_idle() and len(uris) > 1:
             songs += await loader.load_local_songs(uris[:1])
             tail = uris[1:]
-            refused = refusal()
+            refused = self._refusal()
             if refused is not None:
-                return refused
+                return EnqueueOutcome(refused)
             if songs[0] is not None:
-                placed = await self.enqueue(songs[:1])
-                if placed.kind in (
-                    OutcomeKind.REFUSED_DISCONNECTING,
-                    OutcomeKind.REFUSED_NOT_IN_VOICE,
-                ):
-                    return placed
+                await self.enqueue(songs[:1])
 
         loaded_tail = await loader.load_local_songs(tail)
-        refused = refusal()
+        refused = self._refusal()
         if refused is not None:
-            return refused
+            return EnqueueOutcome(refused)
         songs += loaded_tail
 
         added = [song for song in loaded_tail if song is not None]
         if added:
-            placed = await self.enqueue(added)
-            if placed.kind in (
-                OutcomeKind.REFUSED_DISCONNECTING,
-                OutcomeKind.REFUSED_NOT_IN_VOICE,
-            ):
-                return placed
+            await self.enqueue(added)
 
         return EnqueueOutcome(
             OutcomeKind.LIBRARY_PICK,
@@ -671,6 +660,8 @@ class AudioController(object):
 
     def prev_song(self) -> bool:
         """Loads the last song from the history into the queue and starts it"""
+        if self._refusal() is not None:
+            return False
 
         prev_song = self.playlist.prev()
         if not prev_song:

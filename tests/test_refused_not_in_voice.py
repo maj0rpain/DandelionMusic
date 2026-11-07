@@ -131,6 +131,18 @@ def test_a_song_whose_load_finishes_after_a_disconnect_is_refused(
     assert _backup(controller, tmp_path) == ["retry"]
 
 
+async def _disconnect_during_tail(controller, batch, gate):
+    pick = asyncio.ensure_future(
+        controller.process_local_tracks(batch, "test")
+    )
+    await _settle()
+    assert _titles(controller) == ["a"]
+    await controller.udisconnect("test")
+    _leave_voice(controller)
+    gate.set()
+    return await pick
+
+
 def test_a_library_pick_whose_tail_lands_after_a_disconnect_is_refused(
     controller, stub_loader, monkeypatch
 ):
@@ -146,18 +158,9 @@ def test_a_library_pick_whose_tail_lands_after_a_disconnect_is_refused(
         gate=gate,
     )
 
-    async def scenario():
-        pick = asyncio.ensure_future(
-            controller.process_local_tracks(batch, "test")
-        )
-        await _settle()
-        assert _titles(controller) == ["a"]
-        await controller.udisconnect("test")
-        _leave_voice(controller)
-        gate.set()
-        return await pick
-
-    outcome = _run(controller, scenario)
+    outcome = _run(
+        controller, lambda: _disconnect_during_tail(controller, batch, gate)
+    )
 
     assert outcome.kind is OutcomeKind.REFUSED_NOT_IN_VOICE
     assert _titles(controller) == []
@@ -178,18 +181,9 @@ def test_a_pick_whose_tail_all_fails_after_a_disconnect_is_refused(
         gate=gate,
     )
 
-    async def scenario():
-        pick = asyncio.ensure_future(
-            controller.process_local_tracks(batch, "test")
-        )
-        await _settle()
-        assert _titles(controller) == ["a"]
-        await controller.udisconnect("test")
-        _leave_voice(controller)
-        gate.set()
-        return await pick
-
-    outcome = _run(controller, scenario)
+    outcome = _run(
+        controller, lambda: _disconnect_during_tail(controller, batch, gate)
+    )
 
     assert outcome.kind is OutcomeKind.REFUSED_NOT_IN_VOICE
     assert _titles(controller) == []
