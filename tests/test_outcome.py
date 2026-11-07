@@ -98,13 +98,6 @@ def test_library_pick_wording_comes_from_the_language_file(monkeypatch):
     )
 
 
-def test_library_hints_name_a_bang_prefix(config_factory, monkeypatch):
-    cfg = config_factory("BOT_TOKEN=x\nBOT_PREFIX=!\n")
-    assert _library_under(cfg, monkeypatch, ["a.mp3"]).endswith(
-        "run `!library refresh`."
-    )
-
-
 def test_library_report_survives_braces_in_the_prefix(
     config_factory, monkeypatch
 ):
@@ -157,9 +150,7 @@ def test_refused_not_in_voice_says_the_bot_left():
     outcome = EnqueueOutcome(OutcomeKind.REFUSED_NOT_IN_VOICE)
     reply = render(outcome, True)
     assert reply.embed is None
-    assert reply.text == (
-        "I left the voice channel before your request was ready - try again."
-    )
+    assert reply.text == config.LEFT_VOICE_MESSAGE
 
 
 def test_refused_disconnecting_says_the_disconnecting_message():

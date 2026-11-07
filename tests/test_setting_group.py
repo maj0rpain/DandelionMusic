@@ -10,6 +10,7 @@ for leaving the view where it was.
 """
 
 import types
+from dataclasses import dataclass
 
 import discord
 import pytest
@@ -81,28 +82,39 @@ VALID_VALUES = {
     "start_voice_channel": f"<#{VOICE_ID}>",
     "dj_role": f"<@&{ROLE_ID}>",
     "user_must_be_in_vc": "on",
-    "button_emote": "\N{SPARKLES}",
+    "button_emote": "\N{FIRE}",
     "default_volume": "50",
     "vc_timeout": "on",
-    "announce_songs": "on",
+    "announce_songs": "off",
 }
 
 
-def build_ctx(text, sett, is_admin=True, is_owner=False, roles=()):
+@dataclass(frozen=True)
+class Invoker:
+    "Who runs d!setting; by default an admin with nothing else"
+
+    is_admin: bool = True
+    is_owner: bool = False
+    roles: tuple = ()
+    dj_role: str | None = None
+    extra_owners: tuple = ()
+
+
+def build_ctx(text, sett, who):
     bot = fake_bot(sett)
 
     async def is_owner_answer(user):
-        return is_owner
+        return who.is_owner
 
     bot.is_owner = is_owner_answer
     author = fake_author()
-    author.roles = list(roles)
+    author.roles = list(who.roles)
     guild = fake_group_guild()
     message = types.SimpleNamespace(
         _state=None,
         attachments=[],
         guild=guild,
-        channel=fake_channel(is_admin),
+        channel=fake_channel(who.is_admin),
         author=author,
     )
     ctx = RecordingContext(
@@ -112,7 +124,7 @@ def build_ctx(text, sett, is_admin=True, is_owner=False, roles=()):
     return ctx
 
 
-def invoke(text, is_admin=True, sett=None, is_owner=False, roles=()):
+def invoke(text, who=Invoker(), sett=None):
     """Runs `d!setting <text>`; returns (sent, error, sett)"""
     cog = General(None)
     group = setting_group(cog)
@@ -121,7 +133,7 @@ def invoke(text, is_admin=True, sett=None, is_owner=False, roles=()):
         sub.cog = cog
     sett = sett or stored_settings()
     sett.guild_id = "1"
-    ctx = build_ctx(text, sett, is_admin, is_owner, roles)
+    ctx = build_ctx(text, sett, who)
     ctx.invoked_with = "setting"
     ctx.command = group
     ctx.invoked_parents = []
@@ -139,10 +151,10 @@ def reset_commit_count():
 
 
 def test_an_admin_setting_a_value_gets_only_the_confirmation():
-    sent, error, sett = invoke("announce_songs on")
+    sent, error, sett = invoke("announce_songs off")
 
     assert error is None
-    assert sent == [("Setting `announce_songs` updated to True!", None)]
+    assert sent == [("Setting `announce_songs` updated to False!", None)]
 
 
 def settings_with_dj_role(dj_role):
@@ -152,14 +164,16 @@ def settings_with_dj_role(dj_role):
 
 
 NOT_ADMIN_INVOKERS = {
-    "plain member": (None, [], []),
-    "plain member, DJ role set": (str(DJ_ROLE_ID), [], []),
-    "DJ-role holder": (
-        str(DJ_ROLE_ID),
-        [types.SimpleNamespace(id=DJ_ROLE_ID)],
-        [],
+    "plain member": Invoker(is_admin=False),
+    "plain member, DJ role set": Invoker(
+        is_admin=False, dj_role=str(DJ_ROLE_ID)
     ),
-    "extra owner": (None, [], [1]),
+    "DJ-role holder": Invoker(
+        is_admin=False,
+        dj_role=str(DJ_ROLE_ID),
+        roles=(types.SimpleNamespace(id=DJ_ROLE_ID),),
+    ),
+    "extra owner": Invoker(is_admin=False, extra_owners=(1,)),
 }
 
 
@@ -168,15 +182,12 @@ NOT_ADMIN_INVOKERS = {
 def test_a_non_admin_is_refused_without_a_reply_or_a_change(
     monkeypatch, name, who
 ):
-    dj_role, roles, extra_owners = NOT_ADMIN_INVOKERS[who]
-    monkeypatch.setattr(config, "EXTRA_OWNERS", extra_owners)
-    sett, before = settings_with_dj_role(dj_role)
+    invoker = NOT_ADMIN_INVOKERS[who]
+    monkeypatch.setattr(config, "EXTRA_OWNERS", list(invoker.extra_owners))
+    sett, before = settings_with_dj_role(invoker.dj_role)
 
     sent, error, sett = invoke(
-        f"{name} {VALID_VALUES[name]}",
-        is_admin=False,
-        sett=sett,
-        roles=roles,
+        f"{name} {VALID_VALUES[name]}", who=invoker, sett=sett
     )
 
     assert isinstance(error, CheckError)
@@ -191,8 +202,7 @@ def test_a_non_admin_is_refused_without_a_reply_or_a_change(
 def test_an_admin_or_the_owner_gets_the_subcommands_own_reply(name, is_owner):
     sent, error, sett = invoke(
         f"{name} {VALID_VALUES[name]}",
-        is_admin=not is_owner,
-        is_owner=is_owner,
+        who=Invoker(is_admin=not is_owner, is_owner=is_owner),
     )
 
     assert error is None
@@ -207,7 +217,7 @@ def test_an_admin_or_the_owner_gets_the_subcommands_own_reply(name, is_owner):
 
 @pytest.mark.parametrize("text", ["", "show"])
 def test_a_plain_member_still_gets_the_settings_embed(text):
-    sent, error, sett = invoke(text, is_admin=False)
+    sent, error, sett = invoke(text, Invoker(is_admin=False))
 
     assert error is None
     [(content, embed)] = sent
