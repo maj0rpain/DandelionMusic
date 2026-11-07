@@ -1,5 +1,5 @@
-"""`loader.load_song` takes a checked track, over a stubbed `_load`; the
-loader holds no message-link pattern of its own."""
+"""`loader.load_song` takes a plain or a checked track, over a stubbed
+`_load`; the loader holds no message-link pattern of its own."""
 
 import pytest
 
@@ -14,11 +14,12 @@ TRACK = "https://example.invalid/track"
 @pytest.mark.parametrize(
     "track, name, admitted",
     [
+        (TRACK, TRACK, None),
         (CheckedTrack(TRACK), TRACK, None),
         (CheckedTrack(LINK, LINK), LINK, LINK),
     ],
 )
-def test_load_song_loads_the_track_a_checked_track_names(
+def test_load_song_loads_the_track_a_plain_or_checked_track_names(
     track, name, admitted, monkeypatch
 ):
     loaded = []

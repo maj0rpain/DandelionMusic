@@ -11,7 +11,6 @@ import pytest
 
 from config import config
 from musicbot import loader
-from musicbot.message_link import CheckedTrack
 from musicbot.song import LoadResult
 from helpers import plain_song, run
 
@@ -83,7 +82,7 @@ def _use(pool, lane=loader.Lane.LOAD):
 def test_a_break_then_a_good_retry_returns_the_retried_result(pools):
     broken = FakePool(["break"])
     _use(broken)
-    assert run(loader.load_song(CheckedTrack(URL))).songs[0].title == "ok"
+    assert run(loader.load_song(URL)).songs[0].title == "ok"
     in_load_lane = loader._pools[loader.Lane.LOAD] is pools.built[0]
     assert (len(pools.built), in_load_lane) == (1, True)
 
@@ -91,13 +90,13 @@ def test_a_break_then_a_good_retry_returns_the_retried_result(pools):
 def test_the_broken_pool_is_shut_down_without_waiting(pools):
     broken = FakePool(["break"])
     _use(broken)
-    run(loader.load_song(CheckedTrack(URL)))
+    run(loader.load_song(URL))
     assert broken.shutdown_calls == [False]
 
 
 def test_a_rebuild_prints_one_stderr_line(pools, capsys):
     _use(FakePool(["break"]))
-    run(loader.load_song(CheckedTrack(URL)))
+    run(loader.load_song(URL))
     assert len(capsys.readouterr().err.strip().splitlines()) == 1
 
 
@@ -113,7 +112,7 @@ def test_a_double_break_leaves_a_fresh_pool(pools):
     _use(FakePool(["break"]))
     pools.upcoming = [FakePool(["break"])]
     with pytest.raises(loader.SongError) as e:
-        run(loader.load_song(CheckedTrack(URL)))
+        run(loader.load_song(URL))
     assert str(e.value) == config.LOADER_CRASHED
     assert len(pools.built) == 2
     assert loader._pools[loader.Lane.LOAD] is pools.built[1]
@@ -124,9 +123,7 @@ def test_concurrent_calls_on_one_broken_pool_rebuild_once(pools):
     _use(FakePool(["break"] * 4))
 
     async def many():
-        return await asyncio.gather(
-            *[loader.load_song(CheckedTrack(URL)) for _ in range(4)]
-        )
+        return await asyncio.gather(*[loader.load_song(URL) for _ in range(4)])
 
     assert [r.songs[0].title for r in run(many())] == ["ok"] * 4
     assert len(pools.built) == 1
@@ -137,7 +134,7 @@ def test_a_break_after_shutdown_raises_not_running_and_builds_nothing(
 ):
     _use(ShutdownOnSubmit(["break"]))
     with pytest.raises(loader.LoaderNotRunning):
-        run(loader.load_song(CheckedTrack(URL)))
+        run(loader.load_song(URL))
     assert pools.built == []
 
 
@@ -145,7 +142,7 @@ def test_a_break_on_the_retry_after_shutdown_raises_not_running(pools):
     pools.upcoming = [ShutdownOnSubmit(["break"])]
     _use(FakePool(["break"]))
     with pytest.raises(loader.LoaderNotRunning):
-        run(loader.load_song(CheckedTrack(URL)))
+        run(loader.load_song(URL))
     assert loader._pools == {}
     assert len(pools.built) == 1
 
@@ -168,7 +165,7 @@ def test_a_break_in_the_load_lane_leaves_the_preload_lane_alone(pools):
     preload_pool = FakePool()
     _use(FakePool(["break"]), loader.Lane.LOAD)
     _use(preload_pool, loader.Lane.PRELOAD)
-    run(loader.load_song(CheckedTrack(URL)))
+    run(loader.load_song(URL))
     assert (
         len(pools.built),
         loader._pools[loader.Lane.PRELOAD] is preload_pool,
@@ -195,8 +192,8 @@ def test_concurrent_breaks_in_two_lanes_rebuild_each_once(pools):
 
     async def many():
         return await asyncio.gather(
-            loader.load_song(CheckedTrack(URL)),
-            loader.load_song(CheckedTrack(URL)),
+            loader.load_song(URL),
+            loader.load_song(URL),
             loader._load(loader.Lane.PRELOAD, URL),
             loader._load(loader.Lane.PRELOAD, URL),
         )
