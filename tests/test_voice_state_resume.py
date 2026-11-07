@@ -85,14 +85,16 @@ def test_move_while_not_playing_resumes_nothing(monkeypatch):
 
 def test_cleared_during_the_wait_resumes_nothing(monkeypatch):
     client = ResumingClient()
-    move(monkeypatch, client, on_wait=clear)
+    _, controller = move(monkeypatch, client, on_wait=clear)
     assert client.resumed == 0
+    assert controller.disconnects == []
 
 
 def test_cleared_while_the_idle_timer_runs_resumes_nothing(monkeypatch):
     client = ResumingClient()
-    move(monkeypatch, client, on_timer=clear)
+    _, controller = move(monkeypatch, client, on_timer=clear)
     assert client.resumed == 0
+    assert controller.disconnects == []
 
 
 def test_replaced_during_the_wait_leaves_both_clients_alone(monkeypatch):
@@ -101,6 +103,7 @@ def test_replaced_during_the_wait_leaves_both_clients_alone(monkeypatch):
     def replace(guild):
         guild.voice_client = new
 
-    move(monkeypatch, old, on_wait=replace)
+    _, controller = move(monkeypatch, old, on_wait=replace)
     assert old.resumed == 0
     assert new.touched == 0
+    assert controller.disconnects == []
