@@ -88,9 +88,9 @@ class FakeController:
         self.outcomes = outcomes
         self.processed = []
 
-    async def process_song(self, url, user=None):
-        self.processed.append(url)
-        outcome = self.outcomes[url]
+    async def process_song(self, checked, user=None):
+        self.processed.append(checked.track)
+        outcome = self.outcomes[checked.track]
         if isinstance(outcome, Exception):
             raise outcome
         return outcome

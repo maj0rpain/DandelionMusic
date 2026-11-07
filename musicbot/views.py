@@ -164,7 +164,9 @@ class MusicButton(discord.ui.Button):
     pick (`RequestKind.PICK`) acts in a joining command's name, so
     `enter()` joins voice before its action. An optional async
     `after(ctx)` runs once the action has succeeded; a refused click
-    runs none."""
+    runs none. An optional async `before(ctx)` runs after the click is
+    deferred and before admission checks and joins it; when it returns
+    `None` the click ends there, the step having replied itself."""
 
     def __init__(
         self,
@@ -172,10 +174,12 @@ class MusicButton(discord.ui.Button):
         kind=admission.RequestKind.PLAYER_BUTTON,
         *,
         after=None,
+        before=None,
         **kwargs,
     ):
         super().__init__(**kwargs)
         self._callback = callback
+        self._before = before
         self._kind = kind
         self._after = after
 
@@ -192,6 +196,8 @@ class MusicButton(discord.ui.Button):
         ctx = await inter.client.get_context(inter)
         try:
             await inter.response.defer()
+            if self._before is not None and await self._before(ctx) is None:
+                return
             try:
                 await admit_click(inter, self._kind, ctx=ctx)
             except CheckError as e:

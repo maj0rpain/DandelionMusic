@@ -1,9 +1,6 @@
 """The message-link gate: whether a track that is a message link may be
 loaded for the requesting member."""
 
-import ast
-import inspect
-
 import discord
 import pytest
 
@@ -12,7 +9,7 @@ from musicbot import message_link
 from musicbot.loader import SongError
 from musicbot.yt_dlp_plugins.extractor.discord import DiscordAttachmentsIE
 from discord_fakes import coded_error
-from helpers import run
+from helpers import imported_names, run
 from message_link_fakes import (
     FOREIGN_LINK,
     LINK,
@@ -59,6 +56,46 @@ def test_a_readable_channel_passes():
     check(LINK, LinkGuild([LinkChannel()]), LinkMember())
 
 
+def test_a_message_link_comes_back_checked_with_its_admitted_link():
+    checked = check(LINK, LinkGuild([LinkChannel()]), LinkMember())
+    assert checked == message_link.CheckedTrack(LINK, LINK)
+
+
+@pytest.mark.parametrize("wrap", ["<{}>", "  {}  ", "{}."])
+def test_a_wrapped_link_is_admitted_as_the_bare_link(wrap):
+    checked = check(
+        wrap.format(LINK), LinkGuild([LinkChannel()]), LinkMember()
+    )
+    assert checked.admitted_link == LINK
+
+
+def test_a_track_that_is_not_a_message_link_has_no_admitted_link():
+    checked = check("some words", LinkGuild([]), None)
+    assert checked == message_link.CheckedTrack("some words", None)
+
+
+@pytest.mark.parametrize(
+    "track",
+    [
+        "<{}>".format(LINK),
+        "  {}  ".format(LINK),
+        "{}.".format(LINK),
+        LINK.replace("discord.com", "canary.discord.com"),
+    ],
+)
+def test_is_message_link_agrees_with_the_gate_on_a_link_form(track):
+    checked = check(track, LinkGuild([LinkChannel()]), LinkMember())
+    assert message_link.is_message_link(track)
+    assert checked.admitted_link is not None
+
+
+@pytest.mark.parametrize(
+    "track", ["some words", "https://youtu.be/x", "discord.com/channels/1/2/3"]
+)
+def test_is_message_link_is_false_for_anything_else(track):
+    assert not message_link.is_message_link(track)
+
+
 def test_a_readable_thread_passes():
     check(LINK, LinkGuild([LinkThread()]), LinkMember())
 
@@ -89,7 +126,9 @@ def test_a_private_thread_whose_member_lookup_is_forbidden_is_refused():
 def test_a_canary_link_is_checked_the_same():
     link = LINK.replace("discord.com", "canary.discord.com")
     refused(
-        link.replace("1234", "99"), LinkGuild([LinkChannel()]), LinkMember()
+        FOREIGN_LINK.replace("discord.com", "canary.discord.com"),
+        LinkGuild([LinkChannel()]),
+        LinkMember(),
     )
     check(link, LinkGuild([LinkChannel()]), LinkMember())
 
@@ -122,26 +161,9 @@ def test_the_extractor_matches_with_the_gates_pattern():
     assert DiscordAttachmentsIE._VALID_URL is message_link.MESSAGE_LINK_PATTERN
 
 
-def _module_level_imports(statements):
-    for node in statements:
-        if isinstance(node, ast.Import):
-            yield from (a.name for a in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            base = "." * node.level + (node.module or "")
-            yield base
-            yield from (f"{base}.{a.name}" for a in node.names)
-        elif isinstance(node, (ast.If, ast.Try)):
-            for body in (node.body, node.orelse):
-                yield from _module_level_imports(body)
-            for handler in getattr(node, "handlers", []):
-                yield from _module_level_imports(handler.body)
-            yield from _module_level_imports(getattr(node, "finalbody", []))
-
-
 def test_the_gate_imports_neither_the_loader_nor_linkutils_at_module_level():
-    # function bodies are not walked: the check's own imports are local
-    tree = ast.parse(inspect.getsource(message_link))
-    for name in _module_level_imports(tree.body):
+    names = imported_names(message_link, module_level_only=True)
+    for name in names:
         parts = name.lstrip(".").split(".")
         assert parts[:2] not in (
             ["musicbot", "loader"],

@@ -3,6 +3,7 @@ real controller with the loader stubbed."""
 
 import asyncio
 
+from musicbot.message_link import CheckedTrack
 from musicbot.commands.music import Music
 from musicbot.outcome import BatchReport, OutcomeKind
 from musicbot.song import LoadResult
@@ -32,7 +33,7 @@ def test_a_first_track_whose_preload_fails_is_start_failed(
     )
     ctx, sent = command_ctx(controller)
 
-    _run(controller, lambda: Music(None)._play_song(ctx, "a"))
+    _run(controller, lambda: Music(None)._play_song(ctx, CheckedTrack("a")))
 
     assert sent == []
     assert len(controller.panel.skipped) == 1
@@ -102,7 +103,10 @@ def _remove(controller, position):
 
 
 def _process(controller, **kwargs):
-    return _run(controller, lambda: controller.process_song("x", **kwargs))
+    return _run(
+        controller,
+        lambda: controller.process_song(CheckedTrack("x"), **kwargs),
+    )
 
 
 def test_process_song_of_a_single_result_gives_a_single_song_outcome(
