@@ -59,19 +59,26 @@ def _is_type_checking_block(node) -> bool:
     )
 
 
-def imported_names(module, *, skip_type_checking=False) -> set[str]:
+def imported_names(
+    module, *, skip_type_checking=False, module_level_only=False
+) -> set[str]:
     """The names a module's source imports, from its AST.
 
     Each `import x` gives `x`; each `from m import n` gives the module
     `m` and the pair `m.n` (a relative import's missing module is `""`).
     With `skip_type_checking=True`, every node inside an
-    `if TYPE_CHECKING:` block is skipped.
+    `if TYPE_CHECKING:` block is skipped. With `module_level_only=True`,
+    every import inside a function body is skipped.
     """
     tree = _parse_module_source(module)
     skipped = set()
     if skip_type_checking:
         for node in ast.walk(tree):
             if _is_type_checking_block(node):
+                skipped.update(id(inner) for inner in ast.walk(node))
+    if module_level_only:
+        for node in ast.walk(tree):
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
                 skipped.update(id(inner) for inner in ast.walk(node))
     names = set()
     for node in ast.walk(tree):
@@ -86,14 +93,18 @@ def imported_names(module, *, skip_type_checking=False) -> set[str]:
     return names
 
 
-def imported_roots(module, *, skip_type_checking=False) -> set[str]:
+def imported_roots(
+    module, *, skip_type_checking=False, module_level_only=False
+) -> set[str]:
     """The first dotted part of each name `imported_names` returns, with
-    the same `skip_type_checking` meaning (a relative import's root is
-    `""`)."""
+    the same `skip_type_checking` and `module_level_only` meanings (a
+    relative import's root is `""`)."""
     return {
         name.split(".")[0]
         for name in imported_names(
-            module, skip_type_checking=skip_type_checking
+            module,
+            skip_type_checking=skip_type_checking,
+            module_level_only=module_level_only,
         )
     }
 

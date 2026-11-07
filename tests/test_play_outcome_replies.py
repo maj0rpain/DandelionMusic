@@ -4,6 +4,7 @@ are exactly what `render` returns for the controller's outcome."""
 import pytest
 
 from config import config
+from musicbot.message_link import CheckedTrack
 from musicbot import playlists
 from musicbot.commands.music import Music
 from musicbot.outcome import EnqueueOutcome, OutcomeKind, render
@@ -33,7 +34,7 @@ def test_play_sends_exactly_what_render_returns(outcome, announce):
         ProcessController(outcome), announce_songs=announce
     )
 
-    run(Music(None)._play_song(ctx, "t"))
+    run(Music(None)._play_song(ctx, CheckedTrack("t")))
 
     expected = render(outcome, announce)
     assert sent == ([] if expected is None else [expected.embed.title])

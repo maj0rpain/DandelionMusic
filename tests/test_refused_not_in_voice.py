@@ -3,6 +3,7 @@ controller places nothing, writes no backup and starts nothing."""
 
 import asyncio
 
+from musicbot.message_link import CheckedTrack
 from musicbot.outcome import OutcomeKind
 from musicbot.song import LoadResult
 from controller_helpers import (
@@ -109,7 +110,9 @@ def test_a_song_whose_load_finishes_after_a_disconnect_is_refused(
     monkeypatch.setattr(stub_loader, "load_song", load_song)
 
     async def scenario():
-        request = asyncio.ensure_future(controller.process_song("slow"))
+        request = asyncio.ensure_future(
+            controller.process_song(CheckedTrack("slow"))
+        )
         await _settle()
         await controller.udisconnect("test")
         _leave_voice(controller)

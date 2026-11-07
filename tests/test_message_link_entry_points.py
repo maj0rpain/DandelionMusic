@@ -10,6 +10,7 @@ from config import config
 from musicbot import loader, playlists
 from musicbot.commands import music
 from musicbot.commands.music import Music
+from musicbot.message_link import CheckedTrack
 from musicbot.plugins.button import Button
 from musicbot.song import LoadResult
 from controller_helpers import (
@@ -27,6 +28,7 @@ from message_link_fakes import (
     LINK,
     LinkChannel,
     LinkMember,
+    LinkThread,
     perms,
 )
 
@@ -37,7 +39,7 @@ def loaded(stub_loader):
     return [a for name, a in stub_loader.calls if name == "load_song"]
 
 
-def arm(controller, stub_loader, monkeypatch, readable=True):
+def stub_load_and_channel(controller, stub_loader, monkeypatch):
     monkeypatch.setattr(music, "SongError", stub_loader.SongError)
     _fake_ffmpeg(monkeypatch)
     _no_idle_timer(controller, monkeypatch)
@@ -45,15 +47,15 @@ def arm(controller, stub_loader, monkeypatch, readable=True):
         _song(controller, "a")
     )
     controller.guild.get_channel_or_thread = lambda _id: LinkChannel(
-        permissions=perms(view_channel=readable)
+        permissions=perms()
     )
 
 
-def invoke(name, controller, track=None, message=None):
+def invoke(name, controller, track=None, own_message=None):
     ctx, sent = command_ctx(controller)
     ctx.author = LinkMember(guild=controller.guild)
     ctx.interaction = None
-    ctx.message = message or types.SimpleNamespace(
+    ctx.message = own_message or types.SimpleNamespace(
         attachments=[], reference=None
     )
     command = getattr(Music, name)
@@ -68,27 +70,35 @@ def invoke(name, controller, track=None, message=None):
 def test_a_forbidden_link_is_refused_and_not_loaded(
     name, controller, stub_loader, monkeypatch
 ):
-    arm(controller, stub_loader, monkeypatch)
+    stub_load_and_channel(controller, stub_loader, monkeypatch)
     sent = invoke(name, controller, FOREIGN_LINK)
     assert sent == [config.MESSAGE_LINK_FORBIDDEN]
     assert loaded(stub_loader) == []
 
 
 @pytest.mark.parametrize("name", COMMANDS)
-def test_an_unreadable_link_is_refused_and_not_loaded(
-    name, controller, stub_loader, monkeypatch
-):
-    arm(controller, stub_loader, monkeypatch, readable=False)
-    sent = invoke(name, controller, LINK)
-    assert sent == [config.MESSAGE_LINK_FORBIDDEN]
-    assert loaded(stub_loader) == []
-
-
-@pytest.mark.parametrize("name", COMMANDS)
 def test_an_allowed_link_loads(name, controller, stub_loader, monkeypatch):
-    arm(controller, stub_loader, monkeypatch)
+    stub_load_and_channel(controller, stub_loader, monkeypatch)
     invoke(name, controller, LINK)
-    assert loaded(stub_loader) == [(LINK,)]
+    assert loaded(stub_loader) == [(CheckedTrack(LINK, LINK),)]
+
+
+def test_the_gate_runs_once_per_play_request(
+    controller, stub_loader, monkeypatch
+):
+    stub_load_and_channel(controller, stub_loader, monkeypatch)
+    lookups = []
+
+    class CountingThread(LinkThread):
+        async def fetch_member(self, member_id):
+            lookups.append(member_id)
+            return await super().fetch_member(member_id)
+
+    thread = CountingThread(private=True)
+    controller.guild.get_channel_or_thread = lambda _id: thread
+    invoke("_play", controller, LINK)
+    assert loaded(stub_loader) == [(CheckedTrack(LINK, LINK),)]
+    assert len(lookups) == 1
 
 
 def message(jump_url, attachments=True, reference=None):
@@ -106,11 +116,11 @@ def reply_to(jump_url):
 def test_replying_to_a_message_in_another_guild_is_refused(
     controller, stub_loader, monkeypatch
 ):
-    arm(controller, stub_loader, monkeypatch)
+    stub_load_and_channel(controller, stub_loader, monkeypatch)
     own = message(
         "unused", attachments=False, reference=reply_to(FOREIGN_LINK)
     )
-    sent = invoke("_play", controller, message=own)
+    sent = invoke("_play", controller, own_message=own)
     assert sent == [config.MESSAGE_LINK_FORBIDDEN]
     assert loaded(stub_loader) == []
 
@@ -118,22 +128,22 @@ def test_replying_to_a_message_in_another_guild_is_refused(
 def test_replying_to_a_readable_message_in_the_guild_loads(
     controller, stub_loader, monkeypatch
 ):
-    arm(controller, stub_loader, monkeypatch)
+    stub_load_and_channel(controller, stub_loader, monkeypatch)
     own = message("unused", attachments=False, reference=reply_to(LINK))
-    invoke("_play", controller, message=own)
-    assert loaded(stub_loader) == [(LINK,)]
+    invoke("_play", controller, own_message=own)
+    assert loaded(stub_loader) == [(CheckedTrack(LINK, LINK),)]
 
 
 def test_a_play_message_with_its_own_attachment_loads(
     controller, stub_loader, monkeypatch
 ):
-    arm(controller, stub_loader, monkeypatch)
-    invoke("_play", controller, message=message(LINK))
-    assert loaded(stub_loader) == [(LINK,)]
+    stub_load_and_channel(controller, stub_loader, monkeypatch)
+    invoke("_play", controller, own_message=message(LINK))
+    assert loaded(stub_loader) == [(CheckedTrack(LINK, LINK),)]
 
 
 def add_song(controller, stub_loader, monkeypatch, link):
-    arm(controller, stub_loader, monkeypatch)
+    stub_load_and_channel(controller, stub_loader, monkeypatch)
     saved = []
     loads = []
 
@@ -171,7 +181,7 @@ def test_playlist_add_song_saves_an_allowed_link(
     controller, stub_loader, monkeypatch
 ):
     sent, saved, loads = add_song(controller, stub_loader, monkeypatch, LINK)
-    assert loads == [LINK]
+    assert loads == [CheckedTrack(LINK, LINK)]
     assert len(saved) == 1
     assert sent == [config.PLAYLIST_UPDATED]
 
@@ -194,7 +204,7 @@ class PluginController:
         return await self._process(self, url, user=user)
 
 
-def react(link, monkeypatch):
+def react(link, monkeypatch, content=None):
     loads = []
 
     async def load_song(track):
@@ -203,12 +213,13 @@ def react(link, monkeypatch):
 
     monkeypatch.setattr(loader, "load_song", load_song)
     sent = []
-    msg = types.SimpleNamespace(content=link)
-    channel = LinkChannel(2, perms())
+    msg = types.SimpleNamespace(content=content or link)
 
     class Channel(LinkChannel):
         async def fetch_message(self, _id):
             return msg
+
+    channel = Channel(2, perms())
 
     class Guild(VoiceGuild):
         name = "guild"
@@ -218,7 +229,7 @@ def react(link, monkeypatch):
             self.id = GUILD_ID
 
         def get_channel_or_thread(self, channel_id):
-            return Channel(channel_id, channel.permissions)
+            return channel
 
     guild = Guild()
     mine = guild.channel("mine", humans=1)
@@ -265,6 +276,17 @@ def test_the_plugin_refuses_a_forbidden_link_and_does_not_load(monkeypatch):
     assert loads == []
 
 
+def test_one_forbidden_link_among_several_reactions_still_queues_the_rest(
+    monkeypatch,
+):
+    other = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
+    loads, sent = react(
+        FOREIGN_LINK, monkeypatch, content=f"{FOREIGN_LINK} {other}"
+    )
+    assert [c.track for c in loads] == [other]
+    assert sent == [config.MESSAGE_LINK_FORBIDDEN, "loaded"]
+
+
 def test_the_plugin_loads_an_allowed_link(monkeypatch):
     loads, _sent = react(LINK, monkeypatch)
-    assert loads == [LINK]
+    assert loads == [CheckedTrack(LINK, LINK)]

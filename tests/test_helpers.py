@@ -124,3 +124,32 @@ def test_dockerfile_commands_join_continuations_and_drop_noise():
 def test_shell_commands_split_in_order_stripped_and_drop_empties():
     text = "a && && b\nc \\\n d && e\n"
     assert shell_commands(text) == ["a", "b", "c   d", "e"]
+
+
+IN_FUNCTIONS = """\
+import os
+
+
+def f():
+    import json
+    from re import match
+
+
+async def g():
+    import abc
+
+
+if os:
+    import sys
+"""
+
+
+def test_module_level_only_skips_imports_inside_function_bodies(tmp_path):
+    module = module_of(tmp_path, IN_FUNCTIONS)
+    assert imported_names(module) >= {"json", "re", "re.match", "abc"}
+    assert imported_names(module, module_level_only=True) == {"os", "sys"}
+
+
+def test_roots_honour_module_level_only(tmp_path):
+    module = module_of(tmp_path, IN_FUNCTIONS)
+    assert imported_roots(module, module_level_only=True) == {"os", "sys"}
