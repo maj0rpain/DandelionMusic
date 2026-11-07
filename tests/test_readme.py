@@ -3,7 +3,6 @@ nothing points to upstream or lets a cookies file be committed."""
 
 import re
 import subprocess
-from pathlib import Path
 
 import jsonc
 
@@ -15,8 +14,9 @@ from musicbot.commands.library import Library
 from musicbot.commands.music import Music
 from musicbot.settings import SETTINGS, SettingsEmbed
 
-ROOT = Path(__file__).resolve().parent.parent
-README = (ROOT / "README.md").read_text(encoding="utf-8")
+from helpers import REPO_ROOT
+
+README = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 UPSTREAM = "solaluset/DandelionMusic"
 COOKIES_HEADING = "Custom Cookies"
 
@@ -35,7 +35,7 @@ def _mentioned(form):
 def _git_ignores(path):
     result = subprocess.run(
         ["git", "check-ignore", "--no-index", "-q", path],
-        cwd=ROOT,
+        cwd=REPO_ROOT,
         stdin=subprocess.DEVNULL,
     )
     return result.returncode == 0
@@ -110,7 +110,7 @@ def test_setting_section_says_what_reset_means():
 
 
 def test_env_sample_does_not_point_cookie_path_at_the_placeholder():
-    path = ROOT / ".env.sample"
+    path = REPO_ROOT / ".env.sample"
     text = path.read_text(encoding="utf-8")
     assert "COOKIE_PATH" not in parse_env_file(str(path))
     assert "COOKIE_PATH" in text
@@ -120,14 +120,16 @@ def test_env_sample_does_not_point_cookie_path_at_the_placeholder():
 
 
 def test_songinfo_error_points_at_custom_cookies_not_a_wiki():
-    strings = jsonc.loads((ROOT / "config/en.json").read_text("utf-8"))
+    strings = jsonc.loads((REPO_ROOT / "config/en.json").read_text("utf-8"))
     assert COOKIES_HEADING in strings["SONGINFO_ERROR"]
     assert COOKIES_HEADING in README
     assert [k for k, v in strings.items() if "wiki" in str(v)] == []
 
 
 def test_no_upstream_links():
-    cookies = (ROOT / "config/cookies/cookies.txt").read_text(encoding="utf-8")
+    cookies = (REPO_ROOT / "config/cookies/cookies.txt").read_text(
+        encoding="utf-8"
+    )
     assert UPSTREAM not in README
     assert UPSTREAM not in cookies
 
@@ -141,5 +143,7 @@ def test_placeholder_cookies_file_stays_tracked():
 
 
 def test_dockerignore_excludes_the_cookies_directory():
-    lines = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    lines = (
+        (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    )
     assert "config/cookies/*" in [line.strip() for line in lines]
