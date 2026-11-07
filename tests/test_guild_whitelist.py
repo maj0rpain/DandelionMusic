@@ -13,6 +13,7 @@ import types
 
 import pytest
 from discord.ext import commands
+from sqlalchemy.exc import IntegrityError
 
 from config import config
 from musicbot.commands.developer import Developer
@@ -119,8 +120,6 @@ class TestChanges:
         assert listed == [10]
 
     def test_a_non_clash_integrity_error_on_add_is_re_raised(self):
-        from sqlalchemy.exc import IntegrityError
-
         error = IntegrityError("flush", {}, Exception("boom"))
 
         async def scenario(factory):
@@ -320,8 +319,6 @@ class TestEnvImport:
     def test_an_integrity_error_without_a_marker_is_re_raised(
         self, monkeypatch, capsys
     ):
-        from sqlalchemy.exc import IntegrityError
-
         monkeypatch.setattr(config, "GUILD_WHITELIST", [111])
         error = IntegrityError("commit", {}, Exception("boom"))
 
