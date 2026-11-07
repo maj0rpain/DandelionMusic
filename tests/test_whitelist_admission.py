@@ -1,55 +1,22 @@
 """Admission on a real MusicBot: on_ready's sweep and on_guild_join leave
 every guild the whitelist does not admit and register the rest."""
 
-import asyncio
-
-import discord
-
-from musicbot import settings
-from musicbot.bot import MusicBot
-from db_seam import in_memory_db, seed_whitelist
+from db_seam import run_musicbot
 from developer_fakes import LeavingGuild
-from helpers import run
 
 
-def drive(monkeypatch, listed, scenario):
-    """Build a MusicBot over an in-memory database holding `listed`, with
-    register recorded, and run `scenario(bot, registered)`."""
-    registered = []
-
-    async def go():
-        async with in_memory_db(settings) as factory:
-            await seed_whitelist(factory, *listed)
-            bot = MusicBot(
-                [], command_prefix="d!", intents=discord.Intents.default()
-            )
-            bot.DbSession = factory
-            bot.absolutely_ready = asyncio.get_running_loop().create_future()
-
-            async def register(guild):
-                registered.append(guild.id)
-
-            async def load_settings(guilds):
-                pass
-
-            monkeypatch.setattr(bot, "register", register)
-            monkeypatch.setattr(bot.sessions, "load_settings", load_settings)
-            monkeypatch.setattr(
-                type(bot.refresh_panels), "is_running", lambda self: True
-            )
-            await scenario(bot)
-
-    run(go())
-    return registered
-
-
-def set_guilds(monkeypatch, guilds):
-    monkeypatch.setattr(MusicBot, "guilds", property(lambda self: guilds))
+def drive(monkeypatch, listed, scenario, guilds=None):
+    """Run `scenario(bot)` on a MusicBot whitelisting `listed`; returns the
+    registered ids."""
+    return run_musicbot(
+        monkeypatch, listed, guilds=guilds, scenario=scenario
+    ).registered
 
 
 def sweep(monkeypatch, listed, guilds):
-    set_guilds(monkeypatch, guilds)
-    return drive(monkeypatch, listed, lambda bot: bot.on_ready())
+    return drive(
+        monkeypatch, listed, lambda bot: bot.on_ready(), guilds=guilds
+    )
 
 
 def test_sweep_leaves_unadmitted_and_registers_admitted(monkeypatch):
