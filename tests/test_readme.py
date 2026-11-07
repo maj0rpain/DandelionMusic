@@ -1,10 +1,11 @@
 """The README describes this fork: every command is documented, and
 nothing points to upstream or lets a cookies file be committed."""
 
-import jsonc
 import re
 import subprocess
 from pathlib import Path
+
+import jsonc
 
 from config.config import parse_env_file
 from musicbot.bot import _help as help_command
