@@ -13,11 +13,12 @@ from musicbot.commands.developer import Developer
 from musicbot.commands.general import General
 from musicbot.commands.library import Library
 from musicbot.commands.music import Music
-from musicbot.settings import SETTINGS
+from musicbot.settings import SETTINGS, SettingsEmbed
 
 ROOT = Path(__file__).resolve().parent.parent
 README = (ROOT / "README.md").read_text(encoding="utf-8")
 UPSTREAM = "solaluset/DandelionMusic"
+COOKIES_HEADING = "Custom Cookies"
 
 
 def _commands():
@@ -101,7 +102,7 @@ def test_setting_section_says_what_reset_means():
         "button_emote",
     }
     section = _setting_section()
-    assert "Not Set" in section
+    assert SettingsEmbed.FIELD_EMPTY in section
     lines = section.splitlines()
     omit = next(i for i, x in enumerate(lines) if "Omit the value" in x)
     assert any(x.startswith("* Arguments") for x in lines[:omit])
@@ -115,12 +116,13 @@ def test_env_sample_does_not_point_cookie_path_at_the_placeholder():
     assert "COOKIE_PATH" in text
     paths = set(re.findall(r"config/cookies/[\w.-]+", text))
     assert paths - {"config/cookies/cookies.txt"}
-    assert "Custom Cookies" in text
+    assert COOKIES_HEADING in text
 
 
 def test_songinfo_error_points_at_custom_cookies_not_a_wiki():
     strings = jsonc.loads((ROOT / "config/en.json").read_text("utf-8"))
-    assert "Custom Cookies" in strings["SONGINFO_ERROR"]
+    assert COOKIES_HEADING in strings["SONGINFO_ERROR"]
+    assert COOKIES_HEADING in README
     assert [k for k, v in strings.items() if "wiki" in str(v)] == []
 
 
