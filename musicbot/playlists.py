@@ -194,7 +194,14 @@ async def save(
         try:
             await session.commit()
         except IntegrityError:
-            raise PlaylistExists(playlist.name) from None
+            # A clash only if the row exists; any other integrity
+            # error is not the user's duplicate name.
+            await session.rollback()
+            async with session_factory() as check:
+                exists = await _load_row(check, playlist) is not None
+            if exists:
+                raise PlaylistExists(playlist.name) from None
+            raise
 
 
 async def delete(
