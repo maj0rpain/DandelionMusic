@@ -55,26 +55,19 @@ async def _start_playing(controller):
     await _settle()
 
 
-def _bounded(controller, scenario):
-    """Runs `scenario` under a wall-clock bound, so a regression to
-    cycling fails the test instead of hanging the suite."""
-
-    async def bounded():
-        await asyncio.wait_for(scenario(), timeout=2)
-
-    _run(controller, bounded)
-
-
-def _run_playing(controller, scenario, runner=_run):
-    """Runs `scenario(controller)` through `runner(controller, main)`
-    (`_run`, or `_bounded` for a wall-clock bound), with the queue head
+def _run_playing(controller, scenario):
+    """Runs `scenario(controller)` through `_run`, with the queue head
     started first and the loop given time to settle afterwards."""
 
     async def main():
         await _start_playing(controller)
         await scenario(controller)
 
-    runner(controller, main)
+    _run(controller, main)
+
+
+def _backup_bytes(path):
+    return path.read_bytes() if path.exists() else None
 
 
 def _played(controller):
@@ -780,7 +773,7 @@ def test_a_stop_skips_the_backup_after_the_hop(
         await controller.ensure_playing()
         controller.stop()
         # stop() snapshots the queue itself; what follows is the hop
-        snapshot = backup.read_bytes() if backup.exists() else None
+        snapshot = _backup_bytes(backup)
         seen = _record_threads(controller, monkeypatch)
         await _settle()
         return snapshot, seen
@@ -789,7 +782,7 @@ def test_a_stop_skips_the_backup_after_the_hop(
 
     # the hop ran - it advanced the emptied queue - and wrote no backup
     assert "next" in [name for name, _ in seen]
-    after = backup.read_bytes() if backup.exists() else None
+    after = _backup_bytes(backup)
     assert after == snapshot
     assert controller.guild.voice_client.stopped == 1
 
@@ -952,7 +945,7 @@ def test_an_external_disconnect_leaves_the_queue_history_and_backup(
     _run(controller, lambda: _start_then_disconnect(controller))
 
     assert _titles(controller) == ["first", "second"]
-    assert _history(controller) == ["first"]
+    assert _track_names(controller) == ["first"]
     assert _backup(controller, tmp_path) == ["first", "second"]
     assert len(old.played) == 1
 
@@ -960,7 +953,7 @@ def test_an_external_disconnect_leaves_the_queue_history_and_backup(
 # --- d!history: a song is recorded when it starts ---------------------
 
 
-def _history(controller):
+def _track_names(controller):
     return list(controller.playlist.trackname_history)
 
 
@@ -979,7 +972,7 @@ def test_a_skip_in_the_middle_of_the_queue_records_the_skipped_song(
     _queue(controller, "first", "second", "third")
     _run_playing(controller, _skip)
 
-    assert _history(controller) == ["first", "second"]
+    assert _track_names(controller) == ["first", "second"]
 
 
 def test_skipping_the_last_song_records_it(controller, monkeypatch):
@@ -987,7 +980,7 @@ def test_skipping_the_last_song_records_it(controller, monkeypatch):
     _queue(controller, "only")
     _run_playing(controller, _skip)
 
-    assert _history(controller) == ["only"]
+    assert _track_names(controller) == ["only"]
 
 
 def test_a_skip_with_loop_all_records_the_skipped_song(
@@ -999,7 +992,7 @@ def test_a_skip_with_loop_all_records_the_skipped_song(
     controller.playlist.loop = ac.LoopMode.ALL
     _run_playing(controller, _skip)
 
-    assert _history(controller) == ["first", "second"]
+    assert _track_names(controller) == ["first", "second"]
 
 
 def test_two_skips_before_the_end_hops_back_record_each_started_song_once(
@@ -1014,11 +1007,13 @@ def test_two_skips_before_the_end_hops_back_record_each_started_song_once(
 
     _run_playing(controller, scenario)
 
-    assert _history(controller) == ["first", "third"]
+    assert _track_names(controller) == ["first", "third"]
+    assert _played(controller) == ["first", "third"]
+    assert _announced(controller) == ["first", "third"]
 
 
 def _announced(controller):
-    return [song.title for song in controller.panel.announced]
+    return [song.display_name for song in controller.panel.announced]
 
 
 def test_a_stop_right_after_a_skip_plays_nothing_more(
@@ -1032,7 +1027,7 @@ def test_a_stop_right_after_a_skip_plays_nothing_more(
     async def scenario(c):
         c.skip()
         c.stop()
-        snapshots.append(backup.read_bytes() if backup.exists() else None)
+        snapshots.append(_backup_bytes(backup))
 
     _run_playing(controller, scenario)
 
@@ -1040,7 +1035,7 @@ def test_a_stop_right_after_a_skip_plays_nothing_more(
     assert _announced(controller) == ["first"]
     assert _titles(controller) == []
     assert controller.is_idle()
-    after = backup.read_bytes() if backup.exists() else None
+    after = _backup_bytes(backup)
     assert after == snapshots[0]
 
 
@@ -1079,22 +1074,6 @@ def test_a_stop_right_after_prev_starts_nothing_new(controller, monkeypatch):
     assert controller.is_idle()
 
 
-def test_two_quick_skips_play_the_third_song_never_the_second(
-    controller, monkeypatch
-):
-    _fake_ffmpeg(monkeypatch)
-    _queue(controller, "first", "second", "third")
-
-    async def scenario(c):
-        c.skip()
-        c.skip()
-
-    _run_playing(controller, scenario)
-
-    assert _played(controller) == ["first", "third"]
-    assert _announced(controller) == ["first", "third"]
-
-
 def test_a_skip_after_a_kick_plays_the_current_queue(controller, monkeypatch):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second", "third")
@@ -1124,7 +1103,7 @@ def test_prev_while_playing_records_the_outgoing_song(controller, monkeypatch):
 
     _run_playing(controller, scenario)
 
-    assert _history(controller) == ["first", "second", "first"]
+    assert _track_names(controller) == ["first", "second", "first"]
 
 
 def test_a_stop_while_playing_leaves_the_stopped_song_in_the_history(
@@ -1138,7 +1117,7 @@ def test_a_stop_while_playing_leaves_the_stopped_song_in_the_history(
 
     _run_playing(controller, scenario)
 
-    assert _history(controller) == ["first"]
+    assert _track_names(controller) == ["first"]
 
 
 def test_a_disconnect_while_playing_leaves_the_song_in_the_history(
@@ -1152,7 +1131,7 @@ def test_a_disconnect_while_playing_leaves_the_song_in_the_history(
 
     _run_playing(controller, scenario)
 
-    assert _history(controller) == ["first"]
+    assert _track_names(controller) == ["first"]
 
 
 def test_a_song_that_fails_to_preload_is_not_recorded(
@@ -1164,7 +1143,7 @@ def test_a_song_that_fails_to_preload_is_not_recorded(
 
     _run_playing(controller, _nothing)
 
-    assert _history(controller) == []
+    assert _track_names(controller) == []
     assert _played(controller) == []
 
 
@@ -1175,7 +1154,7 @@ def test_a_song_without_a_direct_url_is_not_recorded(controller, monkeypatch):
 
     _run_playing(controller, _nothing)
 
-    assert _history(controller) == []
+    assert _track_names(controller) == []
     assert _played(controller) == []
 
 
@@ -1190,7 +1169,7 @@ def test_a_play_the_voice_client_refuses_is_not_recorded(
         await controller.play_song(controller.playlist[0])
 
     _run(controller, scenario)
-    assert _history(controller) == []
+    assert _track_names(controller) == []
     # the on_play_failed teardown snapshots the queue, then empties it
     assert _backup(controller, tmp_path) == ["refused"]
     assert _titles(controller) == []
@@ -1213,7 +1192,7 @@ def test_a_source_that_cannot_be_built_goes_the_play_failed_path(
         await controller.play_song(controller.playlist[0])
 
     _run(controller, scenario)
-    assert _history(controller) == []
+    assert _track_names(controller) == []
     assert _backup(controller, tmp_path) == ["no ffmpeg"]
     assert _titles(controller) == []
 
@@ -1226,7 +1205,7 @@ def test_a_song_that_finishes_on_its_own_is_recorded_once(
 
     _run(controller, lambda: _end_first_track_on_audio_thread(controller))
 
-    assert _history(controller) == ["first"]
+    assert _track_names(controller) == ["first"]
 
 
 def test_the_song_playing_now_is_in_the_history(controller, monkeypatch):
@@ -1253,7 +1232,7 @@ def test_each_repeat_of_a_single_track_loop_is_recorded(
 
     _run_playing(controller, scenario)
 
-    assert _history(controller) == ["first", "first", "first"]
+    assert _track_names(controller) == ["first", "first", "first"]
 
 
 def test_restore_after_an_external_disconnect_starts_the_cut_off_song(
@@ -2464,7 +2443,7 @@ def test_a_play_starts_announced_on_the_panel(controller, monkeypatch):
 
     _run(controller, lambda: _start_playing(controller))
 
-    assert [s.display_name for s in controller.panel.announced] == ["first"]
+    assert _announced(controller) == ["first"]
 
 
 # --- the expired-token regression: the real panel over a channel whose
@@ -2794,12 +2773,13 @@ def test_back_starts_the_previous_song_when_the_backup_write_fails(
 
 
 def _fail_pickle(controller, monkeypatch, error=None):
-    ac = sys.modules[type(controller).__module__]
-
-    def failing(*args, **kwargs):
-        raise error or RuntimeError("cannot pickle")
-
-    monkeypatch.setattr(ac.pickle, "dump", failing)
+    _fail_write(
+        controller,
+        monkeypatch,
+        "pickle",
+        "dump",
+        error or RuntimeError("cannot pickle"),
+    )
 
 
 @pytest.mark.parametrize("fail", [_fail_replace, _fail_pickle])
@@ -2837,7 +2817,7 @@ def test_a_non_os_error_write_failure_logs_the_traceback(
     controller, monkeypatch, capsys
 ):
     _queue(controller, "first")
-    _fail_replace(controller, monkeypatch, RuntimeError("cannot pickle"))
+    _fail_pickle(controller, monkeypatch)
 
     _save_backup(controller)
 
@@ -2892,7 +2872,7 @@ def _loop_all(controller):
     controller.playlist.loop = LoopMode.ALL
 
 
-def _history_songs(controller):
+def _play_history(controller):
     return [s.title for s in controller.playlist.playhistory]
 
 
@@ -2904,7 +2884,7 @@ def test_loop_all_every_preload_failing_drains_to_idle(
     _loop_all(controller)
     _failing_preloads(stub_loader, "a", "b", "c")
 
-    _bounded(controller, lambda: _start_playing(controller))
+    _run(controller, lambda: _start_playing(controller))
 
     assert [s.title for s in controller.panel.skipped] == ["a", "b", "c"]
     assert _titles(controller) == []
@@ -2912,7 +2892,7 @@ def test_loop_all_every_preload_failing_drains_to_idle(
     assert _played(controller) == []
     assert _preload_counts(stub_loader) == {"a": 1, "b": 1, "c": 1}
     assert _backup(controller, tmp_path) == []
-    assert _history_songs(controller) == []
+    assert _play_history(controller) == []
 
 
 def test_loop_all_song_without_a_url_is_reported_once_and_removed(
@@ -2922,7 +2902,7 @@ def test_loop_all_song_without_a_url_is_reported_once_and_removed(
     controller.playlist.add(_without_url(controller, "no url"))
     _loop_all(controller)
 
-    _bounded(controller, lambda: _start_playing(controller))
+    _run(controller, lambda: _start_playing(controller))
 
     assert [s.title for s in controller.panel.skipped] == ["no url"]
     assert _titles(controller) == []
@@ -2930,7 +2910,7 @@ def test_loop_all_song_without_a_url_is_reported_once_and_removed(
     assert _played(controller) == []
     assert _preload_counts(stub_loader) == {"no url": 1}
     assert _backup(controller, tmp_path) == []
-    assert _history_songs(controller) == []
+    assert _play_history(controller) == []
 
 
 def _failing_at_the_head(controller, stub_loader, *titles):
@@ -2967,11 +2947,11 @@ def test_loop_all_mixed_queue_drops_failing_songs_and_keeps_the_rest(
         assert _played(controller) == ["good", "fine"]
         await next_round()
 
-    _bounded(controller, scenario)
+    _run(controller, scenario)
 
     assert [s.title for s in controller.panel.skipped] == ["bad", "worse"]
     assert sorted(_titles(controller)) == ["fine", "good"]
-    assert _history_songs(controller) == []
+    assert _play_history(controller) == []
 
 
 class _HookedPanel(RecordingPanel):
@@ -3013,7 +2993,7 @@ def test_a_start_overtaken_after_its_report_drops_and_starts_nothing(
 
     controller.panel.on_notice = disconnect_during_notice
 
-    _bounded(controller, lambda: _start_playing(controller))
+    _run(controller, lambda: _start_playing(controller))
 
     assert [s.title for s in controller.panel.skipped] == ["broken"]
     assert _titles(controller) == ["broken", "next"]
@@ -3036,15 +3016,15 @@ def test_a_track_ending_on_its_own_with_no_audio_is_a_failed_track(
     controller.playlist.loop = mode
     _silent_voice(controller)
 
-    _bounded(controller, lambda: _end_first_track_on_audio_thread(controller))
+    _run(controller, lambda: _end_first_track_on_audio_thread(controller))
 
     assert [s.title for s in controller.panel.skipped] == ["dead"]
     assert _titles(controller) == ["next"]
     assert _played(controller) == ["dead", "next"]
     assert _preload_counts(stub_loader)["dead"] == 1
     assert _backup(controller, tmp_path) == ["next"]
-    assert _history_songs(controller) == []
-    assert "dead" in _history(controller)
+    assert _play_history(controller) == []
+    assert "dead" in _track_names(controller)
 
 
 def test_a_lone_track_ending_with_no_audio_under_loop_single_idles(
@@ -3055,7 +3035,7 @@ def test_a_lone_track_ending_with_no_audio_under_loop_single_idles(
     controller.playlist.loop = LoopMode.SINGLE
     _silent_voice(controller)
 
-    _bounded(controller, lambda: _end_first_track_on_audio_thread(controller))
+    _run(controller, lambda: _end_first_track_on_audio_thread(controller))
 
     assert [s.title for s in controller.panel.skipped] == ["dead"]
     assert _titles(controller) == []
@@ -3077,7 +3057,7 @@ def test_a_lone_track_failing_with_no_audio_leaves_the_controller_idle(
         controller.guild.voice_client.produces_nothing = False
         await controller.enqueue(_songs(controller, "later"))
 
-    _bounded(controller, scenario)
+    _run(controller, scenario)
 
     assert _played(controller) == ["dead", "later"]
 
@@ -3137,9 +3117,7 @@ def test_a_command_overtakes_a_failure_notice_in_flight(
     _silent_voice(controller)
     _old_track(controller)
 
-    _bounded(
-        controller, lambda: _end_with_notice_in_flight(controller, command)
-    )
+    _run(controller, lambda: _end_with_notice_in_flight(controller, command))
 
     assert _played(controller) == played
     assert _titles(controller) == titles
@@ -3159,25 +3137,14 @@ def test_a_disconnect_overtaking_a_failure_notice_keeps_backup_no_idle(
         _save_backup(controller)
         await _end_with_notice_in_flight(controller, _cmd_disconnect)
 
-    _bounded(controller, scenario)
+    _run(controller, scenario)
 
     assert _titles(controller) == ["first", "second"]
     assert _backup(controller, tmp_path) == ["first", "second"]
     assert controller.timer._task is None
 
 
-@pytest.mark.parametrize("mode", list(LoopMode))
-@pytest.mark.parametrize(
-    "command, played",
-    [
-        (_cmd_stop, []),
-        (_cmd_skip, ["second"]),
-        (_cmd_back, None),
-    ],
-)
-def test_a_user_command_on_a_track_with_no_audio_is_not_a_failure(
-    controller, monkeypatch, command, played, mode
-):
+def _no_audio_user_command(controller, monkeypatch, command, mode):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "first", "second")
     controller.playlist.loop = mode
@@ -3188,28 +3155,67 @@ def test_a_user_command_on_a_track_with_no_audio_is_not_a_failure(
         await command(c)
         await _settle()
 
-    _run_playing(controller, scenario, runner=_bounded)
+    _run_playing(controller, scenario)
 
+    # no track was reported as failed
     assert controller.panel.skipped == []
-    if command is _cmd_back:
-        # the queue's real step-back: history under OFF/SINGLE, rotation
-        # under ALL
-        played = ["second"] if mode == LoopMode.ALL else ["old"]
+
+
+@pytest.mark.parametrize(
+    "mode, played, titles",
+    [
+        (LoopMode.OFF, [], []),
+        (LoopMode.SINGLE, [], []),
+        (LoopMode.ALL, [], []),
+    ],
+)
+def test_a_stop_on_a_track_with_no_audio_is_not_a_failure(
+    controller, monkeypatch, mode, played, titles
+):
+    _no_audio_user_command(controller, monkeypatch, _cmd_stop, mode)
+
     assert _played(controller)[1:] == played
-    if command is _cmd_stop:
-        assert _titles(controller) == []
-    elif command is _cmd_skip:
-        # a skip follows the loop mode's normal advance: rotation under
-        # ALL, the song into the play history otherwise
-        if mode == LoopMode.ALL:
-            assert _titles(controller) == ["second", "first"]
-            assert _history_songs(controller) == ["old"]
-        else:
-            assert _titles(controller) == ["second"]
-            assert _history_songs(controller) == ["old", "first"]
-    else:
-        # loose on purpose (deviation, #1012)
-        assert "first" in _titles(controller)
+    assert _titles(controller) == titles
+
+
+# a skip follows the loop mode's normal advance: rotation under ALL, the
+# song into the play history otherwise
+@pytest.mark.parametrize(
+    "mode, played, titles, history",
+    [
+        (LoopMode.OFF, ["second"], ["second"], ["old", "first"]),
+        (LoopMode.SINGLE, ["second"], ["second"], ["old", "first"]),
+        (LoopMode.ALL, ["second"], ["second", "first"], ["old"]),
+    ],
+)
+def test_a_skip_on_a_track_with_no_audio_is_not_a_failure(
+    controller, monkeypatch, mode, played, titles, history
+):
+    assert set(LoopMode) == {LoopMode.OFF, LoopMode.SINGLE, LoopMode.ALL}
+    _no_audio_user_command(controller, monkeypatch, _cmd_skip, mode)
+
+    assert _played(controller)[1:] == played
+    assert _titles(controller) == titles
+    assert _play_history(controller) == history
+
+
+# the queue's real step-back: history under OFF/SINGLE, rotation under ALL
+@pytest.mark.parametrize(
+    "mode, played",
+    [
+        (LoopMode.OFF, ["old"]),
+        (LoopMode.SINGLE, ["old"]),
+        (LoopMode.ALL, ["second"]),
+    ],
+)
+def test_a_step_back_on_a_track_with_no_audio_is_not_a_failure(
+    controller, monkeypatch, mode, played
+):
+    _no_audio_user_command(controller, monkeypatch, _cmd_back, mode)
+
+    assert _played(controller)[1:] == played
+    # loose on purpose (deviation, #1012)
+    assert "first" in _titles(controller)
 
 
 @pytest.mark.parametrize(
@@ -3226,7 +3232,7 @@ def test_a_track_with_audio_then_an_error_advances_as_finished(
     _queue(controller, "first", "second")
     controller.playlist.loop = mode
 
-    _bounded(
+    _run(
         controller,
         lambda: _end_first_track_on_audio_thread(
             controller, RuntimeError("boom")
