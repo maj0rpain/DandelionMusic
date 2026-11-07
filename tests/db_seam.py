@@ -1,7 +1,9 @@
 """An in-memory database with the real schema, for tests.
 
 Shared by the saved-playlists tests and the AudioController tests, so
-the StaticPool detail lives in one place.
+the StaticPool detail lives in one place. It also holds the
+real-`MusicBot` harness (`run_musicbot`, `MusicBotRun`) that the
+`on_ready` and whitelist-admission tests share.
 """
 
 import asyncio
