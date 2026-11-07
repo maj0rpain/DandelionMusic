@@ -272,9 +272,6 @@ class MusicBot(commands.Bot):
             inner = inner.original
         if isinstance(inner, commands.CommandNotFound):
             return
-        if isinstance(inner, loader.SongError):
-            await ctx.send(inner)
-            return
         if isinstance(inner, commands.UserInputError):
             message = str(inner)
             command = getattr(ctx, "command", None)
@@ -285,7 +282,9 @@ class MusicBot(commands.Bot):
                 message += f"\nUsage: {usage}"
             await ctx.send(message)
             return
-        if isinstance(inner, (commands.CheckFailure, CheckError)):
+        if isinstance(
+            inner, (loader.SongError, commands.CheckFailure, CheckError)
+        ):
             await ctx.send(inner)
             return
         await ctx.send(error)
