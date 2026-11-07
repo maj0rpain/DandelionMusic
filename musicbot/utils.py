@@ -25,7 +25,7 @@ from discord.ext.commands import CommandError, NotOwner
 
 from config import config
 from musicbot.song import Song
-from musicbot.linkutils import SiteTypes, url_regex
+from musicbot.linkutils import SiteTypes, bare_url
 
 # avoiding circular import
 if TYPE_CHECKING:
@@ -160,7 +160,7 @@ def joining_command(func):
     there, once its own checks on its input have passed, or later,
     when a pick from a message it sent acts in its name. A marked
     Music command joins in its body, after its input checks, through
-    Music._enter; the hooks never join. A command that opens a view
+    Music._join_voice; the hooks never join. A command that opens a view
     whose picks may later join voice must carry the marker too: a
     pick joins through
     that command's context (a library search or browse pick) or
@@ -196,12 +196,6 @@ def get_emoji(bot: MusicBot, string: str) -> Optional[Union[str, Emoji]]:
     if string.isdecimal():
         return utils.get(bot.emojis, id=int(string))
     return string
-
-
-def bare_url(url: str) -> str:
-    """A url's bare form when ``url_regex`` matches it, else the url."""
-    match = url_regex.fullmatch(url)
-    return match.group("bare") if match else url
 
 
 def songs_embed(title: str, songs: Iterable[Song]) -> Embed:

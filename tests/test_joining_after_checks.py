@@ -35,8 +35,10 @@ from message_link_fakes import FOREIGN_LINK
 class RecordingController:
     """The controller as the commands see it: it records what they ask
     of it. `backup` is what load_backup() loads into the queue; with
-    `disconnecting` it refuses as a disconnect that began after the
-    hooks admitted the request (is_disconnecting() stays False); `events`,
+    `disconnect_on_load` load_backup() refuses as a disconnect that began
+    after the hooks admitted the request (is_disconnecting() stays False
+    for it); with `disconnect_on_prev`, prev_song() turns is_disconnecting()
+    true; `events`,
     when set, gets ("load_backup",) appended by load_backup()."""
 
     def __init__(
@@ -46,14 +48,19 @@ class RecordingController:
         active=False,
         readable=True,
         loop=None,
-        disconnecting=False,
+        disconnect_on_prev=False,
+        prev_result=True,
+        disconnect_on_load=False,
     ):
         self.name = "controller"
         self.backup = None if backup is None else list(backup)
         self.queue = []
         self.active = active
         self.readable = readable
-        self.disconnecting = disconnecting
+        self.disconnecting = False
+        self.disconnect_on_load = disconnect_on_load
+        self.disconnect_on_prev = disconnect_on_prev
+        self.prev_result = prev_result
         self.events = None
         self.calls = []
         self.playlist = Playlist()
@@ -62,12 +69,12 @@ class RecordingController:
             self.playlist.loop = loop
 
     def is_disconnecting(self):
-        return False
+        return self.disconnecting
 
     def load_backup(self):
         if self.events is not None:
             self.events.append(("load_backup",))
-        if self.disconnecting:
+        if self.disconnecting or self.disconnect_on_load:
             # began disconnecting after the hooks admitted the request
             return RestoreResult.REFUSED_WHILE_DISCONNECTING
         if self.active:
@@ -85,9 +92,14 @@ class RecordingController:
         self.calls.append("start_restored")
         return RestoreResult.RESTORED
 
+    def has_prev(self):
+        return self.playlist.has_prev()
+
     def prev_song(self):
         self.calls.append("prev_song")
-        return True
+        # teardown begins after admission, before the step-back
+        self.disconnecting = self.disconnect_on_prev
+        return self.prev_result
 
     async def start_idle_timer(self, reset):
         pass
@@ -187,7 +199,7 @@ def test_a_slash_play_with_no_track_and_no_file_does_not_join():
             config.RESTORE_BACKUP_UNREADABLE,
         ),
         (
-            RecordingController(disconnecting=True),
+            RecordingController(disconnect_on_load=True),
             config.DISCONNECTING_MESSAGE,
         ),
     ],
@@ -226,6 +238,15 @@ def test_prev_with_no_previous_track_does_not_join():
     assert joins(guild) == []
 
 
+def test_prev_refused_by_the_controller_does_not_join():
+    controller = RecordingController(history=["x"])
+    controller.has_prev = lambda: False
+    guild, ctx, cog, sent = body_ctx("prev", controller)
+    invoke(cog, ctx, Music._prev.callback)
+    assert sent == [config.NO_PREVIOUS_TRACK]
+    assert joins(guild) == []
+
+
 def test_prev_with_loop_all_and_an_empty_queue_does_not_join():
     controller = RecordingController(history=["x"], loop=LoopMode.ALL)
     guild, ctx, cog, sent = body_ctx("prev", controller)
@@ -234,9 +255,25 @@ def test_prev_with_loop_all_and_an_empty_queue_does_not_join():
     assert joins(guild) == []
 
 
+def test_prev_refused_while_disconnecting_replies_disconnecting():
+    controller = RecordingController(
+        history=["x"], disconnect_on_prev=True, prev_result=False
+    )
+    guild, ctx, cog, sent = body_ctx("prev", controller)
+    invoke(cog, ctx, Music._prev.callback)
+    assert sent == [config.DISCONNECTING_MESSAGE]
+
+
+def test_prev_refused_with_history_not_disconnecting_replies_no_prev_track():
+    controller = RecordingController(history=["x"], prev_result=False)
+    guild, ctx, cog, sent = body_ctx("prev", controller)
+    invoke(cog, ctx, Music._prev.callback)
+    assert sent == [config.NO_PREVIOUS_TRACK]
+
+
 def test_playlist_load_of_an_unknown_name_does_not_join(monkeypatch):
     async def get(session_factory, ref):
-        return None
+        raise music.playlists.PlaylistNotFound(ref.name)
 
     monkeypatch.setattr(music.playlists, "get", get)
     guild, ctx, cog, sent = body_ctx("playlist load")

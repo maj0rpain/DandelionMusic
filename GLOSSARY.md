@@ -12,9 +12,9 @@
 
 **Guild whitelist** - The guilds the bot may stay in. When it is empty the whitelist is *disabled* and every guild is *admitted*; otherwise a guild is admitted only if it is listed. A change that leaves a present guild unadmitted makes the bot leave it.
 
-**Enqueue outcome**: what adding a request's songs to the queue did: started playing it, placed it at a numbered queue position, failed to start it, added a batch of songs as one request (a playlist, possibly truncated, a saved playlist, or a library pick with files skipped), or refused it because the bot had left voice before the songs arrived. Every reply to a play request is drawn from it.
+**Enqueue outcome**: what adding a request's songs to the queue did: started playing it, placed it at a numbered queue position, failed to start it, added a batch of songs as one request (a playlist, possibly truncated, a saved playlist, or a library pick with files skipped), or refused it, because the bot was disconnecting or because it had left voice before the songs arrived. A refused request places nothing and starts nothing. Every reply to a play request is drawn from it.
 
-**Playback** - one guild's start/advance/stop state machine over its voice connection: which track is starting or playing, which comes next, and when the playlist backup is written. Distinct from a guild session (the guild's settings, controller and player panel, `GuildSessions`). Its states are idle, starting (a track is claimed but its preload has not finished) and active (playing or paused).
+**Playback** - one guild's start/advance/stop state machine over its voice connection: which track is starting or playing, which comes next, and when the playlist backup is written. Distinct from a guild session (the guild's settings, controller and player panel, `GuildSessions`). Its states are idle, starting (a track is claimed but its preload has not finished), active (playing or paused) and disconnecting (teardown of the voice session under way; it takes precedence over the other three, and nothing is placed or started while it holds).
 
 **Player panel**: A guild's playback-facing side in Discord: the channel the bot posts playback news to (now playing, skipped tracks), and the one message whose buttons follow the playback state. _Avoid_: view, now-playing message.
 

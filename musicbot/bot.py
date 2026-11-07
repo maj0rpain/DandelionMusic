@@ -395,7 +395,7 @@ class Context(commands.Context):
 
     async def defer(self, *, ephemeral: bool = False) -> None:
         """Context.defer, but a second call does nothing: a command
-        body may defer an interaction that Music._enter already
+        body may defer an interaction that Music._join_voice already
         deferred before joining voice."""
         if self.interaction and not self.interaction.response.is_done():
             await self.interaction.response.defer(ephemeral=ephemeral)

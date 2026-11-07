@@ -262,7 +262,7 @@ class TestMusicBeforeInvoke:
         async def scenario():
             cog = Music(None)
             await invoke_music_hooks(cog, ctx)
-            await cog._enter(ctx)
+            await cog._join_voice(ctx)
             await ctx.defer()
 
         run(scenario())
@@ -396,18 +396,20 @@ class TestNonJoiningCommand:
 
 
 class TestJoiningCommand:
-    """A joining command's body, through _enter, defers and moves the bot
+    """A joining command's body, through _join_voice, defers and moves the bot
     out of a bots-only channel (the hooks never join: see
     tests/test_admission.py)."""
 
-    def test_enter_defers_and_moves_out_of_a_bots_only_channel(self, no_sleep):
+    def test_join_voice_defers_and_moves_out_of_a_bots_only_channel(
+        self, no_sleep
+    ):
         guild = VoiceGuild()
         guild.put_bot_in(guild.channel("a", bots=1))
         ctx = slash_ctx(guild, guild.channel("b"))
         ctx.command = command_of(Music, "prev")
         cog = Music(None)
         run(invoke_music_hooks(cog, ctx))
-        run(cog._enter(ctx))
+        run(cog._join_voice(ctx))
         assert guild.events == [("defer", False), ("move", "b")]
 
 
