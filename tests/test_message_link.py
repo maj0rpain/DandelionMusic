@@ -1,7 +1,6 @@
 """The message-link gate: whether a track that is a message link may be
 loaded for the requesting member."""
 
-
 import discord
 import pytest
 
@@ -55,6 +54,46 @@ def test_a_channel_whose_history_the_member_cannot_read_is_refused():
 
 def test_a_readable_channel_passes():
     check(LINK, LinkGuild([LinkChannel()]), LinkMember())
+
+
+def test_a_message_link_comes_back_checked_with_its_admitted_link():
+    checked = check(LINK, LinkGuild([LinkChannel()]), LinkMember())
+    assert checked == message_link.CheckedTrack(LINK, LINK)
+
+
+@pytest.mark.parametrize("wrap", ["<{}>", "  {}  ", "{}."])
+def test_a_wrapped_link_is_admitted_as_the_bare_link(wrap):
+    checked = check(
+        wrap.format(LINK), LinkGuild([LinkChannel()]), LinkMember()
+    )
+    assert checked.admitted_link == LINK
+
+
+def test_a_track_that_is_not_a_message_link_has_no_admitted_link():
+    checked = check("some words", LinkGuild([]), None)
+    assert checked == message_link.CheckedTrack("some words", None)
+
+
+@pytest.mark.parametrize(
+    "track",
+    [
+        "<{}>".format(LINK),
+        "  {}  ".format(LINK),
+        "{}.".format(LINK),
+        LINK.replace("discord.com", "canary.discord.com"),
+    ],
+)
+def test_is_message_link_agrees_with_the_gate_on_a_link_form(track):
+    checked = check(track, LinkGuild([LinkChannel()]), LinkMember())
+    assert message_link.is_message_link(track)
+    assert checked.admitted_link is not None
+
+
+@pytest.mark.parametrize(
+    "track", ["some words", "https://youtu.be/x", "discord.com/channels/1/2/3"]
+)
+def test_is_message_link_is_false_for_anything_else(track):
+    assert not message_link.is_message_link(track)
 
 
 def test_a_readable_thread_passes():

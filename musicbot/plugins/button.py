@@ -1,6 +1,7 @@
 import discord
 from discord.ext import commands
 from musicbot import admission, linkutils, loader, utils
+from musicbot.message_link import check_message_link
 from musicbot.bot import MusicBot
 from musicbot.outcome import send_outcome
 
@@ -110,8 +111,9 @@ class Button(commands.Cog):
                     )
             for url in links:
                 try:
+                    checked = await check_message_link(url, serv, member)
                     outcome = await audiocontroller.process_song(
-                        url, user=member
+                        checked, user=member
                     )
                 except loader.SongError as e:
                     await ctx.send(str(e))

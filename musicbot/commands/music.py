@@ -1,5 +1,5 @@
 from __future__ import annotations
-from typing import Iterable, List, Optional, Union, Literal
+from typing import List, Optional, Literal
 
 import discord
 from discord import Attachment, Embed, app_commands
@@ -20,7 +20,7 @@ from musicbot.audiocontroller import (
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
 from musicbot.linkutils import get_site_type
-from musicbot.message_link import check_message_link
+from musicbot.message_link import CheckedTrack, check_message_link
 from musicbot.views import MusicButton, OwnedView, SimplePaginator
 
 
@@ -88,11 +88,21 @@ class SongButton(MusicButton):
         async def play(ctx):
             async with ctx.channel.typing():
                 await self.view.use_up_pick()
-                await cog._play_song(ctx, song)
+                await cog._play_song(ctx, self._checked)
 
+        async def before(ctx):
+            # the gate runs before the join: a refused pick replies,
+            # ends used up and never joins
+            self._checked = await cog._checked_track(ctx, song)
+            if self._checked is None:
+                await self.view.use_up_pick()
+            return self._checked
+
+        self._checked = None
         super().__init__(
             play,
             admission.RequestKind.PICK,
+            before=before,
             emoji=f"{num}⃣",
         )
 
@@ -198,25 +208,31 @@ class Music(commands.Cog):
         if track is None:
             await ctx.send(config.PLAY_ARGS_MISSING)
             return
-        try:
-            await check_message_link(track, ctx.guild, ctx.author)
-        except SongError as e:
-            await ctx.send(e)
+        checked = await self._checked_track(ctx, track)
+        if checked is None:
             return
 
         await self._enter(ctx)
         await ctx.defer()
-        await self._play_song(ctx, track, playnext=playnext)
+        await self._play_song(ctx, checked, playnext=playnext)
 
-    async def _play_song(
-        self, ctx, track: Union[str, Iterable[str]], playnext=False
-    ):
+    async def _checked_track(self, ctx, track) -> Optional[CheckedTrack]:
+        """Runs the message-link gate for `ctx`'s author: the checked
+        track, or, when the gate refuses, replies with the refusal and
+        returns None."""
+        try:
+            return await check_message_link(track, ctx.guild, ctx.author)
+        except SongError as e:
+            await ctx.send(e)
+            return None
+
+    async def _play_song(self, ctx, checked: CheckedTrack, playnext=False):
         # reset timer
         await ctx.audiocontroller.start_idle_timer(True)
 
         try:
             outcome = await ctx.audiocontroller.process_song(
-                track, user=ctx.author, playnext=playnext
+                checked, user=ctx.author, playnext=playnext
             )
         except SongError as e:
             await ctx.send(e)
@@ -655,9 +671,11 @@ class Music(commands.Cog):
         track: str,
     ):
         await ctx.defer()
+        checked = await self._checked_track(ctx, track)
+        if checked is None:
+            return
         try:
-            await check_message_link(track, ctx.guild, ctx.author)
-            result = await loader.load_song(track)
+            result = await loader.load_song(checked)
         except SongError as e:
             await ctx.send(e)
             return

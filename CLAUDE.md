@@ -32,7 +32,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/truncation.py` - `Truncation` (a cut-short Spotify playlist's reported total and its `TruncationReason`) with the one cut-short rule (`Truncation.of`) and the user notice; imports only `config`, `enum` and `dataclasses`.
 - `musicbot/outcome.py` - `EnqueueOutcome` (what adding a request's songs did) and `render`, the one function that turns it into a `Reply` or nothing; imports neither the controller nor voice machinery.
 - `musicbot/loader.py` - yt-dlp extraction in two worker processes, the load lane and the preload lane; calling it before `init()` raises `LoaderNotRunning`.
-- `musicbot/message_link.py` - the message-link gate (`check_message_link`, `MESSAGE_LINK_PATTERN`): refuses a Discord message link the requesting member cannot read; imports nothing from `musicbot.loader` or `musicbot.linkutils` at module level.
+- `musicbot/message_link.py` - the message-link gate (`check_message_link`, `is_message_link`, `MESSAGE_LINK_PATTERN`): refuses a Discord message link the requesting member cannot read and makes the checked track for a track it lets through; `is_message_link` is the one "is this a message link" rule; imports nothing from `musicbot.loader` or `musicbot.linkutils` at module level.
 - `musicbot/linkutils.py` - URL classification, short-link resolution (`SHORT_LINK_HOSTS`, `resolve_short_link`) and Spotify resolution.
 - `musicbot/library_metadata.py` - library enrichment (Last.fm/Spotify stats and art, embedded covers): `Enricher(clock, spotify, lastfm_session)` holds the six `CachedLookup` lookups (Last.fm and Spotify artist and album, the tag read and the artwork read, the latter with a `ByteBoundedStore`), and the public `get_enrichment(index, artist, album)` delegates to `default_enricher`; an index rebuild clears them by itself (the generation check).
 - `musicbot/cached_lookup.py` - `CachedLookup`: a remote lookup's cache, in-flight dedup (shielded), timeout and failure cooldown, around a backend passed in and an optional passed-in store (a `dict` by default; `ByteBoundedStore` keeps the art cache's byte-budget and entry-cap eviction); imports only the standard library.
@@ -57,6 +57,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/library_session.py` imports only `musicbot.library`, `musicbot.library_browse`, `musicbot.library_display` and `typing`, plus `musicbot.library_metadata` inside `if TYPE_CHECKING:` only (`tests/test_library_session.py` asserts it) - don't add imports.
 - `musicbot/library_display.py` imports nothing from the project (`tests/test_library_display.py` asserts it) - don't add imports.
 - `musicbot/linkutils.py` imports nothing from `musicbot.loader` (`tests/test_linkutils.py` asserts it) - don't add that import.
+- `musicbot/message_link.py` imports nothing from `musicbot.loader` or `musicbot.linkutils` at module level (`tests/test_message_link.py` asserts it) - don't add those imports.
 
 ## Agent skills
 

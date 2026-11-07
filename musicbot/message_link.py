@@ -9,6 +9,8 @@ level (`SongError` and `normalize_track` are imported inside the check).
 """
 
 import re
+from dataclasses import dataclass
+from typing import Optional
 
 import discord
 
@@ -22,20 +24,42 @@ MESSAGE_LINK_PATTERN = (
 _message_link = re.compile(MESSAGE_LINK_PATTERN)
 
 
-async def check_message_link(track: str, guild, user) -> None:
-    """Does nothing for a track that is not a message link. Otherwise
-    raises `SongError(config.MESSAGE_LINK_FORBIDDEN)` unless the link
-    points into `guild`, its channel or thread resolves there and `user`
-    can view it and read its history (and, for a private thread, is in
-    it or can manage threads)."""
+@dataclass(frozen=True)
+class CheckedTrack:
+    """A track the gate let through: `track` as the member typed it,
+    plus `admitted_link`, the (normalized) message link the gate
+    admitted when the track is one, else `None`. Only
+    `check_message_link` makes one."""
+
+    track: str
+    admitted_link: Optional[str] = None
+
+
+def is_message_link(track: str) -> bool:
+    """The one "is this a message link" rule: whether `track`, once
+    normalized, is a Discord message URL."""
+    from musicbot.linkutils import normalize_track
+
+    return _message_link.match(normalize_track(track)) is not None
+
+
+async def check_message_link(track: str, guild, user) -> CheckedTrack:
+    """Returns the track's `CheckedTrack`: with no admitted link for a
+    track that is not a message link. Otherwise raises
+    `SongError(config.MESSAGE_LINK_FORBIDDEN)` unless the link points
+    into `guild`, its channel or thread resolves there and `user` can
+    view it and read its history (and, for a private thread, is in it
+    or can manage threads); the admitted link is then the link."""
     from musicbot.linkutils import normalize_track
     from musicbot.loader import SongError
 
-    match = _message_link.match(normalize_track(track))
+    link = normalize_track(track)
+    match = _message_link.match(link)
     if match is None:
-        return
+        return CheckedTrack(track)
     if not await _may_read(match, guild, user):
         raise SongError(config.MESSAGE_LINK_FORBIDDEN)
+    return CheckedTrack(track, link)
 
 
 async def _may_read(match, guild, user) -> bool:

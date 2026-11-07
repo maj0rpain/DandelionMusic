@@ -1,4 +1,3 @@
-import re
 import sys
 import atexit
 import asyncio
@@ -9,14 +8,14 @@ from urllib.parse import urlparse
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context as mp_context
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 from config import config
 from musicbot import library
-from musicbot.message_link import MESSAGE_LINK_PATTERN
+from musicbot.message_link import CheckedTrack, is_message_link
 from musicbot.audiotags import nice_title, read_tags
 from musicbot.song import LoadResult, Song
 from musicbot.utils import wrap_stdio
@@ -214,7 +213,10 @@ def _search_youtube(title: str, count: int = 1) -> list[dict]:
     return r["entries"]
 
 
-async def load_song(track: str) -> LoadResult:
+async def load_song(track: Union[str, CheckedTrack]) -> LoadResult:
+    """Loads a plain track or one the message-link gate checked."""
+    if isinstance(track, CheckedTrack):
+        track = track.track
     return await _load(Lane.LOAD, track)
 
 
@@ -302,7 +304,7 @@ def _load_song(track: str) -> LoadResult:
         host = identify_url(track)
         # the message-link gate ran on the short link as typed; a
         # resolved Discord message link would skip it
-        if host == SiteTypes.NOT_URL or re.match(MESSAGE_LINK_PATTERN, track):
+        if host == SiteTypes.NOT_URL or is_message_link(track):
             raise SongError(config.SONGINFO_UNSUPPORTED)
 
     if host == SiteTypes.NOT_URL:
