@@ -1,55 +1,22 @@
 """Admission on a real MusicBot: on_ready's sweep and on_guild_join leave
 every guild the whitelist does not admit and register the rest."""
 
-import asyncio
-
-import discord
-
-from musicbot import settings
-from musicbot.bot import MusicBot
-from db_seam import in_memory_db, seed_whitelist
+from db_seam import run_musicbot
 from developer_fakes import LeavingGuild
-from helpers import run
 
 
-def drive(monkeypatch, listed, scenario):
-    """Build a MusicBot over an in-memory database holding `listed`, with
-    register recorded, and run `scenario(bot, registered)`."""
-    registered = []
-
-    async def go():
-        async with in_memory_db(settings) as factory:
-            await seed_whitelist(factory, *listed)
-            bot = MusicBot(
-                [], command_prefix="d!", intents=discord.Intents.default()
-            )
-            bot.DbSession = factory
-            bot.absolutely_ready = asyncio.get_running_loop().create_future()
-
-            async def register(guild):
-                registered.append(guild.id)
-
-            async def load_settings(guilds):
-                pass
-
-            monkeypatch.setattr(bot, "register", register)
-            monkeypatch.setattr(bot.sessions, "load_settings", load_settings)
-            monkeypatch.setattr(
-                type(bot.refresh_panels), "is_running", lambda self: True
-            )
-            await scenario(bot)
-
-    run(go())
-    return registered
-
-
-def set_guilds(monkeypatch, guilds):
-    monkeypatch.setattr(MusicBot, "guilds", property(lambda self: guilds))
+def drive(monkeypatch, listed, scenario, guilds=None):
+    """Run `scenario(bot)` on a MusicBot whitelisting `listed`; returns the
+    registered ids."""
+    return run_musicbot(
+        monkeypatch, listed, guilds=guilds, scenario=scenario
+    ).registered
 
 
 def sweep(monkeypatch, listed, guilds):
-    set_guilds(monkeypatch, guilds)
-    return drive(monkeypatch, listed, lambda bot: bot.on_ready())
+    return drive(
+        monkeypatch, listed, lambda bot: bot.on_ready(), guilds=guilds
+    )
 
 
 def test_sweep_leaves_unadmitted_and_registers_admitted(monkeypatch):
@@ -76,7 +43,7 @@ def test_sweep_logs_a_failed_leave_and_goes_on(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert registered == [3]
     assert guilds[1].left
-    assert "bad" in err and "Traceback" in err
+    assert 0 <= err.find("Leaving guild bad failed:") < err.find("Traceback")
 
 
 def test_sweep_reads_the_whitelist_once(monkeypatch):
@@ -120,4 +87,4 @@ def test_join_logs_a_failed_leave_and_does_not_register(monkeypatch, capsys):
     registered = join(monkeypatch, [1], LeavingGuild(2, "bad", fail=True))
     err = capsys.readouterr().err
     assert registered == []
-    assert "bad" in err and "Traceback" in err
+    assert 0 <= err.find("Leaving guild bad failed:") < err.find("Traceback")

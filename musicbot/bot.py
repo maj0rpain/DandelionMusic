@@ -133,12 +133,10 @@ class MusicBot(commands.Bot):
         )
         for target, result in zip(targets, results):
             if isinstance(result, BaseException):
-                print(
+                self._log_failure(
                     f"{action} failed for guild {target.guild.name}:",
-                    file=sys.stderr,
-                    flush=True,
+                    result,
                 )
-                print_exception(result)
 
     async def close(self):
         print(config.SHUTDOWN_MESSAGE, flush=True)
@@ -227,12 +225,7 @@ class MusicBot(commands.Bot):
         try:
             await guild.leave()
         except Exception as e:
-            print(
-                f"Leaving guild {guild.name} failed:",
-                file=sys.stderr,
-                flush=True,
-            )
-            print_exception(e)
+            self._log_failure(f"Leaving guild {guild.name} failed:", e)
 
     async def leave_guilds(self, guild_ids):
         """Leave each of these guilds the bot is in; ids it is not in
@@ -272,9 +265,6 @@ class MusicBot(commands.Bot):
             inner = inner.original
         if isinstance(inner, commands.CommandNotFound):
             return
-        if isinstance(inner, loader.SongError):
-            await ctx.send(inner)
-            return
         if isinstance(inner, commands.UserInputError):
             message = str(inner)
             command = getattr(ctx, "command", None)
@@ -285,7 +275,9 @@ class MusicBot(commands.Bot):
                 message += f"\nUsage: {usage}"
             await ctx.send(message)
             return
-        if isinstance(inner, (commands.CheckFailure, CheckError)):
+        if isinstance(
+            inner, (loader.SongError, commands.CheckFailure, CheckError)
+        ):
             await ctx.send(inner)
             return
         await ctx.send(error)
@@ -305,13 +297,17 @@ class MusicBot(commands.Bot):
         if member == self.user:
             if not guild.voice_client:
                 await asyncio.sleep(VC_CONNECT_TIMEOUT)
-            if guild.voice_client:
-                is_playing = guild.voice_client.is_playing()
+            voice_client = guild.voice_client
+            if voice_client:
+                is_playing = voice_client.is_playing()
                 await audiocontroller.start_idle_timer(is_playing)
                 if is_playing:
                     # bot was moved, restore playback
                     await asyncio.sleep(1)
-                    guild.voice_client.resume()
+                    # a disconnect or reset during the awaits cleared
+                    # or replaced it; that already handled the state
+                    if guild.voice_client is voice_client:
+                        voice_client.resume()
             else:
                 # did not reconnect, clear state
                 await audiocontroller.udisconnect("removed from voice channel")
