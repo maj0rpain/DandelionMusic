@@ -3,6 +3,7 @@ import enum
 import pytest
 
 from musicbot import utils
+from musicbot.linkutils import SpotifyPlaylistTypes
 from musicbot.playlist import (
     LoopMode,
     LoopState,
@@ -18,6 +19,7 @@ ENUMS = [
     PlaylistErrorText,
     ConversionErrorText,
     SettingsEmbed,
+    SpotifyPlaylistTypes,
 ]
 
 
