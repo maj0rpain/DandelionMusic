@@ -32,6 +32,7 @@ from musicbot.settings import (
 from musicbot import settings
 from db_seam import in_memory_db, seed_whitelist
 from developer_fakes import FakeBot, FakeCtx, LeavingGuild
+from discord_fakes import run_command_checks
 from helpers import run
 
 
@@ -516,8 +517,7 @@ def test_whitelist_commands_admit_every_owner_and_refuse_others(
 
     async def check(author_id):
         ctx = FakeCtx(bot, author_id)
-        for c in cmd.checks:
-            await c(ctx)
+        await run_command_checks(cmd, ctx)
 
     run(check(5))
     run(check(1))
