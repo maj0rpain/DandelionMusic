@@ -35,34 +35,39 @@ _root: Optional[Path] = None
 _generation = 0
 
 
+_WALK_WARNING = "library: skipping unreadable"
+
+
+def _guarded(operation, path: Path, prefix: str, fallback):
+    """operation(path), but an OSError (permission-restricted folder,
+    NAS metadata dirs, a stale network mount, etc.) prints
+    "<prefix> <path>: <error>" to stderr and returns the fallback
+    instead of crashing the whole index build. Startup additionally
+    tolerates a failed build (setup_hook catches it and starts with an
+    empty index)."""
+    try:
+        return operation(path)
+    except OSError as e:
+        print(f"{prefix} {path}: {e}", file=sys.stderr)
+        return fallback
+
+
 def _safe_iterdir(path: Path) -> List[Path]:
-    """sorted(path.iterdir()), but a directory that cannot be listed
-    (permission-restricted folder, NAS metadata dirs, a stale network
-    mount, etc.) is skipped with a warning instead of crashing the
-    whole index build. The walk skips an entry it cannot stat the same
-    way (see _stat_ok), and startup additionally tolerates a failed
-    build (setup_hook catches it and starts with an empty index)."""
-    try:
-        return sorted(path.iterdir())
-    except OSError as e:
-        print(
-            f"library: skipping unreadable directory {path}: {e}",
-            file=sys.stderr,
-        )
-        return []
+    """sorted(path.iterdir()); a directory that cannot be listed is
+    skipped with a warning."""
+    return _guarded(lambda p: sorted(p.iterdir()), path, _WALK_WARNING, [])
 
 
-def _stat_ok(path: Path, predicate) -> bool:
-    """predicate(path) (Path.is_dir or Path.is_file), but an entry that
-    cannot be stat'ed counts as absent, with a warning on stderr."""
-    try:
-        return predicate(path)
-    except OSError as e:
-        print(
-            f"library: skipping unreadable {path}: {e}",
-            file=sys.stderr,
-        )
-        return False
+def _safe_is_dir(path: Path) -> bool:
+    """path.is_dir(); an entry that cannot be stat'ed counts as
+    absent, with a warning."""
+    return _guarded(Path.is_dir, path, _WALK_WARNING, False)
+
+
+def _safe_is_file(path: Path) -> bool:
+    """path.is_file(); an entry that cannot be stat'ed counts as
+    absent, with a warning."""
+    return _guarded(Path.is_file, path, _WALK_WARNING, False)
 
 
 def _make_song(path: Path) -> LibrarySong:
@@ -102,21 +107,21 @@ def build_index() -> LibraryIndex:
     root = (
         Path(config.MUSIC_LIBRARY_PATH) if config.MUSIC_LIBRARY_PATH else None
     )
-    root_is_dir = root is not None and _stat_ok(root, Path.is_dir)
+    root_is_dir = root is not None and _safe_is_dir(root)
 
     new_root: Optional[Path] = None
     if root_is_dir:
         for artist_dir in _safe_iterdir(root):
-            if not _stat_ok(artist_dir, Path.is_dir):
+            if not _safe_is_dir(artist_dir):
                 continue
             albums: Dict[str, List[LibrarySong]] = {}
             for album_dir in _safe_iterdir(artist_dir):
-                if not _stat_ok(album_dir, Path.is_dir):
+                if not _safe_is_dir(album_dir):
                     continue
                 files = sorted(
                     f
                     for f in _safe_iterdir(album_dir)
-                    if _stat_ok(f, Path.is_file)
+                    if _safe_is_file(f)
                     and f.name.lower().endswith(config.LIBRARY_EXTENSIONS)
                 )
                 # sorted by filename (not the tag-derived title) so
@@ -568,7 +573,8 @@ def track_path_from_uri(uri: str) -> Optional[Path]:
     if path is None:
         return None
     path = Path(path)
-    return path if _stat_ok(path, Path.is_file) else None
+    is_file = _guarded(Path.is_file, path, "library: cannot read track", False)
+    return path if is_file else None
 
 
 def tracks_for(
