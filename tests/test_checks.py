@@ -412,7 +412,7 @@ class TestJoiningCommand:
         run(invoke_music_hooks(Music(None), ctx))
         assert guild.events == []
 
-    def test_enter_defers_and_connects_while_idle(self):
+    def test_join_voice_defers_and_connects_while_idle(self):
         guild = VoiceGuild()
         ctx = slash_ctx(guild, guild.channel("a"))
         ctx.command = command_of(Music, "play")
@@ -421,7 +421,9 @@ class TestJoiningCommand:
         run(cog._join_voice(ctx))
         assert guild.events == [("defer", False), ("connect", "a")]
 
-    def test_enter_defers_and_moves_out_of_a_bots_only_channel(self, no_sleep):
+    def test_join_voice_defers_and_moves_out_of_a_bots_only_channel(
+        self, no_sleep
+    ):
         guild = VoiceGuild()
         guild.put_bot_in(guild.channel("a", bots=1))
         ctx = slash_ctx(guild, guild.channel("b"))
