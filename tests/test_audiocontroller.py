@@ -1403,8 +1403,8 @@ def test_every_preload_failing_leaves_a_long_queue_whole_and_silent(
 @pytest.mark.parametrize(
     "head_result, played, skipped",
     [
-        pytest.param("EXTRACTED", ["a", "b"], [], id="head-extracted"),
-        pytest.param("FAILED", ["a", "c"], ["b"], id="head-failed"),
+        pytest.param(StubLoader.Preload.EXTRACTED, ["a", "b"], [], id="head-extracted"),
+        pytest.param(StubLoader.Preload.FAILED, ["a", "c"], ["b"], id="head-failed"),
     ],
 )
 def test_a_song_failing_in_the_background(
@@ -1420,7 +1420,7 @@ def test_a_song_failing_in_the_background(
         await _settle()
         controller.skip()
         await _settle()
-        futures[1].set_result(getattr(stub_loader.Preload, head_result))
+        futures[1].set_result(head_result)
 
     _run(controller, scenario)
 
