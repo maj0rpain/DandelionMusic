@@ -2,9 +2,10 @@ import asyncio
 import gc
 import weakref
 
-from helpers import imported_roots, run
 from musicbot import keyed_locks
 from musicbot.keyed_locks import KeyedLocks
+
+from helpers import imported_roots, run
 
 
 def test_the_same_key_gives_the_same_lock_while_it_is_held():
