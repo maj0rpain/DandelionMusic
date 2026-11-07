@@ -675,11 +675,6 @@ GATED_COMMANDS = {
 }
 
 
-def refusal_of(cmd, ctx):
-    """The CheckError message a command's own checks raise, or None."""
-    return check_error_message(run_command_checks(cmd, ctx))
-
-
 def test_the_commands_needing_a_dj_are_exactly_the_listed_ones(monkeypatch):
     monkeypatch.setattr(config, "ENABLE_PLAYLISTS", True)
     refused = set()
@@ -689,20 +684,23 @@ def test_the_commands_needing_a_dj_are_exactly_the_listed_ones(monkeypatch):
                 admission.RequestKind.COMMAND, dj_role=ADMISSION_DJ_ROLE
             )
             ctx.audiocontroller = types.SimpleNamespace(is_active=lambda: True)
-            if refusal_of(cmd, ctx) == config.NOT_A_DJ:
+            refusal = check_error_message(run_command_checks(cmd, ctx))
+            if refusal == config.NOT_A_DJ:
                 refused.add(cmd.qualified_name)
-    assert refused == NEEDS_A_DJ
-    for cog in (Music, General):
-        for cmd in cog(None).walk_commands():
             if cmd.qualified_name in NEEDS_A_DJ:
                 assert dj_check in cmd.checks, cmd.qualified_name
+    assert refused == NEEDS_A_DJ
 
 
-def gated_command_context(name, role=None, dj_role=ADMISSION_DJ_ROLE):
+def gated_command_context(name, role=None):
     """(guild, ctx, calls, deferred) for the gated command `name`."""
     cog, kind, bot_channel, author = GATED_COMMANDS[name]
     guild, ctx = situation(
-        kind, bot=bot_channel, author=author, role=role, dj_role=dj_role
+        kind,
+        bot=bot_channel,
+        author=author,
+        role=role,
+        dj_role=ADMISSION_DJ_ROLE,
     )
     ctx.command = command_of(cog, name)
     calls = []
