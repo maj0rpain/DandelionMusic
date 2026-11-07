@@ -75,7 +75,7 @@ def stored_settings():
         button_emote="\N{SPARKLES}",
         default_volume=40,
         vc_timeout=False,
-        announce_songs=False,
+        announce_songs=True,
     )
 
 

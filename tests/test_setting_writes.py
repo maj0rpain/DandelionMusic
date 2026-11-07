@@ -7,13 +7,12 @@ import types
 from sqlalchemy.exc import OperationalError
 from sqlalchemy import select
 
-from musicbot import settings
 from musicbot.settings import GuildSettings, SETTINGS, default_settings
 
-from db_seam import in_memory_db
-from helpers import run
+from db_seam import FailingCommit, seed_settings, with_db
 
 GUILD = "42"
+FAILED_COMMIT = OperationalError("COMMIT", {}, Exception("boom"))
 
 
 def ctx_for(factory):
@@ -21,10 +20,7 @@ def ctx_for(factory):
 
 
 async def seeded(factory, guild=GUILD):
-    async with factory() as session:
-        sett = GuildSettings(guild_id=guild, **default_settings())
-        session.add(sett)
-        await session.commit()
+    await seed_settings(factory, guild)
     async with factory() as session:
         return (
             await session.execute(
@@ -44,38 +40,10 @@ async def row(factory, guild=GUILD):
         ).scalar_one()
 
 
-def with_db(test):
-    async def main():
-        async with in_memory_db(settings) as factory:
-            return await test(factory)
-
-    return run(main())
-
-
-class FailingCommit:
-    "A session factory whose commits raise while `failing` is set"
-
-    def __init__(self, factory):
-        self.factory = factory
-        self.failing = True
-
-    def __call__(self):
-        session = self.factory()
-        commit = session.commit
-
-        async def commit_or_fail():
-            if self.failing:
-                raise OperationalError("COMMIT", {}, Exception("boom"))
-            await commit()
-
-        session.commit = commit_or_fail
-        return session
-
-
 def test_a_failed_commit_returns_false_and_stores_nothing():
     async def test(factory):
         sett = await seeded(factory)
-        failing = FailingCommit(factory)
+        failing = FailingCommit(factory, FAILED_COMMIT)
         ctx = ctx_for(failing)
 
         assert (
@@ -122,7 +90,8 @@ def test_a_failed_reset_returns_false_and_stores_nothing():
 
         assert (
             await sett.reset_setting(
-                SETTINGS["default_volume"], ctx_for(FailingCommit(factory))
+                SETTINGS["default_volume"],
+                ctx_for(FailingCommit(factory, FAILED_COMMIT)),
             )
             is False
         )
