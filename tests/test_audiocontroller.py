@@ -1403,8 +1403,12 @@ def test_every_preload_failing_leaves_a_long_queue_whole_and_silent(
 @pytest.mark.parametrize(
     "head_result, played, skipped",
     [
-        pytest.param(StubLoader.Preload.EXTRACTED, ["a", "b"], [], id="head-extracted"),
-        pytest.param(StubLoader.Preload.FAILED, ["a", "c"], ["b"], id="head-failed"),
+        pytest.param(
+            StubLoader.Preload.EXTRACTED, ["a", "b"], [], id="head-extracted"
+        ),
+        pytest.param(
+            StubLoader.Preload.FAILED, ["a", "c"], ["b"], id="head-failed"
+        ),
     ],
 )
 def test_a_song_failing_in_the_background(
