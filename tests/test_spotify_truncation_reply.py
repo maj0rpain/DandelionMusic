@@ -8,6 +8,7 @@ network or Discord is involved.
 import asyncio
 
 from config import config
+from musicbot.message_link import CheckedTrack
 from musicbot import playlists
 from musicbot.commands import music
 from musicbot.commands.music import Music
@@ -26,7 +27,7 @@ def test_truncated_playlist_reply_holds_numbers_and_reason_text():
         )
     )
 
-    run(Music(None)._play_song(ctx, "t"))
+    run(Music(None)._play_song(ctx, CheckedTrack("t")))
 
     assert sent == [cut.notice(30)]
 
@@ -36,7 +37,7 @@ def test_untruncated_playlist_reply_is_queued_playlist():
         ProcessController(EnqueueOutcome(OutcomeKind.PLAYLIST, count=30))
     )
 
-    run(Music(None)._play_song(ctx, "t"))
+    run(Music(None)._play_song(ctx, CheckedTrack("t")))
 
     assert sent == [config.SONGINFO_PLAYLIST_QUEUED]
 
@@ -44,7 +45,7 @@ def test_untruncated_playlist_reply_is_queued_playlist():
 def _process(controller):
     async def main():
         controller.bot.loop = asyncio.get_running_loop()
-        return await controller.process_song("x")
+        return await controller.process_song(CheckedTrack("x"))
 
     return run(main())
 
