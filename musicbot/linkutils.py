@@ -212,8 +212,18 @@ def _is_disallowed_host(host: Optional[str]) -> bool:
 
 
 # The only schemes of remote media the bot fetches; read by identify_url's
-# custom-link check and by the ffmpeg remote protocol whitelist.
+# custom-link check, the redirect check in resolve_short_link and the
+# ffmpeg remote protocol whitelist.
 ALLOWED_REMOTE_SCHEMES = ("http", "https")
+
+
+def _is_fetchable(scheme: str, host: Optional[str]) -> bool:
+    """Whether the bot may fetch a url of this scheme and host: an
+    allowed remote scheme (any case) and a host that is not disallowed."""
+    return scheme.lower() in ALLOWED_REMOTE_SCHEMES and not (
+        _is_disallowed_host(host)
+    )
+
 
 # Hosts of link shorteners; matched exactly (case-insensitive).
 SHORT_LINK_HOSTS = frozenset(
@@ -294,10 +304,7 @@ async def resolve_short_link(url: str) -> str:
             if not (300 <= response.status < 400 and location):
                 return str(response.url)
             target = response.url.join(URL(location))
-        if (
-            target.scheme.lower() not in ALLOWED_REMOTE_SCHEMES
-            or _is_disallowed_host(target.host)
-        ):
+        if not _is_fetchable(target.scheme, target.host):
             raise RefusedRedirect(f"redirect to {target} refused")
         url = str(target)
     raise RefusedRedirect(f"more than {_MAX_REDIRECTS} redirects")
@@ -556,11 +563,9 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     if ie := get_ie(url):
         return ie
 
-    if (
-        parsed.scheme.lower() in ALLOWED_REMOTE_SCHEMES
-        and not _is_disallowed_host(parsed.hostname)
-        and parsed.path.lower().endswith(config.SUPPORTED_EXTENSIONS)
-    ):
+    if _is_fetchable(
+        parsed.scheme, parsed.hostname
+    ) and parsed.path.lower().endswith(config.SUPPORTED_EXTENSIONS):
         return SiteTypes.CUSTOM
 
     # If no match
