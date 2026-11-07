@@ -143,7 +143,7 @@ def test_config_rejects_a_non_bare_driver_naming_only_the_driver(
 
 def _uv_sync_index(commands):
     (index,) = _indices_where(
-        commands, lambda c: c.startswith("RUN") and "uv sync" in c
+        commands, lambda c: c.startswith("RUN ") and "uv sync" in c
     )
     return index
 
@@ -179,7 +179,7 @@ def test_dockerfile_copies_source_only_after_dependencies():
     early_copies = [
         c.split()[1:-1]
         for c in commands[:sync]
-        if c.startswith("COPY") and "--from=" not in c
+        if c.startswith("COPY ") and "--from=" not in c
     ]
     assert early_copies == [["pyproject.toml", "uv.lock"]]
 
@@ -196,7 +196,7 @@ def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
     import re
 
     commands = dockerfile_commands()
-    images = [c.split()[1] for c in commands if c.startswith("FROM")]
+    images = [c.split()[1] for c in commands if c.startswith("FROM ")]
     copied = []
     for c in commands:
         m = re.match(r"COPY .*--from=(\S+)", c)
@@ -214,7 +214,7 @@ def test_dockerfile_apt_installs_are_minimal_and_clean():
     commands = dockerfile_commands()
     sync = _uv_sync_index(commands)
     for i in _indices_where(commands, lambda c: "apt-get" in c):
-        assert commands[i].startswith("RUN") and i < sync
+        assert commands[i].startswith("RUN ") and i < sync
     for c in commands:
         if "apt-get install" not in c:
             continue
@@ -360,7 +360,9 @@ def test_en_json_renders_only_braced_config_names(config_factory):
     assert shipped == [str(REPO_ROOT / "config")]
     raw = jsonc.loads((REPO_ROOT / "config" / "en.json").read_text("utf-8"))
 
-    # string settings Config parses at load; a sentinel would break loading
+    # string settings Config parses at load (the database URL driver, the
+    # cookie path lookup, the hex embed colour), so a sentinel would break
+    # loading; a new parsed string setting joins the set
     parsed_at_load = {"DATABASE_URL", "COOKIE_PATH", "EMBED_COLOR"}
     sentinels = {
         k: f"SENTINEL<{k}>"
