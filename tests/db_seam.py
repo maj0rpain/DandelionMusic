@@ -1,6 +1,7 @@
 """An in-memory database with the real schema, for tests.
 
-Shared by the saved-playlists tests and the AudioController tests, so
+Shared by the saved-playlists, guild whitelist, guild settings and
+AudioController tests, so
 the StaticPool detail lives in one place.
 """
 

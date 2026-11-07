@@ -153,23 +153,22 @@ def test_a_failed_write_is_reported_on_reset(missing_row):
     assert not any(m and "reset to" in m for m in sent)
 
 
-def test_the_update_and_failure_replies_come_from_the_catalogue(monkeypatch):
+def test_the_update_reply_comes_from_the_catalogue(monkeypatch):
     monkeypatch.setattr(config, "SETTING_UPDATED", "UPD[{}|{}]")
-    monkeypatch.setattr(config, "SETTING_UPDATE_FAILED", "FAIL[{}]")
 
     updated = invoke_setting("default_volume", 50, stored_settings())
-    with monkeypatch.context() as m:
-
-        async def execute(self, statement):
-            return types.SimpleNamespace(rowcount=0)
-
-        m.setattr(FakeDbSession, "execute", execute)
-        failed_update = invoke_setting("default_volume", 50, stored_settings())
-        failed_reset = invoke_setting(
-            "default_volume", NO_VALUE, stored_settings()
-        )
 
     assert updated[-1] == "UPD[default_volume|50]"
+
+
+def test_the_failure_replies_come_from_the_catalogue(monkeypatch, missing_row):
+    monkeypatch.setattr(config, "SETTING_UPDATE_FAILED", "FAIL[{}]")
+
+    failed_update = invoke_setting("default_volume", 50, stored_settings())
+    failed_reset = invoke_setting(
+        "default_volume", NO_VALUE, stored_settings()
+    )
+
     assert failed_update[-1] == "FAIL[default_volume]"
     assert failed_reset[-1] == "FAIL[default_volume]"
 
