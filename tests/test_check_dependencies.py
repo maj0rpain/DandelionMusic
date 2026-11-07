@@ -29,9 +29,21 @@ libswresample   4.  8.100 /  4.  8.100
 """.strip()
 
 
+class FakeFfmpegProbe:
+    """Recorded `check_output` kwargs and the scripted probe result.
+
+    A string `result` is returned; a `BaseException` is raised.
+    """
+
+    def __init__(self):
+        self.calls = []
+        self.result = "ffmpeg version 7.0"
+
+
 @pytest.fixture
 def probe(monkeypatch, tmp_path):
-    """Patch the boundaries; return the list of probe calls' kwargs."""
+    """Patch the boundaries; return the fake ffmpeg probe
+    (recorded calls and scripted result)."""
     monkeypatch.chdir(tmp_path)
     monkeypatch.setattr(
         subprocess, "CREATE_NO_WINDOW", 0x08000000, raising=False
@@ -45,20 +57,16 @@ def probe(monkeypatch, tmp_path):
     monkeypatch.setattr(socket.socket, "connect", no_network)
     monkeypatch.setattr(socket, "create_connection", no_network)
 
-    class Probe(list):
-        state = {"result": "ffmpeg version 7.0"}
-
-    calls = Probe()
+    fake = FakeFfmpegProbe()
 
     def fake_check_output(cmd, **kwargs):
-        calls.append(kwargs)
-        result = calls.state["result"]
-        if isinstance(result, BaseException):
-            raise result
-        return result
+        fake.calls.append(kwargs)
+        if isinstance(fake.result, BaseException):
+            raise fake.result
+        return fake.result
 
     monkeypatch.setattr(utils, "check_output", fake_check_output)
-    return calls
+    return fake
 
 
 def _assert_not_found(tmp_path):
@@ -68,8 +76,7 @@ def _assert_not_found(tmp_path):
     assert message.startswith("ffmpeg was not found")
     assert "install" in message.lower()
     assert "PATH" in message
-    assert not (tmp_path / "ffmpeg.exe").exists()
-    assert list(tmp_path.iterdir()) == []
+    assert list(tmp_path.iterdir()) == [], "no ffmpeg.exe may be written"
 
 
 @pytest.mark.parametrize("platform", ["win32", "linux"])
@@ -82,7 +89,7 @@ def test_missing_ffmpeg_raises_install_advice(
     monkeypatch, tmp_path, probe, platform, error
 ):
     monkeypatch.setattr(sys, "platform", platform)
-    probe.state["result"] = error
+    probe.result = error
     _assert_not_found(tmp_path)
 
 
@@ -91,7 +98,7 @@ def test_old_solaluset_ffmpeg_on_windows_starts_normally(
     monkeypatch, probe, version
 ):
     monkeypatch.setattr(sys, "platform", "win32")
-    probe.state["result"] = version
+    probe.result = version
     utils.check_dependencies()
 
 
@@ -101,7 +108,7 @@ def test_old_solaluset_ffmpeg_on_windows_starts_normally(
 def test_probe_creationflags(monkeypatch, probe, platform, flags):
     monkeypatch.setattr(sys, "platform", platform)
     utils.check_dependencies()
-    assert probe[0]["creationflags"] == flags
+    assert probe.calls[0]["creationflags"] == flags
 
 
 def test_missing_opus_raises(monkeypatch, probe):

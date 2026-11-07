@@ -35,3 +35,21 @@ async def seed_whitelist(factory, *ids):
         for guild_id in ids:
             session.add(WhitelistedGuild(guild_id=str(guild_id)))
         await session.commit()
+
+
+class FailingSessionFactory:
+    """Wraps a real sessionmaker; the named session method (`"commit"`
+    or `"flush"`) of every session it makes raises `error`."""
+
+    def __init__(self, inner, method, error):
+        self._inner = inner
+        self._method = method
+        self._error = error
+
+    def __call__(self):
+        session = self._inner()
+        setattr(session, self._method, self._fail)
+        return session
+
+    async def _fail(self, *args, **kwargs):
+        raise self._error

@@ -55,6 +55,14 @@ def _pages(output: str) -> List[str]:
     return [OUTPUT_FORMAT.format(page) for page in pages if page]
 
 
+async def _send_pages(ctx, output: str) -> bool:
+    """Send the pages of `output` in order; say whether there were any."""
+    pages = _pages(output)
+    for page in pages:
+        await ctx.send(page)
+    return bool(pages)
+
+
 async def run_and_report(ctx, argv: List[str]) -> None:
     """Run a command without blocking the loop and reply with its output."""
     process = await asyncio.create_subprocess_exec(
@@ -67,11 +75,7 @@ async def run_and_report(ctx, argv: List[str]) -> None:
     raw, _ = await process.communicate()
     output = raw.decode("utf-8", errors="replace")
 
-    pages = _pages(output)
-    if pages:
-        for page in pages:
-            await ctx.send(page)
-    else:
+    if not await _send_pages(ctx, output):
         await ctx.send("No output.")
     if process.returncode:
         await ctx.send(
@@ -142,11 +146,7 @@ class Developer(commands.Cog):
             print_exc(file=output)
         output = output.getvalue()
 
-        pages = _pages(output)
-        if pages:
-            for page in pages:
-                await ctx.send(page)
-        else:
+        if not await _send_pages(ctx, output):
             try:
                 suppress = ctx.channel.last_message.author == ctx.me
             except AttributeError:

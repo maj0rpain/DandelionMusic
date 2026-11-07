@@ -71,3 +71,11 @@ def test_execute_no_output_sends_nothing_after_bots_own_message():
     ctx.channel.last_message = types.SimpleNamespace(author=ctx.me)
     run(cog._execute.callback(cog, ctx, code="pass"))
     assert ctx.sent == []
+
+
+def test_execute_no_output_replies_after_another_authors_message():
+    cog = Developer(None)
+    ctx = FakeCtx(FakeBot([]))
+    ctx.channel.last_message = types.SimpleNamespace(author=object())
+    run(cog._execute.callback(cog, ctx, code="pass"))
+    assert ctx.sent == ["No output."]

@@ -11,11 +11,12 @@ import json
 import typing
 
 import pytest
+from sqlalchemy.exc import IntegrityError
 
 from musicbot import playlists, settings
 from musicbot.playlists import PlaylistEntry, PlaylistRef
 from musicbot.settings import SavedPlaylist
-from db_seam import in_memory_db
+from db_seam import FailingSessionFactory, in_memory_db
 from helpers import run
 
 GUILD = "123"
@@ -183,6 +184,20 @@ def test_saving_a_duplicate_name_reports_it_and_keeps_the_original():
         return await load(factory)
 
     assert run_with_db(test) == [A]
+
+
+def test_a_commit_failing_for_another_reason_is_not_reported_as_a_clash():
+    error = IntegrityError("commit", {}, Exception("boom"))
+
+    async def test(factory):
+        failing = FailingSessionFactory(factory, "commit", error)
+        with pytest.raises(IntegrityError) as raised:
+            await playlists.save(failing, MIX, [A])
+        return raised.value, await playlists.get(factory, MIX)
+
+    raised, found = run_with_db(test)
+    assert raised is error
+    assert found is None
 
 
 def test_a_255_character_name_saves_and_a_256_one_is_refused():

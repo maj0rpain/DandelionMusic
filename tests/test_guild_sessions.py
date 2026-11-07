@@ -18,6 +18,10 @@ from discord_fakes import FakePanel
 from helpers import run
 
 
+async def _failing_dispose(*args, **kwargs):
+    raise RuntimeError("dispose failed")
+
+
 class FakeGuild:
     def __init__(self, guild_id):
         self.id = guild_id
@@ -163,12 +167,9 @@ def test_discard_disposes_the_controller_and_drops_both_halves(controller):
 def test_discard_drops_both_halves_even_when_dispose_raises(sessions):
     guild = FakeGuild(1)
 
-    async def failing_dispose():
-        raise RuntimeError("dispose failed")
-
     async def scenario():
         controller = await sessions.get_or_create(guild)
-        controller.dispose = failing_dispose
+        controller.dispose = _failing_dispose
         await sessions.discard(guild)
 
     with pytest.raises(RuntimeError):
@@ -245,12 +246,9 @@ def test_a_reset_whose_dispose_fails_still_builds_a_fresh_controller(
 ):
     guild = FakeGuild(1)
 
-    async def failing_dispose(reason="left guild"):
-        raise RuntimeError("dispose failed")
-
     async def scenario():
         old = await sessions.get_or_create(guild)
-        old.dispose = failing_dispose
+        old.dispose = _failing_dispose
         settings = sessions.settings(guild)
         new = await sessions.reset(guild)
         return old, settings, new
@@ -268,12 +266,9 @@ def test_a_reset_whose_dispose_and_build_fail_leaves_settings_only(
 ):
     guild = FakeGuild(1)
 
-    async def failing_dispose(reason="left guild"):
-        raise RuntimeError("dispose failed")
-
     async def scenario():
         old = await sessions.get_or_create(guild)
-        old.dispose = failing_dispose
+        old.dispose = _failing_dispose
         factory.fail = True
         with pytest.raises(RuntimeError, match="factory failed"):
             await sessions.reset(guild)

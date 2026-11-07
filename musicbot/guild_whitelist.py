@@ -110,7 +110,11 @@ async def add(
             await session.flush()
         except IntegrityError:
             await session.rollback()
-            return WhitelistChange(Outcome.ALREADY_LISTED)
+            # Only a clash with a row another session committed counts
+            # as "already listed"; any other IntegrityError is re-raised.
+            if guild_id in await _listed(session):
+                return WhitelistChange(Outcome.ALREADY_LISTED)
+            raise
         # Decided from the read after our own write, inside the write
         # transaction, so a concurrent add cannot also see an empty list.
         after = await _listed(session)
