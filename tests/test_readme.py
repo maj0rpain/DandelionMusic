@@ -3,7 +3,6 @@ nothing points to upstream or lets a cookies file be committed."""
 
 import re
 import subprocess
-from pathlib import Path
 
 from musicbot.bot import _help as help_command
 from musicbot.commands.developer import Developer
@@ -11,8 +10,9 @@ from musicbot.commands.general import General
 from musicbot.commands.library import Library
 from musicbot.commands.music import Music
 
-ROOT = Path(__file__).resolve().parent.parent
-README = (ROOT / "README.md").read_text(encoding="utf-8")
+from helpers import REPO_ROOT
+
+README = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 UPSTREAM = "solaluset/DandelionMusic"
 
 
@@ -40,7 +40,9 @@ def _commands():
 
 
 def test_no_upstream_links():
-    cookies = (ROOT / "config/cookies/cookies.txt").read_text(encoding="utf-8")
+    cookies = (REPO_ROOT / "config/cookies/cookies.txt").read_text(
+        encoding="utf-8"
+    )
     assert UPSTREAM not in README
     assert UPSTREAM not in cookies
 
@@ -48,7 +50,7 @@ def test_no_upstream_links():
 def ignored(path):
     result = subprocess.run(
         ["git", "check-ignore", "--no-index", "-q", path],
-        cwd=ROOT,
+        cwd=REPO_ROOT,
         stdin=subprocess.DEVNULL,
     )
     return result.returncode == 0
@@ -63,5 +65,7 @@ def test_placeholder_cookies_file_stays_tracked():
 
 
 def test_dockerignore_excludes_the_cookies_directory():
-    lines = (ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    lines = (
+        (REPO_ROOT / ".dockerignore").read_text(encoding="utf-8").splitlines()
+    )
     assert "config/cookies/*" in [line.strip() for line in lines]

@@ -17,7 +17,7 @@ import pytest
 
 from config.config import ENV_ALIASES, Config
 
-REPO_ROOT = Path(__file__).resolve().parent.parent
+from helpers import REPO_ROOT
 
 IMPORT_PROBE = """
 import atexit
