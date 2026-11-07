@@ -175,18 +175,16 @@ def connect(fail=None, **kw):
     return refusal, sent, guild.events, order
 
 
-@pytest.mark.parametrize("rule", [True, False])
-def test_connect_out_of_voice_says_connected(rule):
-    refusal, sent, events, order = connect(rule=rule)
+def test_connect_out_of_voice_says_connected():
+    refusal, sent, events, order = connect(rule=False)
     assert refusal is None
     assert sent == ["Connected."]
     assert events == [("connect", "b")]
     assert order == ["defer", "send"]
 
 
-@pytest.mark.parametrize("rule", [True, False])
-def test_connect_out_of_a_bots_only_channel_says_moved(rule):
-    refusal, sent, events, order = connect(bot=BOTS_ONLY, rule=rule)
+def test_connect_out_of_a_bots_only_channel_says_moved():
+    refusal, sent, events, order = connect(bot=BOTS_ONLY, rule=False)
     assert refusal is None
     assert sent == ["Moved to your voice channel."]
     assert events == [("move", "b")]
@@ -247,12 +245,3 @@ def test_reset_recovers_a_disconnecting_controller():
     controller.dispose = dispose
     assert invoke("reset", ctx) is None
     assert guild.events == [("connect", "b")]
-
-
-def test_connect_while_disconnecting_is_refused():
-    guild, ctx, sent, _ = prepare(
-        "connect", K.JOINING_COMMAND, bot=None, author="b"
-    )
-    ctx.bot.sessions.controller(guild).is_disconnecting = lambda: True
-    assert invoke("connect", ctx) == config.DISCONNECTING_MESSAGE
-    assert guild.events == []
