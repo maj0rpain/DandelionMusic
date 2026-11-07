@@ -79,9 +79,10 @@ def test_delete_removes_the_playlist():
     async def test(factory):
         await playlists.save(factory, MIX, [A])
         await playlists.delete(factory, MIX)
-        return await playlists.get(factory, MIX)
+        with pytest.raises(playlists.PlaylistNotFound):
+            await playlists.get(factory, MIX)
 
-    assert run_with_db(test) is None
+    run_with_db(test)
 
 
 def test_set_title_updates_only_the_matching_url():
@@ -169,11 +170,12 @@ def test_operations_on_a_missing_playlist_report_not_found(operation):
     run_with_db(test)
 
 
-def test_get_on_a_missing_playlist_returns_none():
+def test_get_on_a_missing_playlist_raises_not_found():
     async def test(factory):
-        return await playlists.get(factory, GONE)
+        with pytest.raises(playlists.PlaylistNotFound):
+            await playlists.get(factory, GONE)
 
-    assert run_with_db(test) is None
+    run_with_db(test)
 
 
 def test_saving_a_duplicate_name_reports_it_and_keeps_the_original():
@@ -193,22 +195,23 @@ def test_a_commit_failing_for_another_reason_is_not_reported_as_a_clash():
         failing = FailingSessionFactory(factory, "commit", error)
         with pytest.raises(IntegrityError) as raised:
             await playlists.save(failing, MIX, [A])
-        return raised.value, await playlists.get(factory, MIX)
+        with pytest.raises(playlists.PlaylistNotFound):
+            await playlists.get(factory, MIX)
+        return raised.value
 
-    raised, found = run_with_db(test)
-    assert raised is error
-    assert found is None
+    assert run_with_db(test) is error
 
 
 def test_a_255_character_name_saves_and_a_256_one_is_refused():
     async def test(factory):
         fits = PlaylistRef(GUILD, "x" * 255)
         await playlists.save(factory, fits, [A])
-        with pytest.raises(playlists.PlaylistNameTooLong):
+        with pytest.raises(playlists.PlaylistNameTooLong) as refused:
             await playlists.save(factory, PlaylistRef(GUILD, "x" * 256), [A])
-        return await playlists.list_names(factory, GUILD)
+        names = await playlists.list_names(factory, GUILD)
+        return names, refused.value.max_length
 
-    assert run_with_db(test) == ["x" * 255]
+    assert run_with_db(test) == (["x" * 255], 255)
 
 
 STORED = '[{"url": "https://a.example/1", "title": "a"}]'
@@ -221,9 +224,10 @@ def test_an_existing_256_character_name_still_works():
         assert await playlists.get(factory, long_ref) is not None
         await playlists.add_songs(factory, long_ref, [B])
         await playlists.delete(factory, long_ref)
-        return await playlists.get(factory, long_ref)
+        with pytest.raises(playlists.PlaylistNotFound):
+            await playlists.get(factory, long_ref)
 
-    assert run_with_db(test) is None
+    run_with_db(test)
 
 
 @pytest.mark.parametrize(
@@ -387,9 +391,11 @@ def test_delete_overlapping_edit_leaves_it_deleted(first_operation):
             first_operation,
             lambda f: playlists.delete(f, MIX),
         )
-        return first, second, await playlists.get(factory, MIX)
+        with pytest.raises(playlists.PlaylistNotFound):
+            await playlists.get(factory, MIX)
+        return first, second
 
-    assert run_with_db(test) == (None, None, None)
+    assert run_with_db(test) == (None, None)
 
 
 def test_add_songs_overlapping_delete_reports_not_found():
@@ -400,12 +406,13 @@ def test_add_songs_overlapping_delete_reports_not_found():
             lambda f: playlists.delete(f, MIX),
             lambda f: playlists.add_songs(f, MIX, [B]),
         )
-        return first, second, await playlists.get(factory, MIX)
+        with pytest.raises(playlists.PlaylistNotFound):
+            await playlists.get(factory, MIX)
+        return first, second
 
-    first, second, left = run_with_db(test)
+    first, second = run_with_db(test)
     assert first is None
     assert isinstance(second, playlists.PlaylistNotFound)
-    assert left is None
 
 
 def test_an_edit_to_another_playlist_does_not_wait():

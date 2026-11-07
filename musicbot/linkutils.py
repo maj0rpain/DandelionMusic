@@ -111,6 +111,14 @@ url_regex = re.compile(
     r'"'
     r".,<>?«»“”‘’])))"
 )
+
+
+def bare_url(url: str) -> str:
+    """A url's bare form when ``url_regex`` matches it, else the url."""
+    match = url_regex.fullmatch(url)
+    return match.group("bare") if match else url
+
+
 # the Spotify types the link and URI patterns accept, case-sensitive
 _SPOTIFY_TYPES = "track|playlist|album"
 spotify_regex = re.compile(

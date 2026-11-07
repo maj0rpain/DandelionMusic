@@ -396,8 +396,9 @@ class GuildSettings(Base):
         return await self._store_setting(descriptor, ctx, descriptor.default)
 
 
-# The longest saved-playlist name `playlists.save` accepts; also the
-# length of the name column on MySQL.
+# The longest saved-playlist name `playlists.save` accepts; also the length
+# of the name column on MySQL. Defined here, not in `musicbot.playlists`,
+# because that module imports this one and the column needs it.
 PLAYLIST_NAME_MAX_LENGTH = 255
 
 

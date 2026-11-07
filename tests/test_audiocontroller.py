@@ -7,6 +7,7 @@ directory set to tmp_path so the controller's backup/ lands there.
 """
 
 import asyncio
+import inspect
 import pickle
 import sys
 import threading
@@ -42,7 +43,6 @@ from controller_seam import (
     controller_seam,
 )
 from db_seam import in_memory_db
-from discord_fakes import EXPIRED
 from helpers import attribute_names, imported_names, run
 
 MIX = playlists.PlaylistRef("1234", "mix")
@@ -1311,21 +1311,31 @@ def test_the_teardown_hop_after_a_disconnect_keeps_the_backup(
     assert len(old.played) == 1
 
 
-def _gated_preload(stub_loader, title):
-    """Makes preload() of `title` wait on one future per call, in call
-    order; returns those futures. Other titles succeed at once."""
-    futures = []
+def _install_gated_preload(stub_loader, title, gate):
+    """Wraps preload(): a song titled `title` is awaited through
+    `gate(song)`; other titles fall through to the original preload."""
     original = stub_loader.preload
 
     async def preload(song):
         if song.title != title:
             return await original(song)
+        return await gate(song)
+
+    stub_loader.preload = preload
+
+
+def _gated_preload(stub_loader, title):
+    """Makes preload() of `title` wait on one future per call, in call
+    order; returns those futures. Other titles succeed at once."""
+    futures = []
+
+    async def gate(song):
         stub_loader.calls.append(("preload", (song,)))
         future = asyncio.get_running_loop().create_future()
         futures.append(future)
         return await future
 
-    stub_loader.preload = preload
+    _install_gated_preload(stub_loader, title, gate)
     return futures
 
 
@@ -1369,8 +1379,19 @@ def test_every_preload_failing_leaves_a_long_queue_whole_and_silent(
     assert controller.panel.skipped == []
 
 
-def test_a_song_failing_in_the_background_plays_when_its_own_preload_works(
-    controller, stub_loader, monkeypatch
+@pytest.mark.parametrize(
+    "head_result, played, skipped",
+    [
+        pytest.param(
+            StubLoader.Preload.EXTRACTED, ["a", "b"], [], id="head-extracted"
+        ),
+        pytest.param(
+            StubLoader.Preload.FAILED, ["a", "c"], ["b"], id="head-failed"
+        ),
+    ],
+)
+def test_a_song_failing_in_the_background(
+    controller, stub_loader, monkeypatch, head_result, played, skipped
 ):
     _fake_ffmpeg(monkeypatch)
     _queue(controller, "a", "b", "c")
@@ -1382,37 +1403,23 @@ def test_a_song_failing_in_the_background_plays_when_its_own_preload_works(
         await _settle()
         controller.skip()
         await _settle()
-        futures[1].set_result(stub_loader.Preload.EXTRACTED)
+        futures[1].set_result(head_result)
 
     _run(controller, scenario)
 
-    assert _played(controller) == ["a", "b"]
-    assert controller.panel.skipped == []
+    assert _played(controller) == played
+    assert [song.title for song in controller.panel.skipped] == skipped
 
 
-def test_a_song_failing_in_the_background_and_at_the_head_is_reported_once(
-    controller, stub_loader, monkeypatch
-):
-    _fake_ffmpeg(monkeypatch)
-    _queue(controller, "a", "b", "c")
-
-    async def scenario():
-        futures = _gated_preload(stub_loader, "b")
-        await _start_playing(controller)
-        futures[0].set_result(stub_loader.Preload.FAILED)
-        await _settle()
-        controller.skip()
-        await _settle()
-        futures[1].set_result(stub_loader.Preload.FAILED)
-
-    _run(controller, scenario)
-
-    assert _played(controller) == ["a", "c"]
-    assert [song.title for song in controller.panel.skipped] == ["b"]
-
-
-def test_stop_ends_a_sweep_even_when_songs_are_queued_again(
-    controller, stub_loader, monkeypatch
+@pytest.mark.parametrize(
+    "end_sweep",
+    [
+        pytest.param(lambda c: c.stop(), id="stop"),
+        pytest.param(lambda c: c.udisconnect("test"), id="teardown"),
+    ],
+)
+def test_ending_a_sweep_even_when_songs_are_queued_again(
+    controller, stub_loader, monkeypatch, end_sweep
 ):
     _fake_ffmpeg(monkeypatch)
     songs = _queue(controller, "a", "b", "c")
@@ -1420,7 +1427,9 @@ def test_stop_ends_a_sweep_even_when_songs_are_queued_again(
     async def scenario():
         futures = _gated_preload(stub_loader, "b")
         await _start_playing(controller)
-        controller.stop()
+        result = end_sweep(controller)
+        if inspect.isawaitable(result):
+            await result
         await _settle()
         controller.playlist.add(songs[2])
         futures[0].set_result(stub_loader.Preload.EXTRACTED)
@@ -1450,35 +1459,13 @@ def test_a_new_sweep_supersedes_the_running_one(
     assert _preloaded(stub_loader).count("c") == 1
 
 
-def test_teardown_ends_a_sweep_awaiting_a_preload(
-    controller, stub_loader, monkeypatch
-):
-    _fake_ffmpeg(monkeypatch)
-    songs = _queue(controller, "a", "b", "c")
-
-    async def scenario():
-        futures = _gated_preload(stub_loader, "b")
-        await _start_playing(controller)
-        await controller.udisconnect("test")
-        await _settle()
-        controller.playlist.add(songs[2])
-        futures[0].set_result(stub_loader.Preload.EXTRACTED)
-
-    _run(controller, scenario)
-
-    assert "c" not in _preloaded(stub_loader)
-
-
 def _shared_gated_preload(stub_loader, title):
     """Like loader.preload for `title`: one in-flight future per song
     shared by its callers, resolved as failed when the caller that
     started it is cancelled. Returns the in-flight futures by song."""
     inflight = {}
-    original = stub_loader.preload
 
-    async def preload(song):
-        if song.title != title:
-            return await original(song)
+    async def gate(song):
         future = inflight.get(song)
         if future is not None:
             return await asyncio.shield(future)
@@ -1491,7 +1478,7 @@ def _shared_gated_preload(stub_loader, title):
                 future.set_result(stub_loader.Preload.FAILED)
             raise
 
-    stub_loader.preload = preload
+    _install_gated_preload(stub_loader, title, gate)
     return inflight
 
 
@@ -1706,6 +1693,16 @@ def test_the_snapshot_has_previous_only_with_history(controller):
     controller.playlist.playhistory.append(_song(controller, "old"))
 
     assert controller.panel_snapshot().has_previous
+
+
+def test_has_prev_follows_history_and_loop_all(controller):
+    assert not controller.has_prev()
+
+    controller.playlist.playhistory.append(_song(controller, "old"))
+    assert controller.has_prev()
+
+    controller.playlist.loop = LoopMode.ALL
+    assert not controller.has_prev()
 
 
 def test_current_song_is_nothing_when_active_with_an_empty_queue(controller):
@@ -2486,6 +2483,8 @@ def test_a_failed_skipped_notice_still_lets_the_queue_advance(
     _run(real, scenario)
 
     assert _played(real) == ["next"]
+    assert "slow" not in _titles(real)
+    assert _titles(real)[0] == "next"
 
 
 def test_the_controller_keeps_no_command_channel(controller):
@@ -2848,13 +2847,14 @@ def test_restore_of_an_unreadable_backup_changes_nothing(
     assert "Error(" in err
 
 
-def _failing_preloads(stub_loader, *titles):
-    """Makes the preload of every song titled in `titles` fail."""
+def _failing_preloads(stub_loader, *titles, when=lambda song: True):
+    """Makes the preload of every song titled in `titles` fail, when
+    `when(song)` holds."""
     original = stub_loader.preload
 
     async def preload(song):
         result = await original(song)
-        if song.title in titles:
+        if song.title in titles and when(song):
             return stub_loader.Preload.FAILED
         return result
 
@@ -2872,26 +2872,7 @@ def _loop_all(controller):
     controller.playlist.loop = LoopMode.ALL
 
 
-def test_loop_all_one_song_whose_preload_fails_is_reported_once_and_idles(
-    controller, stub_loader, monkeypatch, tmp_path
-):
-    _fake_ffmpeg(monkeypatch)
-    _queue(controller, "broken")
-    _loop_all(controller)
-    _failing_preloads(stub_loader, "broken")
-
-    _run(controller, lambda: _start_playing(controller))
-
-    assert [s.title for s in controller.panel.skipped] == ["broken"]
-    assert _titles(controller) == []
-    assert controller.timer._task is not None
-    assert _played(controller) == []
-    assert _preload_counts(stub_loader) == {"broken": 1}
-    assert _backup(controller, tmp_path) == []
-    assert _play_history(controller) == []
-
-
-def _play_history(controller):
+def _history_songs(controller):
     return [s.title for s in controller.playlist.playhistory]
 
 
@@ -2911,7 +2892,7 @@ def test_loop_all_every_preload_failing_drains_to_idle(
     assert _played(controller) == []
     assert _preload_counts(stub_loader) == {"a": 1, "b": 1, "c": 1}
     assert _backup(controller, tmp_path) == []
-    assert _play_history(controller) == []
+    assert _history_songs(controller) == []
 
 
 def test_loop_all_song_without_a_url_is_reported_once_and_removed(
@@ -2929,23 +2910,19 @@ def test_loop_all_song_without_a_url_is_reported_once_and_removed(
     assert _played(controller) == []
     assert _preload_counts(stub_loader) == {"no url": 1}
     assert _backup(controller, tmp_path) == []
-    assert _play_history(controller) == []
+    assert _history_songs(controller) == []
 
 
 def _failing_at_the_head(controller, stub_loader, *titles):
     """Makes the preload of a song titled in `titles` fail only while
     it is the queue head, so the preload sweep behind the head leaves
     it for the failed-track path."""
-    original = stub_loader.preload
 
-    async def preload(song):
-        result = await original(song)
+    def at_the_head(song):
         queue = controller.playlist.playque
-        if song.title in titles and queue and queue[0] is song:
-            return stub_loader.Preload.FAILED
-        return result
+        return bool(queue) and queue[0] is song
 
-    stub_loader.preload = preload
+    _failing_preloads(stub_loader, *titles, when=at_the_head)
 
 
 def test_loop_all_mixed_queue_drops_failing_songs_and_keeps_the_rest(
@@ -2974,7 +2951,7 @@ def test_loop_all_mixed_queue_drops_failing_songs_and_keeps_the_rest(
 
     assert [s.title for s in controller.panel.skipped] == ["bad", "worse"]
     assert sorted(_titles(controller)) == ["fine", "good"]
-    assert _play_history(controller) == []
+    assert _history_songs(controller) == []
 
 
 class _HookedPanel(RecordingPanel):
@@ -3023,30 +3000,6 @@ def test_a_start_overtaken_after_its_report_drops_and_starts_nothing(
     assert voice.played == []
 
 
-def test_a_failed_notice_send_still_drops_and_moves_on(
-    expired_panel_seam, monkeypatch
-):
-    real, stub_loader = expired_panel_seam
-    _fake_ffmpeg(monkeypatch)
-    _queue(real, "broken", "next")
-    _failing_preloads(stub_loader, "broken")
-    sends = []
-
-    class RefusingChannel:
-        async def send(self, *args, **kwargs):
-            sends.append(args)
-            raise EXPIRED
-
-    real.panel.direct_to(RefusingChannel())
-
-    _run(real, lambda: _start_playing(real))
-
-    assert sends
-    assert _played(real) == ["next"]
-    assert _titles(real)[0] == "next"
-    assert "broken" not in _titles(real)
-
-
 # --- a track that ends on its own having produced no audio ------------
 
 
@@ -3070,7 +3023,7 @@ def test_a_track_ending_on_its_own_with_no_audio_is_a_failed_track(
     assert _played(controller) == ["dead", "next"]
     assert _preload_counts(stub_loader)["dead"] == 1
     assert _backup(controller, tmp_path) == ["next"]
-    assert _play_history(controller) == []
+    assert _history_songs(controller) == []
     assert "dead" in _track_names(controller)
 
 
@@ -3243,7 +3196,7 @@ def test_a_skip_on_a_track_with_no_audio_is_not_a_failure(
 
     assert _played(controller)[1:] == played
     assert _titles(controller) == titles
-    assert _play_history(controller) == history
+    assert _history_songs(controller) == history
 
 
 # the queue's real step-back: history under OFF/SINGLE, rotation under ALL
@@ -3387,6 +3340,63 @@ def test_requests_during_the_goodbye_are_refused_and_place_nothing(
         ac.RestoreResult.REFUSED_WHILE_DISCONNECTING,
     ]
     assert state == expected
+
+
+def test_prev_during_the_goodbye_is_refused_and_changes_nothing(
+    controller, monkeypatch, tmp_path
+):
+    _quick_goodbye(monkeypatch)
+    _queue(controller, "first", "second")
+
+    def state(client):
+        return (
+            _titles(controller),
+            [s.title for s in controller.playlist.playhistory],
+            len(client.played),
+            _backup_path(controller, tmp_path).read_bytes(),
+        )
+
+    async def scenario():
+        task = await _hold_goodbye(controller)
+        _old_track(controller)
+        client = controller.guild.voice_client
+        before = state(client)
+        result = controller.prev_song()
+        await _settle()
+        after = state(client)
+        await _end_goodbye(controller, task)
+        return result, before, after
+
+    result, before, after = _run(controller, scenario)
+
+    assert result is False
+    assert after == before
+
+
+def test_prev_out_of_voice_is_refused_and_changes_nothing(
+    controller, tmp_path
+):
+    _queue(controller, "first")
+    _save_backup(controller)
+    _old_track(controller)
+    controller.guild.voice_client = None
+
+    def state():
+        return (
+            _titles(controller),
+            [s.title for s in controller.playlist.playhistory],
+            _backup_path(controller, tmp_path).read_bytes(),
+        )
+
+    before = state()
+
+    async def scenario():
+        return controller.prev_song()
+
+    result = _run(controller, scenario)
+
+    assert result is False
+    assert state() == before
 
 
 def test_a_request_after_the_goodbye_starts_on_a_reconnected_client(

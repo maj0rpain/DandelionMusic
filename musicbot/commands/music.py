@@ -9,7 +9,6 @@ from config import config
 from musicbot import admission, utils, loader, playlists
 from musicbot.outcome import BatchReport, send_outcome
 from musicbot.player_panel import send_song_info
-from musicbot.settings import PLAYLIST_NAME_MAX_LENGTH
 from musicbot.song import Song
 from musicbot.bot import MusicBot, Context
 from musicbot.utils import dj_check, chunks, joining_command
@@ -19,7 +18,7 @@ from musicbot.audiocontroller import (
 )
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
-from musicbot.linkutils import get_site_type
+from musicbot.linkutils import bare_url, get_site_type
 from musicbot.message_link import check_message_link
 from musicbot.views import MusicButton, OwnedView, SimplePaginator
 
@@ -135,9 +134,7 @@ def _saved_playlist_error_reply(e: playlists.SavedPlaylistError) -> str:
     if isinstance(e, playlists.PlaylistExists):
         return config.PLAYLIST_ALREADY_EXISTS
     if isinstance(e, playlists.PlaylistNameTooLong):
-        return config.PLAYLIST_NAME_TOO_LONG.format(
-            max_length=PLAYLIST_NAME_MAX_LENGTH
-        )
+        return config.PLAYLIST_NAME_TOO_LONG.format(max_length=e.max_length)
     if isinstance(e, playlists.OnlySongInPlaylist):
         return "Can't remove the only song from playlist."
     raise e
@@ -169,10 +166,10 @@ class Music(commands.Cog):
 
     async def cog_before_invoke(self, ctx):
         # The hook never joins voice: a joining command joins in its
-        # own body (_enter), once its checks on its input have passed.
+        # own body (_join_voice), once its checks on its input have passed.
         ctx.bot.sessions.direct_panel(ctx.guild, ctx.channel)
 
-    async def _enter(self, ctx):
+    async def _join_voice(self, ctx):
         """Joins voice for a joining command, after its own input
         checks. A slow connect must not push a slash command past
         Discord's 3-second deadline, so it is deferred first -
@@ -204,7 +201,7 @@ class Music(commands.Cog):
             await ctx.send(e)
             return
 
-        await self._enter(ctx)
+        await self._join_voice(ctx)
         await ctx.defer()
         await self._play_song(ctx, track, playnext=playnext)
 
@@ -386,7 +383,7 @@ class Music(commands.Cog):
         await ctx.defer()  # restoring extracts the head of the backup
         result = ctx.audiocontroller.load_backup()
         if result is RestoreResult.READY:
-            await self._enter(ctx)
+            await self._join_voice(ctx)
             result = await ctx.audiocontroller.start_restored()
         if result is RestoreResult.REFUSED_WHILE_ACTIVE:
             await ctx.send(config.RESTORE_WHILE_ACTIVE)
@@ -419,12 +416,14 @@ class Music(commands.Cog):
     @commands.check(dj_check)
     @joining_command
     async def _prev(self, ctx):
-        if not ctx.audiocontroller.playlist.has_prev():
+        if not ctx.audiocontroller.has_prev():
             await ctx.send(config.NO_PREVIOUS_TRACK)
             return
-        await self._enter(ctx)
+        await self._join_voice(ctx)
         if ctx.audiocontroller.prev_song():
             await ctx.send("Playing previous song :track_previous:")
+        elif ctx.audiocontroller.is_disconnecting():
+            await ctx.send(config.DISCONNECTING_MESSAGE)
         else:
             await ctx.send(config.NO_PREVIOUS_TRACK)
 
@@ -542,10 +541,7 @@ class Music(commands.Cog):
         except playlists.SavedPlaylistError as e:
             await ctx.send(_saved_playlist_error_reply(e))
             return
-        if contents is None:
-            await ctx.send(config.PLAYLIST_NOT_FOUND)
-            return
-        await self._enter(ctx)
+        await self._join_voice(ctx)
         outcome = await ctx.audiocontroller.enqueue(
             (
                 Song(
@@ -623,16 +619,13 @@ class Music(commands.Cog):
         except playlists.SavedPlaylistError as e:
             await ctx.send(_saved_playlist_error_reply(e))
             return
-        if contents is None:
-            await ctx.send(config.PLAYLIST_NOT_FOUND)
-            return
         pages = []
         i = 1
         for part in chunks(contents.entries, 25):
             embed = Embed(title=contents.ref.name)
             for song in part:
                 url = song.url
-                title = song.title or utils.bare_url(url)
+                title = song.title or bare_url(url)
                 embed.add_field(
                     name=str(i), value=f"[{title}]({url})", inline=False
                 )
