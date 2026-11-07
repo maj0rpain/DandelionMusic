@@ -3122,8 +3122,7 @@ def test_a_lone_track_failing_with_no_audio_leaves_the_controller_idle(
         assert controller.is_idle()
         assert controller.timer._task is not None
         controller.guild.voice_client.produces_nothing = False
-        _queue(controller, "later")
-        await _start_playing(controller)
+        await controller.enqueue(_songs(controller, "later"))
 
     _bounded(controller, scenario)
 
