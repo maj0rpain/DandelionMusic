@@ -4,6 +4,7 @@ from functools import partial
 from pathlib import Path
 
 import pytest
+from mutagen import File as MutagenFile
 from mutagen.asf import ASF
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover
@@ -225,6 +226,16 @@ def test_reads_all_six_fields(audio_file):
         tags.genre,
         tags.year,
     ) == ("Song", "Artist", "Album", "Various", "Rock", 2007)
+
+
+def test_duration_is_whole_seconds_of_the_reported_length(audio_file):
+    length = MutagenFile(audio_file).info.length
+    duration = read_tags(audio_file).duration
+    if length:
+        assert duration == round(length)
+        assert type(duration) is int
+    else:
+        assert duration is None
 
 
 def test_partial_tags_leave_the_rest_none(audio_file):

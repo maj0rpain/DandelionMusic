@@ -146,3 +146,42 @@ def test_a_song_with_no_duration_shows_unknown(update):
         song.update(update)
     assert song.duration is None
     assert _duration_field(song) == config.SONGINFO_UNKNOWN
+
+
+def _pickled_with_duration(duration):
+    old = _old_shape_song()
+    old.duration = duration
+    return pickle.loads(pickle.dumps(old))
+
+
+def test_a_restored_song_with_a_fractional_duration_shows_whole_seconds():
+    restored = _pickled_with_duration(213.333)
+    assert restored.duration == 213
+    assert type(restored.duration) is int
+    assert _duration_field(restored) == "0:03:33"
+
+
+def test_a_restored_song_with_no_duration_shows_unknown():
+    restored = _pickled_with_duration(None)
+    assert restored.duration is None
+    assert _duration_field(restored) == config.SONGINFO_UNKNOWN
+
+
+def test_a_restored_song_with_a_zero_duration_shows_unknown():
+    restored = _pickled_with_duration(0)
+    assert restored.duration is None
+    assert _duration_field(restored) == config.SONGINFO_UNKNOWN
+
+
+def test_the_constructor_reads_a_zero_duration_as_unknown():
+    song = _song(duration=0)
+    assert song.duration is None
+    assert _duration_field(song) == config.SONGINFO_UNKNOWN
+
+
+@pytest.mark.parametrize("update", [{"duration": 0}, {"duration": None}])
+def test_updating_with_a_missing_duration_keeps_the_stored_one(update):
+    song = _song(duration=213)
+    song.update(update)
+    assert song.duration == 213
+    assert _duration_field(song) == "0:03:33"
