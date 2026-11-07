@@ -738,7 +738,9 @@ class Library(commands.Cog):
         invoke_without_command=True,
     )
     async def _library(self, ctx):
-        await ctx.send("Use subcommands: `search`, `browse`.")
+        names = sorted(c.name for c in ctx.command.commands if not c.hidden)
+        listed = ", ".join(f"`{n}`" for n in names)
+        await ctx.send(f"Use subcommands: {listed}.")
 
     @_library.command(
         name="refresh",
