@@ -35,8 +35,10 @@ from message_link_fakes import FOREIGN_LINK
 class RecordingController:
     """The controller as the commands see it: it records what they ask
     of it. `backup` is what load_backup() loads into the queue; with
-    `disconnecting` it refuses as a disconnect that began after the
-    hooks admitted the request (is_disconnecting() stays False); `events`,
+    `disconnect_on_load` load_backup() refuses as a disconnect that began
+    after the hooks admitted the request (is_disconnecting() stays False
+    for it); with `disconnect_on_prev`, prev_song() turns is_disconnecting()
+    true; `events`,
     when set, gets ("load_backup",) appended by load_backup()."""
 
     def __init__(
@@ -48,7 +50,7 @@ class RecordingController:
         loop=None,
         disconnect_on_prev=False,
         prev_result=True,
-        disconnecting=False,
+        disconnect_on_load=False,
     ):
         self.name = "controller"
         self.backup = None if backup is None else list(backup)
@@ -56,7 +58,7 @@ class RecordingController:
         self.active = active
         self.readable = readable
         self.disconnecting = False
-        self.disconnect_on_load = disconnecting
+        self.disconnect_on_load = disconnect_on_load
         self.disconnect_on_prev = disconnect_on_prev
         self.prev_result = prev_result
         self.events = None
@@ -194,7 +196,7 @@ def test_a_slash_play_with_no_track_and_no_file_does_not_join():
             config.RESTORE_BACKUP_UNREADABLE,
         ),
         (
-            RecordingController(disconnecting=True),
+            RecordingController(disconnect_on_load=True),
             config.DISCONNECTING_MESSAGE,
         ),
     ],
