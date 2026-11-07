@@ -34,6 +34,10 @@ def denied(path):
     return str(PermissionError(13, "Permission denied", str(path)))
 
 
+def assert_skipped(err, path):
+    assert f"library: skipping unreadable {path}: {denied(path)}" in err
+
+
 def fail_stat(monkeypatch, name, bad):
     original = getattr(Path, name)
 
@@ -51,10 +55,7 @@ def test_unreadable_artist_dir_is_skipped_and_sibling_indexed(
     fail_stat(monkeypatch, "is_dir", tree / "A1")
     index = library.build_index()
     assert list(index) == ["A2"]
-    assert (
-        f"library: skipping unreadable {tree / 'A1'}: "
-        f"{denied(tree / 'A1')}"
-    ) in capsys.readouterr().err
+    assert_skipped(capsys.readouterr().err, tree / "A1")
 
 
 def test_unreadable_album_dir_is_skipped_and_sibling_indexed(
@@ -64,9 +65,7 @@ def test_unreadable_album_dir_is_skipped_and_sibling_indexed(
     fail_stat(monkeypatch, "is_dir", bad)
     index = library.build_index()
     assert sorted(index["A1"]) == ["Al2"]
-    assert (
-        f"library: skipping unreadable {bad}: {denied(bad)}"
-    ) in capsys.readouterr().err
+    assert_skipped(capsys.readouterr().err, bad)
 
 
 def test_unreadable_file_is_skipped_and_sibling_track_indexed(
@@ -76,17 +75,13 @@ def test_unreadable_file_is_skipped_and_sibling_track_indexed(
     fail_stat(monkeypatch, "is_file", bad)
     index = library.build_index()
     assert [s.filename for s in index["A1"]["Al1"]] == ["t4.flac"]
-    assert (
-        f"library: skipping unreadable {bad}: {denied(bad)}"
-    ) in capsys.readouterr().err
+    assert_skipped(capsys.readouterr().err, bad)
 
 
 def test_unreadable_root_gives_an_empty_index(tree, monkeypatch, capsys):
     fail_stat(monkeypatch, "is_dir", tree)
     assert library.build_index() == {}
-    assert (
-        f"library: skipping unreadable {tree}: {denied(tree)}"
-    ) in capsys.readouterr().err
+    assert_skipped(capsys.readouterr().err, tree)
 
 
 def test_unlistable_artist_dir_is_skipped_and_sibling_indexed(
@@ -95,9 +90,7 @@ def test_unlistable_artist_dir_is_skipped_and_sibling_indexed(
     fail_stat(monkeypatch, "iterdir", tree / "A1")
     index = library.build_index()
     assert list(index) == ["A2"]
-    assert (
-        f"library: skipping unreadable {tree / 'A1'}: {denied(tree / 'A1')}"
-    ) in capsys.readouterr().err
+    assert_skipped(capsys.readouterr().err, tree / "A1")
 
 
 def test_setup_hook_survives_a_failed_index_build(monkeypatch, capsys):

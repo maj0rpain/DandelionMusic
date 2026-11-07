@@ -509,10 +509,11 @@ def library_path_from_uri(uri: str, root: PurePath) -> Optional[PurePath]:
     authority, tail = rest[:slash], rest[slash:]
     if tail.startswith("//"):
         return None
+    decoded = os.fsdecode(unquote_to_bytes(tail))
     if isinstance(root, PureWindowsPath):
-        parsed = _parse_windows_uri(authority, tail, type(root))
+        parsed = _parse_windows_uri(authority, decoded, type(root))
     else:
-        parsed = _parse_posix_uri(authority, tail, type(root))
+        parsed = _parse_posix_uri(authority, decoded, type(root))
     if parsed is None:
         return None
     path, segments = parsed
@@ -529,17 +530,16 @@ def library_path_from_uri(uri: str, root: PurePath) -> Optional[PurePath]:
 
 
 def _parse_posix_uri(
-    authority: str, tail: str, flavour: type[PurePath]
+    authority: str, decoded: str, flavour: type[PurePath]
 ) -> Optional[tuple[PurePath, list[str]]]:
     """The candidate path and the segments to check, or None."""
     if authority not in ("", "localhost"):
         return None
-    decoded = os.fsdecode(unquote_to_bytes(tail))
     return flavour(decoded), decoded.split("/")
 
 
 def _parse_windows_uri(
-    authority: str, tail: str, flavour: type[PurePath]
+    authority: str, decoded: str, flavour: type[PurePath]
 ) -> Optional[tuple[PurePath, list[str]]]:
     """The candidate path and the segments to check, or None."""
     host = ""
@@ -547,7 +547,6 @@ def _parse_windows_uri(
         host = os.fsdecode(unquote_to_bytes(authority))
         if any(c in host for c in "/\\:|"):
             return None
-    decoded = os.fsdecode(unquote_to_bytes(tail))
     has_drive_letter = decoded[2:3] == ":"
     if decoded[1:2] in ("\\", "/") or decoded[2:3] == "|":
         return None
