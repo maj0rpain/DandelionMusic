@@ -3110,6 +3110,26 @@ def test_a_lone_track_ending_with_no_audio_under_loop_single_idles(
     assert controller.timer._task is not None
 
 
+def test_a_lone_track_failing_with_no_audio_leaves_the_controller_idle(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    _queue(controller, "dead")
+    _silent_voice(controller)
+
+    async def scenario():
+        await _end_first_track_on_audio_thread(controller)
+        assert controller.is_idle()
+        assert controller.timer._task is not None
+        controller.guild.voice_client.produces_nothing = False
+        _queue(controller, "later")
+        await _start_playing(controller)
+
+    _bounded(controller, scenario)
+
+    assert _played(controller) == ["dead", "later"]
+
+
 async def _end_with_notice_in_flight(controller, command):
     """Ends the silent head on its own with the failure notice held,
     runs `command(controller)`, then lets the notice finish."""
