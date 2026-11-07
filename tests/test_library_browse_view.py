@@ -37,6 +37,7 @@ from musicbot.library_metadata import ArtInfo, Enrichment
 from config import config
 from discord_fakes import (
     VoiceGuild,
+    context_client,
     admission_settings,
     http_error,
     make_bot,
@@ -1358,11 +1359,7 @@ def _click_context(interaction, ctx=None):
     """Gives the interaction a client whose get_context answers the
     click's own context."""
     ctx = ctx or SimpleNamespace(author=None)
-
-    async def get_context(inter):
-        return ctx
-
-    interaction.client = SimpleNamespace(get_context=get_context)
+    interaction.client = context_client(ctx)
     return ctx
 
 
