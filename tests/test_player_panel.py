@@ -1097,7 +1097,6 @@ def test_a_take_down_after_a_raising_send_stops_nothing(attached):
     assert not handed[0].is_finished()
 
 
-
 @pytest.fixture
 def store():
     return discord.ui.view.ViewStore(types.SimpleNamespace())
