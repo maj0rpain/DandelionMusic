@@ -123,14 +123,15 @@ def assert_failed(sent, sett, reply):
     assert stored_values(sett) == stored_values(stored_settings())
 
 
+async def execute_matching_no_row(self, statement):
+    return types.SimpleNamespace(rowcount=0)
+
+
 @pytest.fixture
 def missing_row(monkeypatch):
     "The settings row is gone: the update matches no row"
 
-    async def execute(self, statement):
-        return types.SimpleNamespace(rowcount=0)
-
-    monkeypatch.setattr(FakeDbSession, "execute", execute)
+    monkeypatch.setattr(FakeDbSession, "execute", execute_matching_no_row)
 
 
 FAILED = "`Error: Setting default_volume could not be updated.`"
@@ -153,22 +154,20 @@ def test_a_failed_write_is_reported_on_reset(missing_row):
     assert not any(m and "reset to" in m for m in sent)
 
 
-def test_the_update_reply_comes_from_the_catalogue(monkeypatch):
+def test_the_update_and_failure_replies_come_from_the_catalogue(
+    monkeypatch,
+):
     monkeypatch.setattr(config, "SETTING_UPDATED", "UPD[{}|{}]")
-
-    updated = invoke_setting("default_volume", 50, stored_settings())
-
-    assert updated[-1] == "UPD[default_volume|50]"
-
-
-def test_the_failure_replies_come_from_the_catalogue(monkeypatch, missing_row):
     monkeypatch.setattr(config, "SETTING_UPDATE_FAILED", "FAIL[{}]")
 
+    updated = invoke_setting("default_volume", 50, stored_settings())
+    monkeypatch.setattr(FakeDbSession, "execute", execute_matching_no_row)
     failed_update = invoke_setting("default_volume", 50, stored_settings())
     failed_reset = invoke_setting(
         "default_volume", NO_VALUE, stored_settings()
     )
 
+    assert updated[-1] == "UPD[default_volume|50]"
     assert failed_update[-1] == "FAIL[default_volume]"
     assert failed_reset[-1] == "FAIL[default_volume]"
 
