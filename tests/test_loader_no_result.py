@@ -67,6 +67,17 @@ def test_spotify_track_whose_search_raises_is_songinfo_error(
     assert _raised(loader._load_song, track) == config.SONGINFO_ERROR
 
 
+def test_spotify_track_whose_fetch_raises_is_songinfo_error(
+    monkeypatch, worker_loop
+):
+    async def fetch_spotify(url):
+        raise OSError("boom")
+
+    monkeypatch.setattr(loader, "fetch_spotify", fetch_spotify)
+    track = "https://open.spotify.com/track/4cOdK2wGLETKBW3PvgPWqT"
+    assert _raised(loader._load_song, track) == config.SONGINFO_ERROR
+
+
 def test_unknown_host_is_unsupported(monkeypatch):
     monkeypatch.setattr(loader, "identify_url", lambda t: SiteTypes.UNKNOWN)
     assert _no_result_load(monkeypatch, "https://x.invalid/a") == (

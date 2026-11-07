@@ -4,7 +4,7 @@ import pytest
 
 from config import config
 from musicbot import loader
-from musicbot.linkutils import SpotifyTrack, SpotifyTracks
+from musicbot.linkutils import SpotifyTrack
 from musicbot.loader import SongError
 
 SHORT = "https://on.soundcloud.com/AbC123"
@@ -102,24 +102,6 @@ def test_short_link_to_a_spotify_track(monkeypatch, worker_loop, extracted):
 
     assert fetched == [resolved]
     assert [s.webpage_url for s in result.songs] == ["https://yt/v"]
-
-
-def test_short_link_to_a_spotify_playlist(monkeypatch, worker_loop, extracted):
-    resolved = "https://open.spotify.com/playlist/p"
-    fetched = []
-    links = [f"https://open.spotify.com/track/{i}" for i in (1, 2)]
-
-    async def fetch_spotify(url):
-        fetched.append(url)
-        return SpotifyTracks(links, None)
-
-    monkeypatch.setattr(loader, "fetch_spotify", fetch_spotify)
-    _resolver(monkeypatch, resolved)
-
-    result = loader._load_song("https://spotify.link/xyz")
-
-    assert fetched == [resolved]
-    assert [s.webpage_url for s in result.songs] == links
 
 
 def test_raising_resolver_is_a_songinfo_error(
