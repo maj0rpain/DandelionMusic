@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from musicbot import loader
+from musicbot.message_link import CheckedTrack
 from musicbot.linkutils import SiteTypes
 from musicbot.song import LoadResult, Song
 from musicbot.truncation import Truncation, TruncationReason
@@ -175,7 +176,7 @@ def test_load_song_stamps_every_song_with_the_clock(monkeypatch, count):
         )
 
     monkeypatch.setattr(loader, "_run_sync", run_sync)
-    result = run(loader.load_song(URL))
+    result = run(loader.load_song(CheckedTrack(URL)))
     assert [s.extracted_at for s in result.songs] == [NOW] * (count or 1)
 
 

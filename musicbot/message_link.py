@@ -35,12 +35,19 @@ class CheckedTrack:
     admitted_link: Optional[str] = None
 
 
+def _match(track: str):
+    """The one message-link match: `track` normalized, and its match
+    (`None` when it is not a Discord message URL)."""
+    from musicbot.linkutils import normalize_track
+
+    link = normalize_track(track)
+    return link, _message_link.match(link)
+
+
 def is_message_link(track: str) -> bool:
     """The one "is this a message link" rule: whether `track`, once
     normalized, is a Discord message URL."""
-    from musicbot.linkutils import normalize_track
-
-    return _message_link.match(normalize_track(track)) is not None
+    return _match(track)[1] is not None
 
 
 async def check_message_link(track: str, guild, user) -> CheckedTrack:
@@ -50,11 +57,9 @@ async def check_message_link(track: str, guild, user) -> CheckedTrack:
     into `guild`, its channel or thread resolves there and `user` can
     view it and read its history (and, for a private thread, is in it
     or can manage threads); the admitted link is then the link."""
-    from musicbot.linkutils import normalize_track
     from musicbot.loader import SongError
 
-    link = normalize_track(track)
-    match = _message_link.match(link)
+    link, match = _match(track)
     if match is None:
         return CheckedTrack(track)
     if not await _may_read(match, guild, user):

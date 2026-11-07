@@ -276,9 +276,7 @@ async def message_link_click(link, *, join_needed=False):
     guild = inter.ctx.guild
     guild.id = GUILD_ID
     guild.get_channel_or_thread = lambda _id: LinkChannel()
-    inter.ctx.author = LinkMember(
-        id=OWNER, guild=guild, voice=SimpleNamespace(channel=None)
-    )
+    inter.ctx.author = LinkMember(id=OWNER, guild=guild, voice=None)
     if join_needed:
         guild.voice_client = None
         inter.ctx.author.voice = SimpleNamespace(

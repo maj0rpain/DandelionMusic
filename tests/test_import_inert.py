@@ -62,6 +62,7 @@ import json
 import multiprocessing
 
 from musicbot import loader
+from musicbot.message_link import CheckedTrack
 
 
 def worker_state_is_set():
@@ -102,7 +103,9 @@ def calls_without_worker():
     return {
         "load_song": asyncio.run(
             _observe_call(
-                lambda: loader.load_song("https://example.com/a.mp3")
+                lambda: loader.load_song(
+                    CheckedTrack("https://example.com/a.mp3")
+                )
             )
         ),
         "search_youtube": asyncio.run(

@@ -8,7 +8,7 @@ from urllib.parse import urlparse
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context as mp_context
-from typing import Dict, List, Optional, Union
+from typing import Dict, List, Optional
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
@@ -216,13 +216,9 @@ def _search_youtube(title: str, count: int = 1) -> list[dict]:
     return r["entries"]
 
 
-async def load_song(track: Union[str, CheckedTrack]) -> LoadResult:
-    """Loads a plain track or one the message-link gate checked."""
-    admitted_link = None
-    if isinstance(track, CheckedTrack):
-        admitted_link = track.admitted_link
-        track = track.track
-    return await _load(Lane.LOAD, track, admitted_link)
+async def load_song(checked: CheckedTrack) -> LoadResult:
+    """Loads a track the message-link gate checked."""
+    return await _load(Lane.LOAD, checked.track, checked.admitted_link)
 
 
 async def _load(
