@@ -16,6 +16,7 @@ from urllib3.util.retry import Retry
 from spotipy import Spotify
 from bs4 import BeautifulSoup
 from aiohttp import ClientSession, ClientTimeout
+from yarl import URL
 from spotipy.cache_handler import MemoryCacheHandler
 from spotipy.oauth2 import SpotifyClientCredentials
 from yt_dlp.extractor import gen_extractor_classes
@@ -263,13 +264,35 @@ async def get_soup(url: str) -> BeautifulSoup:
     return BeautifulSoup(page, "html.parser")
 
 
+# Most redirects a short link may take (aiohttp's own default).
+_MAX_REDIRECTS = 10
+
+
+class RefusedRedirect(Exception):
+    """A short link's redirect was refused: its target is a disallowed
+    host or not an allowed remote scheme, or the hop limit was hit."""
+
+
 async def resolve_short_link(url: str) -> str:
-    """The URL a short link redirects to: one GET with redirects
-    followed, the body never read. Raises on a 4xx/5xx or any
-    network or timeout error."""
-    async with get_session().get(url, allow_redirects=True) as response:
-        response.raise_for_status()
-        return str(response.url)
+    """The URL a short link redirects to: one GET per hop with
+    redirects disabled, the body never read. Each hop's target is
+    checked before it is requested. Raises RefusedRedirect on a refused
+    hop or too many hops, and on a 4xx/5xx or any network or timeout
+    error."""
+    for _ in range(_MAX_REDIRECTS + 1):
+        async with get_session().get(url, allow_redirects=False) as response:
+            response.raise_for_status()
+            location = response.headers.get("Location")
+            if not (300 <= response.status < 400 and location):
+                return str(response.url)
+            target = response.url.join(URL(location))
+        if (
+            target.scheme.lower() not in ALLOWED_REMOTE_SCHEMES
+            or _is_disallowed_host(target.host)
+        ):
+            raise RefusedRedirect(f"redirect to {target} refused")
+        url = str(target)
+    raise RefusedRedirect(f"more than {_MAX_REDIRECTS} redirects")
 
 
 async def _scrape_track(url: str) -> tuple[str, str]:
