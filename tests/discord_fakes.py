@@ -222,6 +222,35 @@ def coded_error(cls, status, code):
     return cls(Response(), {"code": code, "message": "x"})
 
 
+class EditRecordingMessage(discord.Message):
+    """A bot-sent message. Records every edit; raises from it while
+    `fail` is set."""
+
+    def __init__(self, fail=False):
+        # no state: discord.Message is only here for isinstance
+        self.edits = []
+        self.fail = fail
+
+    async def edit(self, **kwargs):
+        if self.fail:
+            raise http_error()
+        self.edits.append(kwargs)
+
+
+class FakeFollowup:
+    """A click's followup webhook: records edit_message(id, ...); raises
+    while `fail` is set."""
+
+    def __init__(self, fail=False):
+        self.edits = []
+        self.fail = fail
+
+    async def edit_message(self, message_id, **kwargs):
+        if self.fail:
+            raise http_error()
+        self.edits.append((message_id, kwargs))
+
+
 EXPIRED = coded_error(discord.HTTPException, 401, 50027)
 
 

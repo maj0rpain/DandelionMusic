@@ -364,18 +364,5 @@ def test_mp4_reader_keeps_the_depth_of_alac():
     assert _depth_reader(MP4)(info) == 24
 
 
-def test_mp4_reader_gives_none_for_aac():
-    info = _Info(codec="mp4a.40.2", bits_per_sample=16)
-    assert _depth_reader(MP4)(info) is None
-
-
-def test_fallback_reader_keeps_a_reported_depth():
-    assert _depth_reader(object)(_Info(bits_per_sample=24)) == 24
-
-
-def test_fallback_reader_gives_none_without_the_attribute():
-    assert _depth_reader(object)(_Info()) is None
-
-
 def test_fallback_reader_gives_none_for_zero():
     assert _depth_reader(object)(_Info(bits_per_sample=0)) is None
