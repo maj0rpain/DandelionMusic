@@ -28,8 +28,7 @@ def exit_handlers(monkeypatch, worker_loop):
 
 
 def extract():
-    ie = extractor.DiscordAttachmentsIE()
-    return ie._real_extract(URL)
+    return _extract_as(URL)
 
 
 def test_two_extractions_log_in_once_and_fetch_by_ids(exit_handlers):
@@ -90,3 +89,31 @@ def test_failed_login_is_download_error_and_retried(exit_handlers):
     assert len(FakeHTTPClient.instances) == 2
     assert FakeHTTPClient.instances[1].logins == ["tok"]
     assert len(exit_handlers) == 1
+
+
+def _extract_as(admitted, url=URL):
+    from musicbot import loader
+
+    loader._admitted_link = admitted
+    try:
+        return extractor.DiscordAttachmentsIE()._real_extract(url)
+    finally:
+        loader._admitted_link = None
+
+
+def test_the_admitted_link_is_fetched(exit_handlers):
+    _extract_as(URL)
+    (client,) = FakeHTTPClient.instances
+    assert client.fetches == [(22, 333)]
+
+
+def test_another_message_link_is_refused_without_a_fetch(exit_handlers):
+    with pytest.raises(DownloadError):
+        _extract_as(URL, "https://discord.com/channels/1/22/334")
+    assert [c.fetches for c in FakeHTTPClient.instances] == []
+
+
+def test_with_no_admitted_link_nothing_is_fetched(exit_handlers):
+    with pytest.raises(DownloadError):
+        _extract_as(None)
+    assert [c.fetches for c in FakeHTTPClient.instances] == []

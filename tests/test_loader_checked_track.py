@@ -19,12 +19,17 @@ def test_load_song_loads_the_track_a_plain_or_checked_track_names(
 ):
     loaded = []
 
-    async def load(lane, name):
-        loaded.append(name)
+    async def load(lane, name, admitted_link):
+        loaded.append((name, admitted_link))
 
     monkeypatch.setattr(loader, "_load", load)
     run(loader.load_song(track))
-    assert loaded == [getattr(track, "track", track)]
+    assert loaded == [
+        (
+            getattr(track, "track", track),
+            getattr(track, "admitted_link", None),
+        )
+    ]
 
 
 def test_the_loader_has_no_pattern_match_of_its_own_for_message_links():
