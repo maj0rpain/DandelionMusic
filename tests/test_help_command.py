@@ -2,6 +2,8 @@
 member's voice state, the bot's playback state, the channel or the DJ
 role, and never runs admission."""
 
+from types import SimpleNamespace
+
 import discord
 import pytest
 
@@ -20,7 +22,7 @@ EXTENSIONS = [
 
 DJ_ROLE = 12345
 
-NAMED_BY_THE_ISSUE = {
+ADMISSION_REFUSED_COMMANDS = {
     "play",
     "playnext",
     "search",
@@ -92,7 +94,7 @@ def test_help_lists_commands_admission_would_refuse(bot):
     playlist = bot.get_command("playlist")
     shown = listed(bot, ctx, music.get_commands())
     shown |= listed(bot, ctx, playlist.commands)
-    assert NAMED_BY_THE_ISSUE <= shown
+    assert ADMISSION_REFUSED_COMMANDS <= shown
 
 
 @pytest.mark.parametrize("name", ["playlist", "setting"])
@@ -125,17 +127,26 @@ def test_help_for_a_hidden_owner_command_still_renders(bot):
     assert any("d!add" in m and "Arguments" in m for m in sent)
 
 
-def walk(command):
-    yield command
-    for sub in getattr(command, "commands", ()):
-        yield from walk(sub)
-
-
 def test_every_owner_only_command_is_hidden(bot):
     unhidden = [
         c.qualified_name
-        for top in bot.commands
-        for c in walk(top)
+        for c in bot.walk_commands()
         if owner_check in c.checks and not c.hidden
     ]
     assert unhidden == []
+
+
+def test_bare_library_reply_names_the_non_hidden_subcommands(bot):
+    sent = []
+
+    async def send(content=None, **kwargs):
+        sent.append(content)
+
+    group = bot.get_command("library")
+    names = sorted(c.name for c in group.commands if not c.hidden)
+    expected = "Use subcommands: " + ", ".join(f"`{n}`" for n in names) + "."
+    ctx = SimpleNamespace(send=send, command=group)
+    run(group.callback(bot.get_cog("Library"), ctx))
+    assert sent == [expected]
+    assert expected == "Use subcommands: `browse`, `search`."
+    assert "refresh" not in sent[0]

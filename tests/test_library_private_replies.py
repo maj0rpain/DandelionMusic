@@ -33,18 +33,6 @@ def make_ctx(slash):
     return ctx, sent
 
 
-def test_send_private_is_ephemeral_for_an_interaction():
-    ctx, sent = make_ctx(True)
-    assert run(lc._send_private(ctx, content="hi")) == "sent"
-    assert sent == [{"content": "hi", "ephemeral": True}]
-
-
-def test_send_private_adds_nothing_for_a_prefix_context():
-    ctx, sent = make_ctx(False)
-    assert run(lc._send_private(ctx, content="hi")) == "sent"
-    assert sent == [{"content": "hi"}]
-
-
 INDEX = {"A": {"B": ["t"]}}
 
 
@@ -90,6 +78,7 @@ def test_search_results_reply_is_private_only_for_slash(monkeypatch):
         _search(monkeypatch, ctx, ["r"])
         (kw,) = sent
         assert ("ephemeral" in kw) is slash
+        assert kw["view"].message == "sent"
 
 
 def test_browse_view_is_private_only_for_slash(monkeypatch):
@@ -101,11 +90,13 @@ def test_browse_view_is_private_only_for_slash(monkeypatch):
         def embed(self, frame):
             return "embed"
 
+    view = FakeView()
     monkeypatch.setattr(
-        lc.LibraryBrowseView, "open", lambda ctx, index: (FakeView(), "f")
+        lc.LibraryBrowseView, "open", lambda ctx, index: (view, "f")
     )
     for slash in (True, False):
         ctx, sent = make_ctx(slash)
         run(lc.Library._library_browse.callback(lc.Library(None), ctx))
         (kw,) = sent
         assert ("ephemeral" in kw) is slash
+        assert view.message == "sent"
