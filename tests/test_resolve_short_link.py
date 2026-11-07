@@ -102,16 +102,6 @@ def test_refused_connection_raises():
 def test_redirect_to_a_disallowed_target_is_refused(path):
     async def scenario():
         async with serving() as server:
-            await linkutils.resolve_short_link(str(server.make_url(path)))
-
-    with pytest.raises(linkutils.RefusedRedirect):
-        run(scenario())
-
-
-@pytest.mark.parametrize("path", ["/to-localhost", "/to-loopback"])
-def test_refused_local_redirect_is_never_contacted(path):
-    async def scenario():
-        async with serving() as server:
             with pytest.raises(linkutils.RefusedRedirect):
                 await linkutils.resolve_short_link(str(server.make_url(path)))
             return list(server.hits)
