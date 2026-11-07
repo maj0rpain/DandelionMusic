@@ -6,41 +6,9 @@ from yt_dlp.utils import DownloadError
 
 from config import config
 from musicbot.yt_dlp_plugins.extractor import discord as extractor
+from message_link_fakes import FakeHTTPClient
 
 URL = "https://discord.com/channels/1/22/333"
-
-
-class FakeHTTPClient:
-    instances = []
-    login_error = None
-    fetch_error = None
-
-    def __init__(self, loop, *args, **kwargs):
-        self.loop = loop
-        self.logins = []
-        self.fetches = []
-        self.closed = False
-        FakeHTTPClient.instances.append(self)
-
-    async def static_login(self, token):
-        self.logins.append(token)
-        if FakeHTTPClient.login_error:
-            raise FakeHTTPClient.login_error
-
-    async def get_message(self, channel_id, message_id):
-        self.fetches.append((channel_id, message_id))
-        if FakeHTTPClient.fetch_error:
-            raise FakeHTTPClient.fetch_error
-        return {
-            "author": {"username": "alice"},
-            "attachments": [
-                {"id": "9", "url": "https://cdn/a.mp3", "filename": "a.mp3"},
-                {"id": "10", "url": "https://cdn/b.mp3", "filename": "b.mp3"},
-            ],
-        }
-
-    async def close(self):
-        self.closed = True
 
 
 @pytest.fixture

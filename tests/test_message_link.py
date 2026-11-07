@@ -1,8 +1,6 @@
 """The message-link gate: whether a track that is a message link may be
 loaded for the requesting member."""
 
-import ast
-import inspect
 
 import discord
 import pytest
@@ -12,7 +10,7 @@ from musicbot import message_link
 from musicbot.loader import SongError
 from musicbot.yt_dlp_plugins.extractor.discord import DiscordAttachmentsIE
 from discord_fakes import coded_error
-from helpers import run
+from helpers import imported_names, run
 from message_link_fakes import (
     FOREIGN_LINK,
     LINK,
@@ -89,7 +87,9 @@ def test_a_private_thread_whose_member_lookup_is_forbidden_is_refused():
 def test_a_canary_link_is_checked_the_same():
     link = LINK.replace("discord.com", "canary.discord.com")
     refused(
-        link.replace("1234", "99"), LinkGuild([LinkChannel()]), LinkMember()
+        FOREIGN_LINK.replace("discord.com", "canary.discord.com"),
+        LinkGuild([LinkChannel()]),
+        LinkMember(),
     )
     check(link, LinkGuild([LinkChannel()]), LinkMember())
 
@@ -122,26 +122,9 @@ def test_the_extractor_matches_with_the_gates_pattern():
     assert DiscordAttachmentsIE._VALID_URL is message_link.MESSAGE_LINK_PATTERN
 
 
-def _module_level_imports(statements):
-    for node in statements:
-        if isinstance(node, ast.Import):
-            yield from (a.name for a in node.names)
-        elif isinstance(node, ast.ImportFrom):
-            base = "." * node.level + (node.module or "")
-            yield base
-            yield from (f"{base}.{a.name}" for a in node.names)
-        elif isinstance(node, (ast.If, ast.Try)):
-            for body in (node.body, node.orelse):
-                yield from _module_level_imports(body)
-            for handler in getattr(node, "handlers", []):
-                yield from _module_level_imports(handler.body)
-            yield from _module_level_imports(getattr(node, "finalbody", []))
-
-
 def test_the_gate_imports_neither_the_loader_nor_linkutils_at_module_level():
-    # function bodies are not walked: the check's own imports are local
-    tree = ast.parse(inspect.getsource(message_link))
-    for name in _module_level_imports(tree.body):
+    names = imported_names(message_link, module_level_only=True)
+    for name in names:
         parts = name.lstrip(".").split(".")
         assert parts[:2] not in (
             ["musicbot", "loader"],
