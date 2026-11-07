@@ -19,6 +19,7 @@ from discord_fakes import (
     ADMISSION_DJ_ROLE,
     HERE,
     PEOPLE,
+    command_of,
     fake_controller,
     invoke_music_hooks,
     situation,
@@ -483,7 +484,7 @@ def music_ctx(name, **spec):
 
     guild, ctx = situation(K.COMMAND, **spec)
     cog = Music(None)
-    ctx.command = {c.qualified_name: c for c in cog.walk_commands()}[name]
+    ctx.command = command_of(cog, name)
 
     async def defer(**kwargs):
         guild.events.append(("defer",))

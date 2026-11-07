@@ -24,6 +24,7 @@ from musicbot.utils import CheckError
 from discord_fakes import (
     BOTS_ONLY,
     FakeInteraction,
+    command_of,
     invoke_music_hooks,
     situation,
 )
@@ -104,7 +105,7 @@ def body_ctx(name, controller=None, **spec):
     guild controller is `controller`."""
     guild, ctx = situation(K.COMMAND, **spec)
     cog = Music(None)
-    ctx.command = {c.qualified_name: c for c in cog.walk_commands()}[name]
+    ctx.command = command_of(cog, name)
     controller = controller or RecordingController()
     controller.events = guild.events
     ctx.controllers[guild] = controller

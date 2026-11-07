@@ -9,24 +9,22 @@ from discord.ext import commands
 from config import config
 from musicbot.admission import RequestKind as K
 from musicbot.commands.general import General
-from musicbot.utils import CheckError
 from discord_fakes import (
     ADMISSION_DJ_ROLE,
     BOTS_ONLY,
     HERE,
     PEOPLE,
+    check_error_message,
+    command_of,
     situation,
 )
-from helpers import run
 
 
 def prepare(name, kind, **kw):
     """(guild, ctx, sent, disconnects) for running General's command
     `name` with the controller and replies recorded."""
     guild, ctx = situation(kind, **kw)
-    ctx.command = {c.qualified_name: c for c in General(None).walk_commands()}[
-        name
-    ]
+    ctx.command = command_of(General, name)
     sent = []
     disconnects = []
 
@@ -48,11 +46,7 @@ def prepare(name, kind, **kw):
 
 def invoke(name, ctx):
     callback = getattr(General, f"_{name}").callback
-    try:
-        run(callback(General(None), ctx))
-    except CheckError as e:
-        return str(e)
-    return None
+    return check_error_message(callback(General(None), ctx))
 
 
 COMMANDS = [
