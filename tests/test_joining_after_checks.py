@@ -37,7 +37,7 @@ class RecordingController:
     of it. `backup` is what load_backup() loads into the queue; with
     `disconnecting` it refuses as a disconnect that began after the
     hooks admitted the request (is_disconnecting() stays False); `events`,
-    which body_ctx wires to the guild's, gets ("load_backup",) appended."""
+    when set, gets ("load_backup",) appended by load_backup()."""
 
     def __init__(
         self,
@@ -65,7 +65,8 @@ class RecordingController:
         return False
 
     def load_backup(self):
-        self.events.append(("load_backup",))
+        if self.events is not None:
+            self.events.append(("load_backup",))
         if self.disconnecting:
             # began disconnecting after the hooks admitted the request
             return RestoreResult.REFUSED_WHILE_DISCONNECTING
@@ -107,7 +108,6 @@ def body_ctx(name, controller=None, **spec):
     cog = Music(None)
     ctx.command = command_of(cog, name)
     controller = controller or RecordingController()
-    controller.events = guild.events
     ctx.controllers[guild] = controller
     run(ctx.bot.sessions.reset(guild))
     sent = []
@@ -200,6 +200,7 @@ def test_a_slash_play_with_no_track_and_no_file_does_not_join():
 )
 def test_a_restore_refusal_replies_and_does_not_join(controller, reply):
     guild, ctx, cog, sent = body_ctx("restore", controller, role="dj")
+    controller.events = guild.events
     invoke(cog, ctx, Music._restore.callback)
     assert sent == [reply]
     assert guild.events == [("defer",), ("load_backup",)]
@@ -211,6 +212,7 @@ def test_restore_while_active_does_not_move_the_bot():
     guild, ctx, cog, sent = body_ctx(
         "restore", controller, bot=BOTS_ONLY, role="dj"
     )
+    controller.events = guild.events
     invoke(cog, ctx, Music._restore.callback)
     assert sent == [config.RESTORE_WHILE_ACTIVE]
     assert guild.events == [("defer",), ("load_backup",)]
@@ -351,11 +353,7 @@ def test_restore_with_a_backup_defers_then_connects_then_starts():
     after.queue = ["x"]
     guild, ctx, cog, sent = body_ctx("restore", before, role="dj")
     invoke_on_replacement(cog, ctx, guild, Music._restore.callback, after)
-    assert guild.events == [
-        ("defer",),
-        ("load_backup",),
-        ("connect", "b"),
-    ]
+    assert guild.events == [("defer",), ("connect", "b")]
     assert after.calls == ["start_restored"]
     assert before.calls == []
     assert sent == ["Restored playlist"]
