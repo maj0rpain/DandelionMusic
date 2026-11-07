@@ -21,7 +21,7 @@ from config import config
 from musicbot import library, loader, playlists, utils
 from musicbot.outcome import BatchReport, EnqueueOutcome, OutcomeKind
 from musicbot.song import Song
-from musicbot.linkutils import SiteTypes
+from musicbot.linkutils import ALLOWED_REMOTE_SCHEMES, SiteTypes
 from musicbot.message_link import check_message_link
 from musicbot.panel_snapshot import PanelSnapshot
 from musicbot.playback import Playback, PlaybackState
@@ -165,8 +165,11 @@ class AudioController(object):
         if song.host == SiteTypes.LOCAL_LIBRARY:
             before_options = "-protocol_whitelist file"
         else:
+            protocols = ",".join(
+                (*ALLOWED_REMOTE_SCHEMES, "tcp", "tls", "crypto")
+            )
             before_options = (
-                "-protocol_whitelist http,https,tcp,tls,crypto "
+                f"-protocol_whitelist {protocols} "
                 "-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5"
             )
         return discord.PCMVolumeTransformer(

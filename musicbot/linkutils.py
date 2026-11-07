@@ -202,6 +202,10 @@ def _is_disallowed_host(host: Optional[str]) -> bool:
     )
 
 
+# The only schemes of remote media the bot fetches; read by identify_url's
+# custom-link check and by the ffmpeg remote protocol whitelist.
+ALLOWED_REMOTE_SCHEMES = ("http", "https")
+
 # Hosts of link shorteners; matched exactly (case-insensitive).
 SHORT_LINK_HOSTS = frozenset(
     {"on.soundcloud.com", "spotify.link", "spotify.app.link"}
@@ -468,6 +472,15 @@ def get_ie(url: str) -> Optional[ExtractorT]:
     return None
 
 
+def _is_word_colon_word(url: str) -> bool:
+    """True for plain word:word text that is not a URL: it is not a single
+    URL (scheme:// or a spotify: URI) and its first colon is not followed
+    by "/" (file:/ and concat:/ keep their classification)."""
+    return not _is_single_url(url) and not url.partition(":")[2].startswith(
+        "/"
+    )
+
+
 def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     if not url_regex.fullmatch(url):
         return SiteTypes.NOT_URL
@@ -475,7 +488,7 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     # word:word text is not a URL; an extractor may still claim it
     # (ytsearch:, scsearch:), otherwise it is a search query. A first
     # colon followed by "/" (file:/, concat:/) keeps its classification.
-    if not _is_single_url(url) and not url.partition(":")[2].startswith("/"):
+    if _is_word_colon_word(url):
         return get_ie(url) or SiteTypes.NOT_URL
 
     if spotify_regex.match(url):
@@ -494,7 +507,7 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
         return ie
 
     if (
-        parsed.scheme.lower() in ("http", "https")
+        parsed.scheme.lower() in ALLOWED_REMOTE_SCHEMES
         and not _is_disallowed_host(parsed.hostname)
         and parsed.path.lower().endswith(config.SUPPORTED_EXTENSIONS)
     ):
