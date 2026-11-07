@@ -85,6 +85,9 @@ class RecordingController:
         self.calls.append("start_restored")
         return RestoreResult.RESTORED
 
+    def has_prev(self):
+        return self.playlist.has_prev()
+
     def prev_song(self):
         self.calls.append("prev_song")
         return True
@@ -226,6 +229,15 @@ def test_prev_with_no_previous_track_does_not_join():
     assert joins(guild) == []
 
 
+def test_prev_refused_by_the_controller_does_not_join():
+    controller = RecordingController(history=["x"])
+    controller.has_prev = lambda: False
+    guild, ctx, cog, sent = body_ctx("prev", controller)
+    invoke(cog, ctx, Music._prev.callback)
+    assert sent == [config.NO_PREVIOUS_TRACK]
+    assert joins(guild) == []
+
+
 def test_prev_with_loop_all_and_an_empty_queue_does_not_join():
     controller = RecordingController(history=["x"], loop=LoopMode.ALL)
     guild, ctx, cog, sent = body_ctx("prev", controller)
@@ -236,7 +248,7 @@ def test_prev_with_loop_all_and_an_empty_queue_does_not_join():
 
 def test_playlist_load_of_an_unknown_name_does_not_join(monkeypatch):
     async def get(session_factory, ref):
-        return None
+        raise music.playlists.PlaylistNotFound(ref.name)
 
     monkeypatch.setattr(music.playlists, "get", get)
     guild, ctx, cog, sent = body_ctx("playlist load")

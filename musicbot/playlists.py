@@ -78,7 +78,12 @@ class PlaylistExists(SavedPlaylistError):
 
 
 class PlaylistNameTooLong(SavedPlaylistError):
-    """A name over PLAYLIST_NAME_MAX_LENGTH characters cannot be saved."""
+    """A name over `max_length` characters cannot be saved."""
+
+    def __init__(self, name: str, max_length: int):
+        super().__init__(f"playlist name over {max_length} characters")
+        self.name = name
+        self.max_length = max_length
 
 
 class InvalidPosition(SavedPlaylistError):
@@ -156,11 +161,11 @@ async def _load_row(
 
 async def get(
     session_factory: SessionFactory, playlist: PlaylistRef
-) -> Optional[PlaylistContents]:
+) -> PlaylistContents:
     async with session_factory() as session:
         row = await _load_row(session, playlist)
         if row is None:
-            return None
+            raise PlaylistNotFound(playlist.name)
         return PlaylistContents(playlist, _decode(row.songs_json, playlist))
 
 
@@ -182,7 +187,7 @@ async def save(
     songs: Iterable[PlaylistEntry],
 ) -> None:
     if len(playlist.name) > PLAYLIST_NAME_MAX_LENGTH:
-        raise PlaylistNameTooLong(playlist.name)
+        raise PlaylistNameTooLong(playlist.name, PLAYLIST_NAME_MAX_LENGTH)
     async with session_factory() as session:
         session.add(
             SavedPlaylist(

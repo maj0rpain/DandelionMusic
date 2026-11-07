@@ -201,7 +201,7 @@ class AudioController(object):
         return PanelSnapshot(
             active=True,
             paused=not self.guild.voice_client.is_playing(),
-            has_previous=self.playlist.has_prev(),
+            has_previous=self.has_prev(),
             has_next=self.playlist.has_next(),
             queue_empty=len(self.playlist) == 0,
             loop_mode=self.playlist.loop,
@@ -664,6 +664,10 @@ class AudioController(object):
         """Stops the player and removes all songs from the queue"""
         self._supersede_sweep()
         self.playback.stop()
+
+    def has_prev(self) -> bool:
+        """Whether there is a previous track to go back to"""
+        return self.playlist.has_prev()
 
     def prev_song(self) -> bool:
         """Loads the last song from the history into the queue and starts it"""
