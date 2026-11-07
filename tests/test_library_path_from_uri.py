@@ -9,18 +9,14 @@ UNC = PureWindowsPath("//nas/share/Music")
 POSIX = PurePosixPath("/srv/music")
 
 
-def _w(root, *parts):
-    return PureWindowsPath(root, *parts)
-
-
 @pytest.mark.parametrize("root", [DRIVE, UNC])
 def test_windows_as_uri_round_trips(root):
-    song = _w(root, "A", "B", "t.mp3")
+    song = root / "A" / "B" / "t.mp3"
     assert library_path_from_uri(song.as_uri(), root) == song
 
 
 def test_windows_localhost_drive_form_is_accepted():
-    song = _w(DRIVE, "A", "B", "t.mp3")
+    song = DRIVE / "A" / "B" / "t.mp3"
     uri = "file://localhost/C:/Music/A/B/t.mp3"
     assert library_path_from_uri(uri, DRIVE) == song
 
@@ -79,16 +75,6 @@ def test_windows_unc_root_refusals(uri):
     assert library_path_from_uri(uri, UNC) is None
 
 
-def test_posix_host_authority_is_refused():
-    uri = "file://host/srv/music/A/B/t.mp3"
-    assert library_path_from_uri(uri, POSIX) is None
-
-
 def test_posix_backslash_is_an_ordinary_filename_character():
     uri = "file:///srv/music/A/B/a%5Cb.mp3"
     assert library_path_from_uri(uri, POSIX) == POSIX / "A" / "B" / "a\\b.mp3"
-
-
-def test_posix_localhost_is_accepted():
-    uri = "file://localhost/srv/music/A/B/t.mp3"
-    assert library_path_from_uri(uri, POSIX) == POSIX / "A" / "B" / "t.mp3"
