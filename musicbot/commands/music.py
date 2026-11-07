@@ -416,7 +416,7 @@ class Music(commands.Cog):
     @commands.check(dj_check)
     @joining_command
     async def _prev(self, ctx):
-        if not ctx.audiocontroller.playlist.has_prev():
+        if not ctx.audiocontroller.has_prev():
             await ctx.send(config.NO_PREVIOUS_TRACK)
             return
         await self._join_voice(ctx)

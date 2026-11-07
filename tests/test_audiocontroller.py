@@ -1729,6 +1729,16 @@ def test_the_snapshot_has_previous_only_with_history(controller):
     assert controller.panel_snapshot().has_previous
 
 
+def test_has_prev_follows_history_and_loop_all(controller):
+    assert not controller.has_prev()
+
+    controller.playlist.playhistory.append(_song(controller, "old"))
+    assert controller.has_prev()
+
+    controller.playlist.loop = LoopMode.ALL
+    assert not controller.has_prev()
+
+
 def test_current_song_is_nothing_when_active_with_an_empty_queue(controller):
     controller.guild.voice_client.playing = True
 

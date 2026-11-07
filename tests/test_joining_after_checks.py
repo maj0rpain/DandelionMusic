@@ -68,6 +68,9 @@ class RecordingController:
         self.calls.append("start_restored")
         return RestoreResult.RESTORED
 
+    def has_prev(self):
+        return self.playlist.has_prev()
+
     def prev_song(self):
         self.calls.append("prev_song")
         return True
@@ -191,6 +194,15 @@ def test_restore_while_active_does_not_move_the_bot():
 
 def test_prev_with_no_previous_track_does_not_join():
     guild, ctx, cog, sent = body_ctx("prev", RecordingController())
+    invoke(cog, ctx, Music._prev.callback)
+    assert sent == [config.NO_PREVIOUS_TRACK]
+    assert joins(guild) == []
+
+
+def test_prev_refused_by_the_controller_does_not_join():
+    controller = RecordingController(history=["x"])
+    controller.has_prev = lambda: False
+    guild, ctx, cog, sent = body_ctx("prev", controller)
     invoke(cog, ctx, Music._prev.callback)
     assert sent == [config.NO_PREVIOUS_TRACK]
     assert joins(guild) == []
