@@ -210,6 +210,12 @@ class TestScreen:
         assert c.screen().entries == []
 
 
+def album_order(tracks):
+    """The albums of (artist, album, filename) tracks, first-seen
+    first."""
+    return list(dict.fromkeys(album for _, album, _ in tracks))
+
+
 class TestTracks:
     def test_the_album_level_stands_for_its_own_tracks(self):
         c = at_album()
@@ -223,10 +229,7 @@ class TestTracks:
         c = cursor()
         c.descend("Radiohead")
         assert len(c.tracks()) == 5
-        albums = []
-        for _, album, _ in c.tracks():
-            if album not in albums:
-                albums.append(album)
+        albums = album_order(c.tracks())
         assert set(albums) == {"OK Computer", "Kid A"}
         assert albums == library.albums_of(INDEX, "Radiohead")
 
@@ -239,10 +242,7 @@ class TestTracks:
             }
         }
         got = library.tracks_for(index, "Radiohead")
-        albums = []
-        for _, album, _ in got:
-            if album not in albums:
-                albums.append(album)
+        albums = album_order(got)
         assert albums == library.albums_of(index, "Radiohead")
         assert albums == ["Amnesiac", "kid A", "OK Computer"]
         assert [(a, f) for _, a, f in got] == [
