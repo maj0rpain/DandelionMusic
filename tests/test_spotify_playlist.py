@@ -230,18 +230,6 @@ def _failing_page(monkeypatch, error):
     monkeypatch.setattr(linkutils, "get_soup", get_soup)
 
 
-def _track_page(monkeypatch):
-    """Installs a public page for a track titled T by A."""
-
-    async def get_soup(u):
-        return BeautifulSoup(
-            "<title>T - song and lyrics by A | Spotify</title>",
-            "html.parser",
-        )
-
-    monkeypatch.setattr(linkutils, "get_soup", get_soup)
-
-
 class FailingTrackApi:
     """A Spotify API whose track lookup raises `error`."""
 
@@ -328,7 +316,14 @@ def test_track_whose_api_lookup_raises_falls_back_to_the_page_title(
     monkeypatch.setattr(
         linkutils, "spotify_api", FailingTrackApi(RuntimeError("boom"))
     )
-    _track_page(monkeypatch)
+
+    async def get_soup(u):
+        return BeautifulSoup(
+            "<title>T - song and lyrics by A | Spotify</title>",
+            "html.parser",
+        )
+
+    monkeypatch.setattr(linkutils, "get_soup", get_soup)
 
     result = run(linkutils.fetch_spotify("https://open.spotify.com/track/abc"))
 
@@ -342,7 +337,14 @@ def test_track_without_api_reads_the_page_title_and_logs_no_error(
     monkeypatch, capsys
 ):
     monkeypatch.setattr(linkutils, "spotify_api", None)
-    _track_page(monkeypatch)
+
+    async def get_soup(u):
+        return BeautifulSoup(
+            "<title>T - song and lyrics by A | Spotify</title>",
+            "html.parser",
+        )
+
+    monkeypatch.setattr(linkutils, "get_soup", get_soup)
 
     result = run(linkutils.fetch_spotify("https://open.spotify.com/track/abc"))
 
