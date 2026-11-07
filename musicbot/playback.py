@@ -369,10 +369,12 @@ class Playback:
 
     def _on_track_end(self, error, generation: int):
         """Runs on the loop once the track started as `generation` has
-        ended, and advances the queue - unless a newer start has
-        overtaken it, or discord.py has already torn the voice
-        connection down (then the cut-off track stays at the head of
-        the queue)."""
+        ended. Three outcomes: a newer start has overtaken it, or
+        discord.py has already torn the voice connection down (nothing
+        is done, and the cut-off track stays at the head of the
+        queue); the track ended on its own without producing audio
+        (the failed-track path: reported, dropped, the new head
+        started); otherwise the queue advances."""
         _require_loop()
 
         if generation != self._generation:
@@ -413,7 +415,13 @@ class Playback:
 
         self.save_backup()
 
+        self._start_next_or_idle(next_song)
+
+    def _start_next_or_idle(self, next_song: "Song | None"):
+        """Starts `next_song`, or clears the pending-start mark and goes
+        idle when there is none. Loop only."""
         if next_song is None:
+            self._start_pending = False
             self._go_idle()
             return
 
@@ -456,12 +464,7 @@ class Playback:
         next_song = self._drop_failed()
         self._write_backup()
 
-        if next_song is None:
-            self._start_pending = False
-            self._go_idle()
-            return
-
-        self._spawn_start(next_song)
+        self._start_next_or_idle(next_song)
 
     async def _play(self, song: "Song", generation: int) -> bool:
         """True when `song` was handed to the voice client; False for a

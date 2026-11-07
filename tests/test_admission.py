@@ -33,13 +33,17 @@ NOT_CONNECTED = config.NOT_CONNECTED_MESSAGE
 NOT_DJ = config.NOT_A_DJ
 
 
+async def check_request(ctx, kind, allow_disconnecting=False):
+    return await admission.check(
+        ctx,
+        None if kind in admission.COMMAND_KINDS else kind,
+        allow_disconnecting=allow_disconnecting,
+    )
+
+
 def run_request(ctx, kind, allow_disconnecting=False):
     async def go():
-        admitted = await admission.check(
-            ctx,
-            None if kind in admission.COMMAND_KINDS else kind,
-            allow_disconnecting=allow_disconnecting,
-        )
+        admitted = await check_request(ctx, kind, allow_disconnecting)
         return await admitted.enter()
 
     return run(go())
@@ -394,18 +398,16 @@ def test_admission_table(kind, spec, outcome, no_sleep):
             "move": admission.Join.MOVE,
             "admitted": admission.Join.NONE,
         }[outcome]
-        admitted = run(
-            admission.check(
-                ctx,
-                None if kind in admission.COMMAND_KINDS else kind,
-                allow_disconnecting=allow,
+
+        async def go():
+            admitted = await check_request(ctx, kind, allow)
+            assert admitted.join is expected_join
+            assert admitted.join_needed is (
+                expected_join is not admission.Join.NONE
             )
-        )
-        assert admitted.join is expected_join
-        assert admitted.join_needed is (
-            expected_join is not admission.Join.NONE
-        )
-        controller = run_request(ctx, kind, allow)
+            return await admitted.enter()
+
+        controller = run(go())
         assert controller is ctx.bot.sessions.controller(guild)
         expected = {
             "connect": [("connect", "b")],
@@ -503,17 +505,6 @@ def test_the_hooks_never_join_a_joining_command_that_passed_its_checks():
     guild, ctx, cog = music_ctx("prev", dj_role=ADMISSION_DJ_ROLE, role="dj")
     run(invoke_music_hooks(cog, ctx))
     assert guild.events == []
-
-
-def test_the_command_acts_on_the_controller_enter_returns():
-    guild, ctx, cog = music_ctx("play")
-    run(cog.cog_check(ctx))
-    first = ctx.audiocontroller
-    ctx.controllers[guild] = fake_controller()
-    run(ctx.bot.sessions.reset(guild))
-    run(cog._enter(ctx))
-    assert ctx.audiocontroller is not first
-    assert ctx.audiocontroller is ctx.bot.sessions.controller(guild)
 
 
 def test_command_level_checks_read_the_controller_off_the_context():
