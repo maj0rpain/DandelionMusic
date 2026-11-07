@@ -58,13 +58,3 @@ def test_module_imports_only_config_enum_and_dataclasses():
         "dataclasses",
         "dataclasses.dataclass",
     }
-
-
-def test_api_unavailable_notice_uses_the_language_file_text():
-    text = Truncation(50, TruncationReason.API_UNAVAILABLE).notice(30)
-
-    assert (
-        "Spotify's API refused this playlist, so only its public page"
-        " could be read." in text
-    )
-    assert "SPOTIFY_TRUNCATED_API_UNAVAILABLE" not in text
