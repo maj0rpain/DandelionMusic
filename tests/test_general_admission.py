@@ -212,10 +212,13 @@ def test_connect_with_nothing_to_do_is_refused_as_already_connected(
     assert order == ["defer"]
 
 
+@pytest.mark.parametrize("rule", [True, False])
 @pytest.mark.parametrize("bot", [None, BOTS_ONLY], ids=["connect", "move"])
-def test_a_failed_connect_or_move_is_refused_after_the_defer(bot, no_sleep):
+def test_a_failed_connect_or_move_is_refused_after_the_defer(
+    rule, bot, no_sleep
+):
     refusal, sent, _, order = connect(
-        fail=asyncio.TimeoutError(), bot=bot, rule=False
+        fail=asyncio.TimeoutError(), bot=bot, rule=rule
     )
     assert refusal == config.VOICE_CONNECT_FAILED
     assert sent == []
