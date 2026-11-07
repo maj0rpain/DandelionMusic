@@ -14,10 +14,8 @@ Failures the caller must tell apart are raised as the exceptions
 below; ``get`` returns ``None`` for a missing playlist instead.
 """
 
-import asyncio
 import json
 import sys
-import weakref
 from dataclasses import dataclass
 from typing import Callable, Iterable, List, Optional
 
@@ -25,6 +23,7 @@ from sqlalchemy import delete as sql_delete, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from musicbot.keyed_locks import KeyedLocks
 from musicbot.settings import PLAYLIST_NAME_MAX_LENGTH, SavedPlaylist
 
 SessionFactory = Callable[[], AsyncSession]
@@ -96,18 +95,8 @@ class OnlySongInPlaylist(SavedPlaylistError):
     pass
 
 
-# One lock per saved playlist: changes to it run one at a time. Weak
-# values, so an entry goes once nothing holds or waits on its lock.
-_locks: "weakref.WeakValueDictionary[PlaylistRef, asyncio.Lock]" = (
-    weakref.WeakValueDictionary()
-)
-
-
-def _lock(playlist: PlaylistRef) -> asyncio.Lock:
-    lock = _locks.get(playlist)
-    if lock is None:
-        lock = _locks[playlist] = asyncio.Lock()
-    return lock
+# One lock per saved playlist: changes to it run one at a time.
+_locks = KeyedLocks()
 
 
 def _decode_entry(song) -> PlaylistEntry:
@@ -212,7 +201,7 @@ async def save(
 async def delete(
     session_factory: SessionFactory, playlist: PlaylistRef
 ) -> None:
-    async with _lock(playlist), session_factory() as session:
+    async with _locks(playlist), session_factory() as session:
         result = await session.execute(
             sql_delete(SavedPlaylist).where(*_matches(playlist))
         )
@@ -229,7 +218,7 @@ async def _update(
     """Loads the playlist's entries, lets ``change`` edit them in
     place (or raise), and stores the result. A change that leaves
     the entries as they were writes nothing."""
-    async with _lock(playlist), session_factory() as session:
+    async with _locks(playlist), session_factory() as session:
         row = await _load_row(session, playlist)
         if row is None:
             raise PlaylistNotFound(playlist.name)
