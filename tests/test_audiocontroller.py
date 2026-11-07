@@ -3208,33 +3208,40 @@ def _no_audio_user_command(controller, monkeypatch, command, mode):
     assert controller.panel.skipped == []
 
 
-@pytest.mark.parametrize("mode", list(LoopMode))
+@pytest.mark.parametrize(
+    "mode, played, titles",
+    [
+        (LoopMode.OFF, [], []),
+        (LoopMode.SINGLE, [], []),
+        (LoopMode.ALL, [], []),
+    ],
+)
 def test_a_stop_on_a_track_with_no_audio_is_not_a_failure(
-    controller, monkeypatch, mode
+    controller, monkeypatch, mode, played, titles
 ):
     _no_audio_user_command(controller, monkeypatch, _cmd_stop, mode)
 
-    assert _played(controller)[1:] == []
-    assert _titles(controller) == []
+    assert _played(controller)[1:] == played
+    assert _titles(controller) == titles
 
 
 # a skip follows the loop mode's normal advance: rotation under ALL, the
 # song into the play history otherwise
 @pytest.mark.parametrize(
-    "mode, titles, history",
+    "mode, played, titles, history",
     [
-        (LoopMode.OFF, ["second"], ["old", "first"]),
-        (LoopMode.SINGLE, ["second"], ["old", "first"]),
-        (LoopMode.ALL, ["second", "first"], ["old"]),
+        (LoopMode.OFF, ["second"], ["second"], ["old", "first"]),
+        (LoopMode.SINGLE, ["second"], ["second"], ["old", "first"]),
+        (LoopMode.ALL, ["second"], ["second", "first"], ["old"]),
     ],
 )
 def test_a_skip_on_a_track_with_no_audio_is_not_a_failure(
-    controller, monkeypatch, mode, titles, history
+    controller, monkeypatch, mode, played, titles, history
 ):
     assert set(LoopMode) == {LoopMode.OFF, LoopMode.SINGLE, LoopMode.ALL}
     _no_audio_user_command(controller, monkeypatch, _cmd_skip, mode)
 
-    assert _played(controller)[1:] == ["second"]
+    assert _played(controller)[1:] == played
     assert _titles(controller) == titles
     assert _play_history(controller) == history
 
