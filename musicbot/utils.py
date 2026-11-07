@@ -25,7 +25,7 @@ from discord.ext.commands import CommandError, NotOwner
 
 from config import config
 from musicbot.song import Song
-from musicbot.linkutils import SiteTypes, url_regex
+from musicbot.linkutils import SiteTypes, bare_url
 
 # avoiding circular import
 if TYPE_CHECKING:
@@ -196,12 +196,6 @@ def get_emoji(bot: MusicBot, string: str) -> Optional[Union[str, Emoji]]:
     if string.isdecimal():
         return utils.get(bot.emojis, id=int(string))
     return string
-
-
-def bare_url(url: str) -> str:
-    """A url's bare form when ``url_regex`` matches it, else the url."""
-    match = url_regex.fullmatch(url)
-    return match.group("bare") if match else url
 
 
 def songs_embed(title: str, songs: Iterable[Song]) -> Embed:

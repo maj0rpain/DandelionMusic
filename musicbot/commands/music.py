@@ -19,7 +19,7 @@ from musicbot.audiocontroller import (
 )
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
-from musicbot.linkutils import get_site_type
+from musicbot.linkutils import bare_url, get_site_type
 from musicbot.message_link import check_message_link
 from musicbot.views import MusicButton, OwnedView, SimplePaginator
 
@@ -632,7 +632,7 @@ class Music(commands.Cog):
             embed = Embed(title=contents.ref.name)
             for song in part:
                 url = song.url
-                title = song.title or utils.bare_url(url)
+                title = song.title or bare_url(url)
                 embed.add_field(
                     name=str(i), value=f"[{title}]({url})", inline=False
                 )
