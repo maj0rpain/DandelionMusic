@@ -2872,7 +2872,7 @@ def _loop_all(controller):
     controller.playlist.loop = LoopMode.ALL
 
 
-def _history_songs(controller):
+def _play_history(controller):
     return [s.title for s in controller.playlist.playhistory]
 
 
@@ -2892,7 +2892,7 @@ def test_loop_all_every_preload_failing_drains_to_idle(
     assert _played(controller) == []
     assert _preload_counts(stub_loader) == {"a": 1, "b": 1, "c": 1}
     assert _backup(controller, tmp_path) == []
-    assert _history_songs(controller) == []
+    assert _play_history(controller) == []
 
 
 def test_loop_all_song_without_a_url_is_reported_once_and_removed(
@@ -2910,7 +2910,7 @@ def test_loop_all_song_without_a_url_is_reported_once_and_removed(
     assert _played(controller) == []
     assert _preload_counts(stub_loader) == {"no url": 1}
     assert _backup(controller, tmp_path) == []
-    assert _history_songs(controller) == []
+    assert _play_history(controller) == []
 
 
 def _failing_at_the_head(controller, stub_loader, *titles):
@@ -2951,7 +2951,7 @@ def test_loop_all_mixed_queue_drops_failing_songs_and_keeps_the_rest(
 
     assert [s.title for s in controller.panel.skipped] == ["bad", "worse"]
     assert sorted(_titles(controller)) == ["fine", "good"]
-    assert _history_songs(controller) == []
+    assert _play_history(controller) == []
 
 
 class _HookedPanel(RecordingPanel):
@@ -3023,7 +3023,7 @@ def test_a_track_ending_on_its_own_with_no_audio_is_a_failed_track(
     assert _played(controller) == ["dead", "next"]
     assert _preload_counts(stub_loader)["dead"] == 1
     assert _backup(controller, tmp_path) == ["next"]
-    assert _history_songs(controller) == []
+    assert _play_history(controller) == []
     assert "dead" in _track_names(controller)
 
 
@@ -3196,7 +3196,7 @@ def test_a_skip_on_a_track_with_no_audio_is_not_a_failure(
 
     assert _played(controller)[1:] == played
     assert _titles(controller) == titles
-    assert _history_songs(controller) == history
+    assert _play_history(controller) == history
 
 
 # the queue's real step-back: history under OFF/SINGLE, rotation under ALL
