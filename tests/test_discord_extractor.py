@@ -50,6 +50,7 @@ def http(monkeypatch, worker_loop):
     monkeypatch.setattr(extractor, "_client", None)
     monkeypatch.setattr(extractor.atexit, "register", lambda *a, **k: None)
     monkeypatch.setattr(linkutils, "HTTP_TIMEOUT", LIMIT)
+    monkeypatch.setattr(loader, "_admitted_link", URL)
     return http
 
 
@@ -87,5 +88,5 @@ def test_a_failed_discord_link_is_a_could_not_load_error(
     else:
         http.login_exc = RuntimeError("bad token")
     with pytest.raises(SongError) as info:
-        loader._load_song(URL)
+        loader._load_song(URL, URL)
     assert str(info.value) == config.SONGINFO_ERROR

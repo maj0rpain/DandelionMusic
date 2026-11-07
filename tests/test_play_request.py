@@ -18,8 +18,8 @@ def run_command(name, ctx, monkeypatch, **kwargs):
     reached = []
     ctx.guild = ctx.author = None  # no message link: never read
 
-    async def play_song(self, ctx, track, playnext=False):
-        reached.append((track, playnext))
+    async def play_song(self, ctx, checked, playnext=False):
+        reached.append((checked.track, playnext))
 
     monkeypatch.setattr(Music, "_play_song", play_song)
     command = getattr(Music, name)

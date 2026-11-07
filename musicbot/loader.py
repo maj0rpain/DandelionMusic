@@ -1,4 +1,3 @@
-import re
 import sys
 import atexit
 import asyncio
@@ -9,14 +8,14 @@ from urllib.parse import urlparse
 from concurrent.futures import ProcessPoolExecutor
 from concurrent.futures.process import BrokenProcessPool
 from multiprocessing import get_context as mp_context
-from typing import Dict, List, Optional
+from typing import Dict, List, Optional, Union
 
 from yt_dlp import YoutubeDL
 from yt_dlp.utils import DownloadError
 
 from config import config
 from musicbot import library
-from musicbot.message_link import MESSAGE_LINK_PATTERN
+from musicbot.message_link import CheckedTrack, is_message_link
 from musicbot.audiotags import nice_title, read_tags
 from musicbot.song import LoadResult, Song
 from musicbot.utils import wrap_stdio
@@ -68,6 +67,9 @@ _downloader: Optional[YoutubeDL] = None
 # bot's process, _site_locks by extract_info() in the worker
 _preloading = {}
 _site_locks = {}
+# the one message link this worker may fetch, held only for the duration
+# of one _load_song; the Discord-attachments plugin compares against it
+_admitted_link: Optional[str] = None
 
 
 def _new_downloader() -> YoutubeDL:
@@ -214,13 +216,20 @@ def _search_youtube(title: str, count: int = 1) -> list[dict]:
     return r["entries"]
 
 
-async def load_song(track: str) -> LoadResult:
-    return await _load(Lane.LOAD, track)
+async def load_song(track: Union[str, CheckedTrack]) -> LoadResult:
+    """Loads a plain track or one the message-link gate checked."""
+    admitted_link = None
+    if isinstance(track, CheckedTrack):
+        admitted_link = track.admitted_link
+        track = track.track
+    return await _load(Lane.LOAD, track, admitted_link)
 
 
-async def _load(lane: Lane, track: str) -> LoadResult:
+async def _load(
+    lane: Lane, track: str, admitted_link: Optional[str] = None
+) -> LoadResult:
     """Runs _load_song in the given lane and stamps the result."""
-    result = await _run_sync(lane, _load_song, track)
+    result = await _run_sync(lane, _load_song, track, admitted_link)
     now = _now()
     for song in result.songs:
         song.extracted_at = now
@@ -287,10 +296,24 @@ def _search_spotify_track(track: SpotifyTrack) -> dict:
         raise SongError(config.SONGINFO_ERROR) from e
 
 
-def _load_song(track: str) -> LoadResult:
+def _load_song(track: str, admitted_link: Optional[str] = None) -> LoadResult:
+    """Loads `track`. A message link is fetched only when it is
+    `admitted_link`, which is held for this load alone."""
+    global _admitted_link
+    _admitted_link = admitted_link
+    try:
+        return _load_song_held(track, admitted_link)
+    finally:
+        _admitted_link = None
+
+
+def _load_song_held(track: str, admitted_link: Optional[str]) -> LoadResult:
     track = normalize_track(track)
     truncation = None
     host = identify_url(track)
+
+    if is_message_link(track) and track != admitted_link:
+        raise SongError(config.SONGINFO_UNSUPPORTED)
 
     if host == SiteTypes.SHORT_LINK:
         # resolved once; the result is never resolved again
@@ -302,7 +325,7 @@ def _load_song(track: str) -> LoadResult:
         host = identify_url(track)
         # the message-link gate ran on the short link as typed; a
         # resolved Discord message link would skip it
-        if host == SiteTypes.NOT_URL or re.match(MESSAGE_LINK_PATTERN, track):
+        if host == SiteTypes.NOT_URL or is_message_link(track):
             raise SongError(config.SONGINFO_UNSUPPORTED)
 
     if host == SiteTypes.NOT_URL:

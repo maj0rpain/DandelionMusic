@@ -104,8 +104,8 @@ class RecordingController:
     async def start_idle_timer(self, reset):
         pass
 
-    async def process_song(self, track, user=None, playnext=False):
-        self.calls.append(("process_song", track, playnext))
+    async def process_song(self, checked, user=None, playnext=False):
+        self.calls.append(("process_song", checked.track, playnext))
         return EnqueueOutcome(OutcomeKind.START_FAILED)
 
     async def enqueue(self, songs, batch=None):

@@ -102,3 +102,32 @@ def test_attribute_names_are_name_dot_attr_pairs(tmp_path):
 def test_an_attribute_on_a_non_name_gives_nothing(tmp_path):
     module = module_of(tmp_path, "x = f().attr\ny = a[0].attr\n")
     assert attribute_names(module) == set()
+
+
+IN_FUNCTIONS = """\
+import os
+
+
+def f():
+    import json
+    from re import match
+
+
+async def g():
+    import abc
+
+
+if os:
+    import sys
+"""
+
+
+def test_module_level_only_skips_imports_inside_function_bodies(tmp_path):
+    module = module_of(tmp_path, IN_FUNCTIONS)
+    assert imported_names(module) >= {"json", "re", "re.match", "abc"}
+    assert imported_names(module, module_level_only=True) == {"os", "sys"}
+
+
+def test_roots_honour_module_level_only(tmp_path):
+    module = module_of(tmp_path, IN_FUNCTIONS)
+    assert imported_roots(module, module_level_only=True) == {"os", "sys"}
