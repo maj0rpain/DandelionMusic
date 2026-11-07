@@ -37,8 +37,14 @@ class RecordingController:
     of it. `backup` is what load_backup() loads into the queue."""
 
     def __init__(
-        self, backup=(), history=(), active=False, readable=True, loop=None,
-        disconnect_on_prev=False, prev_result=True,
+        self,
+        backup=(),
+        history=(),
+        active=False,
+        readable=True,
+        loop=None,
+        disconnect_on_prev=False,
+        prev_result=True,
     ):
         self.name = "controller"
         self.backup = None if backup is None else list(backup)
