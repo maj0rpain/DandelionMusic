@@ -15,7 +15,7 @@ from musicbot.commands import music
 from musicbot.commands.music import Music
 from musicbot.song import LoadResult
 from controller_helpers import command_ctx
-from helpers import plain_song, run
+from helpers import imported_names, plain_song, run
 
 
 def _fail_with(error):
@@ -92,11 +92,15 @@ def test_remove_song_refuses_the_only_song(monkeypatch):
     [
         (playlists.PlaylistExists(), config.PLAYLIST_ALREADY_EXISTS),
         (
-            playlists.PlaylistNameTooLong(),
+            playlists.PlaylistNameTooLong("p", 255),
             config.PLAYLIST_NAME_TOO_LONG.format(max_length=255),
         ),
+        (
+            playlists.PlaylistNameTooLong("p", 40),
+            config.PLAYLIST_NAME_TOO_LONG.format(max_length=40),
+        ),
     ],
-    ids=["already_exists", "name_too_long"],
+    ids=["already_exists", "name_too_long", "name_too_long_other_limit"],
 )
 def test_save_that_fails_replies_with_the_reason(monkeypatch, error, reply):
     monkeypatch.setattr(playlists, "save", _fail_with(error))
@@ -153,3 +157,11 @@ def test_show_lists_an_untitled_entry_by_its_url(monkeypatch):
     run(Music._playlist_show.callback(Music(None), ctx, "p"))
 
     assert "[u](u)" in shown[0].fields[0].value
+
+
+def test_the_music_cog_imports_nothing_from_the_settings_module():
+    assert not {
+        name
+        for name in imported_names(music)
+        if name == "musicbot.settings" or name.startswith("musicbot.settings.")
+    }

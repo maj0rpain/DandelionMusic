@@ -204,11 +204,12 @@ def test_a_255_character_name_saves_and_a_256_one_is_refused():
     async def test(factory):
         fits = PlaylistRef(GUILD, "x" * 255)
         await playlists.save(factory, fits, [A])
-        with pytest.raises(playlists.PlaylistNameTooLong):
+        with pytest.raises(playlists.PlaylistNameTooLong) as refused:
             await playlists.save(factory, PlaylistRef(GUILD, "x" * 256), [A])
-        return await playlists.list_names(factory, GUILD)
+        names = await playlists.list_names(factory, GUILD)
+        return names, refused.value.max_length
 
-    assert run_with_db(test) == ["x" * 255]
+    assert run_with_db(test) == (["x" * 255], 255)
 
 
 STORED = '[{"url": "https://a.example/1", "title": "a"}]'
