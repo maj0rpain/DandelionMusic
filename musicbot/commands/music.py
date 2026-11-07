@@ -166,10 +166,10 @@ class Music(commands.Cog):
 
     async def cog_before_invoke(self, ctx):
         # The hook never joins voice: a joining command joins in its
-        # own body (_enter), once its checks on its input have passed.
+        # own body (_join_voice), once its checks on its input have passed.
         ctx.bot.sessions.direct_panel(ctx.guild, ctx.channel)
 
-    async def _enter(self, ctx):
+    async def _join_voice(self, ctx):
         """Joins voice for a joining command, after its own input
         checks. A slow connect must not push a slash command past
         Discord's 3-second deadline, so it is deferred first -
@@ -201,7 +201,7 @@ class Music(commands.Cog):
             await ctx.send(e)
             return
 
-        await self._enter(ctx)
+        await self._join_voice(ctx)
         await ctx.defer()
         await self._play_song(ctx, track, playnext=playnext)
 
@@ -383,7 +383,7 @@ class Music(commands.Cog):
         await ctx.defer()  # restoring extracts the head of the backup
         result = ctx.audiocontroller.load_backup()
         if result is RestoreResult.READY:
-            await self._enter(ctx)
+            await self._join_voice(ctx)
             result = await ctx.audiocontroller.start_restored()
         if result is RestoreResult.REFUSED_WHILE_ACTIVE:
             await ctx.send(config.RESTORE_WHILE_ACTIVE)
@@ -419,7 +419,7 @@ class Music(commands.Cog):
         if not ctx.audiocontroller.playlist.has_prev():
             await ctx.send(config.NO_PREVIOUS_TRACK)
             return
-        await self._enter(ctx)
+        await self._join_voice(ctx)
         if ctx.audiocontroller.prev_song():
             await ctx.send("Playing previous song :track_previous:")
         else:
@@ -542,7 +542,7 @@ class Music(commands.Cog):
         if contents is None:
             await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
-        await self._enter(ctx)
+        await self._join_voice(ctx)
         outcome = await ctx.audiocontroller.enqueue(
             (
                 Song(

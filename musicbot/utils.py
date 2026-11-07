@@ -160,7 +160,7 @@ def joining_command(func):
     there, once its own checks on its input have passed, or later,
     when a pick from a message it sent acts in its name. A marked
     Music command joins in its body, after its input checks, through
-    Music._enter; the hooks never join. A command that opens a view
+    Music._join_voice; the hooks never join. A command that opens a view
     whose picks may later join voice must carry the marker too: a
     pick joins through
     that command's context (a library search or browse pick) or

@@ -510,7 +510,7 @@ def test_the_command_acts_on_the_controller_enter_returns():
     first = ctx.audiocontroller
     ctx.controllers[guild] = fake_controller()
     run(ctx.bot.sessions.reset(guild))
-    run(cog._enter(ctx))
+    run(cog._join_voice(ctx))
     assert ctx.audiocontroller is not first
     assert ctx.audiocontroller is ctx.bot.sessions.controller(guild)
 
