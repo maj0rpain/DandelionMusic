@@ -3,7 +3,7 @@ import sys
 import socket
 import ipaddress
 import asyncio
-from enum import Enum, auto
+from enum import Enum, StrEnum, auto
 from dataclasses import dataclass
 from traceback import print_exc
 from urllib.parse import urlparse
@@ -218,7 +218,7 @@ class SiteTypes(Enum):
     NOT_URL = auto()
 
 
-class SpotifyPlaylistTypes(Enum):
+class SpotifyPlaylistTypes(StrEnum):
     PLAYLIST = "playlist"
     ALBUM = "album"
 
@@ -283,13 +283,29 @@ async def _scrape_track(url: str) -> tuple[str, str]:
     return title_str, ""
 
 
-def _log_api_error(kind, code) -> None:
+def _log_api_error(kind: str, code: str) -> None:
     """Logs the exception being handled as a Spotify API error."""
     print(
         f"ERROR: Spotify API returned error for {kind} {code}:",
         file=sys.stderr,
     )
     print_exc(file=sys.stderr)
+
+
+async def _api_or_public_page(
+    read_api, read_page_without_api, read_page_after_api_error, kind, code
+):
+    """Reads through the Spotify API when it is set up; when that raises,
+    logs it and reads the public page instead. `read_api` is synchronous,
+    the page reads are async."""
+    if not spotify_api:
+        return await read_page_without_api()
+    try:
+        return read_api()
+    except Exception:
+        _log_api_error(kind, code)
+        # raised inside the except, so the API error is its context
+        return await read_page_after_api_error()
 
 
 async def fetch_spotify(
@@ -305,17 +321,17 @@ async def fetch_spotify(
         return await fetch_spotify_playlist(url, url_type, match.group("code"))
 
     code = match.group("code")
-    if spotify_api:
-        try:
-            track_data = spotify_api.track(code)
-            title = track_data["name"]
-            artist = track_data["artists"][0]["name"]
-        except Exception:
-            _log_api_error("track", code)
-            # raised inside the except, so the API error is its context
-            title, artist = await _scrape_track(url)
-    else:
-        title, artist = await _scrape_track(url)
+
+    def read_api():
+        track_data = spotify_api.track(code)
+        return track_data["name"], track_data["artists"][0]["name"]
+
+    async def read_page():
+        return await _scrape_track(url)
+
+    title, artist = await _api_or_public_page(
+        read_api, read_page, read_page, "track", code
+    )
 
     if artist:
         query = f'{title} - {artist} "Topic"'
@@ -330,19 +346,13 @@ async def fetch_spotify_playlist(
 ) -> SpotifyTracks:
     """Returns the Spotify links, and how many tracks are missing"""
 
-    if spotify_api:
-        try:
-            return fetch_playlist_with_api(
-                SpotifyPlaylistTypes(list_type), code
-            )
-        except Exception:
-            _log_api_error(list_type, code)
-            # raised inside the except, so the API error is its context
-            return await _scrape_playlist(
-                url, TruncationReason.API_UNAVAILABLE
-            )
-
-    return await _scrape_playlist(url, TruncationReason.NO_API)
+    return await _api_or_public_page(
+        lambda: fetch_playlist_with_api(SpotifyPlaylistTypes(list_type), code),
+        lambda: _scrape_playlist(url, TruncationReason.NO_API),
+        lambda: _scrape_playlist(url, TruncationReason.API_UNAVAILABLE),
+        list_type,
+        code,
+    )
 
 
 async def _scrape_playlist(
