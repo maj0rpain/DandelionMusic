@@ -90,11 +90,13 @@ def test_browse_view_is_private_only_for_slash(monkeypatch):
         def embed(self, frame):
             return "embed"
 
-    view = FakeView()
-    monkeypatch.setattr(
-        lc.LibraryBrowseView, "open", lambda ctx, index: (view, "f")
-    )
     for slash in (True, False):
+        view = FakeView()
+        monkeypatch.setattr(
+            lc.LibraryBrowseView,
+            "open",
+            lambda ctx, index, view=view: (view, "f"),
+        )
         ctx, sent = make_ctx(slash)
         run(lc.Library._library_browse.callback(lc.Library(None), ctx))
         (kw,) = sent
