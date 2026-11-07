@@ -1,6 +1,7 @@
 import sys
 import atexit
 import asyncio
+from contextlib import contextmanager
 from enum import Enum, StrEnum
 from traceback import print_exc
 from datetime import datetime, timedelta, timezone
@@ -287,13 +288,20 @@ def _load_local_songs(tracks: List[str]) -> List[Optional[Song]]:
     return songs
 
 
+@contextmanager
+def _songinfo_errors():
+    """Any failure inside the block is a SONGINFO_ERROR."""
+    try:
+        yield
+    except Exception as e:
+        raise SongError(config.SONGINFO_ERROR) from e
+
+
 def _search_spotify_track(track: SpotifyTrack) -> dict:
     """The first YouTube result for a Spotify track. Any failure is a
     SONGINFO_ERROR, as a failed Spotify fetch is."""
-    try:
+    with _songinfo_errors():
         return _search_youtube(track.query)[0]
-    except Exception as e:
-        raise SongError(config.SONGINFO_ERROR) from e
 
 
 def _load_song(track: str, admitted_link: Optional[str] = None) -> LoadResult:
@@ -317,10 +325,8 @@ def _load_song_held(track: str, admitted_link: Optional[str]) -> LoadResult:
 
     if host == SiteTypes.SHORT_LINK:
         # resolved once; the result is never resolved again
-        try:
+        with _songinfo_errors():
             track = _loop.run_until_complete(resolve_short_link(track))
-        except Exception as e:
-            raise SongError(config.SONGINFO_ERROR) from e
         track = normalize_track(track)
         host = identify_url(track)
         # the message-link gate ran on the short link as typed; a
@@ -336,10 +342,8 @@ def _load_song_held(track: str, admitted_link: Optional[str]) -> LoadResult:
         raise SongError(config.SONGINFO_UNSUPPORTED)
 
     elif host == SiteTypes.SPOTIFY:
-        try:
+        with _songinfo_errors():
             data = _loop.run_until_complete(fetch_spotify(track))
-        except Exception as e:
-            raise SongError(config.SONGINFO_ERROR) from e
         if isinstance(data, SpotifyTrack):
             data = _search_spotify_track(data)
         elif isinstance(data, SpotifyTracks):

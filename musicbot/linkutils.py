@@ -24,6 +24,7 @@ from urllib3.util.retry import Retry
 from spotipy import Spotify
 from bs4 import BeautifulSoup
 from aiohttp import ClientSession, ClientTimeout
+from yarl import URL
 from spotipy.cache_handler import MemoryCacheHandler
 from spotipy.oauth2 import SpotifyClientCredentials
 from yt_dlp.extractor import gen_extractor_classes
@@ -210,6 +211,20 @@ def _is_disallowed_host(host: Optional[str]) -> bool:
     )
 
 
+# The only schemes of remote media the bot fetches; read by identify_url's
+# custom-link check, the redirect check in resolve_short_link and the
+# ffmpeg remote protocol whitelist.
+ALLOWED_REMOTE_SCHEMES = ("http", "https")
+
+
+def _is_fetchable(scheme: str, host: Optional[str]) -> bool:
+    """Whether the bot may fetch a url of this scheme and host: an
+    allowed remote scheme (any case) and a host that is not disallowed."""
+    return scheme.lower() in ALLOWED_REMOTE_SCHEMES and not (
+        _is_disallowed_host(host)
+    )
+
+
 # Hosts of link shorteners; matched exactly (case-insensitive).
 SHORT_LINK_HOSTS = frozenset(
     {"on.soundcloud.com", "spotify.link", "spotify.app.link"}
@@ -267,13 +282,32 @@ async def get_soup(url: str) -> BeautifulSoup:
     return BeautifulSoup(page, "html.parser")
 
 
+# Most redirects a short link may take (aiohttp's own default).
+_MAX_REDIRECTS = 10
+
+
+class RefusedRedirect(Exception):
+    """A short link's redirect was refused: its target is a disallowed
+    host or not an allowed remote scheme, or the hop limit was hit."""
+
+
 async def resolve_short_link(url: str) -> str:
-    """The URL a short link redirects to: one GET with redirects
-    followed, the body never read. Raises on a 4xx/5xx or any
-    network or timeout error."""
-    async with get_session().get(url, allow_redirects=True) as response:
-        response.raise_for_status()
-        return str(response.url)
+    """The URL a short link redirects to: one GET per hop with
+    redirects disabled, the body never read. Each hop's target is
+    checked before it is requested. Raises RefusedRedirect on a refused
+    hop or too many hops, and on a 4xx/5xx or any network or timeout
+    error."""
+    for _ in range(_MAX_REDIRECTS + 1):
+        async with get_session().get(url, allow_redirects=False) as response:
+            response.raise_for_status()
+            location = response.headers.get("Location")
+            if not (300 <= response.status < 400 and location):
+                return str(response.url)
+            target = response.url.join(URL(location))
+        if not _is_fetchable(target.scheme, target.host):
+            raise RefusedRedirect(f"redirect to {target} refused")
+        url = str(target)
+    raise RefusedRedirect(f"more than {_MAX_REDIRECTS} redirects")
 
 
 T = TypeVar("T")
@@ -495,6 +529,15 @@ def get_ie(url: str) -> Optional[ExtractorT]:
     return None
 
 
+def _is_word_colon_word(url: str) -> bool:
+    """True for plain word:word text that is not a URL: it is not a single
+    URL (scheme:// or a spotify: URI) and its first colon is not followed
+    by "/" (file:/ and concat:/ keep their classification)."""
+    return not _is_single_url(url) and not url.partition(":")[2].startswith(
+        "/"
+    )
+
+
 def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     if not url_regex.fullmatch(url):
         return SiteTypes.NOT_URL
@@ -502,7 +545,7 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     # word:word text is not a URL; an extractor may still claim it
     # (ytsearch:, scsearch:), otherwise it is a search query. A first
     # colon followed by "/" (file:/, concat:/) keeps its classification.
-    if not _is_single_url(url) and not url.partition(":")[2].startswith("/"):
+    if _is_word_colon_word(url):
         return get_ie(url) or SiteTypes.NOT_URL
 
     if spotify_regex.match(url):
@@ -520,11 +563,9 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     if ie := get_ie(url):
         return ie
 
-    if (
-        parsed.scheme.lower() in ("http", "https")
-        and not _is_disallowed_host(parsed.hostname)
-        and parsed.path.lower().endswith(config.SUPPORTED_EXTENSIONS)
-    ):
+    if _is_fetchable(
+        parsed.scheme, parsed.hostname
+    ) and parsed.path.lower().endswith(config.SUPPORTED_EXTENSIONS):
         return SiteTypes.CUSTOM
 
     # If no match
