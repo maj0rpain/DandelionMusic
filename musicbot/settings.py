@@ -1,6 +1,4 @@
-import asyncio
 import re
-import weakref
 from dataclasses import dataclass
 from enum import StrEnum
 from inspect import isawaitable
@@ -35,6 +33,7 @@ from alembic.operations import Operations, ops as alembic_ops
 from typing_extensions import Annotated
 
 from config import config
+from musicbot.keyed_locks import KeyedLocks
 from musicbot.utils import get_emoji
 
 # avoiding circular import
@@ -263,17 +262,7 @@ def default_settings() -> Dict[str, Any]:
     return {name: d.default for name, d in SETTINGS.items()}
 
 
-_setting_locks: "weakref.WeakValueDictionary[str, asyncio.Lock]" = (
-    weakref.WeakValueDictionary()
-)
-
-
-def _setting_lock(guild_id: str) -> asyncio.Lock:
-    "The guild's setting-write lock; gone once nothing holds or awaits it"
-    lock = _setting_locks.get(guild_id)
-    if lock is None:
-        lock = _setting_locks[guild_id] = asyncio.Lock()
-    return lock
+_setting_locks = KeyedLocks()
 
 
 class GuildSettings(Base):
@@ -365,7 +354,7 @@ class GuildSettings(Base):
     ) -> bool:
         "Stores the resolved value; False for a failed database write"
         setting = descriptor.name
-        async with _setting_lock(self.guild_id):
+        async with _setting_locks(self.guild_id):
             try:
                 async with ctx.bot.DbSession() as session:
                     result = await session.execute(

@@ -194,15 +194,21 @@ def tagged_rig(make_library):
     return build
 
 
+def install_lastfm(monkeypatch, rig, responses):
+    """Installs a fake Last.fm session, answering with the canned
+    responses by method, on the rig; returns it."""
+    monkeypatch.setattr(config, "LASTFM_API_KEY", "test-key")
+    rig.session = FakeLastfm(responses)
+    return rig.session
+
+
 @pytest.fixture
 def lastfm(rig, monkeypatch):
-    """Installs a fake Last.fm session; call it with the canned
-    responses by method."""
-    monkeypatch.setattr(config, "LASTFM_API_KEY", "test-key")
+    """Installs a fake Last.fm session on the default rig; call it
+    with the canned responses by method."""
 
     def install(responses):
-        rig.session = FakeLastfm(responses)
-        return rig.session
+        return install_lastfm(monkeypatch, rig, responses)
 
     return install
 
@@ -355,33 +361,17 @@ def test_lastfm_lone_tag_dict_is_one_tag(rig, lastfm, no_spotify):
     assert rig.album().stats.tags == ("shoegaze",)
 
 
-def test_lastfm_all_empty_node_is_no_match(rig, lastfm, no_spotify):
-    lastfm(
-        {
-            "artist.getInfo": {
-                "artist": {
-                    "image": [{"#text": ""}],
-                    "stats": {"listeners": "0", "playcount": "0"},
-                    "tags": "",
-                }
-            }
-        }
-    )
-
-    result = rig.artist()
-
-    assert (result.stats, result.art) == (None, None)
-
-
-def test_lastfm_node_with_only_a_playcount_is_no_match(
-    rig, lastfm, no_spotify
+@pytest.mark.parametrize("playcount", ["0", "5000"])
+def test_lastfm_node_with_no_listeners_tags_or_image_is_no_match(
+    rig, lastfm, no_spotify, playcount
 ):
+    # whatever its playcount
     lastfm(
         {
             "artist.getInfo": {
                 "artist": {
                     "image": [{"#text": ""}],
-                    "stats": {"listeners": "0", "playcount": "5000"},
+                    "stats": {"listeners": "0", "playcount": playcount},
                     "tags": "",
                 }
             }
@@ -864,19 +854,6 @@ def test_a_file_without_a_cover_is_read_once_across_two_calls(
 TAGGED = dict(album_artist="Tag Artist", album="Tag Album", cover=b"png-bytes")
 
 
-@pytest.fixture
-def lastfm_for(monkeypatch):
-    """Installs a fake Last.fm session on a rig, answering with an
-    empty album."""
-
-    def install(rig):
-        monkeypatch.setattr(config, "LASTFM_API_KEY", "test-key")
-        rig.session = FakeLastfm({"album.getInfo": {"album": {}}})
-        return rig.session
-
-    return install
-
-
 def queried_albums(session):
     return [(q["artist"], q["album"]) for q in session.queries]
 
@@ -890,12 +867,14 @@ def hide(path):
 
 
 def test_a_failed_local_read_is_refused_until_the_cooldown_passes(
-    tagged_rig, lastfm_for, reads
+    tagged_rig, monkeypatch, reads
 ):
     rig = tagged_rig(
         {("Radiohead", "OK Computer", "01.mp3"): TAGGED},
     )
-    session = lastfm_for(rig)
+    session = install_lastfm(
+        monkeypatch, rig, {"album.getInfo": {"album": {}}}
+    )
     sample = library.song_path("Radiohead", "OK Computer", "01.mp3")
     restore = hide(sample)
 

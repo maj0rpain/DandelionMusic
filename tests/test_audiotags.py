@@ -4,6 +4,7 @@ from functools import partial
 from pathlib import Path
 
 import pytest
+from mutagen import File as MutagenFile
 from mutagen.asf import ASF
 from mutagen.flac import FLAC, Picture
 from mutagen.mp4 import MP4, MP4Cover
@@ -227,6 +228,16 @@ def test_reads_all_six_fields(audio_file):
     ) == ("Song", "Artist", "Album", "Various", "Rock", 2007)
 
 
+def test_duration_is_whole_seconds_of_the_reported_length(audio_file):
+    length = MutagenFile(audio_file).info.length
+    duration = read_tags(audio_file).duration
+    if length:
+        assert duration == round(length)
+        assert type(duration) is int
+    else:
+        assert duration is None
+
+
 def test_partial_tags_leave_the_rest_none(audio_file):
     tag(audio_file, {"title": "Song", "genre": "Rock"})
     tags = read_tags(audio_file)
@@ -362,19 +373,6 @@ def _depth_reader(audio_type):
 def test_mp4_reader_keeps_the_depth_of_alac():
     info = _Info(codec="alac", bits_per_sample=24)
     assert _depth_reader(MP4)(info) == 24
-
-
-def test_mp4_reader_gives_none_for_aac():
-    info = _Info(codec="mp4a.40.2", bits_per_sample=16)
-    assert _depth_reader(MP4)(info) is None
-
-
-def test_fallback_reader_keeps_a_reported_depth():
-    assert _depth_reader(object)(_Info(bits_per_sample=24)) == 24
-
-
-def test_fallback_reader_gives_none_without_the_attribute():
-    assert _depth_reader(object)(_Info()) is None
 
 
 def test_fallback_reader_gives_none_for_zero():

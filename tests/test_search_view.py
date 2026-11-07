@@ -23,6 +23,8 @@ from musicbot.bot import MusicBot
 from musicbot.commands.music import Music, SearchView, SongButton
 from discord_fakes import (
     ADMISSION_CHANNEL,
+    EditRecordingMessage,
+    FakeFollowup,
     FakeInteraction,
     VoiceGuild,
     admission_settings,
@@ -41,34 +43,6 @@ from message_link_fakes import (
 OWNER = 1
 OTHER = 2
 URLS = ["https://youtu.be/one", "https://youtu.be/two"]
-
-
-class EditRecordingMessage(discord.Message):
-    """A bot-sent message. Records every edit; raises from it while
-    `fail` is set."""
-
-    def __init__(self, fail=False):
-        # no state: discord.Message is only here for isinstance
-        self.edits = []
-        self.fail = fail
-
-    async def edit(self, **kwargs):
-        if self.fail:
-            raise http_error()
-        self.edits.append(kwargs)
-
-
-class FakeFollowup:
-    """Records message edits by id; raises while `fail` is set."""
-
-    def __init__(self, fail=False):
-        self.edits = []
-        self.fail = fail
-
-    async def edit_message(self, message_id, **kwargs):
-        if self.fail:
-            raise http_error()
-        self.edits.append((message_id, kwargs))
 
 
 class NamedController:

@@ -13,6 +13,8 @@ from mutagen.mp3 import MP3
 from mutagen.mp4 import MP4
 from mutagen.wave import WAVE
 
+from musicbot.duration import whole_seconds
+
 
 class AudioTags(NamedTuple):
     title: Optional[str]
@@ -146,9 +148,7 @@ def read_tags(path: Path, *, strict: bool = False) -> AudioTags:
         genre = _first_str(audio, keys["genre"])
         year = _parse_year(_first_str(audio, keys["year"]))
         info = audio.info
-        duration = (
-            round(info.length) if info is not None and info.length else None
-        )
+        duration = whole_seconds(info.length) if info is not None else None
         # stream details are format-specific attributes on mutagen's
         # StreamInfo - lossy formats carry a bitrate, lossless ones
         # carry bit depth (read per format: mutagen reports a

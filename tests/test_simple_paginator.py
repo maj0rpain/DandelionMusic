@@ -6,27 +6,18 @@ from types import SimpleNamespace
 import discord
 
 from musicbot.views import OwnedView, SimplePaginator
+from discord_fakes import EditRecordingMessage
 from helpers import run
 
 OWNER = 1
-OTHER = 2
-
-
-class EditRecordingMessage(discord.Message):
-    def __init__(self):
-        # no state: discord.Message is only here for isinstance
-        self.edits = []
-
-    async def edit(self, **kwargs):
-        self.edits.append(kwargs)
 
 
 class SendRecordingContext:
-    def __init__(self, message=None):
+    def __init__(self):
         self.author = SimpleNamespace(id=OWNER)
         self.interaction = None
         self.sent = []
-        self.message = message or EditRecordingMessage()
+        self.message = EditRecordingMessage()
 
     async def send(self, **kwargs):
         self.sent.append(kwargs)
@@ -43,40 +34,27 @@ class Response:
     async def defer(self):
         self.calls.append(("defer", {}))
 
-    async def send_message(self, *args, **kwargs):
-        self.calls.append(("send_message", (args, kwargs)))
-
-
-class Followup:
-    def __init__(self):
-        self.edits = []
-
-    async def edit_message(self, message_id, **kwargs):
-        self.edits.append((message_id, kwargs))
-
 
 class Click:
-    def __init__(self, user_id=OWNER):
-        self.user = SimpleNamespace(id=user_id)
+    def __init__(self):
+        self.user = SimpleNamespace(id=OWNER)
         self.response = Response()
-        self.followup = Followup()
-        self.message = SimpleNamespace(id=555)
 
 
 def pages(n):
     return [discord.Embed(title=f"page {n_}") for n_ in range(n)]
 
 
-def sent(n, message=None):
+def sent(n):
     """A paginator of n pages, already sent."""
-    ctx = SendRecordingContext(message)
+    ctx = SendRecordingContext()
     view = SimplePaginator(ctx, pages(n))
     run(view.send())
     return view, ctx
 
 
-def click(view, button, who=OWNER):
-    c = Click(who)
+def click(view, button):
+    c = Click()
 
     async def go():
         if await view.interaction_check(c):
@@ -161,36 +139,3 @@ def test_the_timeout_is_180_seconds():
 def test_it_does_not_override_the_owned_view_checks():
     assert SimplePaginator.interaction_check is OwnedView.interaction_check
     assert SimplePaginator.on_timeout is OwnedView.on_timeout
-
-
-def test_a_non_owner_is_refused_and_the_page_stays():
-    view, _ = sent(3)
-
-    c = click(view, view.next_page, who=OTHER)
-
-    name, (args, kwargs) = c.response.calls[0]
-    assert name == "send_message"
-    assert args == ("This belongs to someone else.",)
-    assert kwargs == {"ephemeral": True}
-    assert len(c.response.calls) == 1
-    assert view.current_page == 0
-
-
-def test_timeout_without_a_click_disables_the_prefix_message():
-    view, ctx = sent(3)
-
-    run(view.on_timeout())
-
-    assert disabled(view) == (True, True)
-    assert ctx.message.edits == [{"view": view}]
-
-
-def test_timeout_after_a_click_edits_through_its_followup():
-    # a slash-sent listing hands back no discord.Message
-    view, ctx = sent(3, message=SimpleNamespace())
-    c = click(view, view.next_page)
-
-    run(view.on_timeout())
-
-    assert disabled(view) == (True, True)
-    assert c.followup.edits == [(555, {"view": view})]
