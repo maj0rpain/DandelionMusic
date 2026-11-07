@@ -435,8 +435,15 @@ def library_root() -> Path:
     return root
 
 
+def _track_path(
+    root: PurePath, artist: str, album: str, filename: str
+) -> PurePath:
+    """A library track's path under `root`, in `root`'s flavour."""
+    return root / artist / album / filename
+
+
 def song_path(artist: str, album: str, filename: str) -> Path:
-    return library_root() / artist / album / filename
+    return _track_path(library_root(), artist, album, filename)
 
 
 def song_uri(artist: str, album: str, filename: str) -> str:
@@ -489,8 +496,6 @@ def library_path_from_uri(uri: str, root: PurePath) -> Optional[PurePath]:
     """
     if not uri.startswith(FILE_SCHEME):
         return None
-    windows = isinstance(root, PureWindowsPath)
-    cls = type(root)
     rest = uri[len(FILE_SCHEME) :]
     slash = rest.find("/")
     if slash < 0:
@@ -498,37 +503,58 @@ def library_path_from_uri(uri: str, root: PurePath) -> Optional[PurePath]:
     authority, tail = rest[:slash], rest[slash:]
     if tail.startswith("//"):
         return None
-    host = ""
-    if authority not in ("", "localhost"):
-        if not windows:
-            return None
-        host = os.fsdecode(unquote_to_bytes(authority))
-        if any(c in host for c in "/\\:|"):
-            return None
-    decoded = os.fsdecode(unquote_to_bytes(tail))
-    segments = decoded.split("/")
-    if windows:
-        if decoded[1:2] in ("\\", "/") or decoded[2:3] == "|":
-            return None
-        if host and decoded[2:3] == ":":
-            return None
-        segments = [part for seg in segments for part in seg.split("\\")]
+    if isinstance(root, PureWindowsPath):
+        parsed = _parse_windows_uri(authority, tail, type(root))
+    else:
+        parsed = _parse_posix_uri(authority, tail, type(root))
+    if parsed is None:
+        return None
+    path, segments = parsed
     if any(seg in (".", "..") for seg in segments):
         return None
-    if host:
-        path = cls("\\\\" + host + decoded.replace("/", "\\"))
-    elif windows and decoded[2:3] == ":":
-        path = cls(decoded[1:])
-    else:
-        path = cls(decoded)
     if not path.is_absolute() or not path.is_relative_to(root):
         return None
     try:
         artist, album, filename = path.relative_to(root).parts
     except ValueError:
         return None
-    song = root / artist / album / filename
+    song = _track_path(root, artist, album, filename)
     return song if song == path else None
+
+
+def _parse_posix_uri(
+    authority: str, tail: str, path_class: type[PurePath]
+) -> Optional[tuple[PurePath, list[str]]]:
+    """The candidate path and the segments to check, or None."""
+    if authority not in ("", "localhost"):
+        return None
+    decoded = os.fsdecode(unquote_to_bytes(tail))
+    return path_class(decoded), decoded.split("/")
+
+
+def _parse_windows_uri(
+    authority: str, tail: str, path_class: type[PurePath]
+) -> Optional[tuple[PurePath, list[str]]]:
+    """The candidate path and the segments to check, or None."""
+    host = ""
+    if authority not in ("", "localhost"):
+        host = os.fsdecode(unquote_to_bytes(authority))
+        if any(c in host for c in "/\\:|"):
+            return None
+    decoded = os.fsdecode(unquote_to_bytes(tail))
+    has_drive_letter = decoded[2:3] == ":"
+    if decoded[1:2] in ("\\", "/") or decoded[2:3] == "|":
+        return None
+    if host and has_drive_letter:
+        return None
+    segments = [p for seg in decoded.split("/") for p in seg.split("\\")]
+    if host:
+        path = path_class("\\\\" + host + decoded.replace("/", "\\"))
+    elif has_drive_letter:
+        path = path_class(decoded[1:])
+    else:
+        path = path_class(decoded)
+    return path, segments
 
 
 def track_path_from_uri(uri: str) -> Optional[Path]:
