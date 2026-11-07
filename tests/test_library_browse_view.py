@@ -36,6 +36,7 @@ from musicbot.library import SearchResult
 from musicbot.library_metadata import ArtInfo, Enrichment
 from config import config
 from discord_fakes import (
+    EditRecordingMessage,
     FakeFollowup,
     VoiceGuild,
     context_client,
@@ -1076,7 +1077,7 @@ class ClickInteraction:
 
 
 def timeout_message(cls, fail=False):
-    """A `cls` (Message / WebhookMessage) that records its edits."""
+    """A `cls` (a WebhookMessage) that records its edits."""
 
     class Recording(cls):
         def __init__(self):
@@ -1278,7 +1279,7 @@ def test_timeout_without_a_click_edits_the_original_response():
 
 def test_timeout_after_a_click_still_edits_a_prefix_message_directly():
     async def go():
-        message = timeout_message(discord.Message)
+        message = EditRecordingMessage()
         view = timeout_view(message)
         click = ClickInteraction()
         assert await view.interaction_check(click)

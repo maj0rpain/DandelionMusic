@@ -39,7 +39,6 @@ class Click:
     def __init__(self):
         self.user = SimpleNamespace(id=OWNER)
         self.response = Response()
-        self.message = SimpleNamespace(id=555)
 
 
 def pages(n):
