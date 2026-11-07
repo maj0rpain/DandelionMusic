@@ -539,9 +539,6 @@ class Music(commands.Cog):
         except playlists.SavedPlaylistError as e:
             await ctx.send(_saved_playlist_error_reply(e))
             return
-        if contents is None:
-            await ctx.send(config.PLAYLIST_NOT_FOUND)
-            return
         await self._join_voice(ctx)
         outcome = await ctx.audiocontroller.enqueue(
             (
@@ -619,9 +616,6 @@ class Music(commands.Cog):
             )
         except playlists.SavedPlaylistError as e:
             await ctx.send(_saved_playlist_error_reply(e))
-            return
-        if contents is None:
-            await ctx.send(config.PLAYLIST_NOT_FOUND)
             return
         pages = []
         i = 1

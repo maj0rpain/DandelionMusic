@@ -161,11 +161,11 @@ async def _load_row(
 
 async def get(
     session_factory: SessionFactory, playlist: PlaylistRef
-) -> Optional[PlaylistContents]:
+) -> PlaylistContents:
     async with session_factory() as session:
         row = await _load_row(session, playlist)
         if row is None:
-            return None
+            raise PlaylistNotFound(playlist.name)
         return PlaylistContents(playlist, _decode(row.songs_json, playlist))
 
 

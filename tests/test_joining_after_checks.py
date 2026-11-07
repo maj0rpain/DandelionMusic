@@ -206,7 +206,7 @@ def test_prev_with_loop_all_and_an_empty_queue_does_not_join():
 
 def test_playlist_load_of_an_unknown_name_does_not_join(monkeypatch):
     async def get(session_factory, ref):
-        return None
+        raise music.playlists.PlaylistNotFound(ref.name)
 
     monkeypatch.setattr(music.playlists, "get", get)
     guild, ctx, cog, sent = body_ctx("playlist load")

@@ -43,8 +43,10 @@ def _run_playlist_command(monkeypatch, command, function, error, *args):
         (Music._playlist_remove_song, "remove_song", ("p", 1)),
         (Music._playlist_move_song, "move_song", ("p", 1, 2)),
         (Music._playlist_add_song, "add_songs", ("p", "t")),
+        (Music._playlist_load, "get", ("p",)),
+        (Music._playlist_show, "get", ("p",)),
     ],
-    ids=["remove", "remove_song", "move_song", "add_song"],
+    ids=["remove", "remove_song", "move_song", "add_song", "load", "show"],
 )
 def test_playlist_commands_on_a_missing_playlist_reply_not_found(
     monkeypatch, command, function, args
