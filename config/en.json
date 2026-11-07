@@ -32,7 +32,7 @@
   "SONGINFO_QUEUE_POSITION": "Added to queue - position {position}",
   "SONGINFO_SONGINFO": "Song info",
   "SONGINFO_UNSUPPORTED": "Unsupported site or file format.",
-  "SONGINFO_ERROR": "Error: Unable to fetch song info. If you're trying to access age restricted content, check the documentation/wiki.",
+  "SONGINFO_ERROR": "Error: Unable to fetch song info. If you're trying to access age restricted content, set up cookies (see \"Custom Cookies\" in the README).",
   "LOADER_CRASHED": "The song loader crashed while loading this - it may be too large. Try again, or try a smaller playlist.",
   "SPOTIFY_PLAYLIST_TRUNCATED": "Only {queued} of {total} tracks could be loaded: {reason}",
   "SPOTIFY_TRUNCATED_API_ERROR": "Spotify stopped responding partway through.",
