@@ -6,6 +6,7 @@ from typing import TYPE_CHECKING, List, Optional, Union
 import discord
 
 from config import config
+from musicbot.duration import whole_seconds
 from musicbot.linkutils import SiteTypes
 from musicbot.truncation import Truncation
 
@@ -13,12 +14,6 @@ if TYPE_CHECKING:
     # type-only: song -> playlists -> settings -> utils -> song is an
     # import cycle, so an unconditional import fails at import time
     from musicbot.playlists import SavedEntry
-
-
-def _whole_seconds(value):
-    """A duration as whole seconds; yt-dlp reports floats for some
-    sites."""
-    return None if value is None else round(value)
 
 
 class Song:
@@ -45,9 +40,16 @@ class Song:
         self.url = url
         self.title = title
         self.uploader = uploader
-        self.duration = _whole_seconds(duration)
+        self.duration = whole_seconds(duration)
         self.thumbnail = thumbnail
         self.saved_entry = saved_entry
+
+    def __setstate__(self, state):
+        # a backup or worker result is restored without __init__, so
+        # the duration rule is applied here
+        self.__dict__.update(state)
+        if "duration" in state:
+            self.duration = whole_seconds(state["duration"])
 
     @property
     def display_name(self) -> str:
@@ -104,7 +106,7 @@ class Song:
         for k, v in data.items():
             if hasattr(self, k) and v:
                 if k == "duration":
-                    v = _whole_seconds(v)
+                    v = whole_seconds(v)
                 setattr(self, k, v)
 
 

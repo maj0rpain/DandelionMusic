@@ -48,7 +48,7 @@ async def _apply_setting(ctx, descriptor: SettingDescriptor, value):
         await ctx.send(refusal)
         return
     sett = get_settings(ctx)
-    failure = f"`Error: Setting {descriptor.name} could not be updated.`"
+    failure = config.SETTING_UPDATE_FAILED.format(descriptor.name)
     if value is None:
         if not await sett.reset_setting(descriptor, ctx):
             await ctx.send(failure)
@@ -68,8 +68,9 @@ async def _apply_setting(ctx, descriptor: SettingDescriptor, value):
         await ctx.send(failure)
         return
     await ctx.send(
-        f"Setting `{descriptor.name}` updated to"
-        f" {descriptor.confirm(value)}!"
+        config.SETTING_UPDATED.format(
+            descriptor.name, descriptor.confirm(value)
+        )
     )
 
 
