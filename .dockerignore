@@ -55,7 +55,6 @@ dist/
 .superpowers/
 .mcp.json
 .ignore
-graft/
 
 # Docs, CI and dev-only trees - not used at runtime
 .github/

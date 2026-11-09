@@ -19,9 +19,6 @@ backup
 .venv
 .superpowers/
 
-# graft's local graph cache — regenerable, not committed (run `graft build`).
-/graft/
-
 # Session handoff documents - see CLAUDE.md's "Workflow" section. Local
 # to one machine's working sessions, so the directory is tracked and its
 # contents are not.
