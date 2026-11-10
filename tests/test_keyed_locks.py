@@ -8,10 +8,10 @@ from musicbot.keyed_locks import KeyedLocks
 from helpers import imported_roots, run
 
 
-def test_the_same_key_gives_the_same_lock_while_it_is_held():
+def test_the_same_key_gives_the_same_lock_while_it_is_referenced():
     locks = KeyedLocks()
-    held = locks("a")
-    assert locks("a") is held
+    first = locks("a")
+    assert locks("a") is first
 
 
 def test_different_keys_give_independent_locks():
