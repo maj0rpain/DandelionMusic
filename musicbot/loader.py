@@ -69,11 +69,11 @@ _downloader: Optional[YoutubeDL] = None
 _preloading = {}
 _site_locks = {}
 # the one message link this worker may fetch, held only for the duration
-# of one _load_song; admits() reads it
+# of one _load_song; admits_link() reads it
 _admitted_link: Optional[str] = None
 
 
-def admits(url: str) -> bool:
+def admits_link(url: str) -> bool:
     """The one admitted-link rule: a message link may be fetched only if
     it is the link admitted for the current load. True for anything that
     is not a message link. Read by the load body's early check and by
@@ -174,8 +174,9 @@ class Preload(Enum):
 
     FAILED: an extraction was needed and failed.
     CURRENT: nothing needed extracting - the song has no webpage_url,
-    is a local-library or custom-link song, has a stream url not within
-    EXPIRY_MARGIN of its expire= (or the link is its own stream), has a
+    is a local-library song, has a stream url not within
+    EXPIRY_MARGIN of its expire= (or, off a custom link, the link is its
+    own stream), has a
     stream url with no expire= extracted less than
     UNKNOWN_EXPIRY_MAX_AGE ago, or another caller's in-flight
     extraction of it succeeded.
@@ -318,12 +319,12 @@ def _load_song(track: Union[str, CheckedTrack]) -> LoadResult:
     else:
         _admitted_link = None
     try:
-        return _load_song_admitting(track)
+        return _load_song_body(track)
     finally:
         _admitted_link = None
 
 
-def _load_song_admitting(track: str) -> LoadResult:
+def _load_song_body(track: str) -> LoadResult:
     """The load body, run while `_load_song` holds the admitted link."""
     track = normalize_track(track)
     truncation = None
@@ -331,12 +332,13 @@ def _load_song_admitting(track: str) -> LoadResult:
 
     # Only here for the friendlier SONGINFO_UNSUPPORTED reply; the
     # extractor's check is the one that covers hops and re-extraction.
-    if not admits(track):
+    if not admits_link(track):
         raise SongError(config.SONGINFO_UNSUPPORTED)
 
     followed = None
     if host == SiteTypes.SHORT_LINK:
-        # resolved once; the result is never resolved again
+        # the short link is followed here once; its result is followed
+        # again in the custom-link branch only when normalizing changed it
         with _songinfo_errors():
             followed = _loop.run_until_complete(resolve_redirects(track))
         track = normalize_track(followed)
@@ -443,7 +445,9 @@ def _stream_url_is_current(song: Song) -> bool:
             song.extracted_at is not None
             and _now() - song.extracted_at < UNKNOWN_EXPIRY_MAX_AGE
         )
-    if expire == _parse_expire(song.webpage_url):
+    if song.host is not SiteTypes.CUSTOM and expire == _parse_expire(
+        song.webpage_url
+    ):
         # the link is its own stream: re-extracting cannot refresh it
         return True
     return _now() < datetime.fromtimestamp(expire, timezone.utc) - (
@@ -455,7 +459,7 @@ async def preload(song: Song) -> Preload:
     if song.webpage_url is None:
         return Preload.CURRENT
 
-    if song.host in (SiteTypes.LOCAL_LIBRARY, SiteTypes.CUSTOM):
+    if song.host is SiteTypes.LOCAL_LIBRARY:
         return Preload.CURRENT
 
     if song.url is not None and _stream_url_is_current(song):

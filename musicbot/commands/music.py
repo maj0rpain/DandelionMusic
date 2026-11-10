@@ -92,7 +92,7 @@ class SongButton(MusicButton):
         async def before(ctx):
             # the gate runs before the join: a refused pick replies,
             # ends used up and never joins
-            self._checked = await cog._checked_track(ctx, song)
+            self._checked = await gate_or_refuse(song, ctx)
             if self._checked is None:
                 await self.view.use_up_pick()
             return self._checked
@@ -205,19 +205,13 @@ class Music(commands.Cog):
         if track is None:
             await ctx.send(config.PLAY_ARGS_MISSING)
             return
-        checked = await self._checked_track(ctx, track)
+        checked = await gate_or_refuse(track, ctx)
         if checked is None:
             return
 
         await self._join_voice(ctx)
         await ctx.defer()
         await self._play_song(ctx, checked, playnext=playnext)
-
-    async def _checked_track(self, ctx, track) -> Optional[CheckedTrack]:
-        """Runs the message-link gate for `ctx`'s author: the checked
-        track, or, when the gate refuses, replies with the refusal and
-        returns None."""
-        return await gate_or_refuse(track, ctx.guild, ctx.author, ctx.send)
 
     async def _play_song(self, ctx, checked: CheckedTrack, playnext=False):
         # reset timer
@@ -659,7 +653,7 @@ class Music(commands.Cog):
         track: str,
     ):
         await ctx.defer()
-        checked = await self._checked_track(ctx, track)
+        checked = await gate_or_refuse(track, ctx)
         if checked is None:
             return
         try:

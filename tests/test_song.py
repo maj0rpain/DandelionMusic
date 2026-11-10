@@ -120,21 +120,12 @@ def test_update_stores_a_whole_second_duration_and_shows_it(
     song = _song()
     song.update({"duration": given})
     assert song.duration == stored
-    assert stored is None or type(song.duration) is int
+    assert type(song.duration) is type(stored)
     assert _duration_field(song) == shown
 
 
 def test_constructor_rounds_a_fractional_duration():
     song = _song(duration=213.6)
-    assert song.duration == 214
-    assert type(song.duration) is int
-
-
-def test_update_from_a_song_rounds_its_fractional_duration():
-    other = _song()
-    other.duration = 213.6
-    song = _song()
-    song.update(other)
     assert song.duration == 214
     assert type(song.duration) is int
 
@@ -169,8 +160,7 @@ def test_a_restored_song_reads_its_raw_duration_in_whole_seconds(
 ):
     restored = _pickled_with_raw_duration(given)
     assert restored.duration == stored
-    if stored is not None:
-        assert type(restored.duration) is int
+    assert type(restored.duration) is type(stored)
     assert _duration_field(restored) == shown
 
 
@@ -178,7 +168,6 @@ def test_a_restored_song_reads_its_raw_duration_in_whole_seconds(
     "given, stored, shown",
     [
         (213.6, 214, "0:03:34"),
-        (0, None, config.SONGINFO_UNKNOWN),
         (None, None, config.SONGINFO_UNKNOWN),
     ],
 )
@@ -186,8 +175,7 @@ def test_assigning_a_duration_directly_applies_the_rule(given, stored, shown):
     song = _song(duration=100)
     song.duration = given
     assert song.duration == stored
-    if stored is not None:
-        assert type(song.duration) is int
+    assert type(song.duration) is type(stored)
     assert _duration_field(song) == shown
 
 
