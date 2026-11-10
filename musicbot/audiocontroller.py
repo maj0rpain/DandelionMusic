@@ -222,6 +222,15 @@ class AudioController(object):
         """The queue's embed, read when a queue button is clicked."""
         return self.playlist.queue_embed()
 
+    def queue_length(self) -> int:
+        """How many songs the play queue holds, the now-playing one
+        at its head included."""
+        return len(self.playlist)
+
+    def queued_songs(self) -> tuple[Song, ...]:
+        """The play queue's songs in order, as a snapshot."""
+        return tuple(self.playlist.playque)
+
     def is_active(self) -> bool:
         return self.playback.is_active()
 
