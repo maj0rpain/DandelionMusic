@@ -88,6 +88,7 @@ class Row(NamedTuple):
     make_command: Callable | None
     expected_sends: Callable  # given the error as received
     printed: bool
+    wrapped: bool = False
 
 
 ROWS = [
@@ -174,6 +175,7 @@ ROWS = [
         None,
         lambda e: ["unsupported link"],
         False,
+        wrapped=True,
     ),
     Row(
         "failure",
@@ -181,15 +183,14 @@ ROWS = [
         None,
         lambda e: [str(e)],
         True,
+        wrapped=True,
     ),
 ]
-
-WRAPPED_IDS = {"song-error", "failure"}
 
 CASES = [
     pytest.param(row, wrap, id=f"{row.id}-{wrap}")
     for row in ROWS
-    for wrap in (WRAPS if row.id in WRAPPED_IDS else ["bare"])
+    for wrap in (WRAPS if row.wrapped else ["bare"])
 ]
 
 
