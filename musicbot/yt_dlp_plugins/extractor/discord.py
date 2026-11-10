@@ -44,9 +44,9 @@ class DiscordAttachmentsIE(InfoExtractor):
 
     def _real_extract(self, url):
         from musicbot import linkutils
-        from musicbot.loader import _loop, admits
+        from musicbot.loader import _loop, admits_link
 
-        if not admits(url):
+        if not admits_link(url):
             raise linkutils.download_error(
                 ValueError("message link not admitted for this load")
             )

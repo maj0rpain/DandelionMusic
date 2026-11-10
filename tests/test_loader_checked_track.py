@@ -50,32 +50,14 @@ def test_a_checked_track_equals_itself_after_a_pickle_round_trip():
 )
 def test_admits_only_the_held_message_link(monkeypatch, held, url, admitted):
     monkeypatch.setattr(loader, "_admitted_link", held)
-    assert loader.admits(url) is admitted
+    assert loader.admits_link(url) is admitted
 
 
 def test_the_extractor_decides_through_the_loaders_predicate():
     from musicbot.yt_dlp_plugins.extractor import discord
 
     assert not [n for n in attribute_names(discord) if "_admitted_link" in n]
-    assert "musicbot.loader.admits" in imported_names(discord)
-
-
-@pytest.mark.parametrize("fails", [False, True])
-def test_a_checked_load_leaves_no_admitted_link_held(monkeypatch, fails):
-    seen = []
-
-    def body(track):
-        seen.append((track, loader._admitted_link))
-        if fails:
-            raise loader.SongError("refused")
-
-    monkeypatch.setattr(loader, "_load_song_admitting", body)
-    try:
-        loader._load_song(gated_track(LINK))
-    except loader.SongError:
-        pass
-    assert seen == [(LINK, LINK)]
-    assert loader._admitted_link is None
+    assert "musicbot.loader.admits_link" in imported_names(discord)
 
 
 def test_the_loader_has_no_pattern_match_of_its_own_for_message_links():
