@@ -73,7 +73,7 @@ def test_a_batch_loads_each_track_as_a_plain_string(lib, monkeypatch):
         seen.append((track, loader._admitted_link))
         return loader.LoadResult.of_song(loader.Song(SiteTypes.YT_DLP, "u"))
 
-    monkeypatch.setattr(loader, "_load_song", load_song)
+    monkeypatch.setattr(loader, "_load_song_admitting", load_song)
     uri = _uri(lib, "A/B/t.mp3")
     loader._load_local_songs([uri])
     assert seen == [(uri, None)]

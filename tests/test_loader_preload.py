@@ -251,7 +251,7 @@ def test_preload_loads_a_plain_string_with_no_admitted_link(monkeypatch):
     async def run_sync(lane, f, *args):
         return f(*args)
 
-    monkeypatch.setattr(loader, "_load_song", load_song)
+    monkeypatch.setattr(loader, "_load_song_admitting", load_song)
     monkeypatch.setattr(loader, "_run_sync", run_sync)
     assert run(loader.preload(_song())) is Preload.EXTRACTED
     assert seen == [(URL, None)]
