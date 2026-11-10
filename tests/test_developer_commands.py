@@ -11,9 +11,12 @@ from helpers import run
 PREFIX, SUFFIX = OUTPUT_FORMAT.split("{}")
 
 
-def execute(code):
+def execute(code, last_message_by_bot=None):
     cog = Developer(None)
     ctx = FakeCtx(FakeBot([]))
+    if last_message_by_bot is not None:
+        author = ctx.me if last_message_by_bot else object()
+        ctx.channel.last_message = types.SimpleNamespace(author=author)
     run(cog._execute.callback(cog, ctx, code=code))
     return ctx.sent
 
@@ -66,16 +69,8 @@ def test_execute_sends_short_output_as_one_code_block_page():
 
 
 def test_execute_no_output_sends_nothing_after_bots_own_message():
-    cog = Developer(None)
-    ctx = FakeCtx(FakeBot([]))
-    ctx.channel.last_message = types.SimpleNamespace(author=ctx.me)
-    run(cog._execute.callback(cog, ctx, code="pass"))
-    assert ctx.sent == []
+    assert execute("pass", last_message_by_bot=True) == []
 
 
 def test_execute_no_output_replies_after_another_authors_message():
-    cog = Developer(None)
-    ctx = FakeCtx(FakeBot([]))
-    ctx.channel.last_message = types.SimpleNamespace(author=object())
-    run(cog._execute.callback(cog, ctx, code="pass"))
-    assert ctx.sent == ["No output."]
+    assert execute("pass", last_message_by_bot=False) == ["No output."]
