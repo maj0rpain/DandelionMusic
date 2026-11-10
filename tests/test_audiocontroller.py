@@ -3499,3 +3499,70 @@ def test_a_library_pick_whose_load_lands_in_the_goodbye_places_no_tail(
     # "a" and the goodbye sound only
     assert (handed, after) == (2, 2)
     assert _backup(controller, tmp_path) == ["a"]
+
+
+def test_restore_started_during_the_goodbye_is_refused_and_plays_nothing(
+    controller, monkeypatch, tmp_path
+):
+    _quick_goodbye(monkeypatch)
+    _queue(controller, "first", "second")
+    ac = sys.modules[type(controller).__module__]
+
+    async def scenario():
+        controller.bot.loop = asyncio.get_running_loop()
+        _save_backup(controller)
+        loaded = controller.load_backup()
+        task = asyncio.ensure_future(controller.udisconnect("test"))
+        await _settle()
+        client = controller.guild.voice_client
+        backup = _backup_path(controller, tmp_path).read_bytes()
+        handed = len(client.played)
+        restored = await controller.start_restored()
+        state = (
+            len(client.played),
+            _backup_path(controller, tmp_path).read_bytes(),
+        )
+        await _end_goodbye(controller, task)
+        return loaded, restored, state, (handed, backup)
+
+    loaded, restored, state, expected = _run(controller, scenario)
+
+    assert loaded == ac.RestoreResult.READY
+    assert restored == ac.RestoreResult.REFUSED_WHILE_DISCONNECTING
+    assert state == expected
+
+
+def test_a_library_pick_whose_first_track_load_lands_in_the_goodbye_is_refused(
+    controller, stub_loader, monkeypatch
+):
+    _quick_goodbye(monkeypatch)
+    songs = {f"/music/{s.title}.mp3": s for s in _songs(controller, *"ab")}
+    first_gate = asyncio.Event()
+
+    async def load_local_songs(uris):
+        await first_gate.wait()
+        return [songs.get(u) for u in uris]
+
+    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
+    batch = [LocalTrack(f"/music/{t}.mp3", f"Name {t}") for t in "ab"]
+
+    async def scenario():
+        controller.bot.loop = asyncio.get_running_loop()
+        pick = asyncio.ensure_future(
+            controller.process_local_tracks(batch, "test")
+        )
+        await _settle()
+        client = controller.guild.voice_client
+        teardown = asyncio.ensure_future(controller.udisconnect("test"))
+        await _settle()
+        handed = len(client.played)
+        first_gate.set()
+        outcome = await pick
+        await _end_goodbye(controller, teardown)
+        return outcome, handed, len(client.played)
+
+    outcome, handed, after = _run(controller, scenario)
+
+    assert outcome.kind.value == "refused_disconnecting"
+    assert _titles(controller) == []
+    assert after == handed
