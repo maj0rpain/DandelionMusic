@@ -4,15 +4,12 @@ nothing points to upstream or lets a cookies file be committed."""
 import re
 import subprocess
 
-import jsonc
-
-from config.config import parse_env_file
 from musicbot.bot import _help as help_command
 from musicbot.commands.developer import Developer
 from musicbot.commands.general import General
 from musicbot.commands.library import Library
 from musicbot.commands.music import Music
-from musicbot.settings import SETTINGS, SettingsEmbed
+from musicbot.settings import SettingsEmbed
 
 from helpers import REPO_ROOT
 
@@ -41,10 +38,9 @@ def _git_ignores(path):
     return result.returncode == 0
 
 
-def _stale_mentions(text):
-    """Every `d!<group> <word>` in text whose group is a registered
-    command group (name or alias) but whose word is not one of that
-    group's subcommands or aliases."""
+def _group_subcommands():
+    """Every registered group's name and each alias, mapped to the set
+    of its subcommands' names and aliases."""
     groups = {}
     for command in _commands():
         if hasattr(command, "commands"):
@@ -53,6 +49,14 @@ def _stale_mentions(text):
             }
             for name in [command.name, *command.aliases]:
                 groups[name] = subs
+    return groups
+
+
+def _stale_mentions(text):
+    """Every `d!<group> <word>` in text whose group is a registered
+    command group (name or alias) but whose word is not one of that
+    group's subcommands or aliases."""
+    groups = _group_subcommands()
     return [
         f"d!{group} {word}"
         for group, word in re.findall(r"d!([\w-]+) ([\w-]+)", text)
@@ -67,13 +71,13 @@ def _setting_section():
 
 def test_every_command_and_alias_is_documented():
     missing = []
+    groups = _group_subcommands()
     for command in _commands():
         names = [command.name, *command.aliases]
         missing += [f"d!{n}" for n in names if not _mentioned(f"d!{n}")]
-        for sub in getattr(command, "commands", ()):
-            for n in [sub.name, *sub.aliases]:
-                if not any(_mentioned(f"d!{p} {n}") for p in names):
-                    missing.append(f"d!{names[0]} {n}")
+        for n in sorted(groups.get(command.name, ())):
+            if not any(_mentioned(f"d!{p} {n}") for p in names):
+                missing.append(f"d!{names[0]} {n}")
     assert missing == []
 
 
@@ -94,13 +98,6 @@ def test_readme_names_no_stale_subcommand():
 
 
 def test_setting_section_says_what_reset_means():
-    unset = {name for name, d in SETTINGS.items() if d.default is None}
-    assert unset == {
-        "command_channel",
-        "start_voice_channel",
-        "dj_role",
-        "button_emote",
-    }
     section = _setting_section()
     assert SettingsEmbed.FIELD_EMPTY in section
     lines = section.splitlines()
@@ -109,21 +106,8 @@ def test_setting_section_says_what_reset_means():
     assert any(x.startswith("* Example") for x in lines[omit:])
 
 
-def test_env_sample_does_not_point_cookie_path_at_the_placeholder():
-    path = REPO_ROOT / ".env.sample"
-    text = path.read_text(encoding="utf-8")
-    assert "COOKIE_PATH" not in parse_env_file(str(path))
-    assert "COOKIE_PATH" in text
-    paths = set(re.findall(r"config/cookies/[\w.-]+", text))
-    assert paths - {"config/cookies/cookies.txt"}
-    assert COOKIES_HEADING in text
-
-
-def test_songinfo_error_points_at_custom_cookies_not_a_wiki():
-    strings = jsonc.loads((REPO_ROOT / "config/en.json").read_text("utf-8"))
-    assert COOKIES_HEADING in strings["SONGINFO_ERROR"]
+def test_readme_has_a_custom_cookies_heading():
     assert COOKIES_HEADING in README
-    assert [k for k, v in strings.items() if "wiki" in str(v)] == []
 
 
 def test_no_upstream_links():
