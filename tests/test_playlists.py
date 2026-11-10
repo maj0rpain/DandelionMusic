@@ -209,7 +209,8 @@ def test_an_existing_256_character_name_still_works():
     async def test(factory):
         long_ref = PlaylistRef(GUILD, "y" * 256)
         await _seed(factory, STORED, name=long_ref.name)
-        assert await playlists.get(factory, long_ref) is not None
+        loaded = await playlists.get(factory, long_ref)
+        assert [e.url for e in loaded.entries] == ["https://a.example/1"]
         await playlists.add_songs(factory, long_ref, [B])
         await playlists.delete(factory, long_ref)
         with pytest.raises(playlists.PlaylistNotFound):
