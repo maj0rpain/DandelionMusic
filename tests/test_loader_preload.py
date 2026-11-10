@@ -239,6 +239,18 @@ def test_the_controller_seams_stub_preload_matches_the_real_one():
     assert [m.name for m in StubLoader.Preload] == [m.name for m in Preload]
 
 
+def test_preload_loads_a_plain_string_with_no_admitted_link(monkeypatch):
+    calls = []
+
+    async def run_sync(lane, f, *args):
+        calls.append((f, args))
+        return LoadResult.of_song(Song(SiteTypes.YT_DLP, URL))
+
+    monkeypatch.setattr(loader, "_run_sync", run_sync)
+    run(loader._load(loader.Lane.PRELOAD, URL))
+    assert calls == [(loader._load_song, (URL,))]
+
+
 def test_load_in_the_preload_lane_dispatches_there_and_stamps_the_clock(
     monkeypatch,
 ):
