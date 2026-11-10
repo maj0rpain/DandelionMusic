@@ -15,7 +15,7 @@ from musicbot import loader
 from musicbot.linkutils import SiteTypes
 from musicbot.song import LoadResult, Song
 from musicbot.truncation import Truncation, TruncationReason
-from helpers import run
+from helpers import fake_redirect_follower, run
 
 Preload = loader.Preload
 
@@ -297,10 +297,7 @@ def test_a_flac_attachment_without_a_stream_url_is_extracted(
 ):
     cdn = "https://cdn.discordapp.com/attachments/1/2/a.flac?ex=65&is=1"
 
-    async def resolve(url):
-        return url
-
-    monkeypatch.setattr(loader, "resolve_redirects", resolve)
+    fake_redirect_follower(monkeypatch, cdn)
 
     async def load(lane, track):
         # the worker runs it off the event loop, as the lane does
