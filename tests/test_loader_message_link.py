@@ -2,7 +2,6 @@
 link: `_load_song` and `preload` run in process over the real
 `DiscordAttachmentsIE` and a fake `HTTPClient`, so a fetch is observable."""
 
-import atexit
 from datetime import timedelta
 
 import pytest
@@ -14,7 +13,12 @@ from musicbot.loader import Preload, SongError
 from musicbot.song import Song
 from musicbot.yt_dlp_plugins.extractor import discord as extractor
 from helpers import run
-from message_link_fakes import LINK, FakeHTTPClient
+from message_link_fakes import (
+    admitted_track,
+    LINK,
+    FakeHTTPClient,
+    install_fake_discord_client,
+)
 
 OTHER = LINK[:-1] + "6"
 SHORT = "https://short.test/abc"
@@ -39,13 +43,7 @@ class _Hop(InfoExtractor):
 
 @pytest.fixture
 def client(monkeypatch, worker_loop):
-    FakeHTTPClient.instances = []
-    FakeHTTPClient.login_error = None
-    FakeHTTPClient.fetch_error = None
-    monkeypatch.setattr(extractor, "HTTPClient", FakeHTTPClient)
-    monkeypatch.setattr(extractor, "_client", None)
-    monkeypatch.setattr(config, "BOT_TOKEN", "tok")
-    monkeypatch.setattr(atexit, "register", lambda *a, **k: None)
+    install_fake_discord_client(monkeypatch)
     ydl = loader._new_downloader()
     ydl.add_info_extractor(extractor.DiscordAttachmentsIE())
     ydl.add_info_extractor(_Hop())
@@ -84,7 +82,7 @@ def test_a_plain_message_link_is_refused_and_never_fetched(client):
 def test_a_checked_tracks_own_link_is_fetched(client, typed):
     from musicbot.linkutils import normalize_track
 
-    result = loader._load_song(typed, normalize_track(typed))
+    result = loader._load_song(admitted_track(typed, normalize_track(typed)))
     assert len(result.songs) == 2
     assert len(client.made) == 1
 
@@ -104,7 +102,7 @@ def test_a_short_link_to_a_message_link_is_refused(client, monkeypatch):
         ),
     )
     with pytest.raises(SongError) as info:
-        loader._load_song(SHORT, LINK)
+        loader._load_song(admitted_track(SHORT, LINK))
     assert _code(info) == config.SONGINFO_UNSUPPORTED
     assert client.made == []
 
@@ -123,7 +121,7 @@ def test_a_checked_tracks_hop_to_a_different_link_fails_without_a_fetch(
 ):
     _Hop.target = OTHER
     with pytest.raises(SongError) as info:
-        loader._load_song(HOP, LINK)
+        loader._load_song(admitted_track(HOP, LINK))
     assert _code(info) == config.SONGINFO_ERROR
     assert client.made == []
 
@@ -133,7 +131,7 @@ def test_after_a_load_that_raised_a_plain_load_is_still_refused(
 ):
     FakeHTTPClient.fetch_error = RuntimeError("boom")
     with pytest.raises(SongError):
-        loader._load_song(LINK, LINK)
+        loader._load_song(admitted_track(LINK, LINK))
     FakeHTTPClient.fetch_error = None
     fetched = len(client.made)
 
@@ -144,7 +142,7 @@ def test_after_a_load_that_raised_a_plain_load_is_still_refused(
 
 
 def test_after_a_checked_load_the_hop_check_still_refuses(client):
-    loader._load_song(LINK, LINK)
+    loader._load_song(admitted_track(LINK, LINK))
     fetched = len(client.made)
     with pytest.raises(SongError):
         loader._load_song(HOP)
@@ -153,8 +151,8 @@ def test_after_a_checked_load_the_hop_check_still_refuses(client):
 
 @pytest.fixture
 def in_process(monkeypatch):
-    async def load(lane, track, admitted_link=None):
-        return loader._load_song(track, admitted_link)
+    async def load(lane, track):
+        return loader._load_song(track)
 
     monkeypatch.setattr(loader, "_load", load)
 

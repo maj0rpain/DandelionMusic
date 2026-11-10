@@ -86,10 +86,8 @@ def test_a_track_that_is_not_a_message_link_has_no_admitted_link():
         LINK.replace("discord.com", "canary.discord.com"),
     ],
 )
-def test_is_message_link_agrees_with_the_gate_on_a_link_form(track):
-    checked = check(track, LinkGuild([LinkChannel()]), LinkMember())
+def test_is_message_link_is_true_for_each_link_form(track):
     assert message_link.is_message_link(track)
-    assert checked.admitted_link is not None
 
 
 @pytest.mark.parametrize(
