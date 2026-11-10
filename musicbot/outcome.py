@@ -25,6 +25,14 @@ class OutcomeKind(Enum):
     # the bot was disconnecting: nothing was placed or started
     REFUSED_DISCONNECTING = "refused_disconnecting"
 
+    @property
+    def is_refusal(self) -> bool:
+        """Whether this kind is a refusal: nothing was placed."""
+        return self in (
+            OutcomeKind.REFUSED_NOT_IN_VOICE,
+            OutcomeKind.REFUSED_DISCONNECTING,
+        )
+
 
 @dataclass(frozen=True)
 class BatchReport:
