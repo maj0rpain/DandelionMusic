@@ -36,6 +36,22 @@ from discord_fakes import run_command_checks
 from helpers import run
 
 
+def _race_after_first_listed(monkeypatch, competing):
+    """Make a competing write land right after the first `_listed` read.
+
+    The first call makes the real read, restores the real `_listed`,
+    awaits `competing()` once and returns the now stale read."""
+    real_listed = guild_whitelist._listed
+
+    async def racing_listed(session):
+        found = await real_listed(session)
+        monkeypatch.setattr(guild_whitelist, "_listed", real_listed)
+        await competing()
+        return found
+
+    monkeypatch.setattr(guild_whitelist, "_listed", racing_listed)
+
+
 async def _marker(factory):
     """The `BotState` row recording the env import, or None."""
     async with factory() as session:
@@ -126,16 +142,10 @@ class TestChanges:
     def test_a_concurrent_add_of_the_same_guild_is_already_listed(
         self, monkeypatch
     ):
-        real_listed = guild_whitelist._listed
-
         async def scenario(factory):
-            async def racing_listed(session):
-                found = await real_listed(session)
-                monkeypatch.setattr(guild_whitelist, "_listed", real_listed)
-                await seed_whitelist(factory, 20)
-                return found
-
-            monkeypatch.setattr(guild_whitelist, "_listed", racing_listed)
+            _race_after_first_listed(
+                monkeypatch, lambda: seed_whitelist(factory, 20)
+            )
             change = await add(factory, 20, [20])
             return change, list(await load(factory))
 
@@ -228,16 +238,11 @@ class TestEnvImport:
         check; the loser's commit hits IntegrityError and must not take
         startup down or print a second notice."""
         monkeypatch.setattr(config, "GUILD_WHITELIST", [111, 222])
-        real_listed = guild_whitelist._listed
 
         async def scenario(factory):
-            async def racing_listed(session):
-                found = await real_listed(session)
-                monkeypatch.setattr(guild_whitelist, "_listed", real_listed)
-                await import_env_whitelist(factory)
-                return found
-
-            monkeypatch.setattr(guild_whitelist, "_listed", racing_listed)
+            _race_after_first_listed(
+                monkeypatch, lambda: import_env_whitelist(factory)
+            )
             await import_env_whitelist(factory)  # must not raise
             marker = await _marker(factory)
             return list(await load(factory)), marker
