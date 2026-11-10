@@ -12,7 +12,7 @@ from pathlib import Path
 import jsonc
 import pytest
 
-from config.config import Config
+from config.config import ENV_ALIASES, Config
 from config.utils import alchemize_url, ensure_sqlite_parent, get_env_var
 
 from helpers import REPO_ROOT, dockerfile_commands
@@ -194,8 +194,6 @@ def _image_tag(image):
 
 
 def test_dockerfile_images_are_pinned_and_not_piped_to_a_shell():
-    import re
-
     commands = dockerfile_commands()
     images = [c.split()[1] for c in commands if c.startswith("FROM ")]
     copied = []
@@ -232,11 +230,14 @@ def _declared_variable_names(command):
     return [rest.split()[0]]
 
 
-def test_declared_variable_names_reads_every_name_in_any_case():
-    lines = dockerfile_commands(
-        "ARG FOO BOT_TOKEN\narg A=1 BOT_TOKEN=x\nenv A=1 B=2\n"
-        "env OLD value\nrun echo hi\n"
-    )
+def test_declared_variable_names_reads_every_name():
+    lines = [
+        "ARG FOO BOT_TOKEN",
+        "ARG A=1 BOT_TOKEN=x",
+        "ENV A=1 B=2",
+        "ENV OLD value",
+        "RUN echo hi",
+    ]
     assert [_declared_variable_names(c) for c in lines] == [
         ["FOO", "BOT_TOKEN"],
         ["A", "BOT_TOKEN"],
@@ -247,8 +248,6 @@ def test_declared_variable_names_reads_every_name_in_any_case():
 
 
 def test_dockerfile_declares_no_bot_setting_as_arg_or_env():
-    from config.config import ENV_ALIASES
-
     settings = {*Config.as_dict(), *ENV_ALIASES}
     for command in dockerfile_commands():
         for name in _declared_variable_names(command):
