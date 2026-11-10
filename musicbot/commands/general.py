@@ -62,7 +62,7 @@ async def _apply_setting(ctx, descriptor: SettingDescriptor, value):
     try:
         updated = await sett.update_setting(descriptor, value, ctx)
     except ConversionError as e:
-        await ctx.send(f"`Error: {e}`")
+        await ctx.send(config.SETTING_CONVERSION_FAILED.format(e))
         return
     if not updated:
         await ctx.send(failure)
