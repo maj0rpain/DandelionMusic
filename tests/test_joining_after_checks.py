@@ -37,8 +37,9 @@ class RecordingController:
     of it. `backup` is what load_backup() loads into the queue; with
     `disconnect_on_load` load_backup() refuses as a disconnect that began
     after the hooks admitted the request (is_disconnecting() stays False
-    for it); with `disconnect_on_prev`, prev_song() turns is_disconnecting()
-    true; `events`,
+    for it); with `disconnect_on_start`, start_restored() refuses as a
+    teardown begun during the join; with `disconnect_on_prev`,
+    prev_song() turns is_disconnecting() true; `events`,
     when set, gets ("load_backup",) appended by load_backup()."""
 
     def __init__(
@@ -51,6 +52,7 @@ class RecordingController:
         disconnect_on_prev=False,
         prev_result=True,
         disconnect_on_load=False,
+        disconnect_on_start=False,
     ):
         self.name = "controller"
         self.backup = None if backup is None else list(backup)
@@ -59,6 +61,7 @@ class RecordingController:
         self.readable = readable
         self.disconnecting = False
         self.disconnect_on_load = disconnect_on_load
+        self.disconnect_on_start = disconnect_on_start
         self.disconnect_on_prev = disconnect_on_prev
         self.prev_result = prev_result
         self.events = None
@@ -87,6 +90,9 @@ class RecordingController:
         return RestoreResult.READY
 
     async def start_restored(self):
+        if self.disconnect_on_start:
+            # teardown began during the join
+            return RestoreResult.REFUSED_WHILE_DISCONNECTING
         if not self.queue:
             return RestoreResult.NOTHING_TO_RESTORE
         self.calls.append("start_restored")
@@ -472,3 +478,13 @@ def test_restore_reset_race_says_the_queue_is_empty_and_plays_nothing():
     run(Music._restore.callback(cog, ctx))
     assert sent == [config.QUEUE_EMPTY]
     assert first.calls == [] and second.calls == []
+
+
+def test_restore_with_teardown_during_the_join_says_disconnecting():
+    before = RecordingController(backup=["x"])
+    after = RecordingController(disconnect_on_start=True)
+    after.queue = ["x"]
+    guild, ctx, cog, sent = body_ctx("restore", before, role="dj")
+    invoke_on_replacement(cog, ctx, guild, Music._restore.callback, after)
+    assert sent == [config.DISCONNECTING_MESSAGE]
+    assert after.calls == []
