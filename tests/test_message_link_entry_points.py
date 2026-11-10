@@ -27,7 +27,7 @@ from message_link_fakes import (
     LINK,
     LinkChannel,
     LinkMember,
-    LinkThread,
+    CountingThread,
     perms,
 )
 
@@ -95,12 +95,7 @@ def test_the_gate_runs_once_per_play_request(
     stub_load_and_channel(controller, stub_loader, monkeypatch)
     lookups = []
 
-    class CountingThread(LinkThread):
-        async def fetch_member(self, member_id):
-            lookups.append(member_id)
-            return await super().fetch_member(member_id)
-
-    thread = CountingThread(private=True)
+    thread = CountingThread(lookups, private=True)
     controller.guild.get_channel_or_thread = lambda _id: thread
     invoke("_play", controller, LINK)
     assert admitted(loaded(stub_loader)) == [(LINK, LINK)]
@@ -148,8 +143,10 @@ def test_a_play_message_with_its_own_attachment_loads(
     assert admitted(loaded(stub_loader)) == [(LINK, LINK)]
 
 
-def add_song(controller, stub_loader, monkeypatch, link):
+def add_song(controller, stub_loader, monkeypatch, link, channel=None):
     stub_load_and_channel(controller, stub_loader, monkeypatch)
+    if channel is not None:
+        controller.guild.get_channel_or_thread = lambda _id: channel
     saved = []
     loads = []
 
@@ -183,6 +180,23 @@ def test_playlist_add_song_refuses_a_forbidden_link_and_saves_nothing(
     assert saved == []
 
 
+def test_the_gate_runs_once_per_playlist_add_song(
+    controller, stub_loader, monkeypatch
+):
+    lookups = []
+
+    _sent, saved, loads = add_song(
+        controller,
+        stub_loader,
+        monkeypatch,
+        LINK,
+        channel=CountingThread(lookups, private=True),
+    )
+    assert admitted(loads) == [(LINK, LINK)]
+    assert len(saved) == 1
+    assert len(lookups) == 1
+
+
 def test_playlist_add_song_saves_an_allowed_link(
     controller, stub_loader, monkeypatch
 ):
@@ -210,7 +224,7 @@ class PluginController:
         return await self._process(self, url, user=user)
 
 
-def react(link, monkeypatch, content=None, command_channel=None):
+def react(link, monkeypatch, content=None, command_channel=None, lookups=None):
     loads = []
 
     async def load_song(track):
@@ -221,11 +235,15 @@ def react(link, monkeypatch, content=None, command_channel=None):
     sent = []
     msg = types.SimpleNamespace(content=content or link)
 
-    class Channel(LinkChannel):
+    class Channel(CountingThread):
         async def fetch_message(self, _id):
             return msg
 
-    channel = Channel(2, perms())
+    channel = Channel(
+        [] if lookups is None else lookups,
+        channel_id=2,
+        private=lookups is not None,
+    )
 
     class Guild(VoiceGuild):
         name = "guild"
@@ -312,6 +330,16 @@ def test_one_forbidden_link_among_several_reactions_still_queues_the_rest(
         if e == ("reply", config.MESSAGE_LINK_FORBIDDEN)
     ]
     assert len(refusals) == 2 and max(refusals) < connect
+
+
+def test_the_gate_runs_once_per_link_in_a_reaction(monkeypatch):
+    other = LINK.replace("/5", "/6")
+    lookups = []
+    loads, _sent, _events, _directed = react(
+        LINK, monkeypatch, content=f"{LINK} {other}", lookups=lookups
+    )
+    assert admitted(loads) == [(LINK, LINK), (other, other)]
+    assert len(lookups) == 2
 
 
 def test_the_plugin_loads_an_allowed_link(monkeypatch):

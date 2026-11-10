@@ -75,16 +75,16 @@ async def check_message_link(track: str, guild, user) -> CheckedTrack:
     return _admitted(track, link)
 
 
-async def gate_or_refuse(track: str, guild, member, send):
-    """Runs the gate for `member`: the track's `CheckedTrack`, or, when
-    the gate refuses, sends the refusal (`str` of its `SongError`)
-    through `send` and returns None."""
+async def gate_or_refuse(track: str, ctx):
+    """Runs the gate for `ctx.author` in `ctx.guild`: the track's
+    `CheckedTrack`, or, when the gate refuses, sends the refusal (`str`
+    of its `SongError`) through `ctx.send` and returns None."""
     from musicbot.loader import SongError
 
     try:
-        return await check_message_link(track, guild, member)
+        return await check_message_link(track, ctx.guild, ctx.author)
     except SongError as e:
-        await send(str(e))
+        await ctx.send(str(e))
         return None
 
 
