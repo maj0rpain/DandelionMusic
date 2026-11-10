@@ -316,8 +316,7 @@ class Music(commands.Cog):
     )
     @active_only
     async def _queue(self, ctx):
-        playlist = ctx.audiocontroller.playlist
-        await ctx.send(embed=playlist.queue_embed())
+        await ctx.send(embed=ctx.audiocontroller.queue_embed())
 
     @commands.hybrid_command(
         name="stop",
@@ -345,7 +344,7 @@ class Music(commands.Cog):
         dest_pos: int = None,
     ):
         if src_pos is None:
-            src_pos = len(ctx.audiocontroller.playlist)
+            src_pos = ctx.audiocontroller.queue_length()
         if dest_pos is None:
             dest_pos = 2
 
@@ -369,7 +368,7 @@ class Music(commands.Cog):
         queue_number: int = None,
     ):
         if queue_number is None:
-            queue_number = len(ctx.audiocontroller.playlist)
+            queue_number = ctx.audiocontroller.queue_length()
         try:
             song = ctx.audiocontroller.remove(queue_number - 1)
             await ctx.send(f"Removed #{queue_number}: {song.display_name}")
@@ -522,7 +521,7 @@ class Music(commands.Cog):
         await ctx.defer()
         songs = [
             playlists.PlaylistEntry(song.webpage_url, song.title)
-            for song in ctx.audiocontroller.playlist.playque
+            for song in ctx.audiocontroller.queued_songs()
         ]
         if not songs:
             await ctx.send(config.QUEUE_EMPTY)
