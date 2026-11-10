@@ -69,11 +69,11 @@ _downloader: Optional[YoutubeDL] = None
 _preloading = {}
 _site_locks = {}
 # the one message link this worker may fetch, held only for the duration
-# of one _load_song; admits() reads it
+# of one _load_song; admits_link() reads it
 _admitted_link: Optional[str] = None
 
 
-def admits(url: str) -> bool:
+def admits_link(url: str) -> bool:
     """The one admitted-link rule: a message link may be fetched only if
     it is the link admitted for the current load. True for anything that
     is not a message link. Read by the load body's early check and by
@@ -318,12 +318,12 @@ def _load_song(track: Union[str, CheckedTrack]) -> LoadResult:
     else:
         _admitted_link = None
     try:
-        return _load_song_admitting(track)
+        return _load_song_body(track)
     finally:
         _admitted_link = None
 
 
-def _load_song_admitting(track: str) -> LoadResult:
+def _load_song_body(track: str) -> LoadResult:
     """The load body, run while `_load_song` holds the admitted link."""
     track = normalize_track(track)
     truncation = None
@@ -331,7 +331,7 @@ def _load_song_admitting(track: str) -> LoadResult:
 
     # Only here for the friendlier SONGINFO_UNSUPPORTED reply; the
     # extractor's check is the one that covers hops and re-extraction.
-    if not admits(track):
+    if not admits_link(track):
         raise SongError(config.SONGINFO_UNSUPPORTED)
 
     followed = None
