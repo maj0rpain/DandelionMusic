@@ -2,7 +2,6 @@
 resumes the voice client it read, and only while it is still the
 guild's."""
 
-import asyncio
 import types
 
 
@@ -41,9 +40,12 @@ class IdleTimerController:
         self.disconnects.append(reason)
 
 
-def move(monkeypatch, client, on_wait=None, on_timer=None):
+def move(monkeypatch, no_sleep, client, on_wait=None, on_timer=None):
     """Drive a move of the bot; `on_wait` runs during the one-second
-    wait. Returns (guild, controller)."""
+    wait, fired through `no_sleep`'s hook. Asserts the sleep count: one
+    when the client plays, zero when it does not (a move waits only
+    when playing), so an added sleep fails the test. Returns
+    (guild, controller)."""
     guild = VoiceGuild()
     guild.voice_client = client
     controller = IdleTimerController(
@@ -54,12 +56,10 @@ def move(monkeypatch, client, on_wait=None, on_timer=None):
     monkeypatch.setattr(MusicBot, "user", property(lambda self: me))
     monkeypatch.setattr(bot.sessions, "controller", lambda g: controller)
 
-    async def sleep(seconds):
-        if seconds == 1 and on_wait:
-            on_wait(guild)
-
-    monkeypatch.setattr(asyncio, "sleep", sleep)
+    if on_wait:
+        no_sleep.hook = lambda: on_wait(guild)
     run(bot.on_voice_state_update(me, None, None))
+    assert no_sleep.count == (1 if client.playing else 0)
     return guild, controller
 
 
@@ -67,42 +67,46 @@ def clear(guild):
     guild.voice_client = None
 
 
-def test_move_while_playing_resumes_the_same_client(monkeypatch):
+def test_move_while_playing_resumes_the_same_client(monkeypatch, no_sleep):
     client = ResumingClient(playing=True)
-    guild, controller = move(monkeypatch, client)
+    guild, controller = move(monkeypatch, no_sleep, client)
     assert controller.timers == [True]
     assert client.resumed == 1
     assert guild.voice_client is client
 
 
-def test_move_while_not_playing_resumes_nothing(monkeypatch):
+def test_move_while_not_playing_resumes_nothing(monkeypatch, no_sleep):
     client = ResumingClient(playing=False)
-    _, controller = move(monkeypatch, client)
+    _, controller = move(monkeypatch, no_sleep, client)
     assert controller.timers == [False]
     assert client.resumed == 0
 
 
-def test_cleared_during_the_wait_resumes_nothing(monkeypatch):
+def test_cleared_during_the_wait_resumes_nothing(monkeypatch, no_sleep):
     client = ResumingClient()
-    _, controller = move(monkeypatch, client, on_wait=clear)
+    _, controller = move(monkeypatch, no_sleep, client, on_wait=clear)
     assert client.resumed == 0
     assert controller.disconnects == []
 
 
-def test_cleared_while_the_idle_timer_runs_resumes_nothing(monkeypatch):
+def test_cleared_while_the_idle_timer_runs_resumes_nothing(
+    monkeypatch, no_sleep
+):
     client = ResumingClient()
-    _, controller = move(monkeypatch, client, on_timer=clear)
+    _, controller = move(monkeypatch, no_sleep, client, on_timer=clear)
     assert client.resumed == 0
     assert controller.disconnects == []
 
 
-def test_replaced_during_the_wait_leaves_both_clients_alone(monkeypatch):
+def test_replaced_during_the_wait_leaves_both_clients_alone(
+    monkeypatch, no_sleep
+):
     old, new = ResumingClient(), ResumingClient()
 
     def replace(guild):
         guild.voice_client = new
 
-    _, controller = move(monkeypatch, old, on_wait=replace)
+    _, controller = move(monkeypatch, no_sleep, old, on_wait=replace)
     assert old.resumed == 0
     assert new.touched == 0
     assert controller.disconnects == []

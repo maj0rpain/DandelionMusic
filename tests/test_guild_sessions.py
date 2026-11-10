@@ -420,15 +420,11 @@ def test_reset_tells_the_user_when_the_voice_connect_fails(error, capsys):
     assert sent == []
 
 
-def test_reset_refuses_when_the_bot_is_still_in_voice(monkeypatch):
+def test_reset_refuses_when_the_bot_is_still_in_voice(no_sleep):
     """A voice client the reset did not clear: reset refuses rather
     than claim it connected, and connects nothing."""
     from config import config
 
-    async def no_sleep(_):
-        pass
-
-    monkeypatch.setattr(asyncio, "sleep", no_sleep)
     guild = FakeGuild(1)
     channel = CountingVoiceChannel(guild)
     # the bot sits in the user's own channel
