@@ -87,33 +87,48 @@ def allow_every_host(monkeypatch):
 
 
 class Resolved:
-    """What resolving one path of the local server did."""
+    """What running a linkutils function on one path of the local server
+    did."""
 
-    def __init__(self, base, url, error, hits, body_sent):
+    def __init__(self, base, url, error, hits, body_sent, paths):
         self.base = base
         self.url = url
         self.error = error
         self.hits = hits
         self.body_sent = body_sent
+        self.paths = paths
 
     def at(self, path):
         return self.base + path
 
 
-def _resolve(path):
+def _run_on(function, path):
     async def scenario():
         async with serving() as server:
             base = str(server.make_url("/")).rstrip("/")
             url = error = None
             try:
-                url = await linkutils.resolve_redirects(base + path)
+                url = await function(base + path)
             except Exception as exc:
                 error = exc
             return Resolved(
-                base, url, error, list(server.hits), list(server.body_sent)
+                base,
+                url,
+                error,
+                list(server.hits),
+                list(server.body_sent),
+                list(server.hits_all),
             )
 
     return run(scenario())
+
+
+def _resolve(path):
+    return _run_on(linkutils.resolve_redirects, path)
+
+
+def _soup(path):
+    return _run_on(linkutils.get_soup, path)
 
 
 @pytest.mark.parametrize("path", ["/gone", "/boom", "/to-gone", "/to-boom"])
@@ -170,49 +185,35 @@ def test_direct_media_answer_returns_its_url_after_one_get(allow_every_host):
     assert got.body_sent == []
 
 
-def _soup(path):
-    async def scenario():
-        async with serving() as server:
-            base = str(server.make_url("/")).rstrip("/")
-            soup = error = None
-            try:
-                soup = await linkutils.get_soup(base + path)
-            except Exception as exc:
-                error = exc
-            return soup, error, list(server.hits_all)
-
-    return run(scenario())
-
-
 def test_page_is_parsed_from_the_final_hop_each_hop_requested_once(
     allow_every_host,
 ):
-    soup, error, paths = _soup("/chain/2")
+    got = _soup("/chain/2")
 
-    assert error is None
-    assert soup.get_text() == "ok"
-    assert paths == ["/chain/2", "/chain/1", "/chain/0", "/final"]
+    assert got.error is None
+    assert got.url.get_text() == "ok"
+    assert got.paths == ["/chain/2", "/chain/1", "/chain/0", "/final"]
 
 
 @pytest.mark.parametrize("path", sorted("/" + n for n in REFUSED_TARGETS))
 def test_page_redirect_to_a_disallowed_target_is_refused(path):
-    soup, error, paths = _soup(path)
+    got = _soup(path)
 
-    assert isinstance(error, linkutils.RefusedRedirect)
-    assert "/hit" not in paths
+    assert isinstance(got.error, linkutils.RefusedRedirect)
+    assert "/hit" not in got.paths
 
 
 def test_page_chain_past_the_hop_limit_is_refused(allow_every_host):
-    assert isinstance(_soup("/chain/10")[1], linkutils.RefusedRedirect)
+    assert isinstance(_soup("/chain/10").error, linkutils.RefusedRedirect)
 
 
 @pytest.mark.parametrize("path", ["/gone", "/to-boom"])
 def test_page_error_status_raises(path, allow_every_host):
-    assert _soup(path)[1] is not None
+    assert _soup(path).error is not None
 
 
 def test_page_redirect_without_location_is_parsed(allow_every_host):
-    soup, error, _ = _soup("/not-modified-body")
+    got = _soup("/not-modified-body")
 
-    assert error is None
-    assert soup.get_text() == "body"
+    assert got.error is None
+    assert got.url.get_text() == "body"

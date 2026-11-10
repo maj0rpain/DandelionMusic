@@ -295,6 +295,25 @@ def test_api_and_public_page_failing_raises_the_page_error(monkeypatch):
     assert info.value.__context__ is api_error
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "https://open.spotify.com/track/abc",
+        "https://open.spotify.com/playlist/abc",
+        "https://open.spotify.com/album/abc",
+    ],
+)
+def test_refused_redirect_in_a_page_scrape_propagates(monkeypatch, url):
+    refusal = linkutils.RefusedRedirect("redirect to x refused")
+    monkeypatch.setattr(linkutils, "spotify_api", None)
+    _failing_page(monkeypatch, refusal)
+
+    with pytest.raises(linkutils.RefusedRedirect) as info:
+        run(linkutils.fetch_spotify(url))
+
+    assert info.value is refusal
+
+
 @pytest.mark.parametrize("list_type", ["playlist", "album"])
 def test_paging_failure_after_page_one_does_not_scrape(
     monkeypatch, capsys, list_type
