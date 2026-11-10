@@ -69,8 +69,17 @@ _downloader: Optional[YoutubeDL] = None
 _preloading = {}
 _site_locks = {}
 # the one message link this worker may fetch, held only for the duration
-# of one _load_song; the Discord-attachments plugin compares against it
+# of one _load_song; admits() reads it
 _admitted_link: Optional[str] = None
+
+
+def admits(url: str) -> bool:
+    """The one admitted-link rule: a message link may be fetched only if
+    it is the link admitted for the current load. True for anything that
+    is not a message link. Read by the load body's early check and by
+    the Discord-attachments extractor."""
+    url = normalize_track(url)
+    return not is_message_link(url) or url == _admitted_link
 
 
 def _new_downloader() -> YoutubeDL:
@@ -219,18 +228,12 @@ def _search_youtube(title: str, count: int = 1) -> list[dict]:
 
 async def load_song(track: Union[str, CheckedTrack]) -> LoadResult:
     """Loads a plain track or one the message-link gate checked."""
-    admitted_link = None
-    if isinstance(track, CheckedTrack):
-        admitted_link = track.admitted_link
-        track = track.track
-    return await _load(Lane.LOAD, track, admitted_link)
+    return await _load(Lane.LOAD, track)
 
 
-async def _load(
-    lane: Lane, track: str, admitted_link: Optional[str] = None
-) -> LoadResult:
+async def _load(lane: Lane, track: Union[str, CheckedTrack]) -> LoadResult:
     """Runs _load_song in the given lane and stamps the result."""
-    result = await _run_sync(lane, _load_song, track, admitted_link)
+    result = await _run_sync(lane, _load_song, track)
     now = _now()
     for song in result.songs:
         song.extracted_at = now
@@ -304,23 +307,31 @@ def _search_spotify_track(track: SpotifyTrack) -> dict:
         return _search_youtube(track.query)[0]
 
 
-def _load_song(track: str, admitted_link: Optional[str] = None) -> LoadResult:
-    """Loads `track`. A message link is fetched only when it is
-    `admitted_link`, which is held for this load alone."""
+def _load_song(track: Union[str, CheckedTrack]) -> LoadResult:
+    """Loads `track`, the one place a checked track is unpacked. A
+    message link is fetched only when it is the checked track's admitted
+    link, which is held for this load alone; a plain string holds none."""
     global _admitted_link
-    _admitted_link = admitted_link
+    if isinstance(track, CheckedTrack):
+        _admitted_link = track.admitted_link
+        track = track.track
+    else:
+        _admitted_link = None
     try:
-        return _load_song_held(track, admitted_link)
+        return _load_song_admitting(track)
     finally:
         _admitted_link = None
 
 
-def _load_song_held(track: str, admitted_link: Optional[str]) -> LoadResult:
+def _load_song_admitting(track: str) -> LoadResult:
+    """The load body, run while `_load_song` holds the admitted link."""
     track = normalize_track(track)
     truncation = None
     host = identify_url(track)
 
-    if is_message_link(track) and track != admitted_link:
+    # Only here for the friendlier SONGINFO_UNSUPPORTED reply; the
+    # extractor's check is the one that covers hops and re-extraction.
+    if not admits(track):
         raise SongError(config.SONGINFO_UNSUPPORTED)
 
     if host == SiteTypes.SHORT_LINK:
