@@ -323,8 +323,10 @@ def _load_song_held(track: str, admitted_link: Optional[str]) -> LoadResult:
     if is_message_link(track) and track != admitted_link:
         raise SongError(config.SONGINFO_UNSUPPORTED)
 
+    resolved = False
     if host == SiteTypes.SHORT_LINK:
         # resolved once; the result is never resolved again
+        resolved = True
         with _songinfo_errors():
             track = _loop.run_until_complete(resolve_redirects(track))
         track = normalize_track(track)
@@ -352,8 +354,10 @@ def _load_song_held(track: str, admitted_link: Optional[str]) -> LoadResult:
 
     elif host == SiteTypes.CUSTOM:
         # ffmpeg is handed the final URL, whose redirects were checked
-        with _songinfo_errors():
-            stream = _loop.run_until_complete(resolve_redirects(track))
+        stream = track
+        if not resolved:
+            with _songinfo_errors():
+                stream = _loop.run_until_complete(resolve_redirects(track))
         data = {
             "url": stream,
             "webpage_url": track,

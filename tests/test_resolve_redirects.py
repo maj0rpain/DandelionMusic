@@ -23,6 +23,7 @@ REFUSED_TARGETS = {
 @asynccontextmanager
 async def serving():
     hits = []
+    body_sent = []
 
     async def hit(request):
         hits.append(request.path)
@@ -33,8 +34,9 @@ async def serving():
         response = web.StreamResponse()
         await response.prepare(request)
         try:
-            for _ in range(64):
+            for _ in range(256):
                 await response.write(b"x" * 65536)
+            body_sent.append("whole body")
         except ConnectionError:
             pass
         return response
@@ -63,6 +65,7 @@ async def serving():
         app.router.add_get(f"/{name}", redirect_to(target))
     server = TestServer(app)
     server.hits = hits
+    server.body_sent = body_sent
     await server.start_server()
     try:
         yield server
@@ -79,11 +82,12 @@ def allow_every_host(monkeypatch):
 class Resolved:
     """What resolving one path of the local server did."""
 
-    def __init__(self, base, url, error, hits):
+    def __init__(self, base, url, error, hits, body_sent):
         self.base = base
         self.url = url
         self.error = error
         self.hits = hits
+        self.body_sent = body_sent
 
     def at(self, path):
         return self.base + path
@@ -98,7 +102,9 @@ def _resolve(path):
                 url = await linkutils.resolve_redirects(base + path)
             except Exception as exc:
                 error = exc
-            return Resolved(base, url, error, list(server.hits))
+            return Resolved(
+                base, url, error, list(server.hits), list(server.body_sent)
+            )
 
     return run(scenario())
 
@@ -164,3 +170,4 @@ def test_direct_media_answer_returns_its_url_after_one_get(allow_every_host):
 
     assert got.url == got.at("/media.mp3")
     assert got.hits == ["/media.mp3"]
+    assert got.body_sent == []

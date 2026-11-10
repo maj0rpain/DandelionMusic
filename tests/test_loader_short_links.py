@@ -7,21 +7,11 @@ from musicbot import loader
 from musicbot.linkutils import SpotifyTrack
 from musicbot.loader import SongError
 
+from helpers import fake_redirect_follower
+
 SHORT = "https://on.soundcloud.com/AbC123"
 SC_TRACK = "https://soundcloud.com/artist/track?si=abc"
 SC_SET = "https://soundcloud.com/artist/sets/album"
-
-
-class Resolver:
-    def __init__(self, result):
-        self.result = result
-        self.calls = []
-
-    async def __call__(self, url):
-        self.calls.append(url)
-        if isinstance(self.result, Exception):
-            raise self.result
-        return self.result
 
 
 @pytest.fixture
@@ -37,18 +27,12 @@ def extracted(monkeypatch):
     return calls, out
 
 
-def _resolver(monkeypatch, result):
-    resolver = Resolver(result)
-    monkeypatch.setattr(loader, "resolve_redirects", resolver)
-    return resolver
-
-
 def test_short_link_to_a_track_loads_the_resolved_url(
     monkeypatch, worker_loop, extracted
 ):
     calls, out = extracted
     out["data"] = {"url": "stream", "title": "T"}
-    _resolver(monkeypatch, SC_TRACK)
+    fake_redirect_follower(monkeypatch, SC_TRACK)
 
     result = loader._load_song(SHORT)
 
@@ -61,7 +45,7 @@ def test_extractor_webpage_url_replaces_the_resolved_url(
 ):
     calls, out = extracted
     out["data"] = {"url": "s", "webpage_url": "https://soundcloud.com/a/t"}
-    _resolver(monkeypatch, SC_TRACK)
+    fake_redirect_follower(monkeypatch, SC_TRACK)
 
     result = loader._load_song(SHORT)
 
@@ -73,7 +57,7 @@ def test_short_link_to_a_set_queues_every_entry(
 ):
     calls, out = extracted
     out["data"] = {"entries": [{"url": f"https://x/{i}"} for i in range(3)]}
-    _resolver(monkeypatch, SC_SET)
+    fake_redirect_follower(monkeypatch, SC_SET)
 
     result = loader._load_song(SHORT)
 
@@ -96,7 +80,7 @@ def test_short_link_to_a_spotify_track(monkeypatch, worker_loop, extracted):
         "_search_youtube",
         lambda q: [{"url": "https://yt/v", "webpage_url": "https://yt/v"}],
     )
-    _resolver(monkeypatch, resolved)
+    fake_redirect_follower(monkeypatch, resolved)
 
     result = loader._load_song("https://spotify.link/xyz")
 
@@ -107,7 +91,7 @@ def test_short_link_to_a_spotify_track(monkeypatch, worker_loop, extracted):
 def test_raising_resolver_is_a_songinfo_error(
     monkeypatch, worker_loop, extracted
 ):
-    _resolver(monkeypatch, OSError("boom"))
+    fake_redirect_follower(monkeypatch, OSError("boom"))
 
     with pytest.raises(SongError) as e:
         loader._load_song(SHORT)
@@ -118,7 +102,7 @@ def test_raising_resolver_is_a_songinfo_error(
 def test_resolved_unknown_url_is_unsupported(
     monkeypatch, worker_loop, extracted
 ):
-    _resolver(monkeypatch, "https://example.com/page")
+    fake_redirect_follower(monkeypatch, "https://example.com/page")
 
     with pytest.raises(SongError) as e:
         loader._load_song(SHORT)
@@ -129,7 +113,7 @@ def test_resolved_unknown_url_is_unsupported(
 def test_resolved_non_url_is_unsupported_not_searched(
     monkeypatch, worker_loop, extracted
 ):
-    _resolver(monkeypatch, "just some words")
+    fake_redirect_follower(monkeypatch, "just some words")
     searched = []
     monkeypatch.setattr(
         loader, "_search_youtube", lambda q: searched.append(q) or [{}]
@@ -145,7 +129,9 @@ def test_resolved_non_url_is_unsupported_not_searched(
 def test_resolved_short_link_is_unsupported_after_one_resolution(
     monkeypatch, worker_loop, extracted
 ):
-    resolver = _resolver(monkeypatch, "https://spotify.link/other")
+    resolver = fake_redirect_follower(
+        monkeypatch, "https://spotify.link/other"
+    )
 
     with pytest.raises(SongError) as e:
         loader._load_song(SHORT)
@@ -157,7 +143,7 @@ def test_resolved_short_link_is_unsupported_after_one_resolution(
 def test_unknown_url_off_the_list_never_calls_the_resolver(
     monkeypatch, worker_loop, extracted
 ):
-    resolver = _resolver(monkeypatch, SC_TRACK)
+    resolver = fake_redirect_follower(monkeypatch, SC_TRACK)
 
     with pytest.raises(SongError) as e:
         loader._load_song("https://example.com/")
@@ -170,7 +156,7 @@ def test_resolved_discord_message_link_is_unsupported_not_extracted(
     monkeypatch, worker_loop, extracted
 ):
     calls, _ = extracted
-    _resolver(monkeypatch, "https://discord.com/channels/1/2/3")
+    fake_redirect_follower(monkeypatch, "https://discord.com/channels/1/2/3")
 
     with pytest.raises(SongError) as e:
         loader._load_song(SHORT)
