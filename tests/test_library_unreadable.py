@@ -3,12 +3,11 @@ a failed index build."""
 
 from pathlib import Path
 
-import discord
 import pytest
 
 from config import config
 from musicbot import library
-from musicbot.bot import MusicBot
+from discord_fakes import real_music_bot
 from helpers import run
 
 
@@ -98,11 +97,7 @@ def test_unlistable_artist_dir_is_skipped_and_sibling_indexed(
 
 
 def test_setup_hook_survives_a_failed_index_build(monkeypatch, capsys):
-    bot = MusicBot(
-        ["ext.a", "ext.b"],
-        command_prefix="d!",
-        intents=discord.Intents.default(),
-    )
+    bot = real_music_bot(["ext.a", "ext.b"])
     loaded, synced = [], []
 
     async def broken():

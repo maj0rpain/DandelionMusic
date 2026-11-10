@@ -53,6 +53,16 @@ class FakePanel(PlayerPanel):
         return await send(None)
 
 
+def real_music_bot(extensions=(), **kwargs):
+    """A bare real `MusicBot` (prefix `d!`, default intents) over the
+    initial `extensions`; `kwargs` are forwarded to its constructor."""
+    from musicbot.bot import MusicBot
+
+    kwargs.setdefault("command_prefix", "d!")
+    kwargs.setdefault("intents", discord.Intents.default())
+    return MusicBot(list(extensions), **kwargs)
+
+
 def make_bot(controllers=None, is_owner=False, settings=None):
     """A bot whose registry is seeded through its own interface:
     `settings` alone are bulk-loaded, and each of `controllers` is

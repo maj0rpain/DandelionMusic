@@ -111,7 +111,7 @@ def _duration_field(song):
         (213.333, 213, "0:03:33"),
         (213.6, 214, "0:03:34"),
         (213, 213, "0:03:33"),
-        (0.3, 0, "0:00:00"),
+        (0.3, None, config.SONGINFO_UNKNOWN),
     ],
 )
 def test_update_stores_a_whole_second_duration_and_shows_it(
@@ -120,7 +120,7 @@ def test_update_stores_a_whole_second_duration_and_shows_it(
     song = _song()
     song.update({"duration": given})
     assert song.duration == stored
-    assert type(song.duration) is int
+    assert stored is None or type(song.duration) is int
     assert _duration_field(song) == shown
 
 
@@ -148,29 +148,55 @@ def test_a_song_with_no_duration_shows_unknown(update):
     assert _duration_field(song) == config.SONGINFO_UNKNOWN
 
 
-def _pickled_with_duration(duration):
+def _pickled_with_raw_duration(duration):
+    """A song as an old backup holds it: the raw value is planted
+    straight into the instance dict, bypassing the duration rule."""
     old = _old_shape_song()
-    old.duration = duration
+    old.__dict__["duration"] = duration
     return pickle.loads(pickle.dumps(old))
 
 
-def test_a_restored_song_with_a_fractional_duration_shows_whole_seconds():
-    restored = _pickled_with_duration(213.333)
-    assert restored.duration == 213
-    assert type(restored.duration) is int
-    assert _duration_field(restored) == "0:03:33"
+@pytest.mark.parametrize(
+    "given, stored, shown",
+    [
+        (213.333, 213, "0:03:33"),
+        (None, None, config.SONGINFO_UNKNOWN),
+        (0, None, config.SONGINFO_UNKNOWN),
+    ],
+)
+def test_a_restored_song_reads_its_raw_duration_in_whole_seconds(
+    given, stored, shown
+):
+    restored = _pickled_with_raw_duration(given)
+    assert restored.duration == stored
+    if stored is not None:
+        assert type(restored.duration) is int
+    assert _duration_field(restored) == shown
 
 
-def test_a_restored_song_with_no_duration_shows_unknown():
-    restored = _pickled_with_duration(None)
-    assert restored.duration is None
-    assert _duration_field(restored) == config.SONGINFO_UNKNOWN
+@pytest.mark.parametrize(
+    "given, stored, shown",
+    [
+        (213.6, 214, "0:03:34"),
+        (0, None, config.SONGINFO_UNKNOWN),
+        (None, None, config.SONGINFO_UNKNOWN),
+    ],
+)
+def test_assigning_a_duration_directly_applies_the_rule(given, stored, shown):
+    song = _song(duration=100)
+    song.duration = given
+    assert song.duration == stored
+    if stored is not None:
+        assert type(song.duration) is int
+    assert _duration_field(song) == shown
 
 
-def test_a_restored_song_with_a_zero_duration_shows_unknown():
-    restored = _pickled_with_duration(0)
-    assert restored.duration is None
-    assert _duration_field(restored) == config.SONGINFO_UNKNOWN
+def test_update_from_a_restored_song_applies_its_raw_fractional_duration():
+    source = _pickled_with_raw_duration(213.333)
+    song = _song()
+    song.update(source)
+    assert song.duration == 213
+    assert type(song.duration) is int
 
 
 def test_the_constructor_reads_a_zero_duration_as_unknown():

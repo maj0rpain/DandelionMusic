@@ -2,10 +2,10 @@
 one guild's refresh fails, and names the failing guild in the log.
 """
 
-import discord
-
 from musicbot.bot import MusicBot
-from helpers import run
+
+from discord_fakes import real_music_bot
+from helpers import assert_logged_with_traceback, run
 
 
 class _Panel:
@@ -32,7 +32,7 @@ def test_failing_refresh_does_not_stop_other_guilds_and_names_the_guild(
     capsys,
 ):
     refreshed = []
-    bot = MusicBot([], command_prefix="d!", intents=discord.Intents.default())
+    bot = real_music_bot()
     bot.sessions = _Sessions(
         [
             _Panel("Broken Guild", refreshed, RuntimeError("boom")),
@@ -41,9 +41,7 @@ def test_failing_refresh_does_not_stop_other_guilds_and_names_the_guild(
     )
     run(MusicBot.refresh_panels.coro(bot))
     err = capsys.readouterr().err
-    assert (
-        refreshed,
-        0
-        <= err.find("Panel refresh failed for guild Broken Guild:")
-        < err.find("Traceback"),
-    ) == (["ok"], True)
+    assert refreshed == ["ok"]
+    assert_logged_with_traceback(
+        err, "Panel refresh failed for guild Broken Guild:"
+    )

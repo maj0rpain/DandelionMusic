@@ -185,11 +185,26 @@ def worker_loop(monkeypatch):
     loop.close()
 
 
+class StubbedSleep:
+    """What `no_sleep` returns: `count` stubbed sleeps so far, and an
+    optional `hook` (unset by default) called on each one."""
+
+    def __init__(self):
+        self.count = 0
+        self.hook = None
+
+
 @pytest.fixture
 def no_sleep(monkeypatch):
-    """A move waits a second before returning; time is a boundary."""
+    """A move waits a second before returning; time is a boundary.
+    Returns a `StubbedSleep`: `count` stubbed sleeps, and an optional
+    `hook` called on each."""
+    stub = StubbedSleep()
 
     async def sleep(_seconds):
-        pass
+        stub.count += 1
+        if stub.hook:
+            stub.hook()
 
     monkeypatch.setattr(asyncio, "sleep", sleep)
+    return stub

@@ -40,16 +40,20 @@ class Song:
         self.url = url
         self.title = title
         self.uploader = uploader
-        self.duration = whole_seconds(duration)
+        self.duration = duration
         self.thumbnail = thumbnail
         self.saved_entry = saved_entry
 
-    def __setstate__(self, state):
-        # a backup or worker result is restored without __init__, so
-        # the duration rule is applied here
-        self.__dict__.update(state)
-        if "duration" in state:
-            self.duration = whole_seconds(state["duration"])
+    @property
+    def duration(self) -> Optional[int]:
+        """Whole seconds, or None when unknown. Read through the rule
+        too, so a song restored from an old backup (whose instance dict
+        holds the raw value) reads correctly."""
+        return whole_seconds(self.__dict__.get("duration"))
+
+    @duration.setter
+    def duration(self, value: Optional[float]) -> None:
+        self.__dict__["duration"] = whole_seconds(value)
 
     @property
     def display_name(self) -> str:
@@ -105,8 +109,6 @@ class Song:
 
         for k, v in data.items():
             if hasattr(self, k) and v:
-                if k == "duration":
-                    v = whole_seconds(v)
                 setattr(self, k, v)
 
 

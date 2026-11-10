@@ -2,7 +2,11 @@
 
 import types
 
+import pytest
+
+from db_seam import FailingSessionFactory, with_db
 from helpers import (
+    assert_logged_with_traceback,
     attribute_names,
     dockerfile_commands,
     imported_names,
@@ -153,3 +157,44 @@ def test_module_level_only_skips_imports_inside_function_bodies(tmp_path):
 def test_roots_honour_module_level_only(tmp_path):
     module = module_of(tmp_path, IN_FUNCTIONS)
     assert imported_roots(module, module_level_only=True) == {"os", "sys"}
+
+
+def test_failing_session_factory_fails_counts_and_then_runs_for_real():
+    async def test(factory):
+        failing = FailingSessionFactory(factory, "flush", ValueError("boom"))
+        async with failing() as session:
+            with pytest.raises(ValueError):
+                await session.flush()
+        assert failing.attempts == 1
+        failing.failing = False
+        async with failing() as session:
+            await session.flush()
+        assert failing.attempts == 2
+
+        made = FailingSessionFactory(factory, "flush", lambda: KeyError("k"))
+        async with made() as session:
+            with pytest.raises(KeyError):
+                await session.flush()
+
+    with_db(test)
+
+
+def test_logged_with_traceback_passes_when_message_precedes_it():
+    assert_logged_with_traceback(
+        "boom: failed\nTraceback (most recent call last):\n", "boom"
+    )
+
+
+def test_logged_with_traceback_fails_when_message_missing():
+    with pytest.raises(AssertionError):
+        assert_logged_with_traceback("Traceback (most recent)", "boom")
+
+
+def test_logged_with_traceback_fails_when_message_follows_traceback():
+    with pytest.raises(AssertionError):
+        assert_logged_with_traceback("Traceback (most recent)\nboom", "boom")
+
+
+def test_logged_with_traceback_fails_without_a_traceback():
+    with pytest.raises(AssertionError):
+        assert_logged_with_traceback("boom: failed\n", "boom")
