@@ -2,9 +2,10 @@
 one guild's refresh fails, and names the failing guild in the log.
 """
 
+from musicbot.bot import MusicBot
+
 from discord_fakes import real_music_bot
 from helpers import assert_logged_with_traceback, run
-from musicbot.bot import MusicBot
 
 
 class _Panel:

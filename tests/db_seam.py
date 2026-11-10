@@ -3,7 +3,7 @@
 Shared by the saved-playlists, guild whitelist, guild settings and
 AudioController tests, so the StaticPool detail lives in one place. It
 also holds the real-`MusicBot` harness (`run_musicbot`, `MusicBotRun`)
-that the `on_ready`, whitelist-admission and voice-state tests share.
+that the `on_ready` and whitelist-admission tests share.
 """
 
 import asyncio

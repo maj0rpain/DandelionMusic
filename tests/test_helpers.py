@@ -4,6 +4,7 @@ import types
 
 import pytest
 
+from db_seam import FailingSessionFactory, with_db
 from helpers import (
     assert_logged_with_traceback,
     attribute_names,
@@ -159,10 +160,6 @@ def test_roots_honour_module_level_only(tmp_path):
 
 
 def test_failing_session_factory_fails_counts_and_then_runs_for_real():
-    import pytest
-
-    from db_seam import FailingSessionFactory, with_db
-
     async def test(factory):
         failing = FailingSessionFactory(factory, "flush", ValueError("boom"))
         async with failing() as session:

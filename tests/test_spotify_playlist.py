@@ -4,7 +4,7 @@ import pytest
 from musicbot import linkutils
 from musicbot.linkutils import SpotifyPlaylistTypes, fetch_playlist_with_api
 from musicbot.truncation import Truncation, TruncationReason
-from helpers import run
+from helpers import assert_logged_with_traceback, run
 
 
 def url(n):
@@ -263,8 +263,9 @@ def test_failed_api_falls_back_to_the_public_page(
         50, TruncationReason.API_UNAVAILABLE
     )
     err = capsys.readouterr().err
-    assert f"ERROR: Spotify API returned error for {list_type} p:" in err
-    assert "Traceback" in err
+    assert_logged_with_traceback(
+        err, f"ERROR: Spotify API returned error for {list_type} p:"
+    )
 
 
 @pytest.mark.parametrize("list_type", ["playlist", "album"])
@@ -329,8 +330,9 @@ def test_track_whose_api_lookup_raises_falls_back_to_the_page_title(
 
     assert result == linkutils.SpotifyTrack('T - A "Topic"')
     err = capsys.readouterr().err
-    assert "ERROR: Spotify API returned error for track abc:" in err
-    assert "Traceback" in err
+    assert_logged_with_traceback(
+        err, "ERROR: Spotify API returned error for track abc:"
+    )
 
 
 def test_track_without_api_reads_the_page_title_and_logs_no_error(
