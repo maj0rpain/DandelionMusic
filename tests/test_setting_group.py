@@ -244,7 +244,7 @@ def test_an_unknown_word_is_an_error_with_no_embed_and_no_change():
     sent, error, sett = invoke("typo", sett=sett)
 
     assert isinstance(error, CheckError)
-    assert str(error) == "Unknown setting `typo`"
+    assert str(error) == config.UNKNOWN_SETTING.format("typo")
     assert sent == []
     assert stored_values(sett) == before
     assert FakeDbSession.commits == 0
@@ -280,7 +280,7 @@ def test_extra_whitespace_before_an_unknown_word_is_still_unknown():
     sent, error, sett = invoke("  foo")
 
     assert isinstance(error, CheckError)
-    assert str(error) == "Unknown setting `foo`"
+    assert str(error) == config.UNKNOWN_SETTING.format("foo")
     assert sent == []
 
 

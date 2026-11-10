@@ -10,7 +10,12 @@ import types
 import sqlalchemy
 
 from config import config
-from musicbot.settings import SETTINGS, GuildSettings, default_settings
+from musicbot.settings import (
+    SETTINGS,
+    GuildSettings,
+    SettingsEmbed,
+    default_settings,
+)
 
 
 def test_each_setting_defaults_to_its_documented_value():
@@ -181,10 +186,10 @@ def test_settings_embed_flags_ids_that_no_longer_resolve():
             "button_emote",
         )
     } == {
-        "command_channel": "Invalid Channel",
-        "start_voice_channel": "Invalid VChannel",
-        "dj_role": "Invalid Role",
-        "button_emote": "Invalid Emoji",
+        "command_channel": SettingsEmbed.INVALID_CHANNEL,
+        "start_voice_channel": SettingsEmbed.INVALID_VOICE_CHANNEL,
+        "dj_role": SettingsEmbed.INVALID_ROLE,
+        "button_emote": SettingsEmbed.INVALID_EMOJI,
     }
 
 

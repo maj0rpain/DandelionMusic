@@ -18,7 +18,7 @@ from discord.ext.commands.view import StringView
 
 from config import config
 from musicbot.commands.general import General
-from musicbot.settings import SETTINGS
+from musicbot.settings import SETTINGS, ConversionErrorText
 from setting_fakes import (
     FakeMessage,
     fake_author,
@@ -113,7 +113,7 @@ def test_a_setting_update_is_confirmed(name, arg, confirmation, stored):
 
     sent = invoke_setting(name, arg, sett)
 
-    assert sent[-1] == f"Setting `{name}` updated to {confirmation}!"
+    assert sent[-1] == config.SETTING_UPDATED.format(name, confirmation)
     assert getattr(sett, name) == stored
 
 
@@ -134,7 +134,7 @@ def missing_row(monkeypatch):
     monkeypatch.setattr(FakeDbSession, "execute", execute_matching_no_row)
 
 
-FAILED = "`Error: Setting default_volume could not be updated.`"
+FAILED = config.SETTING_UPDATE_FAILED.format("default_volume")
 
 
 def test_a_failed_write_is_reported_on_update(missing_row):
@@ -174,7 +174,7 @@ def test_the_update_and_failure_replies_come_from_the_catalogue(
 
     assert updated[-1] == "UPD[default_volume|50]"
     assert (
-        conversion_failed[-1] == "CONV[Value must be a number in range 0-100]"
+        conversion_failed[-1] == f"CONV[{ConversionErrorText.INVALID_VOLUME}]"
     )
     assert failed_update[-1] == "FAIL[default_volume]"
     assert failed_reset[-1] == "FAIL[default_volume]"
@@ -194,7 +194,13 @@ def test_an_invalid_emoji_is_reported():
         message=FakeMessage(reaction_error=unknown_emoji),
     )
 
-    assert_failed(sent, sett, "`Error: Invalid emote`")
+    assert_failed(
+        sent,
+        sett,
+        config.SETTING_CONVERSION_FAILED.format(
+            ConversionErrorText.INVALID_EMOJI
+        ),
+    )
 
 
 def test_an_out_of_range_volume_is_reported():
@@ -202,7 +208,13 @@ def test_an_out_of_range_volume_is_reported():
 
     sent = invoke_setting("default_volume", 101, sett)
 
-    assert_failed(sent, sett, "`Error: Value must be a number in range 0-100`")
+    assert_failed(
+        sent,
+        sett,
+        config.SETTING_CONVERSION_FAILED.format(
+            ConversionErrorText.INVALID_VOLUME
+        ),
+    )
 
 
 def test_vc_timeout_is_refused_while_its_edit_is_disabled(monkeypatch):
@@ -280,7 +292,9 @@ def test_a_slash_subcommand_takes_its_value_by_parameter_name(
         )
     )
 
-    assert sent[-1].startswith(f"Setting `{name}` updated to")
+    assert sent[-1].startswith(
+        config.SETTING_UPDATED.format(name, "{}").split("{}")[0]
+    )
 
 
 TEXT_ID, VOICE_ID, ROLE_ID = (
@@ -361,7 +375,7 @@ def test_a_prefix_subcommand_converts_its_argument(
 
     run(command.invoke(prefix_ctx(sent, sett, argument)))
 
-    assert sent[-1] == f"Setting `{name}` updated to {confirmation}!"
+    assert sent[-1] == config.SETTING_UPDATED.format(name, confirmation)
     assert getattr(sett, name) == stored
 
 

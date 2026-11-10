@@ -10,6 +10,7 @@ from config import config
 from musicbot import playlists
 from musicbot.commands import music
 from musicbot.commands.music import Music
+from musicbot.playlist import PlaylistErrorText
 from controller_helpers import _queue, _run_while_playing, _titles, command_ctx
 from helpers import run
 
@@ -56,7 +57,7 @@ def test_remove_with_no_position_on_a_one_song_queue_removes_nothing(
         controller, lambda: Music._remove.callback(Music(None), ctx)
     )
 
-    assert sent == ["Cannot move the first song since it's already playing."]
+    assert sent == [PlaylistErrorText.ZERO_INDEX]
     assert _titles(controller) == ["only"]
 
 

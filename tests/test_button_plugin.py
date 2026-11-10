@@ -244,7 +244,7 @@ def test_several_links_send_each_outcome_and_the_error_in_link_order():
     )
     assert effects.processed == [A, B, SOUNDCLOUD, YOUTUBE]
     assert effects.sent == [
-        "Added to queue - position 2",
+        render(queued, False).embed.title,
         "bad link",
         render(playlist, False).text,
     ]
