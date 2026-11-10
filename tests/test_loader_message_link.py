@@ -2,7 +2,6 @@
 link: `_load_song` and `preload` run in process over the real
 `DiscordAttachmentsIE` and a fake `HTTPClient`, so a fetch is observable."""
 
-import atexit
 from datetime import timedelta
 
 import pytest
@@ -14,7 +13,11 @@ from musicbot.loader import Preload, SongError
 from musicbot.song import Song
 from musicbot.yt_dlp_plugins.extractor import discord as extractor
 from helpers import run
-from message_link_fakes import LINK, FakeHTTPClient
+from message_link_fakes import (
+    LINK,
+    FakeHTTPClient,
+    install_fake_discord_client,
+)
 
 OTHER = LINK[:-1] + "6"
 SHORT = "https://short.test/abc"
@@ -39,13 +42,7 @@ class _Hop(InfoExtractor):
 
 @pytest.fixture
 def client(monkeypatch, worker_loop):
-    FakeHTTPClient.instances = []
-    FakeHTTPClient.login_error = None
-    FakeHTTPClient.fetch_error = None
-    monkeypatch.setattr(extractor, "HTTPClient", FakeHTTPClient)
-    monkeypatch.setattr(extractor, "_client", None)
-    monkeypatch.setattr(config, "BOT_TOKEN", "tok")
-    monkeypatch.setattr(atexit, "register", lambda *a, **k: None)
+    install_fake_discord_client(monkeypatch)
     ydl = loader._new_downloader()
     ydl.add_info_extractor(extractor.DiscordAttachmentsIE())
     ydl.add_info_extractor(_Hop())
