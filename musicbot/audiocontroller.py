@@ -33,12 +33,6 @@ from enum import Enum, auto
 
 _T = TypeVar("_T")
 
-# The start kinds `_refusal()` can answer with.
-_REFUSALS = (
-    OutcomeKind.REFUSED_DISCONNECTING,
-    OutcomeKind.REFUSED_NOT_IN_VOICE,
-)
-
 # avoiding circular import
 if TYPE_CHECKING:
     from musicbot.bot import MusicBot
@@ -228,6 +222,15 @@ class AudioController(object):
         """The queue's embed, read when a queue button is clicked."""
         return self.playlist.queue_embed()
 
+    def queue_length(self) -> int:
+        """How many songs the play queue holds, the now-playing one
+        at its head included."""
+        return len(self.playlist)
+
+    def queued_songs(self) -> tuple[Song, ...]:
+        """The play queue's songs in order, as a snapshot."""
+        return tuple(self.playlist.playque)
+
     def is_active(self) -> bool:
         return self.playback.is_active()
 
@@ -337,6 +340,12 @@ class AudioController(object):
             return OutcomeKind.REFUSED_NOT_IN_VOICE
         return None
 
+    def _refusal_outcome(self) -> Optional[EnqueueOutcome]:
+        """The refusal outcome when a request may not place now (see
+        _refusal()), else `None`."""
+        refused = self._refusal()
+        return None if refused is None else EnqueueOutcome(refused)
+
     async def _place_and_start(
         self, place: Callable[[], _T]
     ) -> Tuple[Optional[_T], Optional[OutcomeKind]]:
@@ -384,7 +393,7 @@ class AudioController(object):
         """A refusal start kind is the refusal outcome; a batch load,
         or a placed count other than 1, reports PLAYLIST; else the
         single song's outcome."""
-        if start in _REFUSALS:
+        if start is not None and start.is_refusal:
             return EnqueueOutcome(start)
         if batch is not None or len(placed) != 1:
             return EnqueueOutcome(
@@ -459,7 +468,10 @@ class AudioController(object):
     async def start_restored(self) -> RestoreResult:
         """Starts the head of the queue load_backup() brought back.
         With an empty queue it starts nothing and reports
-        NOTHING_TO_RESTORE."""
+        NOTHING_TO_RESTORE. Refuses, starting nothing, while
+        disconnecting: teardown may have begun since load_backup()."""
+        if self.is_disconnecting():
+            return RestoreResult.REFUSED_WHILE_DISCONNECTING
         if not self.playlist:
             return RestoreResult.NOTHING_TO_RESTORE
         await self.play_song(self.playlist[0])
@@ -541,9 +553,9 @@ class AudioController(object):
             f" in guild {self.guild.name!r}"
         )
 
-        refused = self._refusal()
+        refused = self._refusal_outcome()
         if refused is not None:
-            return EnqueueOutcome(refused)
+            return refused
 
         uris = [track.uri for track in tracks]
         songs: List[Optional[Song]] = []
@@ -562,16 +574,16 @@ class AudioController(object):
         if self.is_idle() and len(uris) > 1:
             songs += await loader.load_local_songs(uris[:1])
             tail = uris[1:]
-            refused = self._refusal()
+            refused = self._refusal_outcome()
             if refused is not None:
-                return EnqueueOutcome(refused)
+                return refused
             if songs[0] is not None:
                 await self.enqueue(songs[:1])
 
         loaded_tail = await loader.load_local_songs(tail)
-        refused = self._refusal()
+        refused = self._refusal_outcome()
         if refused is not None:
-            return EnqueueOutcome(refused)
+            return refused
         songs += loaded_tail
 
         added = [song for song in loaded_tail if song is not None]

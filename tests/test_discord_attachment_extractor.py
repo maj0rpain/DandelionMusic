@@ -1,34 +1,32 @@
-import atexit
 import sys
 
 import pytest
 from yt_dlp.utils import DownloadError
 
-from config import config
 from musicbot.yt_dlp_plugins.extractor import discord as extractor
-from message_link_fakes import FakeHTTPClient
+from message_link_fakes import FakeHTTPClient, install_fake_discord_client
 
 URL = "https://discord.com/channels/1/22/333"
 
 
 @pytest.fixture
 def exit_handlers(monkeypatch, worker_loop):
-    FakeHTTPClient.instances = []
-    FakeHTTPClient.login_error = None
-    FakeHTTPClient.fetch_error = None
     handlers = []
-    monkeypatch.setattr(extractor, "HTTPClient", FakeHTTPClient)
-    monkeypatch.setattr(extractor, "_client", None)
-    monkeypatch.setattr(config, "BOT_TOKEN", "tok")
-    monkeypatch.setattr(
-        atexit, "register", lambda f, *a, **k: handlers.append(f)
+    install_fake_discord_client(
+        monkeypatch, lambda f, *a, **k: handlers.append(f)
     )
     monkeypatch.delitem(sys.modules, "musicbot.__main__", raising=False)
     yield handlers
 
 
-def extract():
-    return _extract_as(URL)
+def extract(admitted=URL, url=URL):
+    from musicbot import loader
+
+    loader._admitted_link = admitted
+    try:
+        return extractor.DiscordAttachmentsIE()._real_extract(url)
+    finally:
+        loader._admitted_link = None
 
 
 def test_two_extractions_log_in_once_and_fetch_by_ids(exit_handlers):
@@ -91,29 +89,19 @@ def test_failed_login_is_download_error_and_retried(exit_handlers):
     assert len(exit_handlers) == 1
 
 
-def _extract_as(admitted, url=URL):
-    from musicbot import loader
-
-    loader._admitted_link = admitted
-    try:
-        return extractor.DiscordAttachmentsIE()._real_extract(url)
-    finally:
-        loader._admitted_link = None
-
-
 def test_the_admitted_link_is_fetched(exit_handlers):
-    _extract_as(URL)
+    extract()
     (client,) = FakeHTTPClient.instances
     assert client.fetches == [(22, 333)]
 
 
 def test_another_message_link_is_refused_without_a_fetch(exit_handlers):
     with pytest.raises(DownloadError):
-        _extract_as(URL, "https://discord.com/channels/1/22/334")
+        extract(url="https://discord.com/channels/1/22/334")
     assert [c.fetches for c in FakeHTTPClient.instances] == []
 
 
 def test_with_no_admitted_link_nothing_is_fetched(exit_handlers):
     with pytest.raises(DownloadError):
-        _extract_as(None)
+        extract(admitted=None)
     assert [c.fetches for c in FakeHTTPClient.instances] == []

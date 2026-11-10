@@ -1076,19 +1076,14 @@ class ClickInteraction:
         self.deleted += 1
 
 
-def timeout_message(cls, fail=False):
-    """A `cls` (a WebhookMessage) that records its edits."""
+class RecordingWebhookMessage(discord.WebhookMessage):
+    """A WebhookMessage that records its edits."""
 
-    class Recording(cls):
-        def __init__(self):
-            self.edits = []
+    def __init__(self):
+        self.edits = []
 
-        async def edit(self, **kwargs):
-            if fail:
-                raise http_error()
-            self.edits.append(kwargs)
-
-    return Recording()
+    async def edit(self, **kwargs):
+        self.edits.append(kwargs)
 
 
 def timeout_view(message=None, command_interaction=None):
@@ -1243,7 +1238,7 @@ def test_timeout_never_uses_a_click_turned_away_as_busy():
 
 def test_timeout_edits_a_webhook_message_view_through_the_click_followup():
     async def go():
-        message = timeout_message(discord.WebhookMessage)
+        message = RecordingWebhookMessage()
         view = timeout_view(message)
         click = ClickInteraction()
         assert await view.interaction_check(click)
@@ -1257,7 +1252,7 @@ def test_timeout_edits_a_webhook_message_view_through_the_click_followup():
 
 def test_timeout_without_a_click_edits_a_webhook_message_directly():
     async def go():
-        message = timeout_message(discord.WebhookMessage)
+        message = RecordingWebhookMessage()
         view = timeout_view(message)
         await view.on_timeout()
         return message, view

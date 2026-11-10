@@ -20,7 +20,7 @@ def test_started_with_announcements_on_says_nothing():
 def test_started_with_announcements_off_says_now_playing():
     outcome = EnqueueOutcome(OutcomeKind.STARTED, song=plain_song())
     reply = render(outcome, False)
-    assert reply.embed.title == "Now Playing"
+    assert reply.embed.title == config.SONGINFO_NOW_PLAYING
 
 
 def test_start_failed_says_nothing():
@@ -32,7 +32,9 @@ def test_start_failed_says_nothing():
 def test_queued_shows_position():
     outcome = EnqueueOutcome(OutcomeKind.QUEUED, song=plain_song(), position=3)
     reply = render(outcome, True)
-    assert reply.embed.title == "Added to queue - position 3"
+    assert reply.embed.title == (
+        config.SONGINFO_QUEUE_POSITION.format(position=3)
+    )
 
 
 def test_playlist_says_queued_playlist():
@@ -58,42 +60,40 @@ def _library(count, skipped):
     return render(outcome, True).text
 
 
-def test_library_pick_with_nothing_skipped():
-    assert _library(3, []) == "Queued 3 song(s)."
+_WORDING = types.SimpleNamespace(
+    LIBRARY_PICK_QUEUED="Got {count}.",
+    LIBRARY_PICK_SKIPPED=" Lost {skipped}: {names}",
+    LIBRARY_PICK_SKIPPED_MORE=" +{more}",
+    LIBRARY_PICK_STALE_INDEX=" Refresh!",
+)
 
 
-def test_library_pick_names_a_few_skipped_files():
-    assert _library(1, ["a.mp3", "b.mp3"]) == (
-        "Queued 1 song(s). 2 skipped (file not found): a.mp3, b.mp3. "
-        "The index may be stale - ask the bot owner to run "
-        "`d!library refresh`."
-    )
-
-
-def test_library_pick_elides_skipped_files_past_five():
-    names = [f"{i}.mp3" for i in range(7)]
-    assert _library(0, names) == (
-        "Queued 0 song(s). 7 skipped (file not found): "
-        "0.mp3, 1.mp3, 2.mp3, 3.mp3, 4.mp3, and 2 more. "
-        "The index may be stale - ask the bot owner to run "
-        "`d!library refresh`."
-    )
-
-
-def _library_under(config_obj, monkeypatch, names):
+def _library_under(config_obj, monkeypatch, names, count=1):
     monkeypatch.setattr(outcome_module, "config", config_obj)
-    return _library(1, names)
+    return _library(count, names)
+
+
+def test_library_pick_with_nothing_skipped(monkeypatch):
+    assert _library_under(_WORDING, monkeypatch, [], 3) == "Got 3."
+
+
+def test_library_pick_names_a_few_skipped_files(monkeypatch):
+    names = ["a.mp3", "b.mp3"]
+    assert _library_under(_WORDING, monkeypatch, names, 1) == (
+        "Got 1. Lost 2: a.mp3, b.mp3 Refresh!"
+    )
+
+
+def test_library_pick_elides_skipped_files_past_five(monkeypatch):
+    names = [f"{i}.mp3" for i in range(7)]
+    assert _library_under(_WORDING, monkeypatch, names, 0) == (
+        "Got 0. Lost 7: 0.mp3, 1.mp3, 2.mp3, 3.mp3, 4.mp3 +2 Refresh!"
+    )
 
 
 def test_library_pick_wording_comes_from_the_language_file(monkeypatch):
-    cfg = types.SimpleNamespace(
-        LIBRARY_PICK_QUEUED="Got {count}.",
-        LIBRARY_PICK_SKIPPED=" Lost {skipped}: {names}",
-        LIBRARY_PICK_SKIPPED_MORE=" +{more}",
-        LIBRARY_PICK_STALE_INDEX=" Refresh!",
-    )
     names = [f"{i}.mp3" for i in range(7)]
-    assert _library_under(cfg, monkeypatch, names) == (
+    assert _library_under(_WORDING, monkeypatch, names) == (
         "Got 1. Lost 7: 0.mp3, 1.mp3, 2.mp3, 3.mp3, 4.mp3 +2 Refresh!"
     )
 
@@ -103,8 +103,9 @@ def test_library_report_survives_braces_in_the_prefix(
 ):
     cfg = config_factory("BOT_TOKEN=x\nBOT_PREFIX={!\n")
     assert _library_under(cfg, monkeypatch, ["a.mp3"]).endswith(
-        "run `{!library refresh`."
+        cfg.LIBRARY_PICK_STALE_INDEX
     )
+    assert "{!" in cfg.LIBRARY_PICK_STALE_INDEX
 
 
 def _send(settings):
@@ -157,3 +158,10 @@ def test_refused_disconnecting_says_the_disconnecting_message():
     outcome = EnqueueOutcome(OutcomeKind.REFUSED_DISCONNECTING)
     assert render(outcome, True).text == config.DISCONNECTING_MESSAGE
     assert render(outcome, False).text == config.DISCONNECTING_MESSAGE
+
+
+def test_only_the_two_refused_kinds_are_refusals():
+    assert {k for k in OutcomeKind if k.is_refusal} == {
+        OutcomeKind.REFUSED_DISCONNECTING,
+        OutcomeKind.REFUSED_NOT_IN_VOICE,
+    }

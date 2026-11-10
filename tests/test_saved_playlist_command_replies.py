@@ -106,9 +106,7 @@ def test_remove_song_refuses_the_only_song(monkeypatch):
 )
 def test_save_that_fails_replies_with_the_reason(monkeypatch, error, reply):
     monkeypatch.setattr(playlists, "save", _fail_with(error))
-    controller = types.SimpleNamespace(
-        playlist=types.SimpleNamespace(playque=[plain_song()])
-    )
+    controller = types.SimpleNamespace(queued_songs=lambda: (plain_song(),))
     ctx, sent = command_ctx(controller)
 
     run(Music._playlist_save.callback(Music(None), ctx, "p"))
