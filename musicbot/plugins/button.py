@@ -1,7 +1,7 @@
 import discord
 from discord.ext import commands
 from musicbot import admission, linkutils, loader, utils
-from musicbot.message_link import check_message_link
+from musicbot.message_link import gate_or_refuse
 from musicbot.bot import MusicBot
 from musicbot.outcome import send_outcome
 
@@ -100,6 +100,16 @@ class Button(commands.Cog):
                 admitted = await admission.check(
                     ctx, admission.RequestKind.REACTION
                 )
+            except utils.CheckError:
+                return
+            checked_tracks = []
+            for url in links:
+                checked = await gate_or_refuse(url, serv, member, ctx.send)
+                if checked is not None:
+                    checked_tracks.append(checked)
+            if not checked_tracks:
+                return
+            try:
                 audiocontroller = await admitted.enter()
             except utils.CheckError:
                 return
@@ -109,9 +119,8 @@ class Button(commands.Cog):
                     self.bot.sessions.direct_panel(
                         serv, channel, replace=False
                     )
-            for url in links:
+            for checked in checked_tracks:
                 try:
-                    checked = await check_message_link(url, serv, member)
                     outcome = await audiocontroller.process_song(
                         checked, user=member
                     )

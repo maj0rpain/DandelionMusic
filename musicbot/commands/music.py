@@ -19,7 +19,7 @@ from musicbot.audiocontroller import (
 from musicbot.loader import SongError, search_youtube
 from musicbot.playlist import PlaylistError
 from musicbot.linkutils import bare_url, get_site_type
-from musicbot.message_link import CheckedTrack, check_message_link
+from musicbot.message_link import CheckedTrack, gate_or_refuse
 from musicbot.views import MusicButton, OwnedView, SimplePaginator
 
 
@@ -217,11 +217,7 @@ class Music(commands.Cog):
         """Runs the message-link gate for `ctx`'s author: the checked
         track, or, when the gate refuses, replies with the refusal and
         returns None."""
-        try:
-            return await check_message_link(track, ctx.guild, ctx.author)
-        except SongError as e:
-            await ctx.send(e)
-            return None
+        return await gate_or_refuse(track, ctx.guild, ctx.author, ctx.send)
 
     async def _play_song(self, ctx, checked: CheckedTrack, playnext=False):
         # reset timer

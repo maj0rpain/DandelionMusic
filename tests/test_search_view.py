@@ -18,7 +18,6 @@ from types import SimpleNamespace
 import discord
 
 from config import config
-from musicbot.message_link import CheckedTrack
 from musicbot.bot import MusicBot
 from musicbot.commands.music import Music, SearchView, SongButton
 from discord_fakes import (
@@ -262,7 +261,7 @@ async def message_link_click(link, *, join_needed=False):
 
 def test_an_allowed_link_pick_hands_play_a_checked_track_carrying_it():
     _view, cog, _inter = run(message_link_click(LINK))
-    assert cog.checked == [CheckedTrack(LINK, LINK)]
+    assert [(c.track, c.admitted_link) for c in cog.checked] == [(LINK, LINK)]
 
 
 def test_a_forbidden_link_pick_is_refused_without_joining_or_playing():
