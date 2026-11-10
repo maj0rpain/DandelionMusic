@@ -11,11 +11,10 @@ from musicbot.commands.library import Library
 from musicbot.commands.music import Music
 from musicbot.settings import SettingsEmbed
 
-from helpers import REPO_ROOT
+from helpers import COOKIES_HEADING, REPO_ROOT
 
 README = (REPO_ROOT / "README.md").read_text(encoding="utf-8")
 UPSTREAM = "solaluset/DandelionMusic"
-COOKIES_HEADING = "Custom Cookies"
 
 
 def _commands():

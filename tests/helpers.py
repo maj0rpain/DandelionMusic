@@ -1,9 +1,9 @@
 """The suite's generic shared helpers: the bounded `run(coro)`,
-`FakeClock`, `plain_song`, `REPO_ROOT` and the four import-reading
-helpers `imported_names`, `imported_roots`, `type_checking_imports` and
-`attribute_names`. `dockerfile_commands` (the Dockerfile reader) and
-`shell_commands` (the shell-command splitter) are readers, not
-import-reading helpers."""
+`FakeClock`, `plain_song`, `REPO_ROOT`, `COOKIES_HEADING` and the four
+import-reading helpers `imported_names`, `imported_roots`,
+`type_checking_imports` and `attribute_names`. `dockerfile_commands` (the
+Dockerfile reader) and `shell_commands` (the shell-command splitter) are
+readers, not import-reading helpers."""
 
 import ast
 import asyncio
@@ -14,6 +14,7 @@ from musicbot.linkutils import SiteTypes
 from musicbot.song import Song
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
+COOKIES_HEADING = "Custom Cookies"
 
 
 def run(coro):
