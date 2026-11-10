@@ -377,11 +377,12 @@ async def fetch_spotify(
         track_data = spotify_api.track(code)
         return track_data["name"], track_data["artists"][0]["name"]
 
-    async def read_page():
-        return await _scrape_track(url)
-
     title, artist = await _api_or_public_page(
-        read_api, read_page, read_page, "track", code
+        read_api,
+        lambda: _scrape_track(url),
+        lambda: _scrape_track(url),
+        "track",
+        code,
     )
 
     if artist:
@@ -542,9 +543,8 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     if not url_regex.fullmatch(url):
         return SiteTypes.NOT_URL
 
-    # word:word text is not a URL; an extractor may still claim it
-    # (ytsearch:, scsearch:), otherwise it is a search query. A first
-    # colon followed by "/" (file:/, concat:/) keeps its classification.
+    # An extractor may still claim it (ytsearch:, scsearch:), otherwise
+    # it is a search query.
     if _is_word_colon_word(url):
         return get_ie(url) or SiteTypes.NOT_URL
 
