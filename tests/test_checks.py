@@ -14,7 +14,6 @@ import pytest
 from discord.ext.commands import NotOwner
 
 from config import config
-from musicbot.message_link import CheckedTrack
 from musicbot.bot import Context
 from musicbot.commands.general import General
 from musicbot.commands.library import Library, queue_songs
@@ -487,12 +486,7 @@ class TestButtons:
         async def play_song(ctx, checked):
             played.append(checked.track)
 
-        async def checked_track(ctx, track):
-            return CheckedTrack(track)
-
-        cog = types.SimpleNamespace(
-            _play_song=play_song, _checked_track=checked_track
-        )
+        cog = types.SimpleNamespace(_play_song=play_song)
         view = SearchView(ctx)
         view.add_item(SongButton(cog, 1, "https://example.com/a"))
         click(view.children[0], ctx, "pick")

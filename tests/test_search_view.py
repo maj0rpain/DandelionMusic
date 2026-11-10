@@ -19,7 +19,7 @@ import discord
 
 from config import config
 from musicbot.bot import MusicBot
-from musicbot.commands.music import Music, SearchView, SongButton
+from musicbot.commands.music import SearchView, SongButton
 from discord_fakes import (
     ADMISSION_CHANNEL,
     EditRecordingMessage,
@@ -37,6 +37,7 @@ from message_link_fakes import (
     LINK,
     LinkChannel,
     LinkMember,
+    CountingThread,
     admitted_pair,
 )
 
@@ -114,9 +115,6 @@ class FakeCog:
         self.checked = []
         self.controllers = []
         self.play_error = None
-
-    async def _checked_track(self, ctx, track):
-        return await Music._checked_track(self, ctx, track)
 
     async def _play_song(self, ctx, checked):
         if self.play_error is not None:
@@ -241,7 +239,7 @@ def test_the_owners_pick_queues_its_url_and_disables_the_buttons():
     assert view.is_finished()
 
 
-async def message_link_click(link, *, join_needed=False):
+async def message_link_click(link, *, join_needed=False, channel=None):
     """The owner picks `link`, a message link, as a guild member who can
     read the link's channel. Returns the view, the cog and the click."""
 
@@ -249,7 +247,7 @@ async def message_link_click(link, *, join_needed=False):
     inter = SearchInteraction()
     guild = inter.ctx.guild
     guild.id = GUILD_ID
-    guild.get_channel_or_thread = lambda _id: LinkChannel()
+    guild.get_channel_or_thread = lambda _id: channel or LinkChannel()
     inter.ctx.author = LinkMember(id=OWNER, guild=guild, voice=None)
     if join_needed:
         guild.voice_client = None
@@ -263,6 +261,16 @@ async def message_link_click(link, *, join_needed=False):
 def test_an_allowed_link_pick_hands_play_a_checked_track_carrying_it():
     _view, cog, _inter = run(message_link_click(LINK))
     assert [admitted_pair(c) for c in cog.checked] == [(LINK, LINK)]
+
+
+def test_the_gate_runs_once_per_pick():
+    lookups = []
+
+    _view, cog, _inter = run(
+        message_link_click(LINK, channel=CountingThread(lookups, private=True))
+    )
+    assert [c.track for c in cog.checked] == [LINK]
+    assert len(lookups) == 1
 
 
 def test_a_forbidden_link_pick_is_refused_without_joining_or_playing():

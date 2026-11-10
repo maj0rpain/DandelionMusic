@@ -104,7 +104,7 @@ class Button(commands.Cog):
                 return
             checked_tracks = []
             for url in links:
-                checked = await gate_or_refuse(url, serv, member, ctx.send)
+                checked = await gate_or_refuse(url, ctx)
                 if checked is not None:
                     checked_tracks.append(checked)
             if not checked_tracks:

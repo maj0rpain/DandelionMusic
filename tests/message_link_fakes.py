@@ -80,6 +80,18 @@ class LinkThread(LinkChannel):
         return object()
 
 
+class CountingThread(LinkThread):
+    """A `LinkThread` appending each `fetch_member` id to `lookups`."""
+
+    def __init__(self, lookups, **kwargs):
+        super().__init__(**kwargs)
+        self.lookups = lookups
+
+    async def fetch_member(self, member_id):
+        self.lookups.append(member_id)
+        return await super().fetch_member(member_id)
+
+
 class LinkGuild:
     def __init__(self, channels=(), guild_id=GUILD_ID):
         self.id = guild_id

@@ -29,16 +29,18 @@ def tree(tmp_path, monkeypatch):
     library.build_index()
 
 
-def _denied_error(path):
+def denied_error(path):
     return PermissionError(13, "Permission denied", str(path))
 
 
-def denied(path):
-    return str(_denied_error(path))
+def denied_message(path):
+    return str(denied_error(path))
 
 
 def assert_skipped(err, path):
-    assert f"library: skipping unreadable {path}: {denied(path)}" in err
+    assert (
+        f"library: skipping unreadable {path}: {denied_message(path)}" in err
+    )
 
 
 def fail_path_call(monkeypatch, name, bad):
@@ -46,7 +48,7 @@ def fail_path_call(monkeypatch, name, bad):
 
     def failing_call(self, *a, **kw):
         if self == bad:
-            raise _denied_error(self)
+            raise denied_error(self)
         return original(self, *a, **kw)
 
     monkeypatch.setattr(Path, name, failing_call)
@@ -134,5 +136,5 @@ def test_track_path_from_uri_is_none_for_a_file_that_cannot_be_stat(
     fail_path_call(monkeypatch, "is_file", bad)
     assert library.track_path_from_uri(uri) is None
     err = capsys.readouterr().err
-    assert f"library: cannot read track {bad}: {denied(bad)}" in err
+    assert f"library: cannot read track {bad}: {denied_message(bad)}" in err
     assert "skipping" not in err
