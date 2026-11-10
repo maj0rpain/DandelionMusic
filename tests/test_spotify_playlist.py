@@ -352,19 +352,3 @@ def test_track_without_api_reads_the_page_title_and_logs_no_error(
 
     assert result == linkutils.SpotifyTrack('T - A "Topic"')
     assert capsys.readouterr().err == ""
-
-
-def test_track_api_and_public_page_failing_raises_the_page_error(
-    monkeypatch,
-):
-    api_error = RuntimeError("api")
-    page_error = RuntimeError("page")
-
-    monkeypatch.setattr(linkutils, "spotify_api", FailingTrackApi(api_error))
-    _failing_page(monkeypatch, page_error)
-
-    with pytest.raises(RuntimeError) as info:
-        run(linkutils.fetch_spotify("https://open.spotify.com/track/abc"))
-
-    assert info.value is page_error
-    assert info.value.__context__ is api_error

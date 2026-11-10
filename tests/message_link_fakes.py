@@ -133,3 +133,14 @@ def install_fake_discord_client(monkeypatch, register=lambda *a, **k: None):
     monkeypatch.setattr(extractor, "_client", None)
     monkeypatch.setattr(config, "BOT_TOKEN", "tok")
     monkeypatch.setattr(atexit, "register", register)
+
+
+def gated_track(track, guild=None, member=None):
+    """`track` through the gate, as the entry points make a checked
+    track: over a guild with the one `CHANNEL_ID` channel by default,
+    for a member who can read it."""
+    from helpers import run
+    from musicbot.message_link import check_message_link
+
+    guild = guild or LinkGuild([LinkChannel()])
+    return run(check_message_link(track, guild, member or LinkMember()))

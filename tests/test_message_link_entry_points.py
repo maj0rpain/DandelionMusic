@@ -10,7 +10,6 @@ from config import config
 from musicbot import loader, playlists
 from musicbot.commands import music
 from musicbot.commands.music import Music
-from musicbot.message_link import CheckedTrack
 from musicbot.plugins.button import Button
 from musicbot.song import LoadResult
 from controller_helpers import (
@@ -33,6 +32,13 @@ from message_link_fakes import (
 )
 
 COMMANDS = ["_play", "_play_next"]
+
+
+def admitted(checked):
+    """The (track, admitted link) of each checked track, one or in a
+    1-tuple of load arguments."""
+    flat = [c[0] if isinstance(c, tuple) else c for c in checked]
+    return [(c.track, c.admitted_link) for c in flat]
 
 
 def loaded(stub_loader):
@@ -80,7 +86,7 @@ def test_a_forbidden_link_is_refused_and_not_loaded(
 def test_an_allowed_link_loads(name, controller, stub_loader, monkeypatch):
     stub_load_and_channel(controller, stub_loader, monkeypatch)
     invoke(name, controller, LINK)
-    assert loaded(stub_loader) == [(CheckedTrack(LINK, LINK),)]
+    assert admitted(loaded(stub_loader)) == [(LINK, LINK)]
 
 
 def test_the_gate_runs_once_per_play_request(
@@ -97,7 +103,7 @@ def test_the_gate_runs_once_per_play_request(
     thread = CountingThread(private=True)
     controller.guild.get_channel_or_thread = lambda _id: thread
     invoke("_play", controller, LINK)
-    assert loaded(stub_loader) == [(CheckedTrack(LINK, LINK),)]
+    assert admitted(loaded(stub_loader)) == [(LINK, LINK)]
     assert len(lookups) == 1
 
 
@@ -131,7 +137,7 @@ def test_replying_to_a_readable_message_in_the_guild_loads(
     stub_load_and_channel(controller, stub_loader, monkeypatch)
     own = message("unused", attachments=False, reference=reply_to(LINK))
     invoke("_play", controller, own_message=own)
-    assert loaded(stub_loader) == [(CheckedTrack(LINK, LINK),)]
+    assert admitted(loaded(stub_loader)) == [(LINK, LINK)]
 
 
 def test_a_play_message_with_its_own_attachment_loads(
@@ -139,7 +145,7 @@ def test_a_play_message_with_its_own_attachment_loads(
 ):
     stub_load_and_channel(controller, stub_loader, monkeypatch)
     invoke("_play", controller, own_message=message(LINK))
-    assert loaded(stub_loader) == [(CheckedTrack(LINK, LINK),)]
+    assert admitted(loaded(stub_loader)) == [(LINK, LINK)]
 
 
 def add_song(controller, stub_loader, monkeypatch, link):
@@ -181,7 +187,7 @@ def test_playlist_add_song_saves_an_allowed_link(
     controller, stub_loader, monkeypatch
 ):
     sent, saved, loads = add_song(controller, stub_loader, monkeypatch, LINK)
-    assert loads == [CheckedTrack(LINK, LINK)]
+    assert admitted(loads) == [(LINK, LINK)]
     assert len(saved) == 1
     assert sent == [config.PLAYLIST_UPDATED]
 
@@ -204,7 +210,7 @@ class PluginController:
         return await self._process(self, url, user=user)
 
 
-def react(link, monkeypatch, content=None):
+def react(link, monkeypatch, content=None, command_channel=None):
     loads = []
 
     async def load_song(track):
@@ -239,6 +245,7 @@ def react(link, monkeypatch, content=None):
         settings={
             guild: admission_settings(
                 button_emote="x",
+                command_channel=command_channel,
                 user_must_be_in_vc=True,
                 dj_role=None,
                 vc_timeout=True,
@@ -249,10 +256,16 @@ def react(link, monkeypatch, content=None):
 
     async def send(content=None, **kwargs):
         sent.append(content)
+        guild.events.append(("reply", content))
 
     async def get_context(_message):
         return types.SimpleNamespace(
-            send=send, bot=bot, guild=guild, command=None, author=None
+            send=send,
+            bot=bot,
+            guild=guild,
+            command=None,
+            author=None,
+            channel=types.SimpleNamespace(id=2),
         )
 
     bot.get_context = get_context
@@ -267,26 +280,52 @@ def react(link, monkeypatch, content=None):
         emoji=types.SimpleNamespace(name="x", id=None),
     )
     run(Button(bot).on_raw_reaction_add(event))
-    return loads, sent
+    directed = bot.sessions.panel(guild).directed
+    return loads, sent, guild.events, directed
 
 
 def test_the_plugin_refuses_a_forbidden_link_and_does_not_load(monkeypatch):
-    loads, sent = react(FOREIGN_LINK, monkeypatch)
+    loads, sent, events, directed = react(
+        FOREIGN_LINK, monkeypatch, command_channel=2
+    )
     assert sent == [config.MESSAGE_LINK_FORBIDDEN]
-    assert loads == []
+    assert (loads, directed) == ([], [])
+    assert events == [("reply", config.MESSAGE_LINK_FORBIDDEN)]
 
 
 def test_one_forbidden_link_among_several_reactions_still_queues_the_rest(
     monkeypatch,
 ):
     other = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
-    loads, sent = react(
-        FOREIGN_LINK, monkeypatch, content=f"{FOREIGN_LINK} {other}"
+    foreign2 = FOREIGN_LINK.replace("/5", "/6")
+    loads, sent, events, _directed = react(
+        FOREIGN_LINK,
+        monkeypatch,
+        content=f"{FOREIGN_LINK} {other} {foreign2}",
     )
     assert [c.track for c in loads] == [other]
-    assert sent == [config.MESSAGE_LINK_FORBIDDEN, "loaded"]
+    assert sent == [config.MESSAGE_LINK_FORBIDDEN] * 2 + ["loaded"]
+    connect = next(i for i, e in enumerate(events) if e[0] == "connect")
+    refusals = [
+        i
+        for i, e in enumerate(events)
+        if e == ("reply", config.MESSAGE_LINK_FORBIDDEN)
+    ]
+    assert len(refusals) == 2 and max(refusals) < connect
 
 
 def test_the_plugin_loads_an_allowed_link(monkeypatch):
-    loads, _sent = react(LINK, monkeypatch)
-    assert loads == [CheckedTrack(LINK, LINK)]
+    loads, _sent, _events, directed = react(
+        LINK, monkeypatch, command_channel=2
+    )
+    assert admitted(loads) == [(LINK, LINK)]
+    assert len(directed) == 1
+
+
+def test_a_reaction_refused_by_admission_sends_no_message_link_reply(
+    monkeypatch,
+):
+    loads, sent, events, directed = react(
+        FOREIGN_LINK, monkeypatch, command_channel=3
+    )
+    assert (loads, sent, events, directed) == ([], [], [], [])

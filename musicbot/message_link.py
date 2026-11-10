@@ -9,7 +9,7 @@ level (`SongError` and `normalize_track` are imported inside the check).
 """
 
 import re
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Optional
 
 import discord
@@ -28,11 +28,19 @@ _message_link = re.compile(MESSAGE_LINK_PATTERN)
 class CheckedTrack:
     """A track the gate let through: `track` as the member typed it,
     plus `admitted_link`, the (normalized) message link the gate
-    admitted when the track is one, else `None`. Only
-    `check_message_link` makes one."""
+    admitted when the track is one, else `None`. The constructor takes
+    only the track; only `check_message_link` (through `_admitted`)
+    gives one an admitted link."""
 
     track: str
-    admitted_link: Optional[str] = None
+    admitted_link: Optional[str] = field(default=None, init=False)
+
+
+def _admitted(track: str, link: str) -> CheckedTrack:
+    """The one maker of a `CheckedTrack` with an admitted link."""
+    checked = CheckedTrack(track)
+    object.__setattr__(checked, "admitted_link", link)
+    return checked
 
 
 def _match(track: str):
@@ -64,7 +72,20 @@ async def check_message_link(track: str, guild, user) -> CheckedTrack:
         return CheckedTrack(track)
     if not await _may_read(match, guild, user):
         raise SongError(config.MESSAGE_LINK_FORBIDDEN)
-    return CheckedTrack(track, link)
+    return _admitted(track, link)
+
+
+async def gate_or_refuse(track: str, guild, member, send):
+    """Runs the gate for `member`: the track's `CheckedTrack`, or, when
+    the gate refuses, sends the refusal (`str` of its `SongError`)
+    through `send` and returns None."""
+    from musicbot.loader import SongError
+
+    try:
+        return await check_message_link(track, guild, member)
+    except SongError as e:
+        await send(str(e))
+        return None
 
 
 async def _may_read(match, guild, user) -> bool:
