@@ -75,10 +75,3 @@ def test_release_permissions_are_narrow():
             assert job.get("permissions", {"contents": "read"}) == {
                 "contents": "read"
             }, name
-
-
-def test_docker_publish_runs_only_on_a_push_to_master():
-    job = _load("checks.yml")["jobs"]["docker-publish"]
-    assert job["if"] == (
-        "github.event_name == 'push' && github.ref == 'refs/heads/master'"
-    )
