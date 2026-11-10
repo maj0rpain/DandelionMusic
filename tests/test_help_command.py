@@ -4,13 +4,11 @@ role, and never runs admission."""
 
 from types import SimpleNamespace
 
-import discord
 import pytest
 
 from musicbot.admission import RequestKind
-from musicbot.bot import MusicBot
 from musicbot.utils import owner_check
-from discord_fakes import situation
+from discord_fakes import real_music_bot, situation
 from helpers import run
 
 EXTENSIONS = [
@@ -41,9 +39,7 @@ ADMISSION_REFUSED_COMMANDS = {
 
 @pytest.fixture(scope="module")
 def bot():
-    built = MusicBot(
-        [], command_prefix="d!", intents=discord.Intents.default()
-    )
+    built = real_music_bot()
 
     async def load():
         for extension in EXTENSIONS:

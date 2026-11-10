@@ -7,7 +7,7 @@ import pytest
 from sqlalchemy.exc import IntegrityError
 
 from musicbot.settings import GuildSettings
-from db_seam import FailingCommit, seed_settings, with_db
+from db_seam import FailingSessionFactory, seed_settings, with_db
 
 
 class FakeGuild:
@@ -51,8 +51,8 @@ def test_mixed_request_returns_all_in_input_order():
 
 def test_second_integrity_error_propagates_without_third_try():
     async def test(factory):
-        failing = FailingCommit(
-            factory, lambda: IntegrityError("x", {}, Exception())
+        failing = FailingSessionFactory(
+            factory, "commit", lambda: IntegrityError("x", {}, Exception())
         )
         bot = types.SimpleNamespace(DbSession=failing)
         with pytest.raises(IntegrityError):

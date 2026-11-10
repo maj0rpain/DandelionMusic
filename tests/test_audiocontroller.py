@@ -43,7 +43,12 @@ from controller_seam import (
     controller_seam,
 )
 from db_seam import in_memory_db
-from helpers import attribute_names, imported_names, run
+from helpers import (
+    assert_logged_with_traceback,
+    attribute_names,
+    imported_names,
+    run,
+)
 
 MIX = playlists.PlaylistRef("1234", "mix")
 
@@ -2825,8 +2830,7 @@ def test_a_non_os_error_write_failure_logs_the_traceback(
     _save_backup(controller)
 
     err = capsys.readouterr().err
-    assert f"({controller.guild.id})" in err
-    assert "Traceback" in err
+    assert_logged_with_traceback(err, f"({controller.guild.id})")
     assert "cannot pickle" in err
 
 
