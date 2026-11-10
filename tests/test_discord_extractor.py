@@ -12,9 +12,10 @@ from yt_dlp.utils import DownloadError
 from config import config
 from musicbot import linkutils, loader
 from musicbot.loader import SongError
-from message_link_fakes import LinkChannel, LinkGuild, gated_track
 from musicbot.yt_dlp_plugins.extractor import discord as extractor
 from musicbot.yt_dlp_plugins.extractor.discord import DiscordAttachmentsIE
+
+from message_link_fakes import LinkChannel, LinkGuild, gated_track
 
 URL = "https://discord.com/channels/1/2/3"
 LIMIT = 0.05
