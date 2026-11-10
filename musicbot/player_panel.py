@@ -162,8 +162,9 @@ def _log(what: str) -> None:
     print_exc(file=sys.stderr)
 
 
-def _report_edit_failure(error: Exception, what: str) -> None:
-    """The one place a failed edit of the player message is reported,
+def _report_message_failure(error: Exception, what: str) -> None:
+    """The one place a failed read or edit of the player message is
+    reported,
     called from the handler of `error`: a `discord.NotFound` means a
     user deleted the message, which is normal and silent; anything else
     is logged with `what` and a traceback. It only reports - forgetting
@@ -174,10 +175,11 @@ def _report_edit_failure(error: Exception, what: str) -> None:
 
 
 @dataclass(frozen=True)
-class _Held:
-    """The player message with the snapshot it was drawn from and the
-    view drawn on it (`None` while inactive), held and replaced as
-    one."""
+class _Drawn:
+    """A draw of the player message: the message with the snapshot it
+    was drawn from and the view drawn on it (`None` while inactive).
+    It is held (`self._held`) once its edit succeeded, and pending
+    before that."""
 
     message: object
     snapshot: PanelSnapshot
@@ -195,7 +197,7 @@ class PlayerPanel:
         self._controller = controller
         self._settings = settings
         self._channel = None
-        self._held: Optional[_Held] = None
+        self._held: Optional[_Drawn] = None
         self._lock = asyncio.Lock()
 
     # -- destination ---------------------------------------------------
@@ -249,7 +251,7 @@ class PlayerPanel:
     def _is_current(self, message) -> bool:
         return self._held is not None and self._held.message is message
 
-    async def _strip(self, held: _Held) -> None:
+    async def _strip(self, held: _Drawn) -> None:
         """Takes the buttons off the held message; a failure is
         reported, never raised. Nothing to do when it carries none."""
         if not held.snapshot.active:
@@ -257,7 +259,7 @@ class PlayerPanel:
         try:
             await held.message.edit(view=None)
         except Exception as e:
-            _report_edit_failure(e, "Failed to strip the player buttons:")
+            _report_message_failure(e, "Failed to strip the player buttons:")
 
     async def _take_down(self) -> None:
         """Forgets the player message and its drawn snapshot, then
@@ -281,7 +283,7 @@ class PlayerPanel:
             snapshot = self._snapshot()
             view = self._layout(snapshot)
             res = await send(view)
-            self._held = _Held(res, snapshot, view)
+            self._held = _Drawn(res, snapshot, view)
         return res
 
     async def refresh(self) -> None:
@@ -297,7 +299,7 @@ class PlayerPanel:
         if not snapshot.active:
             await self._take_down()
             return
-        drawn = _Held(message, snapshot, self._layout(snapshot))
+        drawn = _Drawn(message, snapshot, self._layout(snapshot))
         try:
             await message.edit(view=drawn.view)
             self._swap_view(drawn)
@@ -308,23 +310,24 @@ class PlayerPanel:
                 # The message can never be edited again: stop retrying
                 # it every tick. Deleting it is normal, so only a lost
                 # access is logged.
-                _report_edit_failure(e, "Lost access to the player message:")
+                _report_message_failure(
+                    e, "Lost access to the player message:"
+                )
                 self._forget_if_current(message)
             else:
-                _report_edit_failure(e, "Failed to update the player buttons:")
+                _report_message_failure(
+                    e, "Failed to update the player buttons:"
+                )
 
-    async def _recover(self, drawn: _Held) -> None:
+    async def _recover(self, drawn: _Drawn) -> None:
         """An expired token: refetch the message `drawn` was meant for
         through its channel and edit it once more. Any failure forgets
         the message."""
         message = drawn.message
         try:
             fresh = await message.channel.fetch_message(message.id)
-        except discord.NotFound:
-            self._forget_if_current(message)
-            return
-        except Exception:
-            _log("Failed to refetch the player message:")
+        except Exception as e:
+            _report_message_failure(e, "Failed to refetch the player message:")
             self._forget_if_current(message)
             return
         if not self._is_current(message):
@@ -334,12 +337,12 @@ class PlayerPanel:
             await fresh.edit(view=drawn.view)
             self._swap_view(dataclasses.replace(drawn, message=fresh))
         except Exception as e:
-            _report_edit_failure(
+            _report_message_failure(
                 e, "Failed to update the refetched player message:"
             )
             self._forget_if_current(fresh)
 
-    def _swap_view(self, drawn: _Held) -> None:
+    def _swap_view(self, drawn: _Drawn) -> None:
         """A redraw edit of `drawn.message` succeeded: `drawn` is now
         what is held. When that message is no longer the player
         message, a take-down ran meanwhile and already stopped the old
