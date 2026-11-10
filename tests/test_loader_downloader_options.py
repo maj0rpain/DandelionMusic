@@ -11,11 +11,14 @@ def youtube_extractor():
 def test_youtube_extractor_reads_tv_fallback_after_default_clients(
     youtube_extractor,
 ):
-    ie = youtube_extractor
-    assert ie._configuration_arg("player_client") == ["default", "tv"]
+    assert youtube_extractor._configuration_arg("player_client") == [
+        "default",
+        "tv",
+    ]
 
 
 def test_bgutil_provider_reads_its_base_url(youtube_extractor):
-    ie = youtube_extractor
-    got = ie._configuration_arg("base_url", ie_key="youtubepot-bgutilhttp")
+    got = youtube_extractor._configuration_arg(
+        "base_url", ie_key="youtubepot-bgutilhttp"
+    )
     assert got == ["http://bgutil-provider:4416"]
