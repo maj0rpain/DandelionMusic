@@ -12,7 +12,7 @@ from pathlib import Path
 import jsonc
 import pytest
 
-from config.config import Config, parse_env_file
+from config.config import Config
 from config.utils import alchemize_url, ensure_sqlite_parent, get_env_var
 
 from helpers import REPO_ROOT, dockerfile_commands
@@ -287,6 +287,8 @@ def test_default_library_dir_is_tracked_and_kept_out_of_git_and_image():
 
 
 def test_env_sample_documents_compose_only_library_host_path():
+    from config.config import parse_env_file
+
     keys = parse_env_file(str(REPO_ROOT / ".env.sample"))
     text = (REPO_ROOT / ".env.sample").read_text("utf-8")
     assert "MUSIC_LIBRARY_HOST_PATH" in text
@@ -609,6 +611,8 @@ def test_env_sample_supported_extensions_match_the_default(config_factory):
 
 
 def test_env_sample_does_not_point_cookie_path_at_the_placeholder():
+    from config.config import parse_env_file
+
     path = REPO_ROOT / ".env.sample"
     text = path.read_text(encoding="utf-8")
     assert "COOKIE_PATH" not in parse_env_file(str(path))
