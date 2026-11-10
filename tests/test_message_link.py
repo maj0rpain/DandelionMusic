@@ -1,6 +1,8 @@
 """The message-link gate: whether a track that is a message link may be
 loaded for the requesting member."""
 
+import pickle
+
 import discord
 import pytest
 
@@ -58,7 +60,8 @@ def test_a_readable_channel_passes():
 
 def test_a_message_link_comes_back_checked_with_its_admitted_link():
     checked = check(LINK, LinkGuild([LinkChannel()]), LinkMember())
-    assert checked == message_link.CheckedTrack(LINK, LINK)
+    assert (checked.track, checked.admitted_link) == (LINK, LINK)
+    assert pickle.loads(pickle.dumps(checked)) == checked
 
 
 @pytest.mark.parametrize("wrap", ["<{}>", "  {}  ", "{}."])
@@ -71,7 +74,7 @@ def test_a_wrapped_link_is_admitted_as_the_bare_link(wrap):
 
 def test_a_track_that_is_not_a_message_link_has_no_admitted_link():
     checked = check("some words", LinkGuild([]), None)
-    assert checked == message_link.CheckedTrack("some words", None)
+    assert checked == message_link.CheckedTrack("some words")
 
 
 @pytest.mark.parametrize(
@@ -170,3 +173,12 @@ def test_the_gate_imports_neither_the_loader_nor_linkutils_at_module_level():
             ["musicbot", "linkutils"],
         ), name
         assert parts[0] not in ("loader", "linkutils"), name
+
+
+def test_a_checked_track_cannot_be_built_with_an_admitted_link():
+    with pytest.raises(TypeError):
+        message_link.CheckedTrack(LINK, LINK)
+
+
+def test_a_checked_track_built_directly_has_no_admitted_link():
+    assert message_link.CheckedTrack(LINK).admitted_link is None

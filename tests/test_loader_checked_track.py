@@ -4,23 +4,28 @@
 import pytest
 
 from musicbot import loader
-from musicbot.message_link import CheckedTrack
+from musicbot.message_link import CheckedTrack, check_message_link
 from helpers import imported_names, run
-from message_link_fakes import LINK
+from message_link_fakes import LINK, LinkChannel, LinkGuild, LinkMember
 
 TRACK = "https://example.invalid/track"
 
 
+def gated(track):
+    guild = LinkGuild([LinkChannel()])
+    return run(check_message_link(track, guild, LinkMember()))
+
+
 @pytest.mark.parametrize(
-    "track, name, admitted",
+    "make, name, admitted",
     [
-        (TRACK, TRACK, None),
-        (CheckedTrack(TRACK), TRACK, None),
-        (CheckedTrack(LINK, LINK), LINK, LINK),
+        (lambda: TRACK, TRACK, None),
+        (lambda: CheckedTrack(TRACK), TRACK, None),
+        (lambda: gated(LINK), LINK, LINK),
     ],
 )
 def test_load_song_loads_the_track_a_plain_or_checked_track_names(
-    track, name, admitted, monkeypatch
+    make, name, admitted, monkeypatch
 ):
     loaded = []
 
@@ -28,7 +33,7 @@ def test_load_song_loads_the_track_a_plain_or_checked_track_names(
         loaded.append((name, admitted_link))
 
     monkeypatch.setattr(loader, "_load", load)
-    run(loader.load_song(track))
+    run(loader.load_song(make()))
     assert loaded == [(name, admitted)]
 
 

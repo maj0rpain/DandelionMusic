@@ -10,7 +10,6 @@ from config import config
 from musicbot import loader, playlists
 from musicbot.commands import music
 from musicbot.commands.music import Music
-from musicbot.message_link import CheckedTrack
 from musicbot.plugins.button import Button
 from musicbot.song import LoadResult
 from controller_helpers import (
@@ -33,6 +32,13 @@ from message_link_fakes import (
 )
 
 COMMANDS = ["_play", "_play_next"]
+
+
+def admitted(checked):
+    """The (track, admitted link) of each checked track, one or in a
+    1-tuple of load arguments."""
+    flat = [c[0] if isinstance(c, tuple) else c for c in checked]
+    return [(c.track, c.admitted_link) for c in flat]
 
 
 def loaded(stub_loader):
@@ -80,7 +86,7 @@ def test_a_forbidden_link_is_refused_and_not_loaded(
 def test_an_allowed_link_loads(name, controller, stub_loader, monkeypatch):
     stub_load_and_channel(controller, stub_loader, monkeypatch)
     invoke(name, controller, LINK)
-    assert loaded(stub_loader) == [(CheckedTrack(LINK, LINK),)]
+    assert admitted(loaded(stub_loader)) == [(LINK, LINK)]
 
 
 def test_the_gate_runs_once_per_play_request(
@@ -97,7 +103,7 @@ def test_the_gate_runs_once_per_play_request(
     thread = CountingThread(private=True)
     controller.guild.get_channel_or_thread = lambda _id: thread
     invoke("_play", controller, LINK)
-    assert loaded(stub_loader) == [(CheckedTrack(LINK, LINK),)]
+    assert admitted(loaded(stub_loader)) == [(LINK, LINK)]
     assert len(lookups) == 1
 
 
@@ -131,7 +137,7 @@ def test_replying_to_a_readable_message_in_the_guild_loads(
     stub_load_and_channel(controller, stub_loader, monkeypatch)
     own = message("unused", attachments=False, reference=reply_to(LINK))
     invoke("_play", controller, own_message=own)
-    assert loaded(stub_loader) == [(CheckedTrack(LINK, LINK),)]
+    assert admitted(loaded(stub_loader)) == [(LINK, LINK)]
 
 
 def test_a_play_message_with_its_own_attachment_loads(
@@ -139,7 +145,7 @@ def test_a_play_message_with_its_own_attachment_loads(
 ):
     stub_load_and_channel(controller, stub_loader, monkeypatch)
     invoke("_play", controller, own_message=message(LINK))
-    assert loaded(stub_loader) == [(CheckedTrack(LINK, LINK),)]
+    assert admitted(loaded(stub_loader)) == [(LINK, LINK)]
 
 
 def add_song(controller, stub_loader, monkeypatch, link):
@@ -181,7 +187,7 @@ def test_playlist_add_song_saves_an_allowed_link(
     controller, stub_loader, monkeypatch
 ):
     sent, saved, loads = add_song(controller, stub_loader, monkeypatch, LINK)
-    assert loads == [CheckedTrack(LINK, LINK)]
+    assert admitted(loads) == [(LINK, LINK)]
     assert len(saved) == 1
     assert sent == [config.PLAYLIST_UPDATED]
 
@@ -289,4 +295,4 @@ def test_one_forbidden_link_among_several_reactions_still_queues_the_rest(
 
 def test_the_plugin_loads_an_allowed_link(monkeypatch):
     loads, _sent = react(LINK, monkeypatch)
-    assert loads == [CheckedTrack(LINK, LINK)]
+    assert admitted(loads) == [(LINK, LINK)]
