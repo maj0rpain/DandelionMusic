@@ -1,9 +1,13 @@
 """Fakes for the message-link gate's tests: a guild, channels, threads
 and a `discord.Member` that need no Discord connection."""
 
+import atexit
 import types
 
 import discord
+
+from config import config
+from musicbot.yt_dlp_plugins.extractor import discord as extractor
 
 GUILD_ID = 1234
 CHANNEL_ID = 77
@@ -117,3 +121,15 @@ class FakeHTTPClient:
 
     async def close(self):
         self.closed = True
+
+
+def install_fake_discord_client(monkeypatch, register=lambda *a, **k: None):
+    """Reset `FakeHTTPClient` and install it as the extractor's client,
+    with a bot token and `register` standing in for `atexit.register`."""
+    FakeHTTPClient.instances = []
+    FakeHTTPClient.login_error = None
+    FakeHTTPClient.fetch_error = None
+    monkeypatch.setattr(extractor, "HTTPClient", FakeHTTPClient)
+    monkeypatch.setattr(extractor, "_client", None)
+    monkeypatch.setattr(config, "BOT_TOKEN", "tok")
+    monkeypatch.setattr(atexit, "register", register)
