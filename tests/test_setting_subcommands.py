@@ -18,7 +18,7 @@ from discord.ext.commands.view import StringView
 
 from config import config
 from musicbot.commands.general import General
-from musicbot.settings import SETTINGS, ConversionErrorText
+from musicbot.settings import SETTINGS, ConversionErrorText, SettingsEmbed
 from setting_fakes import (
     FakeMessage,
     fake_author,
@@ -119,7 +119,8 @@ def test_a_setting_update_is_confirmed(name, arg, confirmation, stored):
 
 def assert_failed(sent, sett, reply):
     assert sent[-1] == reply
-    assert not any(m and "updated to" in m for m in sent)
+    updated = config.SETTING_UPDATED.format("{}", "{}").split("{}")[1]
+    assert not any(m and updated in m for m in sent)
     assert stored_values(sett) == stored_values(stored_settings())
 
 
@@ -151,7 +152,8 @@ def test_a_failed_write_is_reported_on_reset(missing_row):
     sent = invoke_setting("default_volume", NO_VALUE, sett)
 
     assert_failed(sent, sett, FAILED)
-    assert not any(m and "reset to" in m for m in sent)
+    reset = config.SETTING_RESET.format("{}", "{}").split("{}")[1]
+    assert not any(m and reset in m for m in sent)
 
 
 def test_the_update_and_failure_replies_come_from_the_catalogue(
@@ -397,7 +399,7 @@ def bound_subcommand(name):
 
 def reset_text(name):
     shown = SETTINGS[name].show(None, SETTINGS[name].default)
-    return f"Setting `{name}` reset to {shown}!"
+    return config.SETTING_RESET.format(name, shown)
 
 
 @pytest.mark.parametrize("name", list(ARGS))
@@ -421,7 +423,9 @@ def test_every_stored_setting_differs_from_its_default():
 def test_a_reset_is_confirmed_with_the_value_the_embed_shows():
     sent = invoke_setting("command_channel", NO_VALUE, stored_settings())
 
-    assert sent[-1] == "Setting `command_channel` reset to Not Set!"
+    assert sent[-1] == config.SETTING_RESET.format(
+        "command_channel", SettingsEmbed.FIELD_EMPTY
+    )
 
 
 def test_a_prefix_subcommand_without_a_value_resets_the_setting():

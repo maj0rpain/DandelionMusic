@@ -141,7 +141,7 @@ def test_settings_embed_shows_none_ids_as_not_set():
             "dj_role",
             "button_emote",
         )
-    ] == ["Not Set"] * 4
+    ] == [SettingsEmbed.FIELD_EMPTY] * 4
 
 
 def test_settings_embed_shows_false_and_zero_as_themselves():

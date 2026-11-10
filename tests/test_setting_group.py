@@ -154,7 +154,9 @@ def test_an_admin_setting_a_value_gets_only_the_confirmation():
     sent, error, sett = invoke("announce_songs off")
 
     assert error is None
-    assert sent == [("Setting `announce_songs` updated to False!", None)]
+    assert sent == [
+        (config.SETTING_UPDATED.format("announce_songs", False), None)
+    ]
 
 
 def settings_with_dj_role(dj_role):
@@ -211,7 +213,7 @@ def test_an_admin_or_the_owner_gets_the_subcommands_own_reply(name, is_owner):
     content, embed = sent[-1]
     assert embed is None
     assert content == config.VC_TIMEOUT_EDIT_DISABLED or content.startswith(
-        f"Setting `{name}` updated to"
+        config.SETTING_UPDATED.format(name, "{}").split("{}")[0]
     )
 
 
