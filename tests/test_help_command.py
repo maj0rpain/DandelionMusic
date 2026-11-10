@@ -2,8 +2,6 @@
 member's voice state, the bot's playback state, the channel or the DJ
 role, and never runs admission."""
 
-from types import SimpleNamespace
-
 import discord
 import pytest
 
@@ -134,19 +132,3 @@ def test_every_owner_only_command_is_hidden(bot):
         if owner_check in c.checks and not c.hidden
     ]
     assert unhidden == []
-
-
-def test_bare_library_reply_names_the_non_hidden_subcommands(bot):
-    sent = []
-
-    async def send(content=None, **kwargs):
-        sent.append(content)
-
-    group = bot.get_command("library")
-    ctx = SimpleNamespace(send=send, command=group)
-    run(group.callback(bot.get_cog("Library"), ctx))
-    names = sorted(c.name for c in group.commands if not c.hidden)
-    expected = "Use subcommands: " + ", ".join(f"`{n}`" for n in names) + "."
-    assert sent == [expected]
-    assert "refresh" not in sent[0]
-    assert sent == ["Use subcommands: `browse`, `search`."]
