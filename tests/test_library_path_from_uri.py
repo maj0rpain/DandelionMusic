@@ -36,6 +36,7 @@ def test_windows_segment_case_comes_back_as_the_uri_gives_it():
     [
         "file:///C:/Music/A/..%5CB/t.mp3",
         "file:///C:/Music/A/.%5Ct.mp3",
+        "file:///C:/Music/A/B/./t.mp3",
         "file:///C:/Music/A/B/..%5C..%5Ct.mp3",
         "file:///C:/Music/A/../B/t.mp3",
         "file:///C:/Music/A/%2E%2E%5Ct/t.mp3",

@@ -36,6 +36,7 @@ _generation = 0
 
 
 _WALK_WARNING = "library: skipping unreadable"
+_TRACK_WARNING = "library: cannot read track"
 
 
 def _guarded(operation, path: Path, prefix: str, fallback):
@@ -511,13 +512,10 @@ def library_path_from_uri(uri: str, root: PurePath) -> Optional[PurePath]:
         return None
     decoded = os.fsdecode(unquote_to_bytes(tail))
     if isinstance(root, PureWindowsPath):
-        parsed = _parse_windows_uri(authority, decoded, type(root))
+        path = _parse_windows_uri(authority, decoded, type(root))
     else:
-        parsed = _parse_posix_uri(authority, decoded, type(root))
-    if parsed is None:
-        return None
-    path, segments = parsed
-    if any(seg in (".", "..") for seg in segments):
+        path = _parse_posix_uri(authority, decoded, type(root))
+    if path is None:
         return None
     if not path.is_absolute() or not path.is_relative_to(root):
         return None
@@ -529,21 +527,33 @@ def library_path_from_uri(uri: str, root: PurePath) -> Optional[PurePath]:
     return song if song == path else None
 
 
+def _is_local_authority(authority: str) -> bool:
+    """Whether a URI authority names this machine (empty or localhost)."""
+    return authority in ("", "localhost")
+
+
+def _has_dot_segment(segments: list[str]) -> bool:
+    """Whether any path segment is `.` or `..`."""
+    return any(seg in (".", "..") for seg in segments)
+
+
 def _parse_posix_uri(
     authority: str, decoded: str, flavour: type[PurePath]
-) -> Optional[tuple[PurePath, list[str]]]:
-    """The candidate path and the segments to check, or None."""
-    if authority not in ("", "localhost"):
+) -> Optional[PurePath]:
+    """The candidate path, or None if refused."""
+    if not _is_local_authority(authority):
         return None
-    return flavour(decoded), decoded.split("/")
+    if _has_dot_segment(decoded.split("/")):
+        return None
+    return flavour(decoded)
 
 
 def _parse_windows_uri(
     authority: str, decoded: str, flavour: type[PurePath]
-) -> Optional[tuple[PurePath, list[str]]]:
-    """The candidate path and the segments to check, or None."""
+) -> Optional[PurePath]:
+    """The candidate path, or None if refused."""
     host = ""
-    if authority not in ("", "localhost"):
+    if not _is_local_authority(authority):
         host = os.fsdecode(unquote_to_bytes(authority))
         if any(c in host for c in "/\\:|"):
             return None
@@ -553,13 +563,13 @@ def _parse_windows_uri(
     if host and has_drive_letter:
         return None
     segments = [p for seg in decoded.split("/") for p in seg.split("\\")]
+    if _has_dot_segment(segments):
+        return None
     if host:
-        path = flavour("\\\\" + host + decoded.replace("/", "\\"))
-    elif has_drive_letter:
-        path = flavour(decoded[1:])
-    else:
-        path = flavour(decoded)
-    return path, segments
+        return flavour("\\\\" + host + decoded.replace("/", "\\"))
+    if has_drive_letter:
+        return flavour(decoded[1:])
+    return flavour(decoded)
 
 
 def track_path_from_uri(uri: str) -> Optional[Path]:
@@ -573,7 +583,7 @@ def track_path_from_uri(uri: str) -> Optional[Path]:
     if path is None:
         return None
     path = Path(path)
-    is_file = _guarded(Path.is_file, path, "library: cannot read track", False)
+    is_file = _guarded(Path.is_file, path, _TRACK_WARNING, False)
     return path if is_file else None
 
 
