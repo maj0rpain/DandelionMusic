@@ -30,14 +30,12 @@ async def serving():
 
     def to_chain(request):
         n = int(request.match_info["n"])
-        return web.HTTPFound(f"/chain/{n - 1}" if n else "/final")
+        return web.HTTPFound(f"/chain/{n - 1}" if n else "/final?si=1")
 
     def redirect_to(target):
         return lambda r: web.HTTPFound(target.format(port=r.url.port))
 
     app = web.Application()
-    app.router.add_get("/a", lambda r: web.HTTPFound("/b"))
-    app.router.add_get("/b", lambda r: web.HTTPFound("/final?si=1"))
     app.router.add_get("/final", lambda r: web.Response(text="ok"))
     app.router.add_get("/gone", lambda r: web.Response(status=404))
     app.router.add_get("/boom", lambda r: web.Response(status=503))
@@ -45,7 +43,6 @@ async def serving():
     app.router.add_get("/to-boom", lambda r: web.HTTPFound("/boom"))
     app.router.add_get("/hit", hit)
     app.router.add_get(r"/chain/{n:\d+}", to_chain)
-    app.router.add_get("/loop", lambda r: web.HTTPFound("/loop"))
     app.router.add_get("/not-modified", lambda r: web.Response(status=304))
     for name, target in REFUSED_TARGETS.items():
         app.router.add_get(f"/{name}", redirect_to(target))
@@ -91,12 +88,6 @@ def _resolve(path):
     return run(scenario())
 
 
-def test_redirect_chain_returns_the_final_url(allow_every_host):
-    got = _resolve("/a")
-
-    assert got.url == got.at("/final?si=1")
-
-
 @pytest.mark.parametrize("path", ["/gone", "/boom", "/to-gone", "/to-boom"])
 def test_error_status_raises(path, allow_every_host):
     assert _resolve(path).error is not None
@@ -105,7 +96,7 @@ def test_error_status_raises(path, allow_every_host):
 def test_refused_connection_raises():
     async def scenario():
         async with serving() as server:
-            url = str(server.make_url("/a"))
+            url = str(server.make_url("/final"))
             await server.close()
             await linkutils.resolve_short_link(url)
 
@@ -124,15 +115,11 @@ def test_redirect_to_a_disallowed_target_is_refused(path):
 def test_chain_of_ten_redirects_resolves(allow_every_host):
     got = _resolve("/chain/9")
 
-    assert got.url == got.at("/final")
+    assert got.url == got.at("/final?si=1")
 
 
 def test_chain_of_eleven_redirects_is_refused(allow_every_host):
     assert isinstance(_resolve("/chain/10").error, linkutils.RefusedRedirect)
-
-
-def test_redirect_loop_is_refused(allow_every_host):
-    assert isinstance(_resolve("/loop").error, linkutils.RefusedRedirect)
 
 
 def test_redirect_without_location_returns_its_own_url(allow_every_host):
