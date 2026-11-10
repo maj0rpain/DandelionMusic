@@ -212,8 +212,8 @@ def _is_disallowed_host(host: Optional[str]) -> bool:
 
 
 # The only schemes of remote media the bot fetches; read by identify_url's
-# custom-link check, the redirect check in resolve_redirects (short and
-# custom links) and the ffmpeg remote protocol whitelist.
+# custom-link check, the redirect check in _follow (short links, custom
+# links and page fetches) and the ffmpeg remote protocol whitelist.
 ALLOWED_REMOTE_SCHEMES = ("http", "https")
 
 
@@ -274,15 +274,15 @@ def download_error(e: Exception) -> DownloadError:
     return DownloadError(str(e) or type(e).__name__)
 
 
-# Most redirects any followed link (short or custom) may take (aiohttp's
-# own default).
+# Most redirects any followed link (short or custom link, or page fetch)
+# may take (aiohttp's own default).
 _MAX_REDIRECTS = 10
 
 
 class RefusedRedirect(Exception):
-    """A redirect (of a short or custom link) was refused: its target is a
-    disallowed host or not an allowed remote scheme, or the hop limit was
-    hit."""
+    """A redirect (of a short or custom link, or a page fetch) was refused:
+    its target is a disallowed host or not an allowed remote scheme, or
+    the hop limit was hit."""
 
 
 async def _follow(url: str, read):
