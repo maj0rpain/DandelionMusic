@@ -543,8 +543,8 @@ def identify_url(url: str) -> Union[SiteTypes, ExtractorT]:
     if not url_regex.fullmatch(url):
         return SiteTypes.NOT_URL
 
-    # An extractor may still claim it (ytsearch:, scsearch:), otherwise
-    # it is a search query.
+    # An extractor may still claim word:word text (ytsearch:, scsearch:),
+    # otherwise it is a search query.
     if _is_word_colon_word(url):
         return get_ie(url) or SiteTypes.NOT_URL
 
