@@ -29,12 +29,15 @@ def test_redirecting_custom_link_streams_the_final_url(
 
 
 def test_failing_follower_is_a_songinfo_error(monkeypatch, worker_loop):
-    fake_redirect_follower(monkeypatch, {TYPED: RefusedRedirect("no")})
+    follower = fake_redirect_follower(
+        monkeypatch, {TYPED: RefusedRedirect("no")}
+    )
 
     with pytest.raises(SongError) as e:
         loader._load_song(TYPED)
 
     assert str(e.value) == config.SONGINFO_ERROR
+    assert follower.calls == [TYPED]
 
 
 def test_short_link_leading_to_a_custom_link_is_followed_once(
