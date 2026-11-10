@@ -323,13 +323,12 @@ def _load_song_held(track: str, admitted_link: Optional[str]) -> LoadResult:
     if is_message_link(track) and track != admitted_link:
         raise SongError(config.SONGINFO_UNSUPPORTED)
 
-    resolved = False
+    followed = None
     if host == SiteTypes.SHORT_LINK:
         # resolved once; the result is never resolved again
-        resolved = True
         with _songinfo_errors():
-            track = _loop.run_until_complete(resolve_redirects(track))
-        track = normalize_track(track)
+            followed = _loop.run_until_complete(resolve_redirects(track))
+        track = normalize_track(followed)
         host = identify_url(track)
         # the message-link gate ran on the short link as typed; a
         # resolved Discord message link would skip it
@@ -355,7 +354,9 @@ def _load_song_held(track: str, admitted_link: Optional[str]) -> LoadResult:
     elif host == SiteTypes.CUSTOM:
         # ffmpeg is handed the final URL, whose redirects were checked
         stream = track
-        if not resolved:
+        # a short link's follow vetted `followed`, so it is skipped only
+        # when normalizing changed nothing
+        if track != followed:
             with _songinfo_errors():
                 stream = _loop.run_until_complete(resolve_redirects(track))
         data = {

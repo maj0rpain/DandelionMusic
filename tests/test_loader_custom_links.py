@@ -69,3 +69,22 @@ def test_short_link_leading_to_a_custom_link_is_followed_once(
 
     assert follower.calls == ["https://on.soundcloud.com/AbC123"]
     assert song.url == TYPED
+
+
+def test_short_link_result_that_normalizes_is_followed_again(
+    monkeypatch, worker_loop
+):
+    short = "https://on.soundcloud.com/AbC123"
+    answers = {short: TYPED + ".", TYPED: FINAL}
+    calls = []
+
+    async def follower(url):
+        calls.append(url)
+        return answers[url]
+
+    monkeypatch.setattr("musicbot.loader.resolve_redirects", follower)
+
+    song = loader._load_song(short).songs[0]
+
+    assert calls == [short, TYPED]
+    assert song.url == FINAL
