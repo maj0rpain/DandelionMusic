@@ -7,11 +7,10 @@ import threading
 
 import pytest
 
-import discord
 from discord.ext import commands
 
 from musicbot import bot as bot_module
-from musicbot.bot import MusicBot
+from discord_fakes import real_music_bot
 from helpers import run
 
 
@@ -38,9 +37,7 @@ def test_close_keeps_the_loop_running_while_the_loader_shuts_down(
     monkeypatch.setattr(commands.Bot, "close", discord_close)
 
     async def scenario():
-        bot = MusicBot(
-            [], command_prefix="d!", intents=discord.Intents.default()
-        )
+        bot = real_music_bot()
         closing = asyncio.create_task(bot.close())
         while not shutdown_calls:
             await asyncio.sleep(0.01)
@@ -99,9 +96,7 @@ def _close(monkeypatch, controllers=(), stop_error=None, shutdown_error=None):
     monkeypatch.setattr(commands.Bot, "close", discord_close)
 
     async def scenario():
-        bot = MusicBot(
-            [], command_prefix="d!", intents=discord.Intents.default()
-        )
+        bot = real_music_bot()
         bot.sessions = list(controllers)
         await bot.close()
 

@@ -5,10 +5,9 @@ guild's."""
 import asyncio
 import types
 
-import discord
 
 from musicbot.bot import MusicBot
-from discord_fakes import VoiceGuild
+from discord_fakes import VoiceGuild, real_music_bot
 from helpers import run
 
 
@@ -50,7 +49,7 @@ def move(monkeypatch, client, on_wait=None, on_timer=None):
     controller = IdleTimerController(
         (lambda: on_timer(guild)) if on_timer else None
     )
-    bot = MusicBot([], command_prefix="d!", intents=discord.Intents.default())
+    bot = real_music_bot()
     me = types.SimpleNamespace(guild=guild)
     monkeypatch.setattr(MusicBot, "user", property(lambda self: me))
     monkeypatch.setattr(bot.sessions, "controller", lambda g: controller)

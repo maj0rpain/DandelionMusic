@@ -5,23 +5,21 @@ traceback, anything else a reply and a traceback."""
 import types
 from typing import Callable, NamedTuple
 
-import discord
 import pytest
 from discord import app_commands
 from discord.ext import commands
 
 from config import config
 from musicbot import bot as bot_module
-from musicbot.bot import MusicBot
 from musicbot.loader import SongError
 from musicbot.utils import CheckError
-from discord_fakes import RecordingCtx
+from discord_fakes import RecordingCtx, real_music_bot
 from helpers import run
 
 
 @pytest.fixture(scope="module")
 def music_bot():
-    return MusicBot([], command_prefix="d!", intents=discord.Intents.default())
+    return real_music_bot()
 
 
 def _hybrid(error):

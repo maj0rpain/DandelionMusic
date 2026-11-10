@@ -9,7 +9,7 @@ from sqlalchemy import select
 
 from musicbot.settings import GuildSettings, SETTINGS, default_settings
 
-from db_seam import FailingCommit, seed_settings, with_db
+from db_seam import FailingSessionFactory, seed_settings, with_db
 
 GUILD = "42"
 FAILED_COMMIT = OperationalError("COMMIT", {}, Exception("boom"))
@@ -43,7 +43,7 @@ async def row(factory, guild=GUILD):
 def test_a_failed_commit_returns_false_and_stores_nothing():
     async def test(factory):
         sett = await seeded(factory)
-        failing = FailingCommit(factory, FAILED_COMMIT)
+        failing = FailingSessionFactory(factory, "commit", FAILED_COMMIT)
         ctx = ctx_for(failing)
 
         assert (
@@ -91,7 +91,9 @@ def test_a_failed_reset_returns_false_and_stores_nothing():
         assert (
             await sett.reset_setting(
                 SETTINGS["default_volume"],
-                ctx_for(FailingCommit(factory, FAILED_COMMIT)),
+                ctx_for(
+                    FailingSessionFactory(factory, "commit", FAILED_COMMIT)
+                ),
             )
             is False
         )
