@@ -223,38 +223,87 @@ def test_a_stream_url_with_its_webpage_urls_expire_is_current(monkeypatch):
     assert run(loader.preload(song)) is Preload.CURRENT
 
 
-@pytest.mark.parametrize("host", [SiteTypes.LOCAL_LIBRARY, SiteTypes.CUSTOM])
-def test_local_library_and_custom_link_songs_are_always_current(
-    monkeypatch, host
+def test_a_local_library_song_is_always_current(monkeypatch):
+    _never_loads(monkeypatch)
+    _clock(monkeypatch)
+    song = Song(
+        SiteTypes.LOCAL_LIBRARY,
+        "file:///music/a.mp3",
+        url=_expiring_in(-MINUTE),
+    )
+    assert run(loader.preload(song)) is Preload.CURRENT
+
+
+def _custom(url=None, link=URL):
+    return Song(SiteTypes.CUSTOM, link, url=url)
+
+
+@pytest.mark.parametrize("delta", [-MINUTE, 9 * MINUTE])
+def test_a_custom_song_near_or_past_expiry_is_reloaded(monkeypatch, delta):
+    calls = _fresh_load(monkeypatch)
+    _clock(monkeypatch)
+    song = _custom(_expiring_in(delta))
+    assert run(loader.preload(song)) is Preload.EXTRACTED
+    assert calls == [URL]
+
+
+@pytest.mark.parametrize("age", [11 * MINUTE, None])
+def test_a_custom_song_with_no_expiry_and_a_stale_stamp_is_reloaded(
+    monkeypatch, age
+):
+    calls = _fresh_load(monkeypatch)
+    _clock(monkeypatch)
+    song = _custom("https://stream.invalid/a")
+    if age is not None:
+        song.extracted_at = NOW - age
+    assert run(loader.preload(song)) is Preload.EXTRACTED
+    assert calls == [URL]
+
+
+def test_a_custom_song_with_no_expiry_and_a_fresh_stamp_is_current(
+    monkeypatch,
 ):
     _never_loads(monkeypatch)
     _clock(monkeypatch)
-    song = Song(host, "file:///music/a.mp3", url=_expiring_in(-MINUTE))
+    song = _custom("https://stream.invalid/a")
+    song.extracted_at = NOW - 9 * MINUTE
     assert run(loader.preload(song)) is Preload.CURRENT
+
+
+@pytest.mark.parametrize("delta", [-MINUTE, 9 * MINUTE])
+def test_a_custom_link_that_is_its_own_stream_is_reloaded_near_expiry(
+    monkeypatch, delta
+):
+    calls = _fresh_load(monkeypatch)
+    _clock(monkeypatch)
+    url = _expiring_in(delta)
+    assert run(loader.preload(_custom(url, link=url))) is Preload.EXTRACTED
+    assert calls == [url]
+
+
+def test_a_custom_link_that_is_its_own_stream_is_current_far_from_expiry(
+    monkeypatch,
+):
+    _never_loads(monkeypatch)
+    _clock(monkeypatch)
+    url = _expiring_in(11 * MINUTE)
+    assert run(loader.preload(_custom(url, link=url))) is Preload.CURRENT
+
+
+def test_a_failed_custom_reload_reports_failure(monkeypatch):
+    async def load(lane, token):
+        raise loader.SongError("gone")
+
+    monkeypatch.setattr(loader, "_load", load)
+    _clock(monkeypatch)
+    song = _custom(_expiring_in(-MINUTE))
+    assert run(loader.preload(song)) is Preload.FAILED
 
 
 def test_the_controller_seams_stub_preload_matches_the_real_one():
     from controller_seam import StubLoader
 
     assert [m.name for m in StubLoader.Preload] == [m.name for m in Preload]
-
-
-def test_preload_loads_a_plain_string_with_no_admitted_link(monkeypatch):
-    seen = []
-
-    def load_song(track):
-        seen.append((track, loader._admitted_link))
-        return LoadResult.of_song(
-            Song(SiteTypes.YT_DLP, track, url="https://s.invalid/new")
-        )
-
-    async def run_sync(lane, f, *args):
-        return f(*args)
-
-    monkeypatch.setattr(loader, "_load_song_admitting", load_song)
-    monkeypatch.setattr(loader, "_run_sync", run_sync)
-    assert run(loader.preload(_song())) is Preload.EXTRACTED
-    assert seen == [(URL, None)]
 
 
 def test_load_in_the_preload_lane_dispatches_there_and_stamps_the_clock(

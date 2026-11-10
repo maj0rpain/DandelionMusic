@@ -180,3 +180,28 @@ def test_a_checked_track_cannot_be_built_with_an_admitted_link():
 
 def test_a_checked_track_built_directly_has_no_admitted_link():
     assert message_link.CheckedTrack(LINK).admitted_link is None
+
+
+class GateContext:
+    """The request's context: a guild, an author and a recording send."""
+
+    def __init__(self, guild, author):
+        self.guild = guild
+        self.author = author
+        self.sent = []
+
+    async def send(self, content):
+        self.sent.append(content)
+
+
+def test_a_refused_link_replies_once_with_the_refusal_and_returns_none():
+    ctx = GateContext(LinkGuild([]), LinkMember())
+    assert run(message_link.gate_or_refuse(LINK, ctx)) is None
+    assert ctx.sent == [config.MESSAGE_LINK_FORBIDDEN]
+
+
+def test_an_allowed_link_returns_its_checked_track_and_sends_nothing():
+    ctx = GateContext(LinkGuild([LinkChannel()]), LinkMember())
+    checked = run(message_link.gate_or_refuse(LINK, ctx))
+    assert (checked.track, checked.admitted_link) == (LINK, LINK)
+    assert ctx.sent == []

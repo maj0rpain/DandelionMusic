@@ -15,7 +15,7 @@ from musicbot import admission
 from musicbot.panel_snapshot import PanelSnapshot
 from musicbot.player_panel import PlayerPanel
 from discord_fakes import EXPIRED, PLAYER_BUTTONS, coded_error, http_error
-from helpers import run
+from helpers import assert_logged_with_traceback, run
 
 
 def snap(**overrides):
@@ -432,7 +432,7 @@ def test_another_refetch_error_is_logged_and_drops_the_message(
     rig.refresh()
 
     err = capsys.readouterr().err
-    assert err.startswith("Failed to refetch the player message:\nTraceback")
+    assert_logged_with_traceback(err, "Failed to refetch the player message:")
     assert err.rstrip().endswith("RuntimeError: boom")
     assert stale.edits == [] and channel.fetches == 1
 
