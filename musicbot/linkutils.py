@@ -274,14 +274,6 @@ def download_error(e: Exception) -> DownloadError:
     return DownloadError(str(e) or type(e).__name__)
 
 
-async def get_soup(url: str) -> BeautifulSoup:
-    async with get_session().get(url) as response:
-        response.raise_for_status()
-        page = await response.text()
-
-    return BeautifulSoup(page, "html.parser")
-
-
 # Most redirects any followed link (short or custom) may take (aiohttp's
 # own default).
 _MAX_REDIRECTS = 10
@@ -293,6 +285,25 @@ class RefusedRedirect(Exception):
     hit."""
 
 
+async def _follow(url: str, read):
+    """Follow url's redirects hop by hop and return `await read(response,
+    url)` for the final response, read while it is open: one GET per hop
+    with redirects disabled, each target checked before it is requested.
+    Raises RefusedRedirect on a refused hop or too many hops, and on a
+    4xx/5xx. A redirect status with no Location is the final response."""
+    for _ in range(_MAX_REDIRECTS + 1):
+        async with get_session().get(url, allow_redirects=False) as response:
+            response.raise_for_status()
+            location = response.headers.get("Location")
+            if not (300 <= response.status < 400 and location):
+                return await read(response, url)
+            target = response.url.join(URL(location))
+        if not _is_fetchable(target.scheme, target.host):
+            raise RefusedRedirect(f"redirect to {target} refused")
+        url = str(target)
+    raise RefusedRedirect(f"more than {_MAX_REDIRECTS} redirects")
+
+
 async def resolve_redirects(url: str) -> str:
     """The last URL a link's redirects lead to, as requested (not
     re-parsed): one GET per hop with redirects disabled, the body never
@@ -300,17 +311,21 @@ async def resolve_redirects(url: str) -> str:
     checked before it is requested. Raises RefusedRedirect on a refused
     hop or too many hops, and on a 4xx/5xx or any network or timeout
     error."""
-    for _ in range(_MAX_REDIRECTS + 1):
-        async with get_session().get(url, allow_redirects=False) as response:
-            response.raise_for_status()
-            location = response.headers.get("Location")
-            if not (300 <= response.status < 400 and location):
-                return url
-            target = response.url.join(URL(location))
-        if not _is_fetchable(target.scheme, target.host):
-            raise RefusedRedirect(f"redirect to {target} refused")
-        url = str(target)
-    raise RefusedRedirect(f"more than {_MAX_REDIRECTS} redirects")
+
+    async def final_url(response, url):
+        return url
+
+    return await _follow(url, final_url)
+
+
+async def get_soup(url: str) -> BeautifulSoup:
+    """The page url's redirects lead to, parsed from the final response
+    alone. Redirects are followed as in resolve_redirects."""
+
+    async def parse(response, url):
+        return BeautifulSoup(await response.text(), "html.parser")
+
+    return await _follow(url, parse)
 
 
 T = TypeVar("T")

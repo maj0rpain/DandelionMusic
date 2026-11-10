@@ -23,6 +23,7 @@ REFUSED_TARGETS = {
 @asynccontextmanager
 async def serving():
     hits = []
+    hits_all = []
     body_sent = []
 
     async def hit(request):
@@ -48,7 +49,15 @@ async def serving():
     def redirect_to(target):
         return lambda r: web.HTTPFound(target.format(port=r.url.port))
 
-    app = web.Application()
+    @web.middleware
+    async def record(request, handler):
+        hits_all.append(request.path)
+        return await handler(request)
+
+    app = web.Application(middlewares=[record])
+    app.router.add_get(
+        "/not-modified-body", lambda r: web.Response(status=300, text="body")
+    )
     app.router.add_get("/final", lambda r: web.Response(text="ok"))
     app.router.add_get("/gone", lambda r: web.Response(status=404))
     app.router.add_get("/boom", lambda r: web.Response(status=503))
@@ -62,6 +71,7 @@ async def serving():
         app.router.add_get(f"/{name}", redirect_to(target))
     server = TestServer(app)
     server.hits = hits
+    server.hits_all = hits_all
     server.body_sent = body_sent
     await server.start_server()
     try:
@@ -158,3 +168,51 @@ def test_direct_media_answer_returns_its_url_after_one_get(allow_every_host):
     assert got.url == got.at("/media.mp3")
     assert got.hits == ["/media.mp3"]
     assert got.body_sent == []
+
+
+def _soup(path):
+    async def scenario():
+        async with serving() as server:
+            base = str(server.make_url("/")).rstrip("/")
+            soup = error = None
+            try:
+                soup = await linkutils.get_soup(base + path)
+            except Exception as exc:
+                error = exc
+            return soup, error, list(server.hits_all)
+
+    return run(scenario())
+
+
+def test_page_is_parsed_from_the_final_hop_each_hop_requested_once(
+    allow_every_host,
+):
+    soup, error, paths = _soup("/chain/2")
+
+    assert error is None
+    assert soup.get_text() == "ok"
+    assert paths == ["/chain/2", "/chain/1", "/chain/0", "/final"]
+
+
+@pytest.mark.parametrize("path", sorted("/" + n for n in REFUSED_TARGETS))
+def test_page_redirect_to_a_disallowed_target_is_refused(path):
+    soup, error, paths = _soup(path)
+
+    assert isinstance(error, linkutils.RefusedRedirect)
+    assert "/hit" not in paths
+
+
+def test_page_chain_past_the_hop_limit_is_refused(allow_every_host):
+    assert isinstance(_soup("/chain/10")[1], linkutils.RefusedRedirect)
+
+
+@pytest.mark.parametrize("path", ["/gone", "/to-boom"])
+def test_page_error_status_raises(path, allow_every_host):
+    assert _soup(path)[1] is not None
+
+
+def test_page_redirect_without_location_is_parsed(allow_every_host):
+    soup, error, _ = _soup("/not-modified-body")
+
+    assert error is None
+    assert soup.get_text() == "body"
