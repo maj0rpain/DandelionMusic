@@ -157,3 +157,10 @@ def test_refused_disconnecting_says_the_disconnecting_message():
     outcome = EnqueueOutcome(OutcomeKind.REFUSED_DISCONNECTING)
     assert render(outcome, True).text == config.DISCONNECTING_MESSAGE
     assert render(outcome, False).text == config.DISCONNECTING_MESSAGE
+
+
+def test_only_the_two_refused_kinds_are_refusals():
+    assert {k for k in OutcomeKind if k.is_refusal} == {
+        OutcomeKind.REFUSED_DISCONNECTING,
+        OutcomeKind.REFUSED_NOT_IN_VOICE,
+    }
