@@ -1,4 +1,4 @@
-"""linkutils.resolve_short_link against a local aiohttp server."""
+"""linkutils.resolve_redirects against a local aiohttp server."""
 
 from contextlib import asynccontextmanager
 
@@ -23,10 +23,23 @@ REFUSED_TARGETS = {
 @asynccontextmanager
 async def serving():
     hits = []
+    body_sent = []
 
     async def hit(request):
         hits.append(request.path)
         return web.Response(text="hit")
+
+    async def media(request):
+        hits.append(request.path)
+        response = web.StreamResponse()
+        await response.prepare(request)
+        try:
+            for _ in range(256):
+                await response.write(b"x" * 65536)
+            body_sent.append("whole body")
+        except ConnectionError:
+            pass
+        return response
 
     def to_chain(request):
         n = int(request.match_info["n"])
@@ -42,12 +55,14 @@ async def serving():
     app.router.add_get("/to-gone", lambda r: web.HTTPFound("/gone"))
     app.router.add_get("/to-boom", lambda r: web.HTTPFound("/boom"))
     app.router.add_get("/hit", hit)
+    app.router.add_get("/media.mp3", media)
     app.router.add_get(r"/chain/{n:\d+}", to_chain)
     app.router.add_get("/not-modified", lambda r: web.Response(status=304))
     for name, target in REFUSED_TARGETS.items():
         app.router.add_get(f"/{name}", redirect_to(target))
     server = TestServer(app)
     server.hits = hits
+    server.body_sent = body_sent
     await server.start_server()
     try:
         yield server
@@ -64,11 +79,12 @@ def allow_every_host(monkeypatch):
 class Resolved:
     """What resolving one path of the local server did."""
 
-    def __init__(self, base, url, error, hits):
+    def __init__(self, base, url, error, hits, body_sent):
         self.base = base
         self.url = url
         self.error = error
         self.hits = hits
+        self.body_sent = body_sent
 
     def at(self, path):
         return self.base + path
@@ -80,10 +96,12 @@ def _resolve(path):
             base = str(server.make_url("/")).rstrip("/")
             url = error = None
             try:
-                url = await linkutils.resolve_short_link(base + path)
+                url = await linkutils.resolve_redirects(base + path)
             except Exception as exc:
                 error = exc
-            return Resolved(base, url, error, list(server.hits))
+            return Resolved(
+                base, url, error, list(server.hits), list(server.body_sent)
+            )
 
     return run(scenario())
 
@@ -98,7 +116,7 @@ def test_refused_connection_raises():
         async with serving() as server:
             url = str(server.make_url("/final"))
             await server.close()
-            await linkutils.resolve_short_link(url)
+            await linkutils.resolve_redirects(url)
 
     with pytest.raises(Exception):
         run(scenario())
@@ -126,3 +144,17 @@ def test_redirect_without_location_returns_its_own_url(allow_every_host):
     got = _resolve("/not-modified")
 
     assert got.url == got.at("/not-modified")
+
+
+def test_url_is_returned_as_requested_not_reparsed(allow_every_host):
+    got = _resolve("/final?q=a b")
+
+    assert got.url == got.at("/final?q=a b")
+
+
+def test_direct_media_answer_returns_its_url_after_one_get(allow_every_host):
+    got = _resolve("/media.mp3")
+
+    assert got.url == got.at("/media.mp3")
+    assert got.hits == ["/media.mp3"]
+    assert got.body_sent == []

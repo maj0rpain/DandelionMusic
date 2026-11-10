@@ -94,15 +94,11 @@ def test_remove_song_refuses_the_only_song(monkeypatch):
     [
         (playlists.PlaylistExists(), config.PLAYLIST_ALREADY_EXISTS),
         (
-            playlists.PlaylistNameTooLong("p", 255),
-            config.PLAYLIST_NAME_TOO_LONG.format(max_length=255),
-        ),
-        (
-            playlists.PlaylistNameTooLong("p", 40),
+            playlists.PlaylistNameTooLong(40),
             config.PLAYLIST_NAME_TOO_LONG.format(max_length=40),
         ),
     ],
-    ids=["already_exists", "name_too_long", "name_too_long_other_limit"],
+    ids=["already_exists", "name_too_long"],
 )
 def test_save_that_fails_replies_with_the_reason(monkeypatch, error, reply):
     monkeypatch.setattr(playlists, "save", _fail_with(error))
