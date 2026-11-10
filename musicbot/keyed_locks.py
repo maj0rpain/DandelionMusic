@@ -5,7 +5,7 @@ from typing import Hashable
 
 class KeyedLocks:
     """One `asyncio.Lock` per key, with weak values: an entry goes once
-    nothing holds or awaits its lock."""
+    nothing references its lock."""
 
     def __init__(self) -> None:
         self._locks: "weakref.WeakValueDictionary[Hashable, asyncio.Lock]"
