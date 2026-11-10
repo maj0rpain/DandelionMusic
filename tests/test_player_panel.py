@@ -410,13 +410,14 @@ def test_another_error_on_the_retry_is_logged_and_drops_the_message(
     assert stale.edits == [] and fresh.edits == []
 
 
-def test_a_message_gone_on_refetch_is_dropped(expired):
+def test_a_message_gone_on_refetch_is_dropped(expired, capsys):
     rig, channel, stale = expired
     channel.fetch_error = coded_error(discord.NotFound, 404, 10008)
 
     rig.refresh()
     rig.refresh()
 
+    assert capsys.readouterr().err == ""
     assert stale.edits == []
     assert channel.fetches == 1
 
@@ -430,7 +431,9 @@ def test_another_refetch_error_is_logged_and_drops_the_message(
     rig.refresh()
     rig.refresh()
 
-    assert "Failed to refetch" in capsys.readouterr().err
+    err = capsys.readouterr().err
+    assert err.startswith("Failed to refetch the player message:\nTraceback")
+    assert err.rstrip().endswith("RuntimeError: boom")
     assert stale.edits == [] and channel.fetches == 1
 
 
