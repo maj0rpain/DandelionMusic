@@ -38,6 +38,7 @@ from message_link_fakes import (
     LinkChannel,
     LinkMember,
     CountingThread,
+    admitted_pair,
 )
 
 OWNER = 1
@@ -259,7 +260,7 @@ async def message_link_click(link, *, join_needed=False, channel=None):
 
 def test_an_allowed_link_pick_hands_play_a_checked_track_carrying_it():
     _view, cog, _inter = run(message_link_click(LINK))
-    assert [(c.track, c.admitted_link) for c in cog.checked] == [(LINK, LINK)]
+    assert [admitted_pair(c) for c in cog.checked] == [(LINK, LINK)]
 
 
 def test_the_gate_runs_once_per_pick():

@@ -1,8 +1,6 @@
 """The message-link gate: whether a track that is a message link may be
 loaded for the requesting member."""
 
-import pickle
-
 import discord
 import pytest
 
@@ -19,6 +17,7 @@ from message_link_fakes import (
     LinkGuild,
     LinkMember,
     LinkThread,
+    admitted_pair,
     perms,
 )
 
@@ -60,8 +59,7 @@ def test_a_readable_channel_passes():
 
 def test_a_message_link_comes_back_checked_with_its_admitted_link():
     checked = check(LINK, LinkGuild([LinkChannel()]), LinkMember())
-    assert (checked.track, checked.admitted_link) == (LINK, LINK)
-    assert pickle.loads(pickle.dumps(checked)) == checked
+    assert admitted_pair(checked) == (LINK, LINK)
 
 
 @pytest.mark.parametrize("wrap", ["<{}>", "  {}  ", "{}."])

@@ -135,16 +135,30 @@ class FakeHTTPClient:
         self.closed = True
 
 
+def admitted_pair(checked):
+    """The (track, admitted link) pair of one checked track."""
+    return (checked.track, checked.admitted_link)
+
+
+def install_extractor_client(
+    monkeypatch, factory, register=lambda *a, **k: None
+):
+    """Install `factory` as the extractor's `HTTPClient`, with no client
+    made yet, a bot token and `register` standing in for
+    `atexit.register`."""
+    monkeypatch.setattr(extractor, "HTTPClient", factory)
+    monkeypatch.setattr(extractor, "_client", None)
+    monkeypatch.setattr(config, "BOT_TOKEN", "tok")
+    monkeypatch.setattr(atexit, "register", register)
+
+
 def install_fake_discord_client(monkeypatch, register=lambda *a, **k: None):
     """Reset `FakeHTTPClient` and install it as the extractor's client,
     with a bot token and `register` standing in for `atexit.register`."""
     FakeHTTPClient.instances = []
     FakeHTTPClient.login_error = None
     FakeHTTPClient.fetch_error = None
-    monkeypatch.setattr(extractor, "HTTPClient", FakeHTTPClient)
-    monkeypatch.setattr(extractor, "_client", None)
-    monkeypatch.setattr(config, "BOT_TOKEN", "tok")
-    monkeypatch.setattr(atexit, "register", register)
+    install_extractor_client(monkeypatch, FakeHTTPClient, register)
 
 
 def gated_track(track, guild=None, member=None):
