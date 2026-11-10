@@ -1,4 +1,4 @@
-"""loader._load_song over a faked short-link resolver."""
+"""loader._load_song over a faked redirect follower."""
 
 import pytest
 
@@ -88,7 +88,7 @@ def test_short_link_to_a_spotify_track(monkeypatch, worker_loop, extracted):
     assert [s.webpage_url for s in result.songs] == ["https://yt/v"]
 
 
-def test_raising_resolver_is_a_songinfo_error(
+def test_raising_follower_is_a_songinfo_error(
     monkeypatch, worker_loop, extracted
 ):
     fake_redirect_follower(monkeypatch, OSError("boom"))
@@ -129,7 +129,7 @@ def test_resolved_non_url_is_unsupported_not_searched(
 def test_resolved_short_link_is_unsupported_after_one_resolution(
     monkeypatch, worker_loop, extracted
 ):
-    resolver = fake_redirect_follower(
+    follower = fake_redirect_follower(
         monkeypatch, "https://spotify.link/other"
     )
 
@@ -137,19 +137,19 @@ def test_resolved_short_link_is_unsupported_after_one_resolution(
         loader._load_song(SHORT)
 
     assert str(e.value) == config.SONGINFO_UNSUPPORTED
-    assert len(resolver.calls) == 1
+    assert len(follower.calls) == 1
 
 
-def test_unknown_url_off_the_list_never_calls_the_resolver(
+def test_unknown_url_off_the_list_never_calls_the_follower(
     monkeypatch, worker_loop, extracted
 ):
-    resolver = fake_redirect_follower(monkeypatch, SC_TRACK)
+    follower = fake_redirect_follower(monkeypatch, SC_TRACK)
 
     with pytest.raises(SongError) as e:
         loader._load_song("https://example.com/")
 
     assert str(e.value) == config.SONGINFO_UNSUPPORTED
-    assert resolver.calls == []
+    assert follower.calls == []
 
 
 def test_resolved_discord_message_link_is_unsupported_not_extracted(

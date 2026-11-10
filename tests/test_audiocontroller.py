@@ -1399,7 +1399,7 @@ def test_every_preload_failing_leaves_a_long_queue_whole_and_silent(
         ),
     ],
 )
-def test_a_song_failing_in_the_background_plays_or_is_reported_once_by_its_head_preload(  # noqa: E501
+def test_a_track_whose_background_preload_fails_plays_or_is_a_failed_track_once_by_its_head_preload(  # noqa: E501
     controller, stub_loader, monkeypatch, head_result, played, skipped
 ):
     _fake_ffmpeg(monkeypatch)
@@ -2883,7 +2883,7 @@ def _play_history(controller):
     return [s.title for s in controller.playlist.playhistory]
 
 
-def _prev_state(controller, tmp_path):
+def _queue_history_and_backup(controller, tmp_path):
     return (
         _titles(controller),
         _play_history(controller),
@@ -3328,23 +3328,24 @@ def test_requests_during_the_goodbye_are_refused_and_place_nothing(
     async def scenario():
         task = await _hold_goodbye(controller)
         client = controller.guild.voice_client
-        backup = _backup_path(controller, tmp_path).read_bytes()
-        handed = len(client.played)
+        before = (
+            _queue_history_and_backup(controller, tmp_path),
+            len(client.played),
+        )
         results = [
             (await controller.enqueue(extra[:1])).kind,
             (await controller.enqueue_next(extra[1])).kind,
             (await controller.process_local_tracks(batch, "test")).kind,
             controller.load_backup(),
         ]
-        state = (
-            _titles(controller),
+        after = (
+            _queue_history_and_backup(controller, tmp_path),
             len(client.played),
-            _backup_path(controller, tmp_path).read_bytes(),
         )
         await _end_goodbye(controller, task)
-        return results, state, (([], handed, backup))
+        return results, before, after
 
-    results, state, expected = _run(controller, scenario)
+    results, before, after = _run(controller, scenario)
 
     refused = ac.OutcomeKind.REFUSED_DISCONNECTING
     assert results == [
@@ -3353,7 +3354,8 @@ def test_requests_during_the_goodbye_are_refused_and_place_nothing(
         refused,
         ac.RestoreResult.REFUSED_WHILE_DISCONNECTING,
     ]
-    assert state == expected
+    assert before[0][0] == []
+    assert after == before
 
 
 def test_prev_during_the_goodbye_is_refused_and_changes_nothing(
@@ -3362,17 +3364,20 @@ def test_prev_during_the_goodbye_is_refused_and_changes_nothing(
     _quick_goodbye(monkeypatch)
     _queue(controller, "first", "second")
 
-    def state(client):
-        return _prev_state(controller, tmp_path), len(client.played)
-
     async def scenario():
         task = await _hold_goodbye(controller)
         _old_track(controller)
         client = controller.guild.voice_client
-        before = state(client)
+        before = (
+            _queue_history_and_backup(controller, tmp_path),
+            len(client.played),
+        )
         result = controller.prev_song()
         await _settle()
-        after = state(client)
+        after = (
+            _queue_history_and_backup(controller, tmp_path),
+            len(client.played),
+        )
         await _end_goodbye(controller, task)
         return result, before, after
 
@@ -3390,7 +3395,7 @@ def test_prev_out_of_voice_is_refused_and_changes_nothing(
     _old_track(controller)
     controller.guild.voice_client = None
 
-    before = _prev_state(controller, tmp_path)
+    before = _queue_history_and_backup(controller, tmp_path)
 
     async def scenario():
         return controller.prev_song()
@@ -3398,7 +3403,7 @@ def test_prev_out_of_voice_is_refused_and_changes_nothing(
     result = _run(controller, scenario)
 
     assert result is False
-    assert _prev_state(controller, tmp_path) == before
+    assert _queue_history_and_backup(controller, tmp_path) == before
 
 
 def test_a_request_after_the_goodbye_starts_on_a_reconnected_client(
@@ -3464,22 +3469,25 @@ def test_a_request_inside_the_voice_disconnect_is_refused_without_the_sound(
     assert _titles(controller) == []
 
 
-def test_a_library_pick_whose_load_lands_in_the_goodbye_places_no_tail(
-    controller, stub_loader, monkeypatch, tmp_path
+def _library_pick_in_the_goodbye(
+    controller, stub_loader, monkeypatch, titles, gated_call
 ):
+    """Picks the library tracks `titles` while a goodbye begins, holding
+    the load call at 0-based index `gated_call` until the goodbye has
+    started. Returns (outcome, handed, after)."""
     _quick_goodbye(monkeypatch)
-    songs = {f"/music/{s.title}.mp3": s for s in _songs(controller, *"abc")}
-    tail_gate = asyncio.Event()
+    songs = {f"/music/{s.title}.mp3": s for s in _songs(controller, *titles)}
+    gate = asyncio.Event()
     calls = []
 
     async def load_local_songs(uris):
         calls.append(uris)
-        if len(calls) == 2:
-            await tail_gate.wait()
+        if len(calls) == gated_call + 1:
+            await gate.wait()
         return [songs.get(u) for u in uris]
 
     monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
-    batch = [LocalTrack(f"/music/{t}.mp3", f"Name {t}") for t in "abc"]
+    batch = [LocalTrack(f"/music/{t}.mp3", f"Name {t}") for t in titles]
 
     async def scenario():
         controller.bot.loop = asyncio.get_running_loop()
@@ -3491,12 +3499,20 @@ def test_a_library_pick_whose_load_lands_in_the_goodbye_places_no_tail(
         teardown = asyncio.ensure_future(controller.udisconnect("test"))
         await _settle()
         handed = len(client.played)
-        tail_gate.set()
+        gate.set()
         outcome = await pick
         await _end_goodbye(controller, teardown)
         return outcome, handed, len(client.played)
 
-    outcome, handed, after = _run(controller, scenario)
+    return _run(controller, scenario)
+
+
+def test_a_library_pick_whose_load_lands_in_the_goodbye_places_no_tail(
+    controller, stub_loader, monkeypatch, tmp_path
+):
+    outcome, handed, after = _library_pick_in_the_goodbye(
+        controller, stub_loader, monkeypatch, "abc", 1
+    )
 
     assert outcome.kind.value == "refused_disconnecting"
     assert _titles(controller) == []
@@ -3539,33 +3555,9 @@ def test_restore_started_during_the_goodbye_is_refused_and_plays_nothing(
 def test_a_library_pick_whose_first_track_load_lands_in_the_goodbye_is_refused(
     controller, stub_loader, monkeypatch
 ):
-    _quick_goodbye(monkeypatch)
-    songs = {f"/music/{s.title}.mp3": s for s in _songs(controller, *"ab")}
-    first_gate = asyncio.Event()
-
-    async def load_local_songs(uris):
-        await first_gate.wait()
-        return [songs.get(u) for u in uris]
-
-    monkeypatch.setattr(stub_loader, "load_local_songs", load_local_songs)
-    batch = [LocalTrack(f"/music/{t}.mp3", f"Name {t}") for t in "ab"]
-
-    async def scenario():
-        controller.bot.loop = asyncio.get_running_loop()
-        pick = asyncio.ensure_future(
-            controller.process_local_tracks(batch, "test")
-        )
-        await _settle()
-        client = controller.guild.voice_client
-        teardown = asyncio.ensure_future(controller.udisconnect("test"))
-        await _settle()
-        handed = len(client.played)
-        first_gate.set()
-        outcome = await pick
-        await _end_goodbye(controller, teardown)
-        return outcome, handed, len(client.played)
-
-    outcome, handed, after = _run(controller, scenario)
+    outcome, handed, after = _library_pick_in_the_goodbye(
+        controller, stub_loader, monkeypatch, "ab", 0
+    )
 
     assert outcome.kind.value == "refused_disconnecting"
     assert _titles(controller) == []
