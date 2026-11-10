@@ -103,8 +103,9 @@ def test_library_report_survives_braces_in_the_prefix(
 ):
     cfg = config_factory("BOT_TOKEN=x\nBOT_PREFIX={!\n")
     assert _library_under(cfg, monkeypatch, ["a.mp3"]).endswith(
-        "run `{!library refresh`."
+        cfg.LIBRARY_PICK_STALE_INDEX
     )
+    assert "{!" in cfg.LIBRARY_PICK_STALE_INDEX
 
 
 def _send(settings):
