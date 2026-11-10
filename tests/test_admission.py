@@ -41,12 +41,18 @@ async def check_request(ctx, kind, allow_disconnecting=False):
     )
 
 
-def run_request(ctx, kind, allow_disconnecting=False):
+def run_admitted(ctx, kind, allow_disconnecting=False):
+    """Run a request through admission: (admitted, controller)."""
+
     async def go():
         admitted = await check_request(ctx, kind, allow_disconnecting)
-        return await admitted.enter()
+        return admitted, await admitted.enter()
 
     return run(go())
+
+
+def run_request(ctx, kind, allow_disconnecting=False):
+    return run_admitted(ctx, kind, allow_disconnecting)[1]
 
 
 JOINING = [K.JOINING_COMMAND, K.PICK, K.REACTION]
@@ -399,15 +405,11 @@ def test_admission_table(kind, spec, outcome, no_sleep):
             "admitted": admission.Join.NONE,
         }[outcome]
 
-        async def go():
-            admitted = await check_request(ctx, kind, allow)
-            assert admitted.join is expected_join
-            assert admitted.join_needed is (
-                expected_join is not admission.Join.NONE
-            )
-            return await admitted.enter()
-
-        controller = run(go())
+        admitted, controller = run_admitted(ctx, kind, allow)
+        assert admitted.join is expected_join
+        assert admitted.join_needed is (
+            expected_join is not admission.Join.NONE
+        )
         assert controller is ctx.bot.sessions.controller(guild)
         expected = {
             "connect": [("connect", "b")],

@@ -15,7 +15,7 @@ from musicbot import loader
 from musicbot.linkutils import SiteTypes
 from musicbot.song import LoadResult, Song
 from musicbot.truncation import Truncation, TruncationReason
-from helpers import run
+from helpers import fake_redirect_follower, run
 
 Preload = loader.Preload
 
@@ -310,11 +310,16 @@ def test_a_result_that_is_not_single_fails_the_preload(monkeypatch, result):
     assert song.title == "stale title"
 
 
-def test_a_flac_attachment_without_a_stream_url_is_extracted(monkeypatch):
+def test_a_flac_attachment_without_a_stream_url_is_extracted(
+    monkeypatch, worker_loop
+):
     cdn = "https://cdn.discordapp.com/attachments/1/2/a.flac?ex=65&is=1"
 
+    fake_redirect_follower(monkeypatch, cdn)
+
     async def load(lane, track):
-        return loader._load_song(track)
+        # the worker runs it off the event loop, as the lane does
+        return await asyncio.to_thread(loader._load_song, track)
 
     monkeypatch.setattr(loader, "_load", load)
     song = Song(SiteTypes.YT_DLP, cdn)
