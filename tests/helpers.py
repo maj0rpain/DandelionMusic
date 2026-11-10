@@ -166,7 +166,9 @@ def dockerfile_commands(text=None):
 
 class RedirectFollower:
     """A recording async stand-in for `loader.resolve_redirects`: returns
-    `result`, or raises it when it is an exception."""
+    `result`, or raises it when it is an exception. `result` may also be a
+    mapping from URL to answer: a call looks its URL up (a URL absent from
+    it raises `KeyError`) and returns or raises that answer alike."""
 
     def __init__(self, result):
         self.result = result
@@ -174,9 +176,12 @@ class RedirectFollower:
 
     async def __call__(self, url):
         self.calls.append(url)
-        if isinstance(self.result, Exception):
-            raise self.result
-        return self.result
+        answer = self.result
+        if isinstance(answer, dict):
+            answer = answer[url]
+        if isinstance(answer, Exception):
+            raise answer
+        return answer
 
 
 def fake_redirect_follower(monkeypatch, result):
