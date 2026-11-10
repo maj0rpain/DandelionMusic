@@ -337,7 +337,8 @@ def _load_song_admitting(track: str) -> LoadResult:
 
     followed = None
     if host == SiteTypes.SHORT_LINK:
-        # resolved once; the result is never resolved again
+        # the short link is followed here once; its result is followed
+        # again in the custom-link branch only when normalizing changed it
         with _songinfo_errors():
             followed = _loop.run_until_complete(resolve_redirects(track))
         track = normalize_track(followed)
