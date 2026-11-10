@@ -10,11 +10,11 @@ from yt_dlp.extractor.common import InfoExtractor
 from config import config
 from musicbot import loader
 from musicbot.loader import Preload, SongError
-from musicbot.message_link import CheckedTrack
 from musicbot.song import Song
 from musicbot.yt_dlp_plugins.extractor import discord as extractor
 from helpers import fake_redirect_follower, run
 from message_link_fakes import (
+    gated_track,
     LINK,
     FakeHTTPClient,
     install_fake_discord_client,
@@ -80,9 +80,7 @@ def test_a_plain_message_link_is_refused_and_never_fetched(client):
     [LINK, f"<{LINK}>", f"  {LINK}. ", LINK.replace("//", "//canary.")],
 )
 def test_a_checked_tracks_own_link_is_fetched(client, typed):
-    from musicbot.linkutils import normalize_track
-
-    result = loader._load_song(CheckedTrack(typed, normalize_track(typed)))
+    result = loader._load_song(gated_track(typed))
     assert len(result.songs) == 2
     assert len(client.made) == 1
 
@@ -99,7 +97,7 @@ def test_a_short_link_to_a_message_link_is_refused(client, monkeypatch):
         ),
     )
     with pytest.raises(SongError) as info:
-        loader._load_song(CheckedTrack(SHORT, LINK))
+        loader._load_song(gated_track(SHORT))
     assert _code(info) == config.SONGINFO_UNSUPPORTED
     assert client.made == []
 
@@ -114,11 +112,26 @@ def test_a_hop_to_a_message_link_fails_without_a_fetch(client, kind):
 
 
 def test_a_checked_tracks_hop_to_a_different_link_fails_without_a_fetch(
-    client,
+    client, monkeypatch
 ):
-    _Hop.target = OTHER
+    class LinkHop(_Hop):
+        _VALID_URL = LINK
+        IE_NAME = "fakelinkhop"
+        target = OTHER
+
+    ydl = loader._new_downloader()
+    ydl.add_info_extractor(extractor.DiscordAttachmentsIE())
+    ydl.add_info_extractor(LinkHop())
+    monkeypatch.setattr(
+        loader,
+        "identify_url",
+        lambda url: (
+            LinkHop if url == LINK else extractor.DiscordAttachmentsIE
+        ),
+    )
+    monkeypatch.setattr(loader, "_downloader", ydl)
     with pytest.raises(SongError) as info:
-        loader._load_song(CheckedTrack(HOP, LINK))
+        loader._load_song(gated_track(LINK))
     assert _code(info) == config.SONGINFO_ERROR
     assert client.made == []
 
@@ -128,7 +141,7 @@ def test_after_a_load_that_raised_a_plain_load_is_still_refused(
 ):
     FakeHTTPClient.fetch_error = RuntimeError("boom")
     with pytest.raises(SongError):
-        loader._load_song(CheckedTrack(LINK, LINK))
+        loader._load_song(gated_track(LINK))
     FakeHTTPClient.fetch_error = None
     fetched = len(client.made)
 
@@ -139,7 +152,7 @@ def test_after_a_load_that_raised_a_plain_load_is_still_refused(
 
 
 def test_after_a_checked_load_the_hop_check_still_refuses(client):
-    loader._load_song(CheckedTrack(LINK, LINK))
+    loader._load_song(gated_track(LINK))
     fetched = len(client.made)
     with pytest.raises(SongError):
         loader._load_song(HOP)
