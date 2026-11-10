@@ -39,6 +39,12 @@ class FakeFfmpegProbe:
         self.calls = []
         self.result = "ffmpeg version 7.0"
 
+    def check_output(self, cmd, **kwargs):
+        self.calls.append(kwargs)
+        if isinstance(self.result, BaseException):
+            raise self.result
+        return self.result
+
 
 @pytest.fixture
 def probe(monkeypatch, tmp_path):
@@ -59,13 +65,7 @@ def probe(monkeypatch, tmp_path):
 
     fake = FakeFfmpegProbe()
 
-    def fake_check_output(cmd, **kwargs):
-        fake.calls.append(kwargs)
-        if isinstance(fake.result, BaseException):
-            raise fake.result
-        return fake.result
-
-    monkeypatch.setattr(utils, "check_output", fake_check_output)
+    monkeypatch.setattr(utils, "check_output", fake.check_output)
     return fake
 
 
