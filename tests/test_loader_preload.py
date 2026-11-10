@@ -240,15 +240,21 @@ def test_the_controller_seams_stub_preload_matches_the_real_one():
 
 
 def test_preload_loads_a_plain_string_with_no_admitted_link(monkeypatch):
-    calls = []
+    seen = []
+
+    def load_song(track):
+        seen.append((track, loader._admitted_link))
+        return LoadResult.of_song(
+            Song(SiteTypes.YT_DLP, track, url="https://s.invalid/new")
+        )
 
     async def run_sync(lane, f, *args):
-        calls.append((f, args))
-        return LoadResult.of_song(Song(SiteTypes.YT_DLP, URL))
+        return f(*args)
 
+    monkeypatch.setattr(loader, "_load_song", load_song)
     monkeypatch.setattr(loader, "_run_sync", run_sync)
-    run(loader._load(loader.Lane.PRELOAD, URL))
-    assert calls == [(loader._load_song, (URL,))]
+    assert run(loader.preload(_song())) is Preload.EXTRACTED
+    assert seen == [(URL, None)]
 
 
 def test_load_in_the_preload_lane_dispatches_there_and_stamps_the_clock(
