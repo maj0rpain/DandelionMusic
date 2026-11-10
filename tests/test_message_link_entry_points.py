@@ -27,7 +27,7 @@ from message_link_fakes import (
     LINK,
     LinkChannel,
     LinkMember,
-    LinkThread,
+    CountingThread,
     perms,
 )
 
@@ -95,12 +95,7 @@ def test_the_gate_runs_once_per_play_request(
     stub_load_and_channel(controller, stub_loader, monkeypatch)
     lookups = []
 
-    class CountingThread(LinkThread):
-        async def fetch_member(self, member_id):
-            lookups.append(member_id)
-            return await super().fetch_member(member_id)
-
-    thread = CountingThread(private=True)
+    thread = CountingThread(lookups, private=True)
     controller.guild.get_channel_or_thread = lambda _id: thread
     invoke("_play", controller, LINK)
     assert admitted(loaded(stub_loader)) == [(LINK, LINK)]
@@ -190,17 +185,12 @@ def test_the_gate_runs_once_per_playlist_add_song(
 ):
     lookups = []
 
-    class CountingThread(LinkThread):
-        async def fetch_member(self, member_id):
-            lookups.append(member_id)
-            return await super().fetch_member(member_id)
-
     _sent, saved, loads = add_song(
         controller,
         stub_loader,
         monkeypatch,
         LINK,
-        channel=CountingThread(private=True),
+        channel=CountingThread(lookups, private=True),
     )
     assert admitted(loads) == [(LINK, LINK)]
     assert len(saved) == 1
@@ -245,15 +235,15 @@ def react(link, monkeypatch, content=None, command_channel=None, lookups=None):
     sent = []
     msg = types.SimpleNamespace(content=content or link)
 
-    class Channel(LinkThread):
+    class Channel(CountingThread):
         async def fetch_message(self, _id):
             return msg
 
-        async def fetch_member(self, member_id):
-            lookups.append(member_id)
-            return await super().fetch_member(member_id)
-
-    channel = Channel(channel_id=2, private=lookups is not None)
+    channel = Channel(
+        [] if lookups is None else lookups,
+        channel_id=2,
+        private=lookups is not None,
+    )
 
     class Guild(VoiceGuild):
         name = "guild"

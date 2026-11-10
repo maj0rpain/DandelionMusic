@@ -37,7 +37,7 @@ from message_link_fakes import (
     LINK,
     LinkChannel,
     LinkMember,
-    LinkThread,
+    CountingThread,
 )
 
 OWNER = 1
@@ -265,13 +265,8 @@ def test_an_allowed_link_pick_hands_play_a_checked_track_carrying_it():
 def test_the_gate_runs_once_per_pick():
     lookups = []
 
-    class CountingThread(LinkThread):
-        async def fetch_member(self, member_id):
-            lookups.append(member_id)
-            return await super().fetch_member(member_id)
-
     _view, cog, _inter = run(
-        message_link_click(LINK, channel=CountingThread(private=True))
+        message_link_click(LINK, channel=CountingThread(lookups, private=True))
     )
     assert [c.track for c in cog.checked] == [LINK]
     assert len(lookups) == 1
