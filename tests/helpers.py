@@ -184,3 +184,13 @@ def fake_redirect_follower(monkeypatch, result):
     follower = RedirectFollower(result)
     monkeypatch.setattr("musicbot.loader.resolve_redirects", follower)
     return follower
+
+
+def assert_logged_with_traceback(err, message):
+    """Asserts `message` appears in `err` and precedes its first
+    `Traceback`: a failure-log line followed by the traceback it logged."""
+    at = err.find(message)
+    trace = err.find("Traceback")
+    assert at >= 0, f"{message!r} not in the log: {err!r}"
+    assert trace >= 0, f"no Traceback in the log: {err!r}"
+    assert at < trace, f"{message!r} follows the first Traceback: {err!r}"

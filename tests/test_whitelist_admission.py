@@ -3,6 +3,7 @@ every guild the whitelist does not admit and register the rest."""
 
 from db_seam import run_musicbot
 from developer_fakes import LeavingGuild
+from helpers import assert_logged_with_traceback
 
 
 def drive(monkeypatch, listed, scenario, guilds=None):
@@ -43,7 +44,7 @@ def test_sweep_logs_a_failed_leave_and_goes_on(monkeypatch, capsys):
     err = capsys.readouterr().err
     assert registered == [3]
     assert guilds[1].left
-    assert 0 <= err.find("Leaving guild bad failed:") < err.find("Traceback")
+    assert_logged_with_traceback(err, "Leaving guild bad failed:")
 
 
 def test_sweep_reads_the_whitelist_once(monkeypatch):
@@ -87,4 +88,4 @@ def test_join_logs_a_failed_leave_and_does_not_register(monkeypatch, capsys):
     registered = join(monkeypatch, [1], LeavingGuild(2, "bad", fail=True))
     err = capsys.readouterr().err
     assert registered == []
-    assert 0 <= err.find("Leaving guild bad failed:") < err.find("Traceback")
+    assert_logged_with_traceback(err, "Leaving guild bad failed:")

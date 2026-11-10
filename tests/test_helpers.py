@@ -2,7 +2,10 @@
 
 import types
 
+import pytest
+
 from helpers import (
+    assert_logged_with_traceback,
     attribute_names,
     dockerfile_commands,
     imported_names,
@@ -177,3 +180,24 @@ def test_failing_session_factory_fails_counts_and_then_runs_for_real():
                 await session.flush()
 
     with_db(test)
+
+
+def test_logged_with_traceback_passes_when_message_precedes_it():
+    assert_logged_with_traceback(
+        "boom: failed\nTraceback (most recent call last):\n", "boom"
+    )
+
+
+def test_logged_with_traceback_fails_when_message_missing():
+    with pytest.raises(AssertionError):
+        assert_logged_with_traceback("Traceback (most recent)", "boom")
+
+
+def test_logged_with_traceback_fails_when_message_follows_traceback():
+    with pytest.raises(AssertionError):
+        assert_logged_with_traceback("Traceback (most recent)\nboom", "boom")
+
+
+def test_logged_with_traceback_fails_without_a_traceback():
+    with pytest.raises(AssertionError):
+        assert_logged_with_traceback("boom: failed\n", "boom")
