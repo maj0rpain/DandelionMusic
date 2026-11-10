@@ -12,12 +12,17 @@ from pathlib import Path
 import jsonc
 import pytest
 
-from config.config import ENV_ALIASES, Config
-from config.utils import alchemize_url, ensure_sqlite_parent, get_env_var
+from config.config import ENV_ALIASES, Config, parse_env_file
+from config.utils import (
+    CONFIG_DIRS,
+    Formatter,
+    alchemize_url,
+    ensure_sqlite_parent,
+    get_env_var,
+)
 
-from helpers import REPO_ROOT, dockerfile_commands
+from helpers import COOKIES_HEADING, REPO_ROOT, dockerfile_commands
 
-COOKIES_HEADING = "Custom Cookies"
 SECRETS_ENV = (
     "BOT_TOKEN=real-token-abc123\n"
     "SPOTIFY_SECRET=real-spotify-secret\n"
@@ -286,7 +291,6 @@ def test_default_library_dir_is_tracked_and_kept_out_of_git_and_image():
 
 
 def test_env_sample_documents_compose_only_library_host_path():
-    from config.config import parse_env_file
 
     keys = parse_env_file(str(REPO_ROOT / ".env.sample"))
     text = (REPO_ROOT / ".env.sample").read_text("utf-8")
@@ -354,7 +358,6 @@ def test_en_json_renders_only_braced_config_names(config_factory):
     """Every en.json string comes out as its raw text with only the
     braced config names filled: a bare word that equals a config key
     stays literal, runtime placeholders reach their .format() call."""
-    from config.utils import CONFIG_DIRS
 
     shipped = [d for d in CONFIG_DIRS if (Path(d) / "en.json").is_file()]
     assert shipped == [str(REPO_ROOT / "config")]
@@ -379,7 +382,6 @@ def test_en_json_renders_only_braced_config_names(config_factory):
 
 
 def test_double_braces_are_not_a_load_time_escape():
-    from config.utils import Formatter
 
     text = Formatter("{{SEARCH_RESULTS}} {{}} {x:>3}").format(
         {"SEARCH_RESULTS": "5"}
@@ -610,7 +612,6 @@ def test_env_sample_supported_extensions_match_the_default(config_factory):
 
 
 def test_env_sample_does_not_point_cookie_path_at_the_placeholder():
-    from config.config import parse_env_file
 
     path = REPO_ROOT / ".env.sample"
     text = path.read_text(encoding="utf-8")
