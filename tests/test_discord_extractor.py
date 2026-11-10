@@ -12,6 +12,7 @@ from yt_dlp.utils import DownloadError
 from config import config
 from musicbot import linkutils, loader
 from musicbot.loader import SongError
+from musicbot.message_link import CheckedTrack
 from musicbot.yt_dlp_plugins.extractor import discord as extractor
 from musicbot.yt_dlp_plugins.extractor.discord import DiscordAttachmentsIE
 
@@ -88,5 +89,5 @@ def test_a_failed_discord_link_is_a_could_not_load_error(
     else:
         http.login_exc = RuntimeError("bad token")
     with pytest.raises(SongError) as info:
-        loader._load_song(URL, URL)
+        loader._load_song(CheckedTrack(URL, URL))
     assert str(info.value) == config.SONGINFO_ERROR
