@@ -210,7 +210,7 @@ class PluginController:
         return await self._process(self, url, user=user)
 
 
-def react(link, monkeypatch, content=None):
+def react(link, monkeypatch, content=None, command_channel=None):
     loads = []
 
     async def load_song(track):
@@ -245,6 +245,7 @@ def react(link, monkeypatch, content=None):
         settings={
             guild: admission_settings(
                 button_emote="x",
+                command_channel=command_channel,
                 user_must_be_in_vc=True,
                 dj_role=None,
                 vc_timeout=True,
@@ -255,10 +256,16 @@ def react(link, monkeypatch, content=None):
 
     async def send(content=None, **kwargs):
         sent.append(content)
+        guild.events.append(("reply", content))
 
     async def get_context(_message):
         return types.SimpleNamespace(
-            send=send, bot=bot, guild=guild, command=None, author=None
+            send=send,
+            bot=bot,
+            guild=guild,
+            command=None,
+            author=None,
+            channel=types.SimpleNamespace(id=2),
         )
 
     bot.get_context = get_context
@@ -273,55 +280,52 @@ def react(link, monkeypatch, content=None):
         emoji=types.SimpleNamespace(name="x", id=None),
     )
     run(Button(bot).on_raw_reaction_add(event))
-    return loads, sent, guild.events
+    directed = bot.sessions.panel(guild).directed
+    return loads, sent, guild.events, directed
 
 
 def test_the_plugin_refuses_a_forbidden_link_and_does_not_load(monkeypatch):
-    loads, sent, _events = react(FOREIGN_LINK, monkeypatch)
+    loads, sent, events, directed = react(
+        FOREIGN_LINK, monkeypatch, command_channel=2
+    )
     assert sent == [config.MESSAGE_LINK_FORBIDDEN]
-    assert loads == []
+    assert (loads, directed) == ([], [])
+    assert events == [("reply", config.MESSAGE_LINK_FORBIDDEN)]
 
 
 def test_one_forbidden_link_among_several_reactions_still_queues_the_rest(
     monkeypatch,
 ):
     other = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
-    loads, sent, _events = react(
-        FOREIGN_LINK, monkeypatch, content=f"{FOREIGN_LINK} {other}"
-    )
-    assert [c.track for c in loads] == [other]
-    assert sent == [config.MESSAGE_LINK_FORBIDDEN, "loaded"]
-
-
-def test_the_plugin_loads_an_allowed_link(monkeypatch):
-    loads, _sent, _events = react(LINK, monkeypatch)
-    assert admitted(loads) == [(LINK, LINK)]
-
-
-def test_a_reaction_with_only_a_forbidden_link_never_connects(monkeypatch):
-    loads, sent, events = react(FOREIGN_LINK, monkeypatch)
-    assert (loads, events) == ([], [])
-    assert sent == [config.MESSAGE_LINK_FORBIDDEN]
-
-
-def test_the_refusal_is_sent_before_the_connect(monkeypatch):
-    other = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
-    _loads, sent, events = react(
-        FOREIGN_LINK, monkeypatch, content=f"{FOREIGN_LINK} {other}"
-    )
-    assert sent[0] == config.MESSAGE_LINK_FORBIDDEN
-    assert events != []
-
-
-def test_every_forbidden_link_is_refused_before_the_allowed_outcome(
-    monkeypatch,
-):
-    other = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
     foreign2 = FOREIGN_LINK.replace("/5", "/6")
-    loads, sent, _events = react(
+    loads, sent, events, _directed = react(
         FOREIGN_LINK,
         monkeypatch,
         content=f"{FOREIGN_LINK} {other} {foreign2}",
     )
     assert [c.track for c in loads] == [other]
     assert sent == [config.MESSAGE_LINK_FORBIDDEN] * 2 + ["loaded"]
+    connect = next(i for i, e in enumerate(events) if e[0] == "connect")
+    refusals = [
+        i
+        for i, e in enumerate(events)
+        if e == ("reply", config.MESSAGE_LINK_FORBIDDEN)
+    ]
+    assert len(refusals) == 2 and max(refusals) < connect
+
+
+def test_the_plugin_loads_an_allowed_link(monkeypatch):
+    loads, _sent, _events, directed = react(
+        LINK, monkeypatch, command_channel=2
+    )
+    assert admitted(loads) == [(LINK, LINK)]
+    assert len(directed) == 1
+
+
+def test_a_reaction_refused_by_admission_sends_no_message_link_reply(
+    monkeypatch,
+):
+    loads, sent, events, directed = react(
+        FOREIGN_LINK, monkeypatch, command_channel=3
+    )
+    assert (loads, sent, events, directed) == ([], [], [], [])
