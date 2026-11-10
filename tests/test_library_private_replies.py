@@ -1,5 +1,6 @@
-"""Library replies a slash caller gets ephemerally and a prefix caller
-gets plainly, driven through the command callbacks."""
+"""The Library cog's command replies, driven through the command
+callbacks on a fake context: replies a slash caller gets ephemerally and
+a prefix caller gets plainly, and the bare `d!library` reply."""
 
 from types import SimpleNamespace
 
@@ -7,6 +8,7 @@ import discord
 
 from config import config
 from musicbot.commands import library as lc
+from discord_fakes import RecordingCtx, command_of
 from helpers import run
 
 
@@ -102,3 +104,12 @@ def test_browse_view_is_private_only_for_slash(monkeypatch):
         (kw,) = sent
         assert ("ephemeral" in kw) is slash
         assert view.message == "sent"
+
+
+def test_bare_library_reply_names_the_non_hidden_subcommands():
+    cog = lc.Library(None)
+    group = command_of(cog, "library")
+    ctx = RecordingCtx()
+    ctx.command = group
+    run(group.callback(cog, ctx))
+    assert ctx.sent == ["Use subcommands: `browse`, `search`."]
