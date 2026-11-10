@@ -162,3 +162,25 @@ def dockerfile_commands(text=None):
         keyword, *args = re.split(r"\s+", line, maxsplit=1)
         commands.append(" ".join([keyword.upper(), *args]))
     return commands
+
+
+class RedirectFollower:
+    """A recording async stand-in for `loader.resolve_redirects`: returns
+    `result`, or raises it when it is an exception."""
+
+    def __init__(self, result):
+        self.result = result
+        self.calls = []
+
+    async def __call__(self, url):
+        self.calls.append(url)
+        if isinstance(self.result, Exception):
+            raise self.result
+        return self.result
+
+
+def fake_redirect_follower(monkeypatch, result):
+    """Patches `loader.resolve_redirects` with a `RedirectFollower`."""
+    follower = RedirectFollower(result)
+    monkeypatch.setattr("musicbot.loader.resolve_redirects", follower)
+    return follower
