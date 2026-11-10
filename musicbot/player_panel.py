@@ -178,8 +178,10 @@ def _report_message_failure(error: Exception, what: str) -> None:
 class _Drawn:
     """A draw of the player message: the message with the snapshot it
     was drawn from and the view drawn on it (`None` while inactive).
-    It is held (`self._held`) once its edit succeeded, and pending
-    before that."""
+    It is held (`self._held`) once it is on the message - sent by
+    `attach`, or its edit succeeded - and pending before that. While
+    `_recover` retries, the held record carries the refetched message
+    with the previous snapshot and view."""
 
     message: object
     snapshot: PanelSnapshot
