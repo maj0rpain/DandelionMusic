@@ -29,7 +29,7 @@ from musicbot.linkutils import (
     fetch_spotify,
     identify_url,
     normalize_track,
-    resolve_short_link,
+    resolve_redirects,
     init as init_session,
     stop as stop_session,
 )
@@ -334,11 +334,12 @@ def _load_song_admitting(track: str) -> LoadResult:
     if not admits(track):
         raise SongError(config.SONGINFO_UNSUPPORTED)
 
+    followed = None
     if host == SiteTypes.SHORT_LINK:
         # resolved once; the result is never resolved again
         with _songinfo_errors():
-            track = _loop.run_until_complete(resolve_short_link(track))
-        track = normalize_track(track)
+            followed = _loop.run_until_complete(resolve_redirects(track))
+        track = normalize_track(followed)
         host = identify_url(track)
         # the message-link gate ran on the short link as typed; a
         # resolved Discord message link would skip it
@@ -362,8 +363,15 @@ def _load_song_admitting(track: str) -> LoadResult:
             data = [{"url": url} for url in data.links]
 
     elif host == SiteTypes.CUSTOM:
+        # ffmpeg is handed the final URL, whose redirects were checked
+        stream = track
+        # a short link's follow vetted `followed`, so it is skipped only
+        # when normalizing changed nothing
+        if track != followed:
+            with _songinfo_errors():
+                stream = _loop.run_until_complete(resolve_redirects(track))
         data = {
-            "url": track,
+            "url": stream,
             "webpage_url": track,
             "title": urlparse(track).path.rpartition("/")[2],
         }

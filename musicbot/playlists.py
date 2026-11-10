@@ -79,9 +79,8 @@ class PlaylistExists(SavedPlaylistError):
 class PlaylistNameTooLong(SavedPlaylistError):
     """A name over `max_length` characters cannot be saved."""
 
-    def __init__(self, name: str, max_length: int):
+    def __init__(self, max_length: int):
         super().__init__(f"playlist name over {max_length} characters")
-        self.name = name
         self.max_length = max_length
 
 
@@ -176,7 +175,7 @@ async def save(
     songs: Iterable[PlaylistEntry],
 ) -> None:
     if len(playlist.name) > PLAYLIST_NAME_MAX_LENGTH:
-        raise PlaylistNameTooLong(playlist.name, PLAYLIST_NAME_MAX_LENGTH)
+        raise PlaylistNameTooLong(PLAYLIST_NAME_MAX_LENGTH)
     async with session_factory() as session:
         session.add(
             SavedPlaylist(

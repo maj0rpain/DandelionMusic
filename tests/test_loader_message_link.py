@@ -12,7 +12,7 @@ from musicbot import loader
 from musicbot.loader import Preload, SongError
 from musicbot.song import Song
 from musicbot.yt_dlp_plugins.extractor import discord as extractor
-from helpers import run
+from helpers import fake_redirect_follower, run
 from message_link_fakes import (
     gated_track,
     LINK,
@@ -86,10 +86,7 @@ def test_a_checked_tracks_own_link_is_fetched(client, typed):
 
 
 def test_a_short_link_to_a_message_link_is_refused(client, monkeypatch):
-    async def resolve(url):
-        return LINK
-
-    monkeypatch.setattr(loader, "resolve_short_link", resolve)
+    fake_redirect_follower(monkeypatch, LINK)
     monkeypatch.setattr(
         loader,
         "identify_url",
