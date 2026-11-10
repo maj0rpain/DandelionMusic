@@ -6,21 +6,16 @@ import pickle
 import pytest
 
 from musicbot import loader
-from musicbot.message_link import CheckedTrack, check_message_link
+from musicbot.message_link import CheckedTrack
 from helpers import attribute_names, imported_names, run
-from message_link_fakes import LINK, LinkChannel, LinkGuild, LinkMember
+from message_link_fakes import LINK, gated_track
 
 TRACK = "https://example.invalid/track"
 
 
-def gated(track):
-    guild = LinkGuild([LinkChannel()])
-    return run(check_message_link(track, guild, LinkMember()))
-
-
 @pytest.mark.parametrize(
     "make",
-    [lambda: TRACK, lambda: CheckedTrack(TRACK), lambda: gated(LINK)],
+    [lambda: TRACK, lambda: CheckedTrack(TRACK), lambda: gated_track(LINK)],
 )
 def test_load_song_hands_load_the_very_track_it_got(make, monkeypatch):
     track = make()
@@ -36,7 +31,7 @@ def test_load_song_hands_load_the_very_track_it_got(make, monkeypatch):
 
 
 def test_a_checked_track_equals_itself_after_a_pickle_round_trip():
-    checked = gated(f"<{LINK}>")
+    checked = gated_track(f"<{LINK}>")
     assert pickle.loads(pickle.dumps(checked)) == checked
 
 
@@ -76,7 +71,7 @@ def test_a_checked_load_leaves_no_admitted_link_held(monkeypatch, fails):
 
     monkeypatch.setattr(loader, "_load_song_admitting", body)
     try:
-        loader._load_song(gated(LINK))
+        loader._load_song(gated_track(LINK))
     except loader.SongError:
         pass
     assert seen == [(LINK, LINK)]

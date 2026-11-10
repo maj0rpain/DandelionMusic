@@ -135,9 +135,12 @@ def install_fake_discord_client(monkeypatch, register=lambda *a, **k: None):
     monkeypatch.setattr(atexit, "register", register)
 
 
-def admitted_track(track, link):
-    """A `CheckedTrack` holding `link` as its admitted link, as the gate
-    makes one, for loader tests that skip the gate."""
-    from musicbot.message_link import _admitted
+def gated_track(track, guild=None, member=None):
+    """`track` through the gate, as the entry points make a checked
+    track: over a guild with the one `CHANNEL_ID` channel by default,
+    for a member who can read it."""
+    from helpers import run
+    from musicbot.message_link import check_message_link
 
-    return _admitted(track, link)
+    guild = guild or LinkGuild([LinkChannel()])
+    return run(check_message_link(track, guild, member or LinkMember()))
