@@ -18,7 +18,7 @@ from discord.ext.commands.view import StringView
 
 from config import config
 from musicbot.commands.general import General
-from musicbot.settings import SETTINGS
+from musicbot.settings import SETTINGS, ConversionErrorText, SettingsEmbed
 from setting_fakes import (
     FakeMessage,
     fake_author,
@@ -113,13 +113,14 @@ def test_a_setting_update_is_confirmed(name, arg, confirmation, stored):
 
     sent = invoke_setting(name, arg, sett)
 
-    assert sent[-1] == f"Setting `{name}` updated to {confirmation}!"
+    assert sent[-1] == config.SETTING_UPDATED.format(name, confirmation)
     assert getattr(sett, name) == stored
 
 
 def assert_failed(sent, sett, reply):
     assert sent[-1] == reply
-    assert not any(m and "updated to" in m for m in sent)
+    updated = config.SETTING_UPDATED.format("{}", "{}").split("{}")[1]
+    assert not any(m and updated in m for m in sent)
     assert stored_values(sett) == stored_values(stored_settings())
 
 
@@ -134,7 +135,7 @@ def missing_row(monkeypatch):
     monkeypatch.setattr(FakeDbSession, "execute", execute_matching_no_row)
 
 
-FAILED = "`Error: Setting default_volume could not be updated.`"
+FAILED = config.SETTING_UPDATE_FAILED.format("default_volume")
 
 
 def test_a_failed_write_is_reported_on_update(missing_row):
@@ -151,7 +152,8 @@ def test_a_failed_write_is_reported_on_reset(missing_row):
     sent = invoke_setting("default_volume", NO_VALUE, sett)
 
     assert_failed(sent, sett, FAILED)
-    assert not any(m and "reset to" in m for m in sent)
+    reset = config.SETTING_RESET.format("{}", "{}").split("{}")[1]
+    assert not any(m and reset in m for m in sent)
 
 
 def test_the_update_and_failure_replies_come_from_the_catalogue(
@@ -174,7 +176,7 @@ def test_the_update_and_failure_replies_come_from_the_catalogue(
 
     assert updated[-1] == "UPD[default_volume|50]"
     assert (
-        conversion_failed[-1] == "CONV[Value must be a number in range 0-100]"
+        conversion_failed[-1] == f"CONV[{ConversionErrorText.INVALID_VOLUME}]"
     )
     assert failed_update[-1] == "FAIL[default_volume]"
     assert failed_reset[-1] == "FAIL[default_volume]"
@@ -194,7 +196,13 @@ def test_an_invalid_emoji_is_reported():
         message=FakeMessage(reaction_error=unknown_emoji),
     )
 
-    assert_failed(sent, sett, "`Error: Invalid emote`")
+    assert_failed(
+        sent,
+        sett,
+        config.SETTING_CONVERSION_FAILED.format(
+            ConversionErrorText.INVALID_EMOJI
+        ),
+    )
 
 
 def test_an_out_of_range_volume_is_reported():
@@ -202,7 +210,13 @@ def test_an_out_of_range_volume_is_reported():
 
     sent = invoke_setting("default_volume", 101, sett)
 
-    assert_failed(sent, sett, "`Error: Value must be a number in range 0-100`")
+    assert_failed(
+        sent,
+        sett,
+        config.SETTING_CONVERSION_FAILED.format(
+            ConversionErrorText.INVALID_VOLUME
+        ),
+    )
 
 
 def test_vc_timeout_is_refused_while_its_edit_is_disabled(monkeypatch):
@@ -280,7 +294,9 @@ def test_a_slash_subcommand_takes_its_value_by_parameter_name(
         )
     )
 
-    assert sent[-1].startswith(f"Setting `{name}` updated to")
+    assert sent[-1].startswith(
+        config.SETTING_UPDATED.format(name, "{}").split("{}")[0]
+    )
 
 
 TEXT_ID, VOICE_ID, ROLE_ID = (
@@ -361,7 +377,7 @@ def test_a_prefix_subcommand_converts_its_argument(
 
     run(command.invoke(prefix_ctx(sent, sett, argument)))
 
-    assert sent[-1] == f"Setting `{name}` updated to {confirmation}!"
+    assert sent[-1] == config.SETTING_UPDATED.format(name, confirmation)
     assert getattr(sett, name) == stored
 
 
@@ -383,7 +399,7 @@ def bound_subcommand(name):
 
 def reset_text(name):
     shown = SETTINGS[name].show(None, SETTINGS[name].default)
-    return f"Setting `{name}` reset to {shown}!"
+    return config.SETTING_RESET.format(name, shown)
 
 
 @pytest.mark.parametrize("name", list(ARGS))
@@ -407,7 +423,9 @@ def test_every_stored_setting_differs_from_its_default():
 def test_a_reset_is_confirmed_with_the_value_the_embed_shows():
     sent = invoke_setting("command_channel", NO_VALUE, stored_settings())
 
-    assert sent[-1] == "Setting `command_channel` reset to Not Set!"
+    assert sent[-1] == config.SETTING_RESET.format(
+        "command_channel", SettingsEmbed.FIELD_EMPTY
+    )
 
 
 def test_a_prefix_subcommand_without_a_value_resets_the_setting():

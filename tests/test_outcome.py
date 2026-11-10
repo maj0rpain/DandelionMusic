@@ -48,8 +48,11 @@ def test_truncated_playlist_says_how_many_of_how_many():
         OutcomeKind.PLAYLIST, count=10, truncation=truncation
     )
     assert render(outcome, True).text == (
-        "Only 10 of 50 tracks could be loaded: "
-        "Spotify stopped responding partway through."
+        config.SPOTIFY_PLAYLIST_TRUNCATED.format(
+            queued=10,
+            total=50,
+            reason=config.SPOTIFY_TRUNCATED_API_ERROR,
+        )
     )
 
 
@@ -88,13 +91,6 @@ def test_library_pick_elides_skipped_files_past_five(monkeypatch):
     names = [f"{i}.mp3" for i in range(7)]
     assert _library_under(_WORDING, monkeypatch, names, 0) == (
         "Got 0. Lost 7: 0.mp3, 1.mp3, 2.mp3, 3.mp3, 4.mp3 +2 Refresh!"
-    )
-
-
-def test_library_pick_wording_comes_from_the_language_file(monkeypatch):
-    names = [f"{i}.mp3" for i in range(7)]
-    assert _library_under(_WORDING, monkeypatch, names) == (
-        "Got 1. Lost 7: 0.mp3, 1.mp3, 2.mp3, 3.mp3, 4.mp3 +2 Refresh!"
     )
 
 

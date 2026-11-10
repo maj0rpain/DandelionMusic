@@ -154,7 +154,9 @@ def test_an_admin_setting_a_value_gets_only_the_confirmation():
     sent, error, sett = invoke("announce_songs off")
 
     assert error is None
-    assert sent == [("Setting `announce_songs` updated to False!", None)]
+    assert sent == [
+        (config.SETTING_UPDATED.format("announce_songs", False), None)
+    ]
 
 
 def settings_with_dj_role(dj_role):
@@ -211,7 +213,7 @@ def test_an_admin_or_the_owner_gets_the_subcommands_own_reply(name, is_owner):
     content, embed = sent[-1]
     assert embed is None
     assert content == config.VC_TIMEOUT_EDIT_DISABLED or content.startswith(
-        f"Setting `{name}` updated to"
+        config.SETTING_UPDATED.format(name, "{}").split("{}")[0]
     )
 
 
@@ -244,7 +246,7 @@ def test_an_unknown_word_is_an_error_with_no_embed_and_no_change():
     sent, error, sett = invoke("typo", sett=sett)
 
     assert isinstance(error, CheckError)
-    assert str(error) == "Unknown setting `typo`"
+    assert str(error) == config.UNKNOWN_SETTING.format("typo")
     assert sent == []
     assert stored_values(sett) == before
     assert FakeDbSession.commits == 0
@@ -280,7 +282,7 @@ def test_extra_whitespace_before_an_unknown_word_is_still_unknown():
     sent, error, sett = invoke("  foo")
 
     assert isinstance(error, CheckError)
-    assert str(error) == "Unknown setting `foo`"
+    assert str(error) == config.UNKNOWN_SETTING.format("foo")
     assert sent == []
 
 
