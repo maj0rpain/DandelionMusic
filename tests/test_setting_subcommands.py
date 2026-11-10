@@ -159,6 +159,7 @@ def test_the_update_and_failure_replies_come_from_the_catalogue(
 ):
     monkeypatch.setattr(config, "SETTING_UPDATED", "UPD[{}|{}]")
     monkeypatch.setattr(config, "SETTING_UPDATE_FAILED", "FAIL[{}]")
+    monkeypatch.setattr(config, "SETTING_CONVERSION_FAILED", "CONV[{}]")
 
     updated = invoke_setting("default_volume", 50, stored_settings())
     monkeypatch.setattr(FakeDbSession, "execute", execute_matching_no_row)
@@ -167,7 +168,14 @@ def test_the_update_and_failure_replies_come_from_the_catalogue(
         "default_volume", NO_VALUE, stored_settings()
     )
 
+    conversion_failed = invoke_setting(
+        "default_volume", 101, stored_settings()
+    )
+
     assert updated[-1] == "UPD[default_volume|50]"
+    assert (
+        conversion_failed[-1] == "CONV[Value must be a number in range 0-100]"
+    )
     assert failed_update[-1] == "FAIL[default_volume]"
     assert failed_reset[-1] == "FAIL[default_volume]"
 
@@ -381,18 +389,11 @@ def reset_text(name):
 @pytest.mark.parametrize("name", list(ARGS))
 def test_a_subcommand_without_a_value_resets_the_setting(name):
     sett = stored_settings()
-    assert getattr(sett, name) != SETTINGS[name].default
 
     sent = invoke_setting(name, NO_VALUE, sett)
 
     assert sent[-1] == reset_text(name)
     assert getattr(sett, name) == SETTINGS[name].default
-
-
-def test_an_announce_songs_reset_is_confirmed_as_false():
-    sent = invoke_setting("announce_songs", NO_VALUE, stored_settings())
-
-    assert sent[-1] == "Setting `announce_songs` reset to False!"
 
 
 def test_every_stored_setting_differs_from_its_default():

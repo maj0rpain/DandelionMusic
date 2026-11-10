@@ -12,9 +12,10 @@ from yt_dlp.utils import DownloadError
 from config import config
 from musicbot import linkutils, loader
 from musicbot.loader import SongError
-from musicbot.message_link import CheckedTrack
 from musicbot.yt_dlp_plugins.extractor import discord as extractor
 from musicbot.yt_dlp_plugins.extractor.discord import DiscordAttachmentsIE
+
+from message_link_fakes import LinkChannel, LinkGuild, gated_track
 
 URL = "https://discord.com/channels/1/2/3"
 LIMIT = 0.05
@@ -89,5 +90,7 @@ def test_a_failed_discord_link_is_a_could_not_load_error(
     else:
         http.login_exc = RuntimeError("bad token")
     with pytest.raises(SongError) as info:
-        loader._load_song(CheckedTrack(URL, URL))
+        loader._load_song(
+            gated_track(URL, LinkGuild([LinkChannel(2)], guild_id=1))
+        )
     assert str(info.value) == config.SONGINFO_ERROR
