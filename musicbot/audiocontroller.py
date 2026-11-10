@@ -165,6 +165,12 @@ class AudioController(object):
         if song.host == SiteTypes.LOCAL_LIBRARY:
             before_options = "-protocol_whitelist file"
         else:
+            # No ffmpeg http option caps or forbids redirects (ffmpeg 8.0),
+            # so the loader resolves a custom link's redirects, checking
+            # each hop, and hands ffmpeg the final URL. Accepted residual:
+            # a server may still redirect ffmpeg's own later request
+            # differently from the check (time-of-check/time-of-use), and
+            # the host rule is text-only (no DNS lookup).
             protocols = ",".join(
                 (*ALLOWED_REMOTE_SCHEMES, "tcp", "tls", "crypto")
             )

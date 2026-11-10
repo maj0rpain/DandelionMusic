@@ -93,7 +93,7 @@ def test_a_short_link_to_a_message_link_is_refused(client, monkeypatch):
     async def resolve(url):
         return LINK
 
-    monkeypatch.setattr(loader, "resolve_short_link", resolve)
+    monkeypatch.setattr(loader, "resolve_redirects", resolve)
     monkeypatch.setattr(
         loader,
         "identify_url",

@@ -39,7 +39,7 @@ def extracted(monkeypatch):
 
 def _resolver(monkeypatch, result):
     resolver = Resolver(result)
-    monkeypatch.setattr(loader, "resolve_short_link", resolver)
+    monkeypatch.setattr(loader, "resolve_redirects", resolver)
     return resolver
 
 

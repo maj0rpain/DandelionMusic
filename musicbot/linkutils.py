@@ -212,8 +212,8 @@ def _is_disallowed_host(host: Optional[str]) -> bool:
 
 
 # The only schemes of remote media the bot fetches; read by identify_url's
-# custom-link check, the redirect check in resolve_short_link and the
-# ffmpeg remote protocol whitelist.
+# custom-link check, the redirect check in resolve_redirects (short and
+# custom links) and the ffmpeg remote protocol whitelist.
 ALLOWED_REMOTE_SCHEMES = ("http", "https")
 
 
@@ -282,18 +282,21 @@ async def get_soup(url: str) -> BeautifulSoup:
     return BeautifulSoup(page, "html.parser")
 
 
-# Most redirects a short link may take (aiohttp's own default).
+# Most redirects any followed link (short or custom) may take (aiohttp's
+# own default).
 _MAX_REDIRECTS = 10
 
 
 class RefusedRedirect(Exception):
-    """A short link's redirect was refused: its target is a disallowed
-    host or not an allowed remote scheme, or the hop limit was hit."""
+    """A redirect (of a short or custom link) was refused: its target is a
+    disallowed host or not an allowed remote scheme, or the hop limit was
+    hit."""
 
 
-async def resolve_short_link(url: str) -> str:
-    """The URL a short link redirects to: one GET per hop with
-    redirects disabled, the body never read. Each hop's target is
+async def resolve_redirects(url: str) -> str:
+    """The last URL a link's redirects lead to, as requested (not
+    re-parsed): one GET per hop with redirects disabled, the body never
+    read. Each hop's target is
     checked before it is requested. Raises RefusedRedirect on a refused
     hop or too many hops, and on a 4xx/5xx or any network or timeout
     error."""
@@ -302,7 +305,7 @@ async def resolve_short_link(url: str) -> str:
             response.raise_for_status()
             location = response.headers.get("Location")
             if not (300 <= response.status < 400 and location):
-                return str(response.url)
+                return url
             target = response.url.join(URL(location))
         if not _is_fetchable(target.scheme, target.host):
             raise RefusedRedirect(f"redirect to {target} refused")
