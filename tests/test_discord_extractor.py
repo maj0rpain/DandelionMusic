@@ -12,10 +12,14 @@ from yt_dlp.utils import DownloadError
 from config import config
 from musicbot import linkutils, loader
 from musicbot.loader import SongError
-from musicbot.yt_dlp_plugins.extractor import discord as extractor
 from musicbot.yt_dlp_plugins.extractor.discord import DiscordAttachmentsIE
 
-from message_link_fakes import LinkChannel, LinkGuild, gated_track
+from message_link_fakes import (
+    LinkChannel,
+    LinkGuild,
+    gated_track,
+    install_extractor_client,
+)
 
 URL = "https://discord.com/channels/1/2/3"
 LIMIT = 0.05
@@ -48,9 +52,7 @@ class _Http:
 @pytest.fixture
 def http(monkeypatch, worker_loop):
     http = _Http()
-    monkeypatch.setattr(extractor, "HTTPClient", lambda loop: http)
-    monkeypatch.setattr(extractor, "_client", None)
-    monkeypatch.setattr(extractor.atexit, "register", lambda *a, **k: None)
+    install_extractor_client(monkeypatch, lambda loop: http)
     monkeypatch.setattr(linkutils, "HTTP_TIMEOUT", LIMIT)
     monkeypatch.setattr(loader, "_admitted_link", URL)
     return http

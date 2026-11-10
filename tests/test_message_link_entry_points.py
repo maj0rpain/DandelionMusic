@@ -3,6 +3,7 @@ forbidden message link with `MESSAGE_LINK_FORBIDDEN` and never loads it;
 an allowed link still loads."""
 
 import types
+from typing import NamedTuple
 
 import pytest
 
@@ -28,6 +29,7 @@ from message_link_fakes import (
     LinkChannel,
     LinkMember,
     LinkThread,
+    admitted_pair,
     perms,
 )
 
@@ -38,7 +40,7 @@ def admitted(checked):
     """The (track, admitted link) of each checked track, one or in a
     1-tuple of load arguments."""
     flat = [c[0] if isinstance(c, tuple) else c for c in checked]
-    return [(c.track, c.admitted_link) for c in flat]
+    return [admitted_pair(c) for c in flat]
 
 
 def loaded(stub_loader):
@@ -210,6 +212,13 @@ class PluginController:
         return await self._process(self, url, user=user)
 
 
+class Reaction(NamedTuple):
+    loads: list
+    sent: list
+    events: list
+    directed: list
+
+
 def react(link, monkeypatch, content=None, command_channel=None):
     loads = []
 
@@ -281,16 +290,13 @@ def react(link, monkeypatch, content=None, command_channel=None):
     )
     run(Button(bot).on_raw_reaction_add(event))
     directed = bot.sessions.panel(guild).directed
-    return loads, sent, guild.events, directed
+    return Reaction(loads, sent, guild.events, directed)
 
 
 def test_the_plugin_refuses_a_forbidden_link_and_does_not_load(monkeypatch):
-    loads, sent, events, directed = react(
-        FOREIGN_LINK, monkeypatch, command_channel=2
-    )
-    assert sent == [config.MESSAGE_LINK_FORBIDDEN]
-    assert (loads, directed) == ([], [])
-    assert events == [("reply", config.MESSAGE_LINK_FORBIDDEN)]
+    seen = react(FOREIGN_LINK, monkeypatch, command_channel=2)
+    assert (seen.loads, seen.directed) == ([], [])
+    assert seen.events == [("reply", config.MESSAGE_LINK_FORBIDDEN)]
 
 
 def test_one_forbidden_link_among_several_reactions_still_queues_the_rest(
@@ -298,34 +304,30 @@ def test_one_forbidden_link_among_several_reactions_still_queues_the_rest(
 ):
     other = "https://www.youtube.com/watch?v=aaaaaaaaaaa"
     foreign2 = FOREIGN_LINK.replace("/5", "/6")
-    loads, sent, events, _directed = react(
+    seen = react(
         FOREIGN_LINK,
         monkeypatch,
         content=f"{FOREIGN_LINK} {other} {foreign2}",
     )
-    assert [c.track for c in loads] == [other]
-    assert sent == [config.MESSAGE_LINK_FORBIDDEN] * 2 + ["loaded"]
-    connect = next(i for i, e in enumerate(events) if e[0] == "connect")
+    assert [c.track for c in seen.loads] == [other]
+    assert seen.sent == [config.MESSAGE_LINK_FORBIDDEN] * 2 + ["loaded"]
+    connect = next(i for i, e in enumerate(seen.events) if e[0] == "connect")
     refusals = [
         i
-        for i, e in enumerate(events)
+        for i, e in enumerate(seen.events)
         if e == ("reply", config.MESSAGE_LINK_FORBIDDEN)
     ]
     assert len(refusals) == 2 and max(refusals) < connect
 
 
 def test_the_plugin_loads_an_allowed_link(monkeypatch):
-    loads, _sent, _events, directed = react(
-        LINK, monkeypatch, command_channel=2
-    )
-    assert admitted(loads) == [(LINK, LINK)]
-    assert len(directed) == 1
+    seen = react(LINK, monkeypatch, command_channel=2)
+    assert admitted(seen.loads) == [(LINK, LINK)]
+    assert len(seen.directed) == 1
 
 
 def test_a_reaction_refused_by_admission_sends_no_message_link_reply(
     monkeypatch,
 ):
-    loads, sent, events, directed = react(
-        FOREIGN_LINK, monkeypatch, command_channel=3
-    )
-    assert (loads, sent, events, directed) == ([], [], [], [])
+    seen = react(FOREIGN_LINK, monkeypatch, command_channel=3)
+    assert seen == ([], [], [], [])

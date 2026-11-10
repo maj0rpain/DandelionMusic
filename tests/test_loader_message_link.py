@@ -41,18 +41,27 @@ class _Hop(InfoExtractor):
         }
 
 
-@pytest.fixture
-def client(monkeypatch, worker_loop):
-    install_fake_discord_client(monkeypatch)
+def install_hop(monkeypatch, hop_extractor, url):
+    """Install a downloader with `DiscordAttachmentsIE` and
+    `hop_extractor`, routing `url` to the hop and any other to
+    `DiscordAttachmentsIE`."""
     ydl = loader._new_downloader()
     ydl.add_info_extractor(extractor.DiscordAttachmentsIE())
-    ydl.add_info_extractor(_Hop())
+    ydl.add_info_extractor(hop_extractor())
     monkeypatch.setattr(loader, "_downloader", ydl)
     monkeypatch.setattr(
         loader,
         "identify_url",
-        lambda url: _Hop if url == HOP else extractor.DiscordAttachmentsIE,
+        lambda u: (
+            hop_extractor if u == url else extractor.DiscordAttachmentsIE
+        ),
     )
+
+
+@pytest.fixture
+def client(monkeypatch, worker_loop):
+    install_fake_discord_client(monkeypatch)
+    install_hop(monkeypatch, _Hop, HOP)
     _Hop.target = LINK
     _Hop.kind = "url"
 
@@ -119,17 +128,7 @@ def test_a_checked_tracks_hop_to_a_different_link_fails_without_a_fetch(
         IE_NAME = "fakelinkhop"
         target = OTHER
 
-    ydl = loader._new_downloader()
-    ydl.add_info_extractor(extractor.DiscordAttachmentsIE())
-    ydl.add_info_extractor(LinkHop())
-    monkeypatch.setattr(
-        loader,
-        "identify_url",
-        lambda url: (
-            LinkHop if url == LINK else extractor.DiscordAttachmentsIE
-        ),
-    )
-    monkeypatch.setattr(loader, "_downloader", ydl)
+    install_hop(monkeypatch, LinkHop, LINK)
     with pytest.raises(SongError) as info:
         loader._load_song(gated_track(LINK))
     assert _code(info) == config.SONGINFO_ERROR
