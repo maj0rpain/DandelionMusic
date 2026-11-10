@@ -8,7 +8,7 @@ import discord
 
 from config import config
 from musicbot.commands import library as lc
-from discord_fakes import command_of
+from discord_fakes import RecordingCtx, command_of
 from helpers import run
 
 
@@ -107,13 +107,9 @@ def test_browse_view_is_private_only_for_slash(monkeypatch):
 
 
 def test_bare_library_reply_names_the_non_hidden_subcommands():
-    sent = []
-
-    async def send(content=None, **kwargs):
-        sent.append(content)
-
     cog = lc.Library(None)
     group = command_of(cog, "library")
-    ctx = SimpleNamespace(send=send, command=group)
+    ctx = RecordingCtx()
+    ctx.command = group
     run(group.callback(cog, ctx))
-    assert sent == ["Use subcommands: `browse`, `search`."]
+    assert ctx.sent == ["Use subcommands: `browse`, `search`."]
