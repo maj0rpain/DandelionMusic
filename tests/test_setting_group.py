@@ -30,6 +30,7 @@ from setting_fakes import (
     setting_group,
     stored_settings,
     stored_values,
+    template_fragment,
 )
 from helpers import run
 
@@ -213,7 +214,7 @@ def test_an_admin_or_the_owner_gets_the_subcommands_own_reply(name, is_owner):
     content, embed = sent[-1]
     assert embed is None
     assert content == config.VC_TIMEOUT_EDIT_DISABLED or content.startswith(
-        config.SETTING_UPDATED.format(name, "{}").split("{}")[0]
+        template_fragment(config.SETTING_UPDATED, 0, name)
     )
 
 

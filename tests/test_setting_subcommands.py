@@ -27,6 +27,7 @@ from setting_fakes import (
     setting_group,
     stored_settings,
     stored_values,
+    template_fragment,
     FakeDbSession,
 )
 from helpers import run
@@ -119,7 +120,7 @@ def test_a_setting_update_is_confirmed(name, arg, confirmation, stored):
 
 def assert_failed(sent, sett, reply):
     assert sent[-1] == reply
-    updated = config.SETTING_UPDATED.format("{}", "{}").split("{}")[1]
+    updated = template_fragment(config.SETTING_UPDATED, 1)
     assert not any(m and updated in m for m in sent)
     assert stored_values(sett) == stored_values(stored_settings())
 
@@ -152,7 +153,7 @@ def test_a_failed_write_is_reported_on_reset(missing_row):
     sent = invoke_setting("default_volume", NO_VALUE, sett)
 
     assert_failed(sent, sett, FAILED)
-    reset = config.SETTING_RESET.format("{}", "{}").split("{}")[1]
+    reset = template_fragment(config.SETTING_RESET, 1)
     assert not any(m and reset in m for m in sent)
 
 
@@ -295,7 +296,7 @@ def test_a_slash_subcommand_takes_its_value_by_parameter_name(
     )
 
     assert sent[-1].startswith(
-        config.SETTING_UPDATED.format(name, "{}").split("{}")[0]
+        template_fragment(config.SETTING_UPDATED, 0, name)
     )
 
 
