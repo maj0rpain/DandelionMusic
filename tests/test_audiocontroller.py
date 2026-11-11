@@ -3354,7 +3354,8 @@ def test_requests_during_the_goodbye_are_refused_and_place_nothing(
         refused,
         ac.RestoreResult.REFUSED_WHILE_DISCONNECTING,
     ]
-    assert before[0][0] == []
+    (titles, _, _), _ = before
+    assert titles == []
     assert after == before
 
 
