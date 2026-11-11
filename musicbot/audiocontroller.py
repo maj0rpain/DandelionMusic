@@ -167,7 +167,11 @@ class AudioController(object):
             # the host rule is text-only (no DNS lookup). Transitional
             # residual (#1406): a custom song restored from a playlist
             # backup written before this change keeps the typed URL as its
-            # stream URL, and that URL is not re-checked.
+            # stream URL, and plays it unchecked only while loader.preload
+            # still counts it current: its expire= is beyond
+            # EXPIRY_MARGIN or, with no expire=, its extraction stamp is
+            # younger than UNKNOWN_EXPIRY_MAX_AGE. After that, preload
+            # re-loads it through the checked redirect follower.
             protocols = ",".join(
                 (*ALLOWED_REMOTE_SCHEMES, "tcp", "tls", "crypto")
             )
