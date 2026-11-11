@@ -1,6 +1,5 @@
 """Which links the reaction-button plugin offers a button for."""
 
-from dataclasses import dataclass
 from types import SimpleNamespace
 
 import pytest
@@ -9,7 +8,12 @@ from musicbot import loader
 from musicbot.outcome import EnqueueOutcome, OutcomeKind, render
 from musicbot.plugins.button import Button
 from musicbot.truncation import Truncation, TruncationReason
-from discord_fakes import VoiceGuild, admission_settings, make_bot
+from discord_fakes import (
+    ReactionEffects,
+    VoiceGuild,
+    admission_settings,
+    make_bot,
+)
 from helpers import plain_song, run
 
 YOUTUBE = "https://www.youtube.com/watch?v=dQw4w9WgXcQ"
@@ -94,14 +98,6 @@ class FakeController:
         if isinstance(outcome, Exception):
             raise outcome
         return outcome
-
-
-@dataclass(frozen=True)
-class ReactionEffects:
-    processed: list
-    sent: list
-    events: list
-    directed: list
 
 
 def react(
