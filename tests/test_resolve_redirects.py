@@ -56,7 +56,8 @@ async def serving():
 
     app = web.Application(middlewares=[record])
     app.router.add_get(
-        "/not-modified-body", lambda r: web.Response(status=300, text="body")
+        "/redirect-status-no-location",
+        lambda r: web.Response(status=300, text="body"),
     )
     app.router.add_get("/final", lambda r: web.Response(text="ok"))
     app.router.add_get("/gone", lambda r: web.Response(status=404))
@@ -204,7 +205,7 @@ def test_page_redirect_to_a_disallowed_target_is_refused():
 
 
 def test_page_redirect_without_location_is_parsed(allow_every_host):
-    got = _soup("/not-modified-body")
+    got = _soup("/redirect-status-no-location")
 
     assert got.error is None
     assert got.result.get_text() == "body"
