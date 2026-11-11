@@ -1,4 +1,5 @@
-"""The shared import-reading helpers, on small sources under `tmp_path`."""
+"""The shared test helpers' own tests: the import-reading helpers on small
+sources under `tmp_path`, and the other shared helpers."""
 
 import types
 
