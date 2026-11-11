@@ -230,7 +230,7 @@ class PluginController:
         return await self._process(self, url, user=user)
 
 
-def react(link, monkeypatch, content=None, command_channel=None, lookups=None):
+def react(link, monkeypatch, content=None, command_channel=None, channel=None):
     loads = []
 
     async def load_song(track):
@@ -241,15 +241,12 @@ def react(link, monkeypatch, content=None, command_channel=None, lookups=None):
     sent = []
     msg = types.SimpleNamespace(content=content or link)
 
-    class Channel(CountingThread):
-        async def fetch_message(self, _id):
-            return msg
+    channel = channel or LinkChannel(channel_id=2)
 
-    channel = Channel(
-        [] if lookups is None else lookups,
-        channel_id=2,
-        private=lookups is not None,
-    )
+    async def fetch_message(_id):
+        return msg
+
+    channel.fetch_message = fetch_message
 
     class Guild(VoiceGuild):
         name = "guild"
@@ -338,7 +335,12 @@ def test_one_forbidden_link_among_several_reactions_still_queues_the_rest(
 def test_the_gate_runs_once_per_link_in_a_reaction(monkeypatch):
     other = LINK.replace("/5", "/6")
     lookups = []
-    seen = react(LINK, monkeypatch, content=f"{LINK} {other}", lookups=lookups)
+    seen = react(
+        LINK,
+        monkeypatch,
+        content=f"{LINK} {other}",
+        channel=CountingThread(lookups, channel_id=2, private=True),
+    )
     assert admitted(seen.processed) == [(LINK, LINK), (other, other)]
     assert len(lookups) == 2
 
