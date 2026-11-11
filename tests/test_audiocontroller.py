@@ -2891,6 +2891,13 @@ def _queue_history_and_backup(controller, tmp_path):
     )
 
 
+def _goodbye_snapshot(controller, tmp_path):
+    return (
+        _queue_history_and_backup(controller, tmp_path),
+        len(controller.guild.voice_client.played),
+    )
+
+
 def test_loop_all_every_preload_failing_drains_to_idle(
     controller, stub_loader, monkeypatch, tmp_path
 ):
@@ -3327,21 +3334,14 @@ def test_requests_during_the_goodbye_are_refused_and_place_nothing(
 
     async def scenario():
         task = await _hold_goodbye(controller)
-        client = controller.guild.voice_client
-        before = (
-            _queue_history_and_backup(controller, tmp_path),
-            len(client.played),
-        )
+        before = _goodbye_snapshot(controller, tmp_path)
         results = [
             (await controller.enqueue(extra[:1])).kind,
             (await controller.enqueue_next(extra[1])).kind,
             (await controller.process_local_tracks(batch, "test")).kind,
             controller.load_backup(),
         ]
-        after = (
-            _queue_history_and_backup(controller, tmp_path),
-            len(client.played),
-        )
+        after = _goodbye_snapshot(controller, tmp_path)
         await _end_goodbye(controller, task)
         return results, before, after
 
@@ -3367,17 +3367,10 @@ def test_prev_during_the_goodbye_is_refused_and_changes_nothing(
     async def scenario():
         task = await _hold_goodbye(controller)
         _old_track(controller)
-        client = controller.guild.voice_client
-        before = (
-            _queue_history_and_backup(controller, tmp_path),
-            len(client.played),
-        )
+        before = _goodbye_snapshot(controller, tmp_path)
         result = controller.prev_song()
         await _settle()
-        after = (
-            _queue_history_and_backup(controller, tmp_path),
-            len(client.played),
-        )
+        after = _goodbye_snapshot(controller, tmp_path)
         await _end_goodbye(controller, task)
         return result, before, after
 
