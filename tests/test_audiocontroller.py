@@ -3511,7 +3511,7 @@ def test_a_library_pick_whose_load_lands_in_the_goodbye_places_no_tail(
     controller, stub_loader, monkeypatch, tmp_path
 ):
     outcome, handed, after = _library_pick_in_the_goodbye(
-        controller, stub_loader, monkeypatch, "abc", 1
+        controller, stub_loader, monkeypatch, "abc", gated_call=1
     )
 
     assert outcome.kind.value == "refused_disconnecting"
@@ -3556,7 +3556,7 @@ def test_a_library_pick_whose_first_track_load_lands_in_the_goodbye_is_refused(
     controller, stub_loader, monkeypatch
 ):
     outcome, handed, after = _library_pick_in_the_goodbye(
-        controller, stub_loader, monkeypatch, "ab", 0
+        controller, stub_loader, monkeypatch, "ab", gated_call=0
     )
 
     assert outcome.kind.value == "refused_disconnecting"
