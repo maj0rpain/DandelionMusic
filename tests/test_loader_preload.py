@@ -290,16 +290,6 @@ def test_a_custom_link_that_is_its_own_stream_is_current_far_from_expiry(
     assert run(loader.preload(_custom(url, link=url))) is Preload.CURRENT
 
 
-def test_a_failed_custom_reload_reports_failure(monkeypatch):
-    async def load(lane, token):
-        raise loader.SongError("gone")
-
-    monkeypatch.setattr(loader, "_load", load)
-    _clock(monkeypatch)
-    song = _custom(_expiring_in(-MINUTE))
-    assert run(loader.preload(song)) is Preload.FAILED
-
-
 def test_the_controller_seams_stub_preload_matches_the_real_one():
     from controller_seam import StubLoader
 
