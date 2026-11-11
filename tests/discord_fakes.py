@@ -8,6 +8,7 @@ import asyncio
 import inspect
 import types
 from concurrent.futures import ThreadPoolExecutor
+from dataclasses import dataclass
 
 import discord
 
@@ -27,6 +28,21 @@ def admission_without_join(current_controller):
         return current_controller()
 
     return types.SimpleNamespace(join_needed=False, enter=enter)
+
+
+@dataclass(frozen=True)
+class ReactionEffects:
+    """What one reaction did, as the reaction-plugin tests' `react`
+    helpers return it. `processed` holds the tracks the reaction passed
+    on to the stage the test stubs out: the controller's `process_song`
+    in the button plugin tests, `loader.load_song` in the entry-point
+    tests. `sent` is the replies sent, `events` the guild's recorded
+    events, and `directed` the panel's `direct_to` calls."""
+
+    processed: list
+    sent: list
+    events: list
+    directed: list
 
 
 class FakePanel(PlayerPanel):
