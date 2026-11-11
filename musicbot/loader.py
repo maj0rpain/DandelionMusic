@@ -173,13 +173,12 @@ class Preload(Enum):
     """What preload() did. It defines no __bool__: compare with `is`.
 
     FAILED: an extraction was needed and failed.
-    CURRENT: nothing needed extracting - the song has no webpage_url,
-    is a local-library song, has a stream url not within
-    EXPIRY_MARGIN of its expire= (or, off a custom link, the link is its
-    own stream), has a
-    stream url with no expire= extracted less than
-    UNKNOWN_EXPIRY_MAX_AGE ago, or another caller's in-flight
-    extraction of it succeeded.
+    CURRENT: nothing needed extracting - the song has no webpage_url, is a
+    local-library song, has a stream url not within EXPIRY_MARGIN of its
+    expire= (or, for a song not from a custom link, the link is its own
+    stream), has a stream url with no expire= extracted less than
+    UNKNOWN_EXPIRY_MAX_AGE ago, or another caller's in-flight extraction
+    of it succeeded.
     EXTRACTED: this call ran an extraction and updated the song.
     """
 

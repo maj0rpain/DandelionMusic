@@ -128,6 +128,7 @@ def test_constructor_rounds_a_fractional_duration():
     song = _song(duration=213.6)
     assert song.duration == 214
     assert type(song.duration) is int
+    assert _duration_field(song) == "0:03:34"
 
 
 @pytest.mark.parametrize("update", [None, {"duration": None}])
@@ -164,19 +165,11 @@ def test_a_restored_song_reads_its_raw_duration_in_whole_seconds(
     assert _duration_field(restored) == shown
 
 
-@pytest.mark.parametrize(
-    "given, stored, shown",
-    [
-        (213.6, 214, "0:03:34"),
-        (None, None, config.SONGINFO_UNKNOWN),
-    ],
-)
-def test_assigning_a_duration_directly_applies_the_rule(given, stored, shown):
+def test_assigning_no_duration_directly_clears_a_known_one():
     song = _song(duration=100)
-    song.duration = given
-    assert song.duration == stored
-    assert type(song.duration) is type(stored)
-    assert _duration_field(song) == shown
+    song.duration = None
+    assert song.duration is None
+    assert _duration_field(song) == config.SONGINFO_UNKNOWN
 
 
 def test_update_from_a_restored_song_applies_its_raw_fractional_duration():

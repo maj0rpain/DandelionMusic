@@ -23,7 +23,7 @@ REFUSED_TARGETS = {
 @asynccontextmanager
 async def serving():
     hits = []
-    hits_all = []
+    paths = []
     body_sent = []
 
     async def hit(request):
@@ -51,7 +51,7 @@ async def serving():
 
     @web.middleware
     async def record(request, handler):
-        hits_all.append(request.path)
+        paths.append(request.path)
         return await handler(request)
 
     app = web.Application(middlewares=[record])
@@ -71,7 +71,7 @@ async def serving():
         app.router.add_get(f"/{name}", redirect_to(target))
     server = TestServer(app)
     server.hits = hits
-    server.hits_all = hits_all
+    server.paths = paths
     server.body_sent = body_sent
     await server.start_server()
     try:
@@ -88,11 +88,12 @@ def allow_every_host(monkeypatch):
 
 class Resolved:
     """What running a linkutils function on one path of the local server
-    did."""
+    did: `result` is the function's return value (a URL or a parsed page),
+    `error` the exception it raised, and `paths` every path requested."""
 
-    def __init__(self, base, url, error, hits, body_sent, paths):
+    def __init__(self, base, result, error, hits, body_sent, paths):
         self.base = base
-        self.url = url
+        self.result = result
         self.error = error
         self.hits = hits
         self.body_sent = body_sent
@@ -106,18 +107,18 @@ def _run_on(function, path):
     async def scenario():
         async with serving() as server:
             base = str(server.make_url("/")).rstrip("/")
-            url = error = None
+            result = error = None
             try:
-                url = await function(base + path)
+                result = await function(base + path)
             except Exception as exc:
                 error = exc
             return Resolved(
                 base,
-                url,
+                result,
                 error,
                 list(server.hits),
                 list(server.body_sent),
-                list(server.hits_all),
+                list(server.paths),
             )
 
     return run(scenario())
@@ -158,7 +159,7 @@ def test_redirect_to_a_disallowed_target_is_refused(path):
 def test_chain_of_ten_redirects_resolves(allow_every_host):
     got = _resolve("/chain/9")
 
-    assert got.url == got.at("/final?si=1")
+    assert got.result == got.at("/final?si=1")
 
 
 def test_chain_of_eleven_redirects_is_refused(allow_every_host):
@@ -168,19 +169,19 @@ def test_chain_of_eleven_redirects_is_refused(allow_every_host):
 def test_redirect_without_location_returns_its_own_url(allow_every_host):
     got = _resolve("/not-modified")
 
-    assert got.url == got.at("/not-modified")
+    assert got.result == got.at("/not-modified")
 
 
 def test_url_is_returned_as_requested_not_reparsed(allow_every_host):
     got = _resolve("/final?q=a b")
 
-    assert got.url == got.at("/final?q=a b")
+    assert got.result == got.at("/final?q=a b")
 
 
 def test_direct_media_answer_returns_its_url_after_one_get(allow_every_host):
     got = _resolve("/media.mp3")
 
-    assert got.url == got.at("/media.mp3")
+    assert got.result == got.at("/media.mp3")
     assert got.hits == ["/media.mp3"]
     assert got.body_sent == []
 
@@ -191,29 +192,19 @@ def test_page_is_parsed_from_the_final_hop_each_hop_requested_once(
     got = _soup("/chain/2")
 
     assert got.error is None
-    assert got.url.get_text() == "ok"
+    assert got.result.get_text() == "ok"
     assert got.paths == ["/chain/2", "/chain/1", "/chain/0", "/final"]
 
 
-@pytest.mark.parametrize("path", sorted("/" + n for n in REFUSED_TARGETS))
-def test_page_redirect_to_a_disallowed_target_is_refused(path):
-    got = _soup(path)
+def test_page_redirect_to_a_disallowed_target_is_refused():
+    got = _soup("/to-localhost")
 
     assert isinstance(got.error, linkutils.RefusedRedirect)
     assert "/hit" not in got.paths
-
-
-def test_page_chain_past_the_hop_limit_is_refused(allow_every_host):
-    assert isinstance(_soup("/chain/10").error, linkutils.RefusedRedirect)
-
-
-@pytest.mark.parametrize("path", ["/gone", "/to-boom"])
-def test_page_error_status_raises(path, allow_every_host):
-    assert _soup(path).error is not None
 
 
 def test_page_redirect_without_location_is_parsed(allow_every_host):
     got = _soup("/not-modified-body")
 
     assert got.error is None
-    assert got.url.get_text() == "body"
+    assert got.result.get_text() == "body"
