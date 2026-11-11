@@ -8,6 +8,7 @@ readers, not import-reading helpers."""
 import ast
 import asyncio
 import re
+from collections.abc import Mapping
 from pathlib import Path
 
 from musicbot.linkutils import SiteTypes
@@ -178,7 +179,7 @@ class RedirectFollower:
     async def __call__(self, url):
         self.calls.append(url)
         answer = self.result
-        if isinstance(answer, dict):
+        if isinstance(answer, Mapping):
             answer = answer[url]
         if isinstance(answer, Exception):
             raise answer
