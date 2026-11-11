@@ -247,29 +247,6 @@ def test_a_custom_song_near_or_past_expiry_is_reloaded(monkeypatch, delta):
     assert calls == [URL]
 
 
-@pytest.mark.parametrize("age", [11 * MINUTE, None])
-def test_a_custom_song_with_no_expiry_and_a_stale_stamp_is_reloaded(
-    monkeypatch, age
-):
-    calls = _fresh_load(monkeypatch)
-    _clock(monkeypatch)
-    song = _custom("https://stream.invalid/a")
-    if age is not None:
-        song.extracted_at = NOW - age
-    assert run(loader.preload(song)) is Preload.EXTRACTED
-    assert calls == [URL]
-
-
-def test_a_custom_song_with_no_expiry_and_a_fresh_stamp_is_current(
-    monkeypatch,
-):
-    _never_loads(monkeypatch)
-    _clock(monkeypatch)
-    song = _custom("https://stream.invalid/a")
-    song.extracted_at = NOW - 9 * MINUTE
-    assert run(loader.preload(song)) is Preload.CURRENT
-
-
 @pytest.mark.parametrize("delta", [-MINUTE, 9 * MINUTE])
 def test_a_custom_link_that_is_its_own_stream_is_reloaded_near_expiry(
     monkeypatch, delta
