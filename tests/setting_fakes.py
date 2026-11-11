@@ -7,6 +7,17 @@ import types
 from musicbot.settings import SETTINGS, GuildSettings
 
 
+def template_fragment(template, index, *fill):
+    """The fixed text fragment `index` of a reply template.
+
+    Fills the template's first placeholders, in order, with `fill`,
+    leaves the rest as `{}`, splits on `{}` and returns fragment `index`.
+    Assumes positional `{}` placeholders only; a named one breaks it.
+    """
+    left = template.count("{}") - len(fill)
+    return template.format(*fill, *["{}"] * left).split("{}")[index]
+
+
 def setting_group(cog):
     return next(c for c in cog.get_commands() if c.name == "setting")
 
