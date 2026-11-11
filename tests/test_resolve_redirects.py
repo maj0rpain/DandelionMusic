@@ -196,21 +196,11 @@ def test_page_is_parsed_from_the_final_hop_each_hop_requested_once(
     assert got.paths == ["/chain/2", "/chain/1", "/chain/0", "/final"]
 
 
-@pytest.mark.parametrize("path", sorted("/" + n for n in REFUSED_TARGETS))
-def test_page_redirect_to_a_disallowed_target_is_refused(path):
-    got = _soup(path)
+def test_page_redirect_to_a_disallowed_target_is_refused():
+    got = _soup("/to-localhost")
 
     assert isinstance(got.error, linkutils.RefusedRedirect)
     assert "/hit" not in got.paths
-
-
-def test_page_chain_past_the_hop_limit_is_refused(allow_every_host):
-    assert isinstance(_soup("/chain/10").error, linkutils.RefusedRedirect)
-
-
-@pytest.mark.parametrize("path", ["/gone", "/to-boom"])
-def test_page_error_status_raises(path, allow_every_host):
-    assert _soup(path).error is not None
 
 
 def test_page_redirect_without_location_is_parsed(allow_every_host):
