@@ -56,7 +56,8 @@ async def serving():
 
     app = web.Application(middlewares=[record])
     app.router.add_get(
-        "/redirect-status-no-location", lambda r: web.Response(status=300, text="body")
+        "/redirect-status-no-location",
+        lambda r: web.Response(status=300, text="body"),
     )
     app.router.add_get("/final", lambda r: web.Response(text="ok"))
     app.router.add_get("/gone", lambda r: web.Response(status=404))
