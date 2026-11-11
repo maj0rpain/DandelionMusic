@@ -230,9 +230,7 @@ class PluginController:
         return await self._process(self, url, user=user)
 
 
-def react(
-    link, monkeypatch, content=None, command_channel=None, channel=None
-):
+def react(link, monkeypatch, content=None, command_channel=None, channel=None):
     loads = []
 
     async def load_song(track):
