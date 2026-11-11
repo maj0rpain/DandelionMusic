@@ -3,7 +3,6 @@ forbidden message link with `MESSAGE_LINK_FORBIDDEN` and never loads it;
 an allowed link still loads."""
 
 import types
-from typing import NamedTuple
 
 import pytest
 
@@ -20,7 +19,12 @@ from controller_helpers import (
     _song,
     command_ctx,
 )
-from discord_fakes import VoiceGuild, admission_settings, make_bot
+from discord_fakes import (
+    ReactionEffects,
+    VoiceGuild,
+    admission_settings,
+    make_bot,
+)
 from helpers import run
 from message_link_fakes import (
     FOREIGN_LINK,
@@ -226,14 +230,9 @@ class PluginController:
         return await self._process(self, url, user=user)
 
 
-class Reaction(NamedTuple):
-    loads: list
-    sent: list
-    events: list
-    directed: list
-
-
-def react(link, monkeypatch, content=None, command_channel=None, channel=None):
+def react(
+    link, monkeypatch, content=None, command_channel=None, channel=None
+):
     loads = []
 
     async def load_song(track):
@@ -305,12 +304,12 @@ def react(link, monkeypatch, content=None, command_channel=None, channel=None):
     )
     run(Button(bot).on_raw_reaction_add(event))
     directed = bot.sessions.panel(guild).directed
-    return Reaction(loads, sent, guild.events, directed)
+    return ReactionEffects(loads, sent, guild.events, directed)
 
 
 def test_the_plugin_refuses_a_forbidden_link_and_does_not_load(monkeypatch):
     seen = react(FOREIGN_LINK, monkeypatch, command_channel=2)
-    assert (seen.loads, seen.directed) == ([], [])
+    assert (seen.processed, seen.directed) == ([], [])
     assert seen.events == [("reply", config.MESSAGE_LINK_FORBIDDEN)]
 
 
@@ -324,7 +323,7 @@ def test_one_forbidden_link_among_several_reactions_still_queues_the_rest(
         monkeypatch,
         content=f"{FOREIGN_LINK} {other} {foreign2}",
     )
-    assert [c.track for c in seen.loads] == [other]
+    assert [c.track for c in seen.processed] == [other]
     assert seen.sent == [config.MESSAGE_LINK_FORBIDDEN] * 2 + ["loaded"]
     connect = next(i for i, e in enumerate(seen.events) if e[0] == "connect")
     refusals = [
@@ -338,19 +337,19 @@ def test_one_forbidden_link_among_several_reactions_still_queues_the_rest(
 def test_the_gate_runs_once_per_link_in_a_reaction(monkeypatch):
     other = LINK.replace("/5", "/6")
     lookups = []
-    loads, _sent, _events, _directed = react(
+    seen = react(
         LINK,
         monkeypatch,
         content=f"{LINK} {other}",
         channel=CountingThread(lookups, channel_id=2, private=True),
     )
-    assert admitted(loads) == [(LINK, LINK), (other, other)]
+    assert admitted(seen.processed) == [(LINK, LINK), (other, other)]
     assert len(lookups) == 2
 
 
 def test_the_plugin_loads_an_allowed_link(monkeypatch):
     seen = react(LINK, monkeypatch, command_channel=2)
-    assert admitted(seen.loads) == [(LINK, LINK)]
+    assert admitted(seen.processed) == [(LINK, LINK)]
     assert len(seen.directed) == 1
 
 
@@ -358,4 +357,4 @@ def test_a_reaction_refused_by_admission_sends_no_message_link_reply(
     monkeypatch,
 ):
     seen = react(FOREIGN_LINK, monkeypatch, command_channel=3)
-    assert seen == ([], [], [], [])
+    assert seen == ReactionEffects([], [], [], [])

@@ -1,4 +1,5 @@
-"""The shared import-reading helpers, on small sources under `tmp_path`."""
+"""The shared test helpers' own tests: the import-reading helpers on small
+sources under `tmp_path`, and the other shared helpers."""
 
 import types
 
@@ -7,10 +8,12 @@ import pytest
 from db_seam import FailingSessionFactory, with_db
 from helpers import (
     assert_logged_with_traceback,
+    RedirectFollower,
     attribute_names,
     dockerfile_commands,
     imported_names,
     imported_roots,
+    run,
     shell_commands,
     type_checking_imports,
 )
@@ -198,3 +201,24 @@ def test_logged_with_traceback_fails_when_message_follows_traceback():
 def test_logged_with_traceback_fails_without_a_traceback():
     with pytest.raises(AssertionError):
         assert_logged_with_traceback("boom: failed\n", "boom")
+
+
+def test_redirect_follower_looks_up_a_mapping_proxy_by_url():
+    answers = types.MappingProxyType({"a": "A!", "b": "B!"})
+    follower = RedirectFollower(answers)
+    assert [run(follower("a")), run(follower("b"))] == ["A!", "B!"]
+    assert follower.calls == ["a", "b"]
+
+
+def test_redirect_follower_raises_an_exception_found_in_a_mapping_proxy():
+    boom = RuntimeError("boom")
+    follower = RedirectFollower(types.MappingProxyType({"a": boom}))
+    with pytest.raises(RuntimeError) as caught:
+        run(follower("a"))
+    assert caught.value is boom
+
+
+def test_redirect_follower_raises_key_error_for_a_url_absent_from_a_proxy():
+    follower = RedirectFollower(types.MappingProxyType({"a": "A!"}))
+    with pytest.raises(KeyError):
+        run(follower("b"))
