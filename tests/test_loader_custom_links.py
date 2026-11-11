@@ -11,6 +11,7 @@ from helpers import fake_redirect_follower
 
 TYPED = "https://public.example/dir/song.mp3"
 FINAL = "https://cdn.example/signed/abc123"
+SHORT = "https://on.soundcloud.com/AbC123"
 
 
 def test_redirecting_custom_link_streams_the_final_url(
@@ -45,21 +46,20 @@ def test_short_link_leading_to_a_custom_link_is_followed_once(
 ):
     follower = fake_redirect_follower(monkeypatch, TYPED)
 
-    song = loader._load_song("https://on.soundcloud.com/AbC123").songs[0]
+    song = loader._load_song(SHORT).songs[0]
 
-    assert follower.calls == ["https://on.soundcloud.com/AbC123"]
+    assert follower.calls == [SHORT]
     assert song.url == TYPED
 
 
 def test_short_link_result_that_normalizes_is_followed_again(
     monkeypatch, worker_loop
 ):
-    short = "https://on.soundcloud.com/AbC123"
     follower = fake_redirect_follower(
-        monkeypatch, {short: TYPED + ".", TYPED: FINAL}
+        monkeypatch, {SHORT: TYPED + ".", TYPED: FINAL}
     )
 
-    song = loader._load_song(short).songs[0]
+    song = loader._load_song(SHORT).songs[0]
 
-    assert follower.calls == [short, TYPED]
+    assert follower.calls == [SHORT, TYPED]
     assert song.url == FINAL
