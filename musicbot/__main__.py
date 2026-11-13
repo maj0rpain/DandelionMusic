@@ -9,7 +9,6 @@ from config import config
 from musicbot.bot import MusicBot
 from musicbot.utils import check_dependencies, wrap_stdio
 
-
 # discord.py's phrasing for "your code raised and I caught it" -
 # every such call site starts its message this way (View items and
 # modals, event handlers, prefix and app commands, background tasks,

@@ -59,9 +59,7 @@ def other(lane):
     return PRELOAD if lane == LOAD else LOAD
 """
 
-INDEPENDENCE_PROBE = (
-    PRELUDE
-    + """
+INDEPENDENCE_PROBE = PRELUDE + """
 async def main():
     blocker = await hold(LOAD)
     song = Song(SiteTypes.YT_DLP, "https://example.invalid/a")
@@ -85,11 +83,8 @@ if __name__ == "__main__":
         loader.shutdown()
     print(json.dumps(observed))
 """
-)
 
-CRASH_PROBE = (
-    PRELUDE
-    + """
+CRASH_PROBE = PRELUDE + """
 async def main(killed):
     held = other(killed)
     blocker = await hold(held)
@@ -116,7 +111,6 @@ if __name__ == "__main__":
         loader.shutdown()
     print(json.dumps(observed))
 """
-)
 
 
 @pytest.fixture(scope="module")
