@@ -502,6 +502,7 @@ class Playback:
         # no longer pending once it reaches play(); the generation
         # token that guards the start is _claim_start()'s
         self._start_pending = False
+        probe = None
         try:
             probe = _AudioProbe(self._make_source(song))
             self._track = _PlayingTrack(song, probe)
@@ -510,6 +511,9 @@ class Playback:
                 after=self._track_end_callback(generation),
             )
         except discord.ClientException:
+            if probe is not None:
+                # play() refused it, so nothing else will clean it up
+                probe.cleanup()
             await self._on_play_failed()
             return False
 

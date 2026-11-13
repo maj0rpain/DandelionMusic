@@ -20,6 +20,7 @@ from musicbot.library import LocalTrack
 from musicbot.playlist import LoopMode, PauseState
 from musicbot.commands.music import Music
 from controller_helpers import (
+    FakeDownload,
     _backup,
     _backup_path,
     _fake_ffmpeg,
@@ -2413,6 +2414,7 @@ def test_pause_at_the_first_await_of_a_disconnect_leaves_no_timer(controller):
 def test_a_local_batch_reports_what_it_loaded_and_skipped(
     controller, stub_loader, monkeypatch, loaded, requested, skipped
 ):
+    _fake_ffmpeg(monkeypatch)
     batch = _local_batch(
         controller, stub_loader, monkeypatch, loaded, requested
     )
@@ -2499,15 +2501,180 @@ def test_the_controller_keeps_no_command_channel(controller):
     assert not hasattr(controller, "command_channel")
 
 
-def test_a_remote_song_opens_only_the_http_protocol_stack(
+def _custom_song(controller):
+    ac = sys.modules[type(controller).__module__]
+    return ac.Song(
+        ac.SiteTypes.CUSTOM,
+        "https://example.invalid/custom",
+        url="https://example.invalid/custom.mp3",
+        title="custom",
+    )
+
+
+def test_a_custom_song_opens_only_the_http_protocol_stack(
     controller, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
-    source = controller._make_source(_song(controller, "remote"))
+    source = controller._make_source(_custom_song(controller))
 
     before = source.original.kwargs["before_options"]
+    assert source.original.url == "https://example.invalid/custom.mp3"
     assert "-protocol_whitelist http,https,tcp,tls,crypto" in before
     assert "-reconnect 1" in before
+
+
+def test_a_piped_song_reads_ffmpeg_from_a_pipe_with_no_reconnect(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    source = controller._make_source(_song(controller, "piped"))
+
+    kwargs = source.original.kwargs
+    assert kwargs["pipe"] is True
+    assert kwargs["before_options"] == "-protocol_whitelist pipe"
+
+
+def _popen_spy(monkeypatch, stdin_error=None):
+    import subprocess
+
+    ac = sys.modules["musicbot.audiocontroller"]
+    calls = []
+
+    class Stdin:
+        def __init__(self):
+            self.written = b""
+            self.closed = False
+
+        def write(self, data):
+            if stdin_error:
+                raise stdin_error
+            self.written += data
+
+        def close(self):
+            self.closed = True
+
+    class Process:
+        def __init__(self, args, **kwargs):
+            calls.append((args, kwargs))
+            self.stdin = Stdin()
+            self.stdout = object()
+
+    monkeypatch.setattr(subprocess, "Popen", Process)
+    return ac, calls
+
+
+def test_the_download_runs_yt_dlp_with_the_info_json_on_its_stdin(
+    monkeypatch,
+):
+    import json
+
+    ac, calls = _popen_spy(monkeypatch)
+    process = ac._start_download({"id": "x", "url": "https://s/x"})
+
+    args, kwargs = calls[0]
+    assert args == [
+        sys.executable,
+        "-m",
+        "yt_dlp",
+        "--load-info-json",
+        "-",
+        "-o",
+        "-",
+    ]
+    assert "stderr" not in kwargs
+    assert kwargs["stdout"] == __import__("subprocess").PIPE
+    assert json.loads(process.stdin.written) == {
+        "id": "x",
+        "url": "https://s/x",
+    }
+    assert process.stdin.closed
+
+
+def test_a_stdin_write_to_an_exited_yt_dlp_is_swallowed(monkeypatch):
+    ac, _ = _popen_spy(monkeypatch, stdin_error=BrokenPipeError())
+
+    assert ac._start_download({"id": "x"}).stdout is not None
+
+
+def test_cleaning_up_a_piped_source_kills_and_reaps_yt_dlp(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    started = []
+    ac = sys.modules["musicbot.audiocontroller"]
+
+    def start(info):
+        process = FakeDownload(info)
+        started.append(process)
+        return process
+
+    monkeypatch.setattr(ac, "_start_download", start)
+    source = controller._make_source(_song(controller, "piped"))
+    source.cleanup()
+
+    assert (started[0].killed, started[0].waited) == (True, True)
+
+
+def test_a_failed_ffmpeg_build_kills_and_reaps_yt_dlp(controller, monkeypatch):
+    import discord
+
+    started = []
+    ac = sys.modules["musicbot.audiocontroller"]
+
+    def start(info):
+        started.append(FakeDownload(info))
+        return started[0]
+
+    def refuse(*args, **kwargs):
+        raise discord.ClientException("ffmpeg was not found.")
+
+    monkeypatch.setattr(ac, "_start_download", start)
+    monkeypatch.setattr(discord, "FFmpegPCMAudio", refuse)
+
+    with pytest.raises(discord.ClientException):
+        controller._make_source(_song(controller, "piped"))
+    assert (started[0].killed, started[0].waited) == (True, True)
+
+
+def test_a_song_without_download_info_starts_no_yt_dlp(
+    controller, monkeypatch, capsys
+):
+    _fake_ffmpeg(monkeypatch)
+    ac = sys.modules["musicbot.audiocontroller"]
+
+    def start(info):
+        raise AssertionError("no process expected")
+
+    monkeypatch.setattr(ac, "_start_download", start)
+    song = _song(controller, "bare")
+    song.download_info = None
+    source = controller._make_source(song)
+
+    assert source.original.kwargs["pipe"] is True
+    assert source.original.url.read() == b""
+    assert "no download info" in capsys.readouterr().err
+
+
+def test_a_refused_play_cleans_up_the_source_before_the_failure_path(
+    controller, monkeypatch
+):
+    _fake_ffmpeg(monkeypatch)
+    ac = sys.modules["musicbot.audiocontroller"]
+    started = []
+
+    def start(info):
+        started.append(FakeDownload(info))
+        return started[0]
+
+    monkeypatch.setattr(ac, "_start_download", start)
+    _queue(controller, "refused")
+    controller.guild.voice_client.playing = True
+
+    async def scenario():
+        await controller.play_song(controller.playlist[0])
+
+    _run(controller, scenario)
+    assert started[0].killed and started[0].waited
 
 
 def test_a_local_library_song_opens_only_file(controller, monkeypatch):

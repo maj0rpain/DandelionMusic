@@ -33,7 +33,7 @@ async def _settle(controller=None):
 
 def _songs(controller, *titles):
     ac = sys.modules[type(controller).__module__]
-    return [
+    songs = [
         ac.Song(
             ac.SiteTypes.YT_DLP,
             f"https://example.invalid/{title}",
@@ -42,6 +42,9 @@ def _songs(controller, *titles):
         )
         for title in titles
     ]
+    for song in songs:
+        song.download_info = {"id": song.title, "url": song.url}
+    return songs
 
 
 def _song(controller, title):
@@ -96,8 +99,28 @@ class _FakeFFmpeg:
         return b"\x01\x00" * 1920
 
 
+class FakeDownload:
+    """Stands in for the yt-dlp process: its stdout is the stream url of
+    the download info it was started with."""
+
+    def __init__(self, download_info):
+        self.download_info = download_info
+        self.stdout = download_info.get("url")
+        self.killed = False
+        self.waited = False
+
+    def kill(self):
+        self.killed = True
+
+    def wait(self):
+        self.waited = True
+
+
 def _fake_ffmpeg(monkeypatch):
     import discord
+
+    ac = sys.modules["musicbot.audiocontroller"]
+    monkeypatch.setattr(ac, "_start_download", FakeDownload)
 
     monkeypatch.setattr(
         discord,

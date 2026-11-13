@@ -1,4 +1,7 @@
+import io
+import json
 import os
+import subprocess
 import sys
 import asyncio
 from itertools import islice
@@ -32,6 +35,77 @@ import pickle
 from enum import Enum, auto
 
 _T = TypeVar("_T")
+
+
+def _start_download(download_info: dict):
+    """Starts the yt-dlp process that downloads a song's chosen format
+    to its stdout, given `download_info` as JSON on its stdin (no second
+    extraction). Its stderr is the bot's. A write that fails because
+    yt-dlp already exited is swallowed: its stdout then ends empty and
+    the track produces no audio."""
+    process = subprocess.Popen(
+        [
+            sys.executable,
+            "-m",
+            "yt_dlp",
+            "--load-info-json",
+            "-",
+            "-o",
+            "-",
+        ],
+        stdin=subprocess.PIPE,
+        stdout=subprocess.PIPE,
+    )
+    try:
+        process.stdin.write(json.dumps(download_info).encode())
+        process.stdin.close()
+    except OSError:
+        pass
+    return process
+
+
+def _kill_download(process) -> None:
+    try:
+        process.kill()
+    except OSError:
+        pass
+    process.wait()
+
+
+class _PipedSource(discord.AudioSource):
+    """The audio source of a piped song: forwards `read()`, `is_opus()`
+    and every other attribute read and write (`volume`) to the ffmpeg
+    source it wraps, and on `cleanup()` also kills and reaps the yt-dlp
+    process feeding it, so none outlives its track."""
+
+    _OWN = ("_wrapped", "_process")
+
+    def __init__(self, wrapped, process):
+        object.__setattr__(self, "_wrapped", wrapped)
+        object.__setattr__(self, "_process", process)
+
+    def read(self):
+        return self._wrapped.read()
+
+    def is_opus(self):
+        return self._wrapped.is_opus()
+
+    def cleanup(self):
+        try:
+            self._wrapped.cleanup()
+        finally:
+            if self._process is not None:
+                _kill_download(self._process)
+
+    def __getattr__(self, name):
+        return getattr(self._wrapped, name)
+
+    def __setattr__(self, name, value):
+        if name in self._OWN:
+            object.__setattr__(self, name, value)
+        else:
+            setattr(self._wrapped, name, value)
+
 
 # avoiding circular import
 if TYPE_CHECKING:
@@ -156,6 +230,8 @@ class AudioController(object):
         self.playlist.next()
 
     def _make_source(self, song: Song):
+        if song.host not in (SiteTypes.CUSTOM, SiteTypes.LOCAL_LIBRARY):
+            return self._make_piped_source(song)
         if song.host == SiteTypes.LOCAL_LIBRARY:
             before_options = "-protocol_whitelist file"
         else:
@@ -186,6 +262,38 @@ class AudioController(object):
                 options="-loglevel error",
                 stderr=sys.stderr,
             ),
+            float(self.volume) / 100.0,
+        )
+
+    def _make_piped_source(self, song: Song):
+        """A piped song: a yt-dlp process downloads the stream and
+        ffmpeg reads it on stdin, as YouTube refuses ffmpeg's own
+        request. yt-dlp retries itself, so no -reconnect options."""
+        process = None
+        if song.download_info is None:
+            print(
+                f"{self._log_label}: no download info for"
+                f" {song.display_name!r}; it will play no audio",
+                file=sys.stderr,
+            )
+            stdin = io.BytesIO(b"")
+        else:
+            process = _start_download(song.download_info)
+            stdin = process.stdout
+        try:
+            ffmpeg = discord.FFmpegPCMAudio(
+                stdin,
+                pipe=True,
+                before_options="-protocol_whitelist pipe",
+                options="-loglevel error",
+                stderr=sys.stderr,
+            )
+        except BaseException:
+            if process is not None:
+                _kill_download(process)
+            raise
+        return discord.PCMVolumeTransformer(
+            _PipedSource(ffmpeg, process),
             float(self.volume) / 100.0,
         )
 
