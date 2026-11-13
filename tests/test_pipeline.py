@@ -98,6 +98,28 @@ def test_dependabot_config_covers_every_ecosystem_weekly_in_one_group():
         assert sorted(groups[0]["update-types"]) == ["minor", "patch"]
 
 
+def test_dependabot_ignores_python_minor_and_major_only_for_docker():
+    config = yaml.safe_load(
+        (REPO_ROOT / ".github" / "dependabot.yml").read_text()
+    )
+    by_ecosystem = {e["package-ecosystem"]: e for e in config["updates"]}
+    assert by_ecosystem["docker"]["ignore"] == [
+        {
+            "dependency-name": "python",
+            "update-types": [
+                "version-update:semver-major",
+                "version-update:semver-minor",
+            ],
+        }
+    ]
+    others = [
+        e
+        for e in config["updates"]
+        if e["package-ecosystem"] not in ("docker", "docker-compose")
+    ]
+    assert [e for e in others if "ignore" in e] == []
+
+
 def test_dependabot_compose_entry_ignores_only_the_bgutil_provider_image():
     config = yaml.safe_load(
         (REPO_ROOT / ".github" / "dependabot.yml").read_text()
