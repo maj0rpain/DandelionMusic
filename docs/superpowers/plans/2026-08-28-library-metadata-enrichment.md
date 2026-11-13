@@ -14,6 +14,7 @@
 
 - No test suite in this repo (no `tests/` dir, no pytest dependency). Every task's verification step is a runnable `uv run python -c "..."` script or shell command against real generated fixtures or stubbed network calls — not a pytest invocation.
 - `black -l 79` (79-char lines) and `flake8 --ignore E203,W503` must pass on every touched file before it's considered done. Neither is a project dependency (they only exist inside pre-commit's isolated hook environments per `CLAUDE.md`), so every lint step invokes them via `uv tool run black@25.1.0 -l 79 --target-version py313 --check ...` / `uv tool run flake8@7.3.0 --ignore E203,W503 ...` — a bare `uv run black`/`uv run flake8` fails with "No such file or directory".
+> **Superseded:** the black/flake8 versions pinned here are out of date. `.pre-commit-config.yaml` is the single source of the lint versions; lint with `uv run --group dev pre-commit run --files <files>`.
 - Run everything through `uv run ...` (project code/dependencies) or `uv tool run ...` (black/flake8, which live outside the project's own dependency set) — never a bare `python`/`pip`/`black`/`flake8` (per `CLAUDE.md`, deps are managed exclusively with `uv`).
 - No new dependencies: `mutagen==1.47.0`, `beautifulsoup4==4.15.0`, `aiohttp~=3.14.3`, `spotipy==2.26.0` are already in `pyproject.toml`.
 - Every new `Config` class attribute needs a comment directly above it — `Config.get_comments()` parses that comment for docs/exe use (per `CLAUDE.md`).
@@ -124,6 +125,7 @@ Expected: prints `OK` with no assertion errors.
 - [ ] **Step 3: Lint**
 
 ```bash
+# Superseded: lint versions come from .pre-commit-config.yaml; run: uv run --group dev pre-commit run --files <files>
 uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/audiotags.py
 uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/audiotags.py
 ```
@@ -267,6 +269,7 @@ Expected: prints `OK` with no assertion errors.
 - [ ] **Step 4: Lint**
 
 ```bash
+# Superseded: lint versions come from .pre-commit-config.yaml; run: uv run --group dev pre-commit run --files <files>
 uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/audiotags.py
 uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/audiotags.py
 ```
@@ -354,6 +357,7 @@ Expected: both scripts print their `OK` line.
 - [ ] **Step 4: Lint**
 
 ```bash
+# Superseded: lint versions come from .pre-commit-config.yaml; run: uv run --group dev pre-commit run --files <files>
 uv tool run black@25.1.0 -l 79 --target-version py313 --check config/config.py musicbot/linkutils.py
 uv tool run flake8@7.3.0 --ignore E203,W503 config/config.py musicbot/linkutils.py
 ```
@@ -519,6 +523,7 @@ Expected: both scripts print `import OK` and `OK` respectively.
 - [ ] **Step 3: Lint**
 
 ```bash
+# Superseded: lint versions come from .pre-commit-config.yaml; run: uv run --group dev pre-commit run --files <files>
 uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/library_metadata.py
 uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/library_metadata.py
 ```
@@ -802,6 +807,7 @@ Expected: prints `OK` with no assertion errors. (`call_count == 1` after two con
 - [ ] **Step 4: Lint**
 
 ```bash
+# Superseded: lint versions come from .pre-commit-config.yaml; run: uv run --group dev pre-commit run --files <files>
 uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/library_metadata.py
 uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/library_metadata.py
 ```
@@ -1000,6 +1006,7 @@ Expected: prints `OK` with no assertion errors.
 - [ ] **Step 4: Lint**
 
 ```bash
+# Superseded: lint versions come from .pre-commit-config.yaml; run: uv run --group dev pre-commit run --files <files>
 uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/library_metadata.py
 uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/library_metadata.py
 ```
@@ -1253,6 +1260,7 @@ Expected: prints `OK` with no assertion errors.
 - [ ] **Step 4: Lint**
 
 ```bash
+# Superseded: lint versions come from .pre-commit-config.yaml; run: uv run --group dev pre-commit run --files <files>
 uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/library_metadata.py
 uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/library_metadata.py
 ```
@@ -1587,6 +1595,7 @@ This codebase has no automated way to simulate real Discord interactions (`defer
 - [ ] **Step 9: Lint**
 
 ```bash
+# Superseded: lint versions come from .pre-commit-config.yaml; run: uv run --group dev pre-commit run --files <files>
 uv tool run black@25.1.0 -l 79 --target-version py313 --check musicbot/commands/library.py
 uv tool run flake8@7.3.0 --ignore E203,W503 musicbot/commands/library.py
 ```
