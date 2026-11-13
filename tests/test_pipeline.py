@@ -113,6 +113,22 @@ def test_dependabot_ignores_python_minor_and_major_only_for_docker():
         }
     ]
     others = [
-        e for e in config["updates"] if e["package-ecosystem"] != "docker"
+        e
+        for e in config["updates"]
+        if e["package-ecosystem"] not in ("docker", "docker-compose")
     ]
     assert [e for e in others if "ignore" in e] == []
+
+
+def test_dependabot_compose_entry_ignores_only_the_bgutil_provider_image():
+    config = yaml.safe_load(
+        (REPO_ROOT / ".github" / "dependabot.yml").read_text()
+    )
+    (entry,) = [
+        e
+        for e in config["updates"]
+        if e["package-ecosystem"] == "docker-compose"
+    ]
+    assert entry["ignore"] == [
+        {"dependency-name": "brainicism/bgutil-ytdlp-pot-provider"}
+    ]
