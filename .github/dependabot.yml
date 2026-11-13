@@ -35,6 +35,11 @@ updates:
     directory: "/"
     schedule:
       interval: "weekly"
+    # The bgutil image tag follows the bgutil-ytdlp-pot-provider pin, which
+    # the uv ecosystem bumps; it is set by hand in that PR. A lone compose
+    # PR would fail the tag-equality test.
+    ignore:
+      - dependency-name: "brainicism/bgutil-ytdlp-pot-provider"
     groups:
       minor-and-patch:
         update-types:

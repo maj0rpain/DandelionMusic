@@ -96,3 +96,17 @@ def test_dependabot_config_covers_every_ecosystem_weekly_in_one_group():
         groups = list(entry["groups"].values())
         assert len(groups) == 1
         assert sorted(groups[0]["update-types"]) == ["minor", "patch"]
+
+
+def test_dependabot_compose_entry_ignores_only_the_bgutil_provider_image():
+    config = yaml.safe_load(
+        (REPO_ROOT / ".github" / "dependabot.yml").read_text()
+    )
+    (entry,) = [
+        e
+        for e in config["updates"]
+        if e["package-ecosystem"] == "docker-compose"
+    ]
+    assert entry["ignore"] == [
+        {"dependency-name": "brainicism/bgutil-ytdlp-pot-provider"}
+    ]
