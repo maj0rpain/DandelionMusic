@@ -11,6 +11,12 @@ def _load(name):
     return yaml.safe_load((WORKFLOWS / name).read_text())
 
 
+def _dependabot():
+    return yaml.safe_load(
+        (REPO_ROOT / ".github" / "dependabot.yml").read_text()
+    )
+
+
 def _triggers(workflow):
     # PyYAML parses the bare key `on` as boolean True.
     return workflow[True] if True in workflow else workflow["on"]
@@ -78,9 +84,7 @@ def test_release_permissions_are_narrow():
 
 
 def test_dependabot_config_covers_every_ecosystem_weekly_in_one_group():
-    config = yaml.safe_load(
-        (REPO_ROOT / ".github" / "dependabot.yml").read_text()
-    )
+    config = _dependabot()
     entries = config["updates"]
     ecosystems = {entry["package-ecosystem"] for entry in entries}
     assert ecosystems == {
@@ -99,9 +103,7 @@ def test_dependabot_config_covers_every_ecosystem_weekly_in_one_group():
 
 
 def test_dependabot_compose_entry_ignores_only_the_bgutil_provider_image():
-    config = yaml.safe_load(
-        (REPO_ROOT / ".github" / "dependabot.yml").read_text()
-    )
+    config = _dependabot()
     (entry,) = [
         e
         for e in config["updates"]
