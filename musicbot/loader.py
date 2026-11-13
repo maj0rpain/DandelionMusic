@@ -319,26 +319,28 @@ def _search_spotify_track(track: SpotifyTrack) -> dict:
         return _search_track(track.query)
 
 
+# Every format field yt-dlp defines (`available_at`, the wait before a
+# stream URL answers, among them) and the page's identity; a field yt-dlp
+# adds later is kept with no change here.
 _DOWNLOAD_INFO_KEYS = (
+    *YoutubeDL._format_fields,
     "id",
     "extractor_key",
     "webpage_url",
     "title",
-    "url",
-    "ext",
-    "protocol",
-    "http_headers",
-    "downloader_options",
 )
 
 
 def _download_info(data: dict) -> dict:
-    """The minimal JSON-serializable dict `yt-dlp --load-info-json` needs
-    to download the chosen format, all of it the extraction's own (its
-    webpage_url is the extracted page, never a search's words or a
-    Spotify link); a key the extraction lacks is left out, never
-    written as None."""
-    return {k: data[k] for k in _DOWNLOAD_INFO_KEYS if data.get(k) is not None}
+    """The JSON-serializable dict `yt-dlp --load-info-json` needs to
+    download the chosen format: every kept key is the extraction's own
+    (its webpage_url is the extracted page, never a search's words or a
+    Spotify link), and a key the extraction lacks is left out, never
+    written as None. `sanitize_info` makes every value a plain JSON
+    type and stamps its own `epoch`, `_type` and `_version`, as yt-dlp
+    does for `--write-info-json`."""
+    kept = {k: data[k] for k in _DOWNLOAD_INFO_KEYS if data.get(k) is not None}
+    return YoutubeDL.sanitize_info(kept, remove_private_keys=True)
 
 
 def _load_song(track: Union[str, CheckedTrack]) -> LoadResult:

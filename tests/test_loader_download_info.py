@@ -1,10 +1,12 @@
-"""A piped song keeps the minimal info dict `yt-dlp --load-info-json`
-needs, built by the loader from its extraction and re-filled by preload.
+"""A piped song keeps the info dict `yt-dlp --load-info-json` needs,
+built by the loader from its extraction and re-filled by preload.
 Offline: a real downloader from the loader's factory, a fake extractor."""
 
+import json
 import pickle
 
 import pytest
+from yt_dlp import YoutubeDL
 from yt_dlp.extractor.common import InfoExtractor
 
 from musicbot import loader
@@ -51,7 +53,7 @@ def test_an_extracted_song_keeps_the_listed_keys(downloader):
     info = loader._load_song(PAGE).songs[0].download_info
     # yt-dlp merges its default headers into the format's own
     assert info.pop("http_headers")["User-Agent"] == "x"
-    assert info == {
+    expected = {
         "id": "abc",
         "extractor_key": _Full.ie_key(),
         "webpage_url": PAGE,
@@ -61,6 +63,34 @@ def test_an_extracted_song_keeps_the_listed_keys(downloader):
         "protocol": "https",
         "downloader_options": {"http_chunk_size": 1024},
     }
+    assert {k: info[k] for k in expected} == expected
+
+
+def test_a_formats_available_at_is_kept(downloader):
+    _Full.result = dict(FULL, available_at=4102444800)
+    info = loader._load_song(PAGE).songs[0].download_info
+    assert info["available_at"] == 4102444800
+
+
+def test_every_yt_dlp_format_field_is_kept():
+    names = [
+        *YoutubeDL._format_fields,
+        "id",
+        "extractor_key",
+        "webpage_url",
+        "title",
+        "cookies",
+    ]
+    info = loader._download_info({n: 1 for n in names})
+    assert [n for n in names if n not in info] == []
+
+
+def test_values_json_cannot_encode_still_serialize():
+    info = loader._download_info(
+        {"url": STREAM, "fragments": lambda ctx: [], "request_data": b"\x00"}
+    )
+    json.dumps(info)
+    pickle.dumps(info)
 
 
 def test_keys_the_extraction_lacks_are_left_out(downloader):
