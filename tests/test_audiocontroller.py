@@ -9,6 +9,7 @@ directory set to tmp_path so the controller's backup/ lands there.
 import asyncio
 import inspect
 import pickle
+import subprocess
 import sys
 import threading
 import types
@@ -2530,8 +2531,33 @@ def test_a_piped_song_reads_ffmpeg_from_a_pipe_with_no_reconnect(
     source = controller._make_source(_song(controller, "piped"))
 
     kwargs = source.original.kwargs
-    assert kwargs["pipe"] is True
-    assert kwargs["before_options"] == "-protocol_whitelist pipe"
+    assert "pipe" not in kwargs
+    assert kwargs["before_options"] == "-protocol_whitelist pipe,fd"
+
+
+def test_a_piped_ffmpeg_takes_the_download_as_its_process_stdin(monkeypatch):
+    """No pipe=True writer thread: ffmpeg reads `-` straight from the
+    stdin it is spawned with."""
+    import discord
+
+    ac = sys.modules["musicbot.audiocontroller"]
+    spawned = []
+
+    class Recording(discord.AudioSource):
+        def __init__(self, source, **kwargs):
+            self.source, self.kwargs = source, kwargs
+            self._spawn_process(["ffmpeg"], stdin=subprocess.DEVNULL)
+
+        def _spawn_process(self, args, **subprocess_kwargs):
+            spawned.append(subprocess_kwargs)
+
+    monkeypatch.setattr(discord, "FFmpegPCMAudio", Recording)
+    download_stdout = object()
+    source = ac._piped_ffmpeg(download_stdout, options="-loglevel error")
+
+    assert source.source == "-"
+    assert "pipe" not in source.kwargs
+    assert spawned == [{"stdin": download_stdout}]
 
 
 def _popen_spy(monkeypatch, stdin_error=None):
@@ -2576,6 +2602,8 @@ def test_the_download_runs_yt_dlp_with_the_info_json_on_its_stdin(
         sys.executable,
         "-m",
         "yt_dlp",
+        "--quiet",
+        "--no-progress",
         "--load-info-json",
         "-",
         "-o",
@@ -2629,7 +2657,7 @@ def test_a_failed_ffmpeg_build_kills_and_reaps_yt_dlp(controller, monkeypatch):
         raise discord.ClientException("ffmpeg was not found.")
 
     monkeypatch.setattr(ac, "_start_download", start)
-    monkeypatch.setattr(discord, "FFmpegPCMAudio", refuse)
+    monkeypatch.setattr(ac, "_piped_ffmpeg", refuse)
 
     with pytest.raises(discord.ClientException):
         controller._make_source(_song(controller, "piped"))
@@ -2650,8 +2678,7 @@ def test_a_song_without_download_info_starts_no_yt_dlp(
     song.download_info = None
     source = controller._make_source(song)
 
-    assert source.original.kwargs["pipe"] is True
-    assert source.original.url.read() == b""
+    assert source.original.url is subprocess.DEVNULL
     assert "no download info" in capsys.readouterr().err
 
 

@@ -1,4 +1,3 @@
-import io
 import json
 import os
 import subprocess
@@ -40,14 +39,17 @@ _T = TypeVar("_T")
 def _start_download(download_info: dict):
     """Starts the yt-dlp process that downloads a song's chosen format
     to its stdout, given `download_info` as JSON on its stdin (no second
-    extraction). Its stderr is the bot's. A write that fails because
-    yt-dlp already exited is swallowed: its stdout then ends empty and
-    the track produces no audio."""
+    extraction). Its stderr is the bot's, quiet but for warnings and
+    errors. A write that fails because yt-dlp already exited is
+    swallowed: its stdout then ends empty and the track produces no
+    audio."""
     process = subprocess.Popen(
         [
             sys.executable,
             "-m",
             "yt_dlp",
+            "--quiet",
+            "--no-progress",
             "--load-info-json",
             "-",
             "-o",
@@ -62,6 +64,23 @@ def _start_download(download_info: dict):
     except OSError:
         pass
     return process
+
+
+def _piped_ffmpeg(stdin, **kwargs):
+    """A `discord.FFmpegPCMAudio` (looked up now, so a test's fake is
+    used) reading `-` from `stdin` - the download's stdout - as its
+    process's own stdin. discord.py's pipe=True would copy it through a
+    writer thread instead, which races the source's cleanup on a skip
+    or stop (it writes to, then terminates, a process cleanup has
+    already cleared) - so this overrides discord.py's private
+    `_spawn_process` hook to hand ffmpeg the stdin directly."""
+
+    class _ReadingStdin(discord.FFmpegPCMAudio):
+        def _spawn_process(self, args, **subprocess_kwargs):
+            subprocess_kwargs["stdin"] = stdin
+            return super()._spawn_process(args, **subprocess_kwargs)
+
+    return _ReadingStdin("-", **kwargs)
 
 
 def _kill_download(process) -> None:
@@ -276,15 +295,16 @@ class AudioController(object):
                 f" {song.display_name!r}; it will play no audio",
                 file=sys.stderr,
             )
-            stdin = io.BytesIO(b"")
+            stdin = subprocess.DEVNULL
         else:
             process = _start_download(song.download_info)
             stdin = process.stdout
         try:
-            ffmpeg = discord.FFmpegPCMAudio(
+            ffmpeg = _piped_ffmpeg(
                 stdin,
-                pipe=True,
-                before_options="-protocol_whitelist pipe",
+                # ffmpeg reads `-` through its fd protocol (pipe before
+                # ffmpeg 8), so both are whitelisted and nothing else
+                before_options="-protocol_whitelist pipe,fd",
                 options="-loglevel error",
                 stderr=sys.stderr,
             )

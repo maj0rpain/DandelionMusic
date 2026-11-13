@@ -122,11 +122,10 @@ def _fake_ffmpeg(monkeypatch):
     ac = sys.modules["musicbot.audiocontroller"]
     monkeypatch.setattr(ac, "_start_download", FakeDownload)
 
-    monkeypatch.setattr(
-        discord,
-        "FFmpegPCMAudio",
-        type("FakeFFmpeg", (_FakeFFmpeg, discord.AudioSource), {}),
-    )
+    fake = type("FakeFFmpeg", (_FakeFFmpeg, discord.AudioSource), {})
+    monkeypatch.setattr(discord, "FFmpegPCMAudio", fake)
+    # a piped song's ffmpeg reads the download's stdout as its stdin
+    monkeypatch.setattr(ac, "_piped_ffmpeg", fake)
 
 
 def _backup_path(controller, tmp_path):
