@@ -35,7 +35,8 @@ def test_real_lock_pins_davey_0_1_with_discord_py_2_7_1():
         "discord-py moved off 2.7.1: revisit the davey pin in "
         "pyproject.toml and the davey ignore in .github/dependabot.yml"
     )
-    assert Version("0.1.7") <= locked["davey"] < Version("0.2.0")
+    assert not _davey_too_new(lock)
+    assert locked["davey"] >= Version("0.1.7")
 
 
 def test_davey_0_2_with_discord_py_2_7_1_is_too_new():
