@@ -1,5 +1,5 @@
-"""A piped song keeps the minimal info dict `yt-dlp --load-info-json`
-needs, built by the loader from its extraction and re-filled by preload.
+"""A piped song keeps the info dict `yt-dlp --load-info-json` needs,
+built by the loader from its extraction and re-filled by preload.
 Offline: a real downloader from the loader's factory, a fake extractor."""
 
 import json
