@@ -20,7 +20,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 
 ## Module map
 
-- `musicbot/__main__.py` / `run.py` - entrypoint; `run.py` is a thin forwarder (PyInstaller entry).
+- `musicbot/__main__.py` / `run.py` - entrypoint; `run.py` is a thin forwarder.
 - `musicbot/bot.py` - `MusicBot`, custom `Context`; user-facing replies go through `ctx.send(...)`, not raw channel sends.
 - `musicbot/admission.py` - request admission: per request kind, the checks, the join and the current controller; every Music command, General's voice commands, player button, pick and reaction goes through it.
 - `musicbot/utils.py` - the joining-command marker (`joining_command`), the DJ and owner checks, `settings_admin_check` (administrator or application owner only, for `d!setting`), `CheckError`, and the voice connect port (`connect_to`, `check_voice_permissions`).

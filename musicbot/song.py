@@ -61,10 +61,13 @@ class Song:
     @property
     def piped(self) -> bool:
         """Whether this song plays through a yt-dlp download piped into
-        ffmpeg: its stream comes from a yt-dlp extraction (a Spotify
-        song's is its YouTube search hit's). The one piped-song rule,
-        read by the loader and the audio controller alike."""
-        return self.host in (SiteTypes.YT_DLP, SiteTypes.SPOTIFY)
+        ffmpeg: every remote song but a custom link, whose redirects are
+        checked for ffmpeg to fetch itself. A loaded one is a yt-dlp
+        extraction's (`YT_DLP`, or `SPOTIFY` for its YouTube search
+        hit's); another host is a saved entry's until preload re-extracts
+        it. The one piped-song rule, read by the loader and the audio
+        controller alike."""
+        return self.host not in (SiteTypes.CUSTOM, SiteTypes.LOCAL_LIBRARY)
 
     @property
     def display_name(self) -> str:

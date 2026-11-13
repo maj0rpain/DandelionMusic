@@ -2535,6 +2535,38 @@ def test_a_piped_song_reads_ffmpeg_from_a_pipe_with_no_reconnect(
     assert kwargs["before_options"] == "-protocol_whitelist pipe,fd"
 
 
+@pytest.mark.parametrize(
+    "host, piped",
+    [
+        ("YT_DLP", True),
+        ("SPOTIFY", True),
+        ("NOT_URL", True),
+        ("CUSTOM", False),
+        ("LOCAL_LIBRARY", False),
+    ],
+)
+def test_make_source_pipes_every_host_but_custom_and_local(
+    controller, monkeypatch, host, piped
+):
+    import discord
+
+    _fake_ffmpeg(monkeypatch)
+    ac = sys.modules["musicbot.audiocontroller"]
+    song = ac.Song(
+        ac.SiteTypes[host],
+        "https://example.invalid/page",
+        url="https://example.invalid/stream",
+        title=host,
+    )
+    song.download_info = {"url": "https://example.invalid/stream"}
+
+    source = controller._make_source(song)
+
+    assert isinstance(source, discord.PCMVolumeTransformer)
+    assert isinstance(source.original, ac._PipedSource) is piped
+    assert source.original.url == "https://example.invalid/stream"
+
+
 def test_a_piped_ffmpeg_takes_the_download_as_its_process_stdin(monkeypatch):
     """No pipe=True writer thread: ffmpeg reads `-` straight from the
     stdin it is spawned with."""

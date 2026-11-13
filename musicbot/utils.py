@@ -54,12 +54,7 @@ def check_dependencies():
 
 
 ASSETS_PATH = os.path.join(
-    getattr(
-        sys,
-        "_MEIPASS",
-        os.path.dirname(os.path.abspath(sys.argv[0] or "dummy")),
-    ),
-    "assets",
+    os.path.dirname(os.path.abspath(sys.argv[0] or "dummy")), "assets"
 )
 
 

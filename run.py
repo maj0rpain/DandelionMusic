@@ -8,8 +8,7 @@ terminal. That was removed in 67fd2b2 - the subprocess wrapping broke
 auto-restart - and this file has just forwarded to the musicbot
 package ever since.
 
-It is kept because it is the PyInstaller entry point (see
-config/build.py) and what README tells users to start.
+It is kept because it is what README tells users to start.
 """
 
 if __name__ == "__main__":

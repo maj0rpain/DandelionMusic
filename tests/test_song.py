@@ -199,9 +199,12 @@ def test_updating_with_a_missing_duration_keeps_the_stored_one(update):
     [
         (SiteTypes.YT_DLP, True),
         (SiteTypes.SPOTIFY, True),
+        # a host a saved entry may carry before preload re-extracts it
+        (SiteTypes.NOT_URL, True),
+        (SiteTypes.UNKNOWN, True),
         (SiteTypes.CUSTOM, False),
         (SiteTypes.LOCAL_LIBRARY, False),
     ],
 )
-def test_only_a_song_from_a_yt_dlp_extraction_is_piped(host, piped):
+def test_every_remote_song_but_a_custom_link_is_piped(host, piped):
     assert Song(host, "https://example.invalid/x").piped is piped

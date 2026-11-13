@@ -76,9 +76,8 @@ def ensure_sqlite_parent(url: str) -> None:
     sqlite refuses to create a missing parent and fails with a bare
     "unable to open database file". The default database now sits in
     data/, which exists in a repo checkout (data/.gitkeep) and is
-    created by docker-compose's mount - but not next to a freshly
-    unpacked DandelionMusic.exe, where the .env is copied from the
-    sample into an empty directory.
+    created by docker-compose's mount - but not in a run from any other
+    working directory that lacks it.
     """
     if not url.startswith("sqlite"):
         return
