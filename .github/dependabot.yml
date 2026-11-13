@@ -30,6 +30,13 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # The bot's Python version moves deliberately, everywhere at once
+    # (Dockerfile, CI, .python-version), never by a Dependabot PR.
+    ignore:
+      - dependency-name: "python"
+        update-types:
+          - "version-update:semver-major"
+          - "version-update:semver-minor"
 
   - package-ecosystem: "docker-compose"
     directory: "/"
