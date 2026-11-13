@@ -74,6 +74,9 @@ services:
         condition: service_started
   bgutil-provider:
     container_name: bgutil-provider
+    # The tag must equal the bgutil-ytdlp-pot-provider pin in pyproject.toml.
+    # Dependabot does not bump it: set it by hand in the uv PR that bumps
+    # the pin.
     image: brainicism/bgutil-ytdlp-pot-provider:2.0.2
     restart: unless-stopped
     networks:

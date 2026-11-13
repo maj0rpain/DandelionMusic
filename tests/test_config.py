@@ -323,9 +323,11 @@ def test_compose_bgutil_provider_tag_matches_the_pinned_plugin():
     ), f"expected bgutil-ytdlp-pot-provider==X, found {found!r}"
     version = found[0].split("==", 1)[1].split(";")[0].strip()
     image = _compose_services()["bgutil-provider"]["image"]
-    assert (
-        _image_tag(image) == version
-    ), f"{image!r} does not match the plugin pin {version!r}"
+    assert _image_tag(image) == version, (
+        f"{image!r} does not match the plugin pin {version!r}: set the "
+        f"bgutil-provider image tag in docker-compose.yaml to {version!r} "
+        "in this same PR, because Dependabot bumps only the uv pin"
+    )
 
 
 def test_extra_owners_defaults_to_empty(config_factory):
