@@ -318,6 +318,30 @@ def _search_spotify_track(track: SpotifyTrack) -> dict:
         return _search_track(track.query)
 
 
+# hosts whose songs are downloaded through yt-dlp
+_PIPED_HOSTS = (SiteTypes.YT_DLP, SiteTypes.SPOTIFY)
+
+_DOWNLOAD_INFO_KEYS = (
+    "id",
+    "extractor_key",
+    "title",
+    "url",
+    "ext",
+    "protocol",
+    "http_headers",
+    "downloader_options",
+)
+
+
+def _download_info(data: dict, webpage_url: str) -> dict:
+    """The minimal JSON-serializable dict `yt-dlp --load-info-json` needs
+    to download the chosen format; a key the extraction lacks is left
+    out, never written as None."""
+    info = {k: data[k] for k in _DOWNLOAD_INFO_KEYS if data.get(k) is not None}
+    info["webpage_url"] = webpage_url
+    return info
+
+
 def _load_song(track: Union[str, CheckedTrack]) -> LoadResult:
     """Loads `track`, the one place a checked track is unpacked. A
     message link is fetched only when it is the checked track's admitted
@@ -434,6 +458,8 @@ def _load_song_body(track: str) -> LoadResult:
 
     song = Song(host, webpage_url=track)
     song.update(data)
+    if host in _PIPED_HOSTS:
+        song.download_info = _download_info(data, track)
 
     return LoadResult.of_song(song)
 
@@ -472,7 +498,11 @@ async def preload(song: Song) -> Preload:
     if song.host is SiteTypes.LOCAL_LIBRARY:
         return Preload.CURRENT
 
-    if song.url is not None and _stream_url_is_current(song):
+    if (
+        song.url is not None
+        and (song.host not in _PIPED_HOSTS or song.download_info is not None)
+        and _stream_url_is_current(song)
+    ):
         return Preload.CURRENT
 
     future = _preloading.get(song)

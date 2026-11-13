@@ -169,6 +169,7 @@ def in_process(monkeypatch):
 def _song(url):
     song = Song(loader.SiteTypes.YT_DLP, webpage_url=LINK)
     song.url = url
+    song.download_info = {"id": "x"}
     return song
 
 

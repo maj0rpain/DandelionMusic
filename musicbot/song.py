@@ -23,6 +23,9 @@ class Song:
     # when the loader extracted this song's stream url; class-level for
     # the same reason - a song from an old backup reads as unstamped
     extracted_at: Optional[datetime.datetime] = None
+    # the minimal info dict `yt-dlp --load-info-json` needs to download
+    # the chosen format, for a piped song; class-level likewise
+    download_info: Optional[dict] = None
 
     def __init__(
         self,
