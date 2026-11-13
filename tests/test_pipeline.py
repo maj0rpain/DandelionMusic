@@ -83,7 +83,6 @@ def test_dependabot_config_covers_every_ecosystem_weekly_in_one_group():
     )
     entries = config["updates"]
     ecosystems = {entry["package-ecosystem"] for entry in entries}
-    assert "pip" not in ecosystems
     assert ecosystems == {
         "uv",
         "pre-commit",
