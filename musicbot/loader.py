@@ -300,11 +300,22 @@ def _songinfo_errors():
         raise SongError(config.SONGINFO_ERROR) from e
 
 
+def _search_track(query: str) -> dict:
+    """The top YouTube hit for `query`, fully extracted: a search hit is
+    flat (a watch link, no stream), so it is extracted for the song's
+    stream. Raises SongError with SONGINFO_ERROR when that fails."""
+    hit = _search_youtube(query)[0]
+    data = extract_info(hit["url"])
+    if data is None:
+        raise SongError(config.SONGINFO_ERROR)
+    return data
+
+
 def _search_spotify_track(track: SpotifyTrack) -> dict:
     """The first YouTube result for a Spotify track. Any failure is a
     SONGINFO_ERROR, as a failed Spotify fetch is."""
     with _songinfo_errors():
-        return _search_youtube(track.query)[0]
+        return _search_track(track.query)
 
 
 def _load_song(track: Union[str, CheckedTrack]) -> LoadResult:
@@ -348,7 +359,7 @@ def _load_song_body(track: str) -> LoadResult:
             raise SongError(config.SONGINFO_UNSUPPORTED)
 
     if host == SiteTypes.NOT_URL:
-        data = _search_youtube(track)[0]
+        data = _search_track(track)
         host = SiteTypes.YT_DLP
 
     elif host in (SiteTypes.UNKNOWN, SiteTypes.SHORT_LINK):

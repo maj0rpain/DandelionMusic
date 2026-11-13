@@ -144,3 +144,63 @@ def test_unresolvable_target_raises_songinfo_error(downloader, monkeypatch):
         loader._load_song(SHORT)
 
     assert info.value.args[0] == config.SONGINFO_ERROR
+
+
+def _search_returns(monkeypatch, hit_url):
+    hit = {"_type": "url", "url": hit_url, "ie_key": "Youtube"}
+    monkeypatch.setattr(loader, "_search_youtube", lambda q, c=1: [hit])
+    monkeypatch.setattr(
+        loader,
+        "get_ie",
+        lambda url: _FailingTarget if "failing" in url else _Target,
+    )
+
+
+def test_search_text_loads_the_hits_stream_and_watch_link(
+    downloader, monkeypatch
+):
+    _route_input_to(monkeypatch, loader.SiteTypes.NOT_URL)
+    _search_returns(monkeypatch, TARGET)
+
+    result = loader._load_song("some words")
+
+    assert [(s.url, s.webpage_url) for s in result.songs] == [(STREAM, TARGET)]
+
+
+def test_spotify_track_loads_the_hits_stream_and_watch_link(
+    downloader, monkeypatch, worker_loop
+):
+    _route_input_to(monkeypatch, loader.SiteTypes.SPOTIFY)
+    _search_returns(monkeypatch, TARGET)
+
+    async def fetch_spotify(url):
+        return loader.SpotifyTrack("artist title")
+
+    monkeypatch.setattr(loader, "fetch_spotify", fetch_spotify)
+
+    result = loader._load_song("https://open.spotify.com/track/x")
+
+    assert [(s.url, s.webpage_url) for s in result.songs] == [(STREAM, TARGET)]
+
+
+def test_search_hit_that_fails_to_extract_raises_songinfo_error(
+    downloader, monkeypatch
+):
+    _route_input_to(monkeypatch, loader.SiteTypes.NOT_URL)
+    _search_returns(monkeypatch, "https://failing.test/x")
+
+    with pytest.raises(SongError) as info:
+        loader._load_song("some words")
+
+    assert info.value.args[0] == config.SONGINFO_ERROR
+
+
+def test_search_listing_keeps_flat_hits_without_extracting(
+    downloader, monkeypatch
+):
+    _search_returns(monkeypatch, TARGET)
+
+    songs = loader._search_songs("some words")
+
+    assert [s.webpage_url for s in songs] == [TARGET]
+    assert _Target.calls == 0
