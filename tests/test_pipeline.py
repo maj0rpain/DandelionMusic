@@ -75,3 +75,24 @@ def test_release_permissions_are_narrow():
             assert job.get("permissions", {"contents": "read"}) == {
                 "contents": "read"
             }, name
+
+
+def test_dependabot_config_covers_every_ecosystem_weekly_in_one_group():
+    config = yaml.safe_load(
+        (REPO_ROOT / ".github" / "dependabot.yml").read_text()
+    )
+    entries = config["updates"]
+    ecosystems = {entry["package-ecosystem"] for entry in entries}
+    assert ecosystems == {
+        "uv",
+        "pre-commit",
+        "docker",
+        "docker-compose",
+        "github-actions",
+    }
+    for entry in entries:
+        assert (REPO_ROOT / entry["directory"].lstrip("/")).is_dir()
+        assert entry["schedule"]["interval"] == "weekly"
+        groups = list(entry["groups"].values())
+        assert len(groups) == 1
+        assert sorted(groups[0]["update-types"]) == ["minor", "patch"]

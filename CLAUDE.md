@@ -13,6 +13,7 @@ uv run --group dev pytest        # tests (see tests/CLAUDE.md)
 docker compose up --build        # run in Docker
 uv run --group dev pre-commit install  # once per clone: run the hooks on every commit
 uv run --group dev pre-commit run --all  # black -l 79, flake8 --ignore E203,W503
+# Dependabot keeps `uv.lock`, the pre-commit hooks, the Docker images and the GitHub Actions current: minor and patch updates come as one weekly grouped PR per ecosystem, majors as one PR each.
 ```
 
 Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.

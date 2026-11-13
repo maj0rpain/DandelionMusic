@@ -10,7 +10,6 @@ from musicbot.commands.music import Music
 from discord_fakes import RecordingCtx
 from helpers import run
 
-
 COMMANDS = [("_play", False), ("_play_next", True)]
 
 

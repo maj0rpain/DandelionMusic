@@ -8,7 +8,6 @@ from yt_dlp.extractor.common import InfoExtractor
 from config import config
 from musicbot.message_link import MESSAGE_LINK_PATTERN
 
-
 # The extractor's own discord.py client, created lazily on the loader's
 # worker loop and logged in once; None until a login has succeeded.
 _client = None

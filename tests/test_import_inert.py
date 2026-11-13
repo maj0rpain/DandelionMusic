@@ -26,11 +26,13 @@ import multiprocessing
 import multiprocessing.context
 import sys
 
-# logging, multiprocessing.util and certifi (through yt_dlp) each
-# register an exit handler of their own when imported; take them first
-# so what is left to count is what musicbot registers
+# logging, multiprocessing.util, certifi (through yt_dlp) and sqlalchemy
+# (its weakref.finalize registers weakref's exit handler) each register
+# an exit handler of their own when imported; take them first so what
+# is left to count is what musicbot registers
 import logging
 import multiprocessing.util
+import sqlalchemy
 import yt_dlp
 
 stdout, stderr = sys.stdout, sys.stderr

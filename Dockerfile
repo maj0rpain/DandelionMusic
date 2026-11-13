@@ -6,7 +6,7 @@ RUN apt-get update \
     && apt-get install --no-install-recommends -y ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
-COPY --from=ghcr.io/astral-sh/uv:0.13.7 /uv /uvx /usr/local/bin/
+COPY --from=ghcr.io/astral-sh/uv:0.13.8 /uv /uvx /usr/local/bin/
 COPY --from=denoland/deno:bin-2.9.8 /deno /usr/local/bin/deno
 
 COPY pyproject.toml uv.lock ./
