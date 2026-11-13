@@ -23,6 +23,9 @@ class Song:
     # when the loader extracted this song's stream url; class-level for
     # the same reason - a song from an old backup reads as unstamped
     extracted_at: Optional[datetime.datetime] = None
+    # the minimal info dict `yt-dlp --load-info-json` needs to download
+    # the chosen format, for a piped song; class-level likewise
+    download_info: Optional[dict] = None
 
     def __init__(
         self,
@@ -54,6 +57,17 @@ class Song:
     @duration.setter
     def duration(self, value: Optional[float]) -> None:
         self.__dict__["duration"] = whole_seconds(value)
+
+    @property
+    def piped(self) -> bool:
+        """Whether this song plays through a yt-dlp download piped into
+        ffmpeg: every remote song but a custom link, whose redirects are
+        checked for ffmpeg to fetch itself. A loaded one is a yt-dlp
+        extraction's (`YT_DLP`, or `SPOTIFY` for its YouTube search
+        hit's); another host is a saved entry's until preload re-extracts
+        it. The one piped-song rule, read by the loader and the audio
+        controller alike."""
+        return self.host not in (SiteTypes.CUSTOM, SiteTypes.LOCAL_LIBRARY)
 
     @property
     def display_name(self) -> str:

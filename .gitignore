@@ -1,10 +1,6 @@
 __pycache__
 *egg-info
 
-/DandelionMusic.spec
-/build
-/dist
-
 /config.json
 /settings.db
 /data/*

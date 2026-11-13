@@ -177,8 +177,9 @@ class Preload(Enum):
     local-library song, has a stream url not within EXPIRY_MARGIN of its
     expire= (or, for a song not from a custom link, the link is its own
     stream), has a stream url with no expire= extracted less than
-    UNKNOWN_EXPIRY_MAX_AGE ago, or another caller's in-flight extraction
-    of it succeeded.
+    UNKNOWN_EXPIRY_MAX_AGE ago - and, for a piped song, carries its
+    download info - or another caller's in-flight extraction of it
+    succeeded.
     EXTRACTED: this call ran an extraction and updated the song.
     """
 
@@ -300,11 +301,44 @@ def _songinfo_errors():
         raise SongError(config.SONGINFO_ERROR) from e
 
 
+def _search_track(query: str) -> dict:
+    """The top YouTube hit for `query`, fully extracted: a search hit is
+    flat (a watch link, no stream), so it is extracted for the song's
+    stream. Raises SongError with SONGINFO_ERROR when that fails."""
+    hit = _search_youtube(query)[0]
+    data = extract_info(hit["url"])
+    if data is None:
+        raise SongError(config.SONGINFO_ERROR)
+    return data
+
+
 def _search_spotify_track(track: SpotifyTrack) -> dict:
     """The first YouTube result for a Spotify track. Any failure is a
     SONGINFO_ERROR, as a failed Spotify fetch is."""
     with _songinfo_errors():
-        return _search_youtube(track.query)[0]
+        return _search_track(track.query)
+
+
+_DOWNLOAD_INFO_KEYS = (
+    "id",
+    "extractor_key",
+    "webpage_url",
+    "title",
+    "url",
+    "ext",
+    "protocol",
+    "http_headers",
+    "downloader_options",
+)
+
+
+def _download_info(data: dict) -> dict:
+    """The minimal JSON-serializable dict `yt-dlp --load-info-json` needs
+    to download the chosen format, all of it the extraction's own (its
+    webpage_url is the extracted page, never a search's words or a
+    Spotify link); a key the extraction lacks is left out, never
+    written as None."""
+    return {k: data[k] for k in _DOWNLOAD_INFO_KEYS if data.get(k) is not None}
 
 
 def _load_song(track: Union[str, CheckedTrack]) -> LoadResult:
@@ -348,7 +382,7 @@ def _load_song_body(track: str) -> LoadResult:
             raise SongError(config.SONGINFO_UNSUPPORTED)
 
     if host == SiteTypes.NOT_URL:
-        data = _search_youtube(track)[0]
+        data = _search_track(track)
         host = SiteTypes.YT_DLP
 
     elif host in (SiteTypes.UNKNOWN, SiteTypes.SHORT_LINK):
@@ -423,6 +457,8 @@ def _load_song_body(track: str) -> LoadResult:
 
     song = Song(host, webpage_url=track)
     song.update(data)
+    if song.piped:
+        song.download_info = _download_info(data)
 
     return LoadResult.of_song(song)
 
@@ -461,7 +497,11 @@ async def preload(song: Song) -> Preload:
     if song.host is SiteTypes.LOCAL_LIBRARY:
         return Preload.CURRENT
 
-    if song.url is not None and _stream_url_is_current(song):
+    if (
+        song.url is not None
+        and (not song.piped or song.download_info is not None)
+        and _stream_url_is_current(song)
+    ):
         return Preload.CURRENT
 
     future = _preloading.get(song)

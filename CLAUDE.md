@@ -20,7 +20,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 
 ## Module map
 
-- `musicbot/__main__.py` / `run.py` - entrypoint; `run.py` is a thin forwarder (PyInstaller entry).
+- `musicbot/__main__.py` / `run.py` - entrypoint; `run.py` is a thin forwarder.
 - `musicbot/bot.py` - `MusicBot`, custom `Context`; user-facing replies go through `ctx.send(...)`, not raw channel sends.
 - `musicbot/admission.py` - request admission: per request kind, the checks, the join and the current controller; every Music command, General's voice commands, player button, pick and reaction goes through it.
 - `musicbot/utils.py` - the joining-command marker (`joining_command`), the DJ and owner checks, `settings_admin_check` (administrator or application owner only, for `d!setting`), `CheckError`, and the voice connect port (`connect_to`, `check_voice_permissions`).
@@ -28,7 +28,7 @@ Setup: copy `.env.sample` to `.env`; `BOT_TOKEN` is required.
 - `musicbot/audiocontroller.py` - per-guild controller over the queue: volume, loop, inactivity timer, preload sweep; its public methods delegate the start/advance/stop state machine to `Playback`.
 - `musicbot/player_panel.py` - `PlayerPanel` (one per guild, built by `GuildSessions`): the destination channel, announcements, the player message, its refresh and its stale-message/expired-token recovery; implements the controller's panel port. `PanelSnapshot` (defined in `musicbot/panel_snapshot.py` so the controller can build one without importing the panel) is the controller's read-only state it draws from.
 - `musicbot/playback.py` - `Playback` (one per controller) and `PlaybackState`: the start token, pending start, picked-next song, playing flag, disconnect guard, the `after=` hop, the one failed-track path (a track whose start fails - its stream cannot be loaded or it has no direct stream URL - or that ends on its own having played nothing, found by its audio probe), and when the playlist backup is written; depends only on ports the controller injects (callables, the `timer` and the `log_label`), never `bot`, `guild` or `Playlist`.
-- `musicbot/playlist.py` / `musicbot/song.py` - queue/history and per-track metadata.
+- `musicbot/playlist.py` / `musicbot/song.py` - queue/history and per-track metadata; the song also keeps its download info (what yt-dlp needs to download its stream).
 - `musicbot/playlists.py` - saved playlists: the only reader/writer of `SavedPlaylist.songs_json`, which it also reads in the legacy bare-string format; callers use `PlaylistEntry`/`PlaylistRef`/`PlaylistContents`/`SavedEntry`.
 - `musicbot/truncation.py` - `Truncation` (a cut-short Spotify playlist's reported total and its `TruncationReason`) with the one cut-short rule (`Truncation.of`) and the user notice; imports only `config`, `enum` and `dataclasses`.
 - `musicbot/outcome.py` - `EnqueueOutcome` (what adding a request's songs did) and `render`, the one function that turns it into a `Reply` or nothing; imports neither the controller nor voice machinery.

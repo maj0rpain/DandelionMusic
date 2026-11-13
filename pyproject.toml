@@ -29,7 +29,6 @@ postgres = ["asyncpg==0.32.0"]
 mysql = ["aiomysql==0.3.2"]
 
 [dependency-groups]
-build = ["pyinstaller==6.22.3"]
 dev = ["pre-commit==4.7.0", "pytest==9.2.0", "pyyaml==6.0.3"]
 
 [tool.pytest.ini_options]

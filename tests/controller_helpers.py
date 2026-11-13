@@ -33,7 +33,7 @@ async def _settle(controller=None):
 
 def _songs(controller, *titles):
     ac = sys.modules[type(controller).__module__]
-    return [
+    songs = [
         ac.Song(
             ac.SiteTypes.YT_DLP,
             f"https://example.invalid/{title}",
@@ -42,6 +42,9 @@ def _songs(controller, *titles):
         )
         for title in titles
     ]
+    for song in songs:
+        song.download_info = {"id": song.title, "url": song.url}
+    return songs
 
 
 def _song(controller, title):
@@ -96,14 +99,48 @@ class _FakeFFmpeg:
         return b"\x01\x00" * 1920
 
 
+class FakeDownload:
+    """Stands in for the yt-dlp process: its stdout is the stream url of
+    the download info it was started with."""
+
+    def __init__(self, download_info):
+        self.download_info = download_info
+        self.stdout = download_info.get("url")
+        self.killed = False
+        self.waited = False
+
+    def kill(self):
+        self.killed = True
+
+    def wait(self):
+        self.waited = True
+
+
+def _recording_downloads(monkeypatch):
+    """Fakes the yt-dlp process start and returns the list of every
+    FakeDownload started, in order, to assert killed/waited on."""
+    started = []
+
+    def start(download_info):
+        started.append(FakeDownload(download_info))
+        return started[-1]
+
+    monkeypatch.setattr(
+        sys.modules["musicbot.audiocontroller"], "_start_download", start
+    )
+    return started
+
+
 def _fake_ffmpeg(monkeypatch):
     import discord
 
-    monkeypatch.setattr(
-        discord,
-        "FFmpegPCMAudio",
-        type("FakeFFmpeg", (_FakeFFmpeg, discord.AudioSource), {}),
-    )
+    ac = sys.modules["musicbot.audiocontroller"]
+    monkeypatch.setattr(ac, "_start_download", FakeDownload)
+
+    fake = type("FakeFFmpeg", (_FakeFFmpeg, discord.AudioSource), {})
+    monkeypatch.setattr(discord, "FFmpegPCMAudio", fake)
+    # a piped song's ffmpeg reads the download's stdout as its stdin
+    monkeypatch.setattr(ac, "_piped_ffmpeg", fake)
 
 
 def _backup_path(controller, tmp_path):

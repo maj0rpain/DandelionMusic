@@ -23,7 +23,11 @@ URL = "https://example.invalid/track"
 
 
 def _song(**kw):
-    return Song(SiteTypes.YT_DLP, URL, **kw)
+    song = Song(SiteTypes.YT_DLP, URL, **kw)
+    if song.url is not None:
+        # a piped song with a stream also carries its download info
+        song.download_info = {"id": "x"}
+    return song
 
 
 def _never_loads(monkeypatch):
@@ -219,7 +223,8 @@ def test_a_stream_url_with_its_webpage_urls_expire_is_current(monkeypatch):
     _never_loads(monkeypatch)
     _clock(monkeypatch)
     url = _expiring_in(MINUTE)
-    song = Song(SiteTypes.YT_DLP, url, url=url)
+    song = _song(url=url)
+    song.webpage_url = url
     assert run(loader.preload(song)) is Preload.CURRENT
 
 

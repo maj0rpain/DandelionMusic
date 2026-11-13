@@ -81,6 +81,7 @@ def test_short_link_to_a_spotify_track(monkeypatch, worker_loop, extracted):
         lambda q: [{"url": "https://yt/v", "webpage_url": "https://yt/v"}],
     )
     fake_redirect_follower(monkeypatch, resolved)
+    extracted[1]["data"] = {"webpage_url": "https://yt/v"}
 
     result = loader._load_song("https://spotify.link/xyz")
 

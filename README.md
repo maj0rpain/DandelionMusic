@@ -29,8 +29,6 @@ Obtained keys must be entered into the ```.env``` file as environment variables
 
 #### Requirements
 
-Skip Python and uv if you've decided to use the pre-built exe. You still need ffmpeg installed and on PATH.
-
 * Installation of Python 3.13+
 * Installation of [uv](https://docs.astral.sh/uv/getting-started/installation/)
 
@@ -48,7 +46,7 @@ Install `ffmpeg` and `libopus` packages.
 
 1. Download release if available, alternatively download repository zip
 2. Complete Prerequisites
-3. Start ```run.py``` in project root (or the exe)
+3. Start ```run.py``` in project root
 4. See configuration options in the .env file (each one is described by the comments in `.env.sample`)
 
 Button play plugin:
@@ -338,15 +336,6 @@ d!help [command]
 ### Docker: the `bgutil-provider` sidecar
 
 `docker compose up --build` also starts a `bgutil-provider` sidecar (`brainicism/bgutil-ytdlp-pot-provider`). yt-dlp's YouTube extractor calls it over HTTP (`http://bgutil-provider:4416`) to generate PO tokens, which reliable YouTube playback requires.
-
-### Building a Windows exe
-
-```
-uv sync --locked --group build
-uv run --locked python -m config.build
-```
-
-This produces `dist/DandelionMusic.exe` via PyInstaller (see `config/build.py` for the bundled data and hidden imports). CI runs it on tag pushes (`.github/workflows/release.yml`).
 
 ## License
 

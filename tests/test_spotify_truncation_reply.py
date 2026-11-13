@@ -15,7 +15,12 @@ from musicbot.commands.music import Music
 from musicbot.outcome import EnqueueOutcome, OutcomeKind
 from musicbot.song import LoadResult
 from musicbot.truncation import Truncation, TruncationReason
-from controller_helpers import ProcessController, _songs, command_ctx
+from controller_helpers import (
+    ProcessController,
+    _fake_ffmpeg,
+    _songs,
+    command_ctx,
+)
 from helpers import plain_song, run
 
 
@@ -51,8 +56,9 @@ def _process(controller):
 
 
 def test_one_song_partial_playlist_is_reported_as_a_playlist_outcome(
-    controller, stub_loader
+    controller, stub_loader, monkeypatch
 ):
+    _fake_ffmpeg(monkeypatch)
     songs = _songs(controller, "a")
     cut = Truncation(50, TruncationReason.API_ERROR)
     stub_loader.results["load_song"] = LoadResult(songs, False, cut)
@@ -65,8 +71,9 @@ def test_one_song_partial_playlist_is_reported_as_a_playlist_outcome(
 
 
 def test_multi_song_partial_playlist_keeps_its_truncation(
-    controller, stub_loader
+    controller, stub_loader, monkeypatch
 ):
+    _fake_ffmpeg(monkeypatch)
     songs = _songs(controller, "a", "b", "c")
     cut = Truncation(50, TruncationReason.NO_API)
     stub_loader.results["load_song"] = LoadResult(songs, False, cut)
@@ -79,8 +86,9 @@ def test_multi_song_partial_playlist_keeps_its_truncation(
 
 
 def test_plain_list_becomes_a_playlist_outcome_without_truncation(
-    controller, stub_loader
+    controller, stub_loader, monkeypatch
 ):
+    _fake_ffmpeg(monkeypatch)
     stub_loader.results["load_song"] = LoadResult(
         _songs(controller, "a", "b"), False
     )
