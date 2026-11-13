@@ -21,7 +21,7 @@ from musicbot.library import LocalTrack
 from musicbot.playlist import LoopMode, PauseState
 from musicbot.commands.music import Music
 from controller_helpers import (
-    FakeDownload,
+    _recording_downloads,
     _backup,
     _backup_path,
     _fake_ffmpeg,
@@ -2628,15 +2628,7 @@ def test_cleaning_up_a_piped_source_kills_and_reaps_yt_dlp(
     controller, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
-    started = []
-    ac = sys.modules["musicbot.audiocontroller"]
-
-    def start(info):
-        process = FakeDownload(info)
-        started.append(process)
-        return process
-
-    monkeypatch.setattr(ac, "_start_download", start)
+    started = _recording_downloads(monkeypatch)
     source = controller._make_source(_song(controller, "piped"))
     source.cleanup()
 
@@ -2646,18 +2638,14 @@ def test_cleaning_up_a_piped_source_kills_and_reaps_yt_dlp(
 def test_a_failed_ffmpeg_build_kills_and_reaps_yt_dlp(controller, monkeypatch):
     import discord
 
-    started = []
-    ac = sys.modules["musicbot.audiocontroller"]
-
-    def start(info):
-        started.append(FakeDownload(info))
-        return started[0]
+    started = _recording_downloads(monkeypatch)
 
     def refuse(*args, **kwargs):
         raise discord.ClientException("ffmpeg was not found.")
 
-    monkeypatch.setattr(ac, "_start_download", start)
-    monkeypatch.setattr(ac, "_piped_ffmpeg", refuse)
+    monkeypatch.setattr(
+        sys.modules["musicbot.audiocontroller"], "_piped_ffmpeg", refuse
+    )
 
     with pytest.raises(discord.ClientException):
         controller._make_source(_song(controller, "piped"))
@@ -2686,14 +2674,7 @@ def test_a_refused_play_cleans_up_the_source_before_the_failure_path(
     controller, monkeypatch
 ):
     _fake_ffmpeg(monkeypatch)
-    ac = sys.modules["musicbot.audiocontroller"]
-    started = []
-
-    def start(info):
-        started.append(FakeDownload(info))
-        return started[0]
-
-    monkeypatch.setattr(ac, "_start_download", start)
+    started = _recording_downloads(monkeypatch)
     _queue(controller, "refused")
     controller.guild.voice_client.playing = True
 

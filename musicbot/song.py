@@ -59,6 +59,14 @@ class Song:
         self.__dict__["duration"] = whole_seconds(value)
 
     @property
+    def piped(self) -> bool:
+        """Whether this song plays through a yt-dlp download piped into
+        ffmpeg: its stream comes from a yt-dlp extraction (a Spotify
+        song's is its YouTube search hit's). The one piped-song rule,
+        read by the loader and the audio controller alike."""
+        return self.host in (SiteTypes.YT_DLP, SiteTypes.SPOTIFY)
+
+    @property
     def display_name(self) -> str:
         """The title, else the webpage URL: how a song is named to a
         user or in history."""

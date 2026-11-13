@@ -249,7 +249,7 @@ class AudioController(object):
         self.playlist.next()
 
     def _make_source(self, song: Song):
-        if song.host not in (SiteTypes.CUSTOM, SiteTypes.LOCAL_LIBRARY):
+        if song.piped:
             return self._make_piped_source(song)
         if song.host == SiteTypes.LOCAL_LIBRARY:
             before_options = "-protocol_whitelist file"

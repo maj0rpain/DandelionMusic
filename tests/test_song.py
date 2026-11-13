@@ -192,3 +192,16 @@ def test_updating_with_a_missing_duration_keeps_the_stored_one(update):
     song.update(update)
     assert song.duration == 213
     assert _duration_field(song) == "0:03:33"
+
+
+@pytest.mark.parametrize(
+    "host, piped",
+    [
+        (SiteTypes.YT_DLP, True),
+        (SiteTypes.SPOTIFY, True),
+        (SiteTypes.CUSTOM, False),
+        (SiteTypes.LOCAL_LIBRARY, False),
+    ],
+)
+def test_only_a_song_from_a_yt_dlp_extraction_is_piped(host, piped):
+    assert Song(host, "https://example.invalid/x").piped is piped

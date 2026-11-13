@@ -165,6 +165,8 @@ def test_search_text_loads_the_hits_stream_and_watch_link(
     result = loader._load_song("some words")
 
     assert [(s.url, s.webpage_url) for s in result.songs] == [(STREAM, TARGET)]
+    # the info yt-dlp downloads from names the hit's page, not the words
+    assert result.songs[0].download_info["webpage_url"] == TARGET
 
 
 def test_spotify_track_loads_the_hits_stream_and_watch_link(
@@ -181,6 +183,7 @@ def test_spotify_track_loads_the_hits_stream_and_watch_link(
     result = loader._load_song("https://open.spotify.com/track/x")
 
     assert [(s.url, s.webpage_url) for s in result.songs] == [(STREAM, TARGET)]
+    assert result.songs[0].download_info["webpage_url"] == TARGET
 
 
 def test_search_hit_that_fails_to_extract_raises_songinfo_error(

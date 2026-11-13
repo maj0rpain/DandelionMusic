@@ -116,6 +116,21 @@ class FakeDownload:
         self.waited = True
 
 
+def _recording_downloads(monkeypatch):
+    """Fakes the yt-dlp process start and returns the list of every
+    FakeDownload started, in order, to assert killed/waited on."""
+    started = []
+
+    def start(download_info):
+        started.append(FakeDownload(download_info))
+        return started[-1]
+
+    monkeypatch.setattr(
+        sys.modules["musicbot.audiocontroller"], "_start_download", start
+    )
+    return started
+
+
 def _fake_ffmpeg(monkeypatch):
     import discord
 
