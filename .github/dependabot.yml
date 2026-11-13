@@ -10,6 +10,14 @@ updates:
         update-types:
           - "minor"
           - "patch"
+    # discord.py 2.7.1 is written against davey 0.1 and never executes davey
+    # 0.2's key transitions (prepare_transition/execute_transition), so the
+    # bot's voice audio is silent with 0.2. Lift this by hand in the PR that
+    # moves discord.py to a release supporting davey 0.2.
+    ignore:
+      - dependency-name: "davey"
+        versions:
+          - ">=0.2.0"
 
   - package-ecosystem: "pre-commit"
     directory: "/"

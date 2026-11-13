@@ -73,7 +73,7 @@ def test_dependabot_config_covers_every_ecosystem_weekly_in_one_group():
         assert sorted(groups[0]["update-types"]) == ["minor", "patch"]
 
 
-def test_dependabot_ignores_python_minor_and_major_only_for_docker():
+def test_dependabot_ignores_python_minor_and_major_for_docker():
     config = _dependabot()
     by_ecosystem = {e["package-ecosystem"]: e for e in config["updates"]}
     assert by_ecosystem["docker"]["ignore"] == [
@@ -88,7 +88,7 @@ def test_dependabot_ignores_python_minor_and_major_only_for_docker():
     others = [
         e
         for e in config["updates"]
-        if e["package-ecosystem"] not in ("docker", "docker-compose")
+        if e["package-ecosystem"] not in ("docker", "docker-compose", "uv")
     ]
     assert [e for e in others if "ignore" in e] == []
 
@@ -102,4 +102,12 @@ def test_dependabot_compose_entry_ignores_only_the_bgutil_provider_image():
     ]
     assert entry["ignore"] == [
         {"dependency-name": "brainicism/bgutil-ytdlp-pot-provider"}
+    ]
+
+
+def test_dependabot_uv_entry_ignores_only_davey_0_2():
+    config = _dependabot()
+    (entry,) = [e for e in config["updates"] if e["package-ecosystem"] == "uv"]
+    assert entry["ignore"] == [
+        {"dependency-name": "davey", "versions": [">=0.2.0"]}
     ]
