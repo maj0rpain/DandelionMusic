@@ -19,7 +19,7 @@ dependencies = [
     "spotipy==2.26.0",
     "sqlalchemy[asyncio]~=2.1.8",
     "urllib3==2.8.0",
-    "yt-dlp[default]~=2026.10.26",
+    "yt-dlp[default]~=2026.11.23",
 ]
 
 [project.optional-dependencies]
